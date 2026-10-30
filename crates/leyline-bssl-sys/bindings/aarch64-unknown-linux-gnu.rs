@@ -11308,16 +11308,6 @@ unsafe extern "C" {
     pub fn arc4random() -> __uint32_t;
     pub fn arc4random_buf(__buf: *mut ::std::os::raw::c_void, __size: usize);
     pub fn arc4random_uniform(__upper_bound: __uint32_t) -> __uint32_t;
-    pub fn malloc(__size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void;
-    pub fn calloc(
-        __nmemb: ::std::os::raw::c_ulong,
-        __size: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-    pub fn realloc(
-        __ptr: *mut ::std::os::raw::c_void,
-        __size: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-    pub fn free(__ptr: *mut ::std::os::raw::c_void);
     pub fn reallocarray(
         __ptr: *mut ::std::os::raw::c_void,
         __nmemb: usize,

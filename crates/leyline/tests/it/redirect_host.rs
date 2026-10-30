@@ -6,7 +6,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 
 use leyline::http::header::HOST;
-use leyline::{ProtocolPolicy, ProxyConfig, Session};
+use leyline::{Protocol, Proxy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -59,13 +59,14 @@ async fn a_caller_host_header_is_dropped_on_a_cross_origin_redirect() {
     )
     .await;
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .build()
         .unwrap();
     session
         .get(format!("http://{origin}/"))
         .header(HOST, "caller.example")
+        .send()
         .await
         .unwrap()
         .bytes()
@@ -74,4 +75,25 @@ async fn a_caller_host_header_is_dropped_on_a_cross_origin_redirect() {
     let heads = landed.lock().unwrap();
     assert_eq!(heads.len(), 1);
     assert_eq!(host(&heads[0]), Some(target.to_string().as_str()));
+}
+
+#[tokio::test]
+async fn a_redirect_count_stops_at_the_limit() {
+    let origin = serve(
+        "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\n\r\n".into(),
+        Heads::default(),
+    )
+    .await;
+    let session = Session::builder()
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
+        .redirect(0)
+        .build()
+        .unwrap();
+    let response = session
+        .get(format!("http://{origin}/"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), 302);
 }

@@ -1,4 +1,4 @@
-use leyline::{Browser, Family, Platform, ProtocolPolicy, Session};
+use leyline::{Browser, Platform, Protocol, Session};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -7,7 +7,7 @@ use super::{PEET_URL, Result, ensure, json_str, normalize_akamai};
 const H3_GET_HOST: &str = "cloudflare-quic.com";
 
 pub(super) async fn exact_fingerprint(session: Session, browser: Browser) -> Result<String> {
-    let r = session.get(PEET_URL).await?;
+    let r = session.get(PEET_URL).send().await?;
     ensure(r.status() == 200, format!("status={}", r.status()))?;
     let v: Value = r.json().await?;
 
@@ -19,11 +19,17 @@ pub(super) async fn exact_fingerprint(session: Session, browser: Browser) -> Res
 
     let profile = browser.profile();
     let expected_ja4 = profile
-        .expected_ja4()
+        .tls
+        .fingerprint
+        .as_ref()
+        .and_then(|f| f.ja4.as_deref())
         .ok_or_else(|| format!("{browser} profile missing expected JA4"))?;
     let expected_h2 = normalize_akamai(
         profile
-            .expected_h2_fingerprint()
+            .h2
+            .fingerprint
+            .as_ref()
+            .and_then(|f| f.akamai.as_deref())
             .ok_or_else(|| format!("{browser} profile missing expected H2"))?,
     );
 
@@ -66,7 +72,7 @@ pub(super) async fn h1_wire_shape() -> Result<String> {
         Ok::<_, String>(String::from_utf8_lossy(&req).into_owned())
     });
 
-    let session = Session::browser(Browser::default());
+    let session = Session::from(Browser::default());
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/wire?q=1"))
         .header("x-proof", "smoke")
@@ -100,7 +106,7 @@ pub(super) async fn h1_wire_shape() -> Result<String> {
 pub(super) async fn h3_get(browser: Browser) -> Result<String> {
     let session = Session::builder()
         .browser(browser)
-        .protocol(ProtocolPolicy::Http3)
+        .protocol(Protocol::Http3)
         .build()?;
     let url = format!("https://{H3_GET_HOST}/");
     let resp = session
@@ -118,7 +124,7 @@ pub(super) async fn h3_get(browser: Browser) -> Result<String> {
 
 pub(super) fn firefox() -> Result<Session> {
     Ok(Session::builder()
-        .browser(Browser::latest(Family::Firefox))
+        .browser(Browser::firefox())
         .platform(Platform::Windows)
         .build()?)
 }

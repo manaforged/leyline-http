@@ -31,26 +31,26 @@ URLs the session left, in order. See
 
 ## Limit or stop redirects
 
-`RedirectPolicy::limited(n)` sets the limit; `limited(10)` is the default.
-`RedirectPolicy::none()` follows no redirect. At the limit, the session
+`Redirect::limit(n)` sets the limit; `limit(10)` is the default.
+`Redirect::none()` follows no redirect. At the limit, the session
 returns the last `3xx` response, not an error. Set the policy on the session
 with `SessionBuilder::redirect`, or on one request with
-`RequestBuilder::redirect`. `Session::execute` reads a `RedirectPolicy` from
-the request extensions, and `Session::with_redirect` derives a session with
-another policy.
+`RequestBuilder::redirect`. `Session::execute` reads a `Redirect` from
+the request extensions, and `to_builder().redirect(..)` makes a session
+with another policy.
 
 ```rust,no_run
-use leyline::{Browser, RedirectPolicy, Session};
+use leyline::{Browser, Redirect, Session};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::builder()
     .browser(Browser::default())
-    .redirect(RedirectPolicy::limited(3))
+    .redirect(Redirect::limit(3))
     .build()?;
 let resp = session
     .post("https://example.com/login")
-    .redirect(RedirectPolicy::none())
-    .await?;
+    .redirect(Redirect::none())
+    .send().await?;
 println!("{} {:?}", resp.status(), resp.header("location"));
 # Ok(())
 # }
@@ -58,27 +58,24 @@ println!("{} {:?}", resp.status(), resp.header("location"));
 
 ## Decide each redirect
 
-`RedirectPolicy::custom` calls your function for each redirect with a
-`RedirectAttempt`: the status, the current URL, the `Location` value as a
-string, and the URLs followed so far. The URLs carry no user name or
-password. Return `RedirectAction::Follow` or `RedirectAction::Stop`; on
-`Stop`, the session returns the `3xx` response. A custom policy follows at
+`Redirect::custom` calls your function for each redirect with an `Attempt`:
+`status()`, `url()`, `location()`, and `previous()`, the URLs followed so far.
+The URLs carry no user name or password. Return `true` to follow; on `false`,
+the session returns the `3xx` response. A custom policy follows at
 most 32 redirects; the next one fails with `Kind::Redirect`.
 
 ```rust,no_run
-use leyline::{Browser, RedirectAction, RedirectPolicy, Session};
+use leyline::{Browser, Redirect, Session};
 
 # fn run() -> leyline::Result<()> {
-let policy = RedirectPolicy::custom(|attempt| {
-    let same_host = attempt
-        .location
-        .and_then(|location| attempt.url.join(location).ok())
-        .is_some_and(|next| next.host_str() == attempt.url.host_str());
-    if same_host && attempt.previous.len() < 5 {
-        RedirectAction::Follow
-    } else {
-        RedirectAction::Stop
-    }
+let policy = Redirect::custom(|attempt| {
+    let (Some(url), Some(location)) = (attempt.url(), attempt.location()) else {
+        return false;
+    };
+    let same_host = url
+        .join(location)
+        .is_ok_and(|next| next.host_str() == url.host_str());
+    same_host && attempt.previous().len() < 5
 });
 let session = Session::builder()
     .browser(Browser::default())

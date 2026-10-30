@@ -131,19 +131,14 @@ fn headers_with_priority_roundtrip() {
 
 #[test]
 fn headers_with_chrome_priority_roundtrip() {
-    let params = leyline::h2::PriorityParams {
-        exclusive: true,
-        stream_dependency: 0,
-        weight: 255,
-    };
     let frame = HeadersFrame {
         stream_id: 1,
         end_stream: false,
         end_headers: true,
         priority: Some(StreamDependency {
-            exclusive: params.exclusive,
-            dependency_id: params.stream_dependency,
-            weight: params.weight,
+            exclusive: true,
+            dependency_id: 0,
+            weight: 255,
         }),
         fragment: bytes::Bytes::from_static(b"\x82\x86\x84"),
     };

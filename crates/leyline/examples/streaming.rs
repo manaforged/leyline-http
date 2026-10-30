@@ -33,11 +33,11 @@ async fn main() -> leyline::Result<()> {
 
     eprintln!("status {}", resp.status());
 
-    let mut stream = resp.into_stream()?;
+    let mut stream = resp.bytes_stream()?;
     let mut stdout = tokio::io::stdout();
     let mut total = 0u64;
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(leyline::Error::from)?;
+        let chunk = chunk?;
         total += chunk.len() as u64;
         stdout.write_all(&chunk).await.expect("stdout");
     }

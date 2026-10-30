@@ -12,6 +12,7 @@ impl SessionBuilder {
         derived: DerivedIdentity,
         connector: FingerprintConnector,
     ) -> Session {
+        let inputs = Arc::new(self.clone());
         let impersonates = self.impersonates();
         let pool = Arc::new(self.build_pool());
         let cookie_jar = self.cookie_jar.unwrap_or_default();
@@ -30,6 +31,7 @@ impl SessionBuilder {
                 header_order: derived.header_order,
                 default_headers: self.default_headers,
                 bearer: self.bearer,
+                proxy_shown: self.proxy_config.primary().map(crate::util::redact),
                 proxy_config: self.proxy_config,
                 timeouts: self.timeouts,
                 redirect_policy: self.redirect_policy,
@@ -59,6 +61,8 @@ impl SessionBuilder {
                 #[cfg(feature = "html")]
                 crawl_pace: None,
                 proxy_pool: self.proxy_pool,
+                block_rules: self.block_rules,
+                inputs,
             }),
         }
     }

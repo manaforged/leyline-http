@@ -33,3 +33,15 @@ fn padding_equal_to_payload_is_protocol_error() {
     let payload = vec![10u8, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     DataFrame::parse(header(10, flags::PADDED), Bytes::from(payload)).expect_err("expected Err");
 }
+
+#[test]
+fn a_padded_frame_with_no_pad_length_is_a_protocol_error() {
+    let err = DataFrame::parse(header(0, flags::PADDED), Bytes::new()).unwrap_err();
+    assert!(matches!(
+        err,
+        H2Error::Connection {
+            code: ErrorCode::ProtocolError,
+            ..
+        }
+    ));
+}

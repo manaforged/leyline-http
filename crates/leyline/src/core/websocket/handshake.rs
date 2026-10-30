@@ -7,8 +7,8 @@ use tokio_tungstenite::tungstenite::Error as WireError;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
-use crate::core::WebSocketConfig;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::config::WebSocketOptions;
+use crate::core::error::{Cause, Error, Result};
 use crate::profile::preset::HeaderPair;
 
 pub(super) const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
@@ -17,12 +17,12 @@ pub(super) fn handshake_target(url: &str) -> Result<(url::Url, String, u16)> {
     let mut parsed = url::Url::parse(url).map_err(Error::from_url_parse)?;
     let host = parsed
         .host_str()
-        .ok_or_else(|| Error::new(Kind::Config).with_message("no host in WebSocket URL"))?
+        .ok_or_else(|| Error::new(Cause::Config).with_message("no host in WebSocket URL"))?
         .to_owned();
     let port = parsed.port_or_known_default().unwrap_or(443);
     parsed
         .set_scheme("https")
-        .map_err(|()| Error::new(Kind::Config).with_message("WebSocket URL must use wss://"))?;
+        .map_err(|()| Error::new(Cause::Config).with_message("WebSocket URL must use wss://"))?;
     Ok((parsed, host, port))
 }
 
@@ -44,7 +44,7 @@ pub(super) fn overlay_headers(request: &mut Vec<HeaderPair>, extra: &[(String, S
 }
 
 pub(super) fn tungstenite_config(
-    cfg: &WebSocketConfig,
+    cfg: &WebSocketOptions,
 ) -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
     let mut out = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
     if let Some(n) = cfg.read_buffer_size {
@@ -68,8 +68,8 @@ pub(super) fn tungstenite_config(
 
 pub(super) fn wire_error(op: &'static str, e: WireError) -> Error {
     let kind = match &e {
-        WireError::Capacity(_) | WireError::Protocol(_) | WireError::Utf8 => Kind::Body,
-        _ => Kind::Io,
+        WireError::Capacity(_) | WireError::Protocol(_) | WireError::Utf8 => Cause::Body,
+        _ => Cause::Io,
     };
     let err = Error::new(kind).with_message(format!("{op}: {e}"));
     match e {
@@ -80,12 +80,12 @@ pub(super) fn wire_error(op: &'static str, e: WireError) -> Error {
 
 pub(super) fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {
     let hn = HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
-        Error::new(Kind::Request)
+        Error::new(Cause::Request)
             .with_message(format!("invalid websocket header name: {name}"))
             .with_source(e)
     })?;
     let hv = HeaderValue::from_str(value).map_err(|e| {
-        Error::new(Kind::Request)
+        Error::new(Cause::Request)
             .with_message(format!("invalid websocket header value for {name}"))
             .with_source(e)
     })?;
@@ -124,7 +124,7 @@ pub(super) fn has_token(headers: &[(String, String)], name: &str, token: &str) -
 }
 
 fn fail(m: String) -> Result<()> {
-    Err(Error::new(Kind::Request).with_message(format!("ws handshake: {m}")))
+    Err(Error::new(Cause::Request).with_message(format!("ws handshake: {m}")))
 }
 
 pub(super) fn check_upgrade_response(

@@ -19,9 +19,10 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
         audit_tls,
         audit_cache: OnceLock::new(),
         timing: ResponseTiming::default(),
-        compression: crate::core::CompressionConfig::default(),
+        compression: crate::core::BodyRules::default(),
         attempts: 1,
         proxy: None,
+        block: None,
     }
 }
 
@@ -38,14 +39,16 @@ fn sample_cache() -> Arc<crate::audit::AuditTlsCache> {
 #[test]
 fn audit_is_none_without_tls_context() {
     let resp = bare_response(None);
-    assert!(resp.audit().is_none());
+    assert!(resp.fingerprint().is_none());
 }
 
 #[test]
 fn audit_surfaces_cached_connection_fingerprints() {
     let cache = sample_cache();
     let resp = bare_response(Some(cache.clone()));
-    let audit = resp.audit().expect("audit present when tls context set");
+    let audit = resp
+        .fingerprint()
+        .expect("audit present when tls context set");
     assert_eq!(audit.ja4, cache.ja4);
     assert_eq!(audit.ja3, cache.ja3);
     assert_eq!(audit.h2_fingerprint, cache.h2_fingerprint);
@@ -61,8 +64,8 @@ fn audit_surfaces_cached_connection_fingerprints() {
 #[test]
 fn audit_memoises_across_calls() {
     let resp = bare_response(Some(sample_cache()));
-    let first = resp.audit().unwrap() as *const _;
-    let second = resp.audit().unwrap() as *const _;
+    let first = resp.fingerprint().unwrap() as *const _;
+    let second = resp.fingerprint().unwrap() as *const _;
     assert_eq!(first, second, "audit() must memoise, not recompute");
 }
 
@@ -171,8 +174,12 @@ async fn bytes_on_a_taken_stream_reports_a_body_error() {
     let mut resp = bare_response(None);
     resp.body = ResponseBody::Taken;
     let err = resp.bytes().await.unwrap_err();
-    assert_eq!(err.kind(), Kind::Body, "expected a body error, got {err:?}");
-    assert!(err.to_string().contains("into_stream"), "{err}");
+    assert_eq!(
+        err.cause(),
+        Cause::Body,
+        "expected a body error, got {err:?}"
+    );
+    assert!(err.to_string().contains("bytes_stream"), "{err}");
 }
 
 #[tokio::test]

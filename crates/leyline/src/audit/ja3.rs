@@ -1,5 +1,8 @@
 use crate::audit::{non_grease_cipher_ids, non_grease_curve_ids, non_grease_ext_ids};
 
+pub(crate) const JA3_RECORD_VERSION: u16 = 771;
+pub(crate) const JA3_POINT_FORMATS: u16 = 0;
+
 #[derive(Debug)]
 pub struct Ja3Input<'a> {
     pub ciphers: &'a [String],
@@ -36,7 +39,7 @@ impl Ja3Input<'_> {
             .collect::<Vec<_>>()
             .join("-");
 
-        let point_formats = "0";
+        let point_formats = JA3_POINT_FORMATS;
 
         format!("{version},{ciphers},{extensions},{curves},{point_formats}")
     }

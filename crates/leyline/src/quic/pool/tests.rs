@@ -17,7 +17,7 @@ async fn streaming_head_waits_for_final_response_after_103() {
     stream
         .headers(&headers(&[(":status", "103"), ("link", "</style.css>")]))
         .expect("valid informational response");
-    assert_eq!(stream.response, H3ResponseState::Initial);
+    assert_eq!(stream.response, H3ResponseState::Initial(1));
     if stream.is_streaming() && stream.response == H3ResponseState::Final && !stream.head_sent {
         stream.deliver_head();
     }
@@ -43,7 +43,7 @@ async fn streaming_head_waits_for_final_response_after_103() {
 
 #[test]
 fn trailers_are_regular_fields_after_final_response() {
-    let mut state = H3ResponseState::Initial;
+    let mut state = H3ResponseState::Initial(0);
     assert!(matches!(
         state.headers(&headers(&[(":status", "200")])),
         Ok(H3HeaderBlock::Final { .. })
@@ -57,23 +57,23 @@ fn trailers_are_regular_fields_after_final_response() {
 
 #[test]
 fn response_head_rejects_duplicate_and_malformed_status() {
-    let mut state = H3ResponseState::Initial;
+    let mut state = H3ResponseState::Initial(0);
     assert!(
         state
             .headers(&headers(&[(":status", "200"), (":status", "201")]))
             .is_err()
     );
 
-    let mut state = H3ResponseState::Initial;
+    let mut state = H3ResponseState::Initial(0);
     assert!(state.headers(&headers(&[(":status", "20")])).is_err());
 
-    let mut state = H3ResponseState::Initial;
+    let mut state = H3ResponseState::Initial(0);
     assert!(state.headers(&headers(&[(":status", "101")])).is_err());
 }
 
 #[test]
 fn trailers_reject_status_pseudo_header() {
-    let mut state = H3ResponseState::Initial;
+    let mut state = H3ResponseState::Initial(0);
     state
         .headers(&headers(&[(":status", "200")]))
         .expect("final response");
@@ -82,7 +82,7 @@ fn trailers_reject_status_pseudo_header() {
 
 #[test]
 fn data_requires_final_response_head() {
-    assert!(H3ResponseState::Initial.data().is_err());
+    assert!(H3ResponseState::Initial(0).data().is_err());
 }
 
 #[test]
@@ -159,8 +159,8 @@ async fn deliver_is_once_only() {
         body: std::mem::take(&mut stream.body),
         trailers: Vec::new(),
     };
-    stream.deliver(Ok(resp));
-    stream.deliver(Err("late teardown".into()));
+    stream.reply(Ok(resp));
+    stream.reply(Err(H3SendError::Failed("late teardown".into())));
 
     let got = rx.await.expect("sender delivered").expect("ok response");
     assert_eq!(got.status, 200);
@@ -306,4 +306,19 @@ fn a_queued_request_whose_caller_left_is_cancelled() {
     assert!(!command_is_cancelled(&cmd));
     drop(resp_rx);
     assert!(command_is_cancelled(&cmd));
+}
+
+#[test]
+fn endless_informational_responses_fail_the_stream() {
+    let mut state = H3ResponseState::Initial(0);
+    let early = headers(&[(":status", "103")]);
+    for _ in 0..crate::util::MAX_INFORMATIONAL {
+        assert!(matches!(
+            state.headers(&early),
+            Ok(H3HeaderBlock::Informational)
+        ));
+    }
+    let Err(_) = state.headers(&early) else {
+        panic!("the 17th informational response must fail the stream");
+    };
 }

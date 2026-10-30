@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use leyline::h2::frame::FrameType;
-use leyline::{RetryPolicy, Session, TlsTrustConfig};
+use leyline::{Session, Tls};
 use leyline_bssl_tokio::SslStream;
 use support::{
     read_frame, read_preface, write_data, write_response_headers, write_server_settings,
@@ -74,25 +74,21 @@ async fn an_http1_fallback_that_reaches_h2_sends_on_h2() {
     )
     .await;
     let session = Session::builder()
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
-        .retry(RetryPolicy::none())
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
+        .retry(0)
         .build()
         .unwrap();
     let url = format!("https://127.0.0.1:{port}/");
     session
         .get(format!("{url}a"))
+        .send()
         .await
         .unwrap()
         .bytes()
         .await
         .unwrap();
-    let resp = session.get(format!("{url}b")).await.unwrap();
-    assert_eq!(resp.version(), leyline::HttpVersion::Http2);
+    let resp = session.get(format!("{url}b")).send().await.unwrap();
+    assert_eq!(resp.version(), http::Version::HTTP_2);
     assert_eq!(resp.bytes().await.unwrap(), "ok");
     assert_eq!(connections.load(Ordering::SeqCst), 3);
 }

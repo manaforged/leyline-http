@@ -3,9 +3,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use super::types::{
-    CLOSE, CONNECTION, ChunkedBody, Handler, RecordedRequest, Recorder, TestResponse,
-};
+use super::types::{CLOSE, CONNECTION, ChunkedBody, Handler, Recorder, Request, Response};
 use crate::pool::H1PooledError;
 use crate::pool::h1::MAX_H1_HEADER_BYTES;
 use crate::pool::h1::parse::{parse_h1_head, read_chunked_body};
@@ -42,7 +40,7 @@ where
     }
 }
 
-async fn respond(handler: &Handler, request: &RecordedRequest) -> Option<TestResponse> {
+async fn respond(handler: &Handler, request: &Request) -> Option<Response> {
     let handler = Arc::clone(handler);
     let request = request.clone();
     let response = tokio::task::spawn_blocking(move || handler(&request))
@@ -52,7 +50,7 @@ async fn respond(handler: &Handler, request: &RecordedRequest) -> Option<TestRes
     Some(response)
 }
 
-async fn read_request<S>(stream: &mut S, buf: &mut Vec<u8>) -> io::Result<Option<RecordedRequest>>
+async fn read_request<S>(stream: &mut S, buf: &mut Vec<u8>) -> io::Result<Option<Request>>
 where
     S: AsyncRead + Unpin,
 {
@@ -68,7 +66,7 @@ where
     };
     let (_, headers, _) =
         parse_h1_head(&format!("HTTP/1.1 200 OK\r\n{header_block}")).map_err(to_io)?;
-    let mut request = RecordedRequest {
+    let mut request = Request {
         method: method.to_owned(),
         target: target.to_owned(),
         headers,
@@ -102,11 +100,7 @@ where
     }
 }
 
-async fn read_body<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-    request: &RecordedRequest,
-) -> io::Result<Vec<u8>>
+async fn read_body<S>(stream: &mut S, buf: &mut Vec<u8>, request: &Request) -> io::Result<Vec<u8>>
 where
     S: AsyncRead + Unpin,
 {
@@ -142,11 +136,7 @@ where
     Ok(buf.drain(..length).collect())
 }
 
-async fn write_response<S>(
-    stream: &mut S,
-    response: &TestResponse,
-    head_only: bool,
-) -> io::Result<()>
+async fn write_response<S>(stream: &mut S, response: &Response, head_only: bool) -> io::Result<()>
 where
     S: AsyncWrite + Unpin,
 {
@@ -160,7 +150,7 @@ where
     stream.flush().await
 }
 
-fn head(response: &TestResponse) -> String {
+fn head(response: &Response) -> String {
     let reason = http::StatusCode::from_u16(response.status)
         .ok()
         .and_then(|status| status.canonical_reason())

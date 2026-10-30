@@ -5,7 +5,7 @@ pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     let excess = has_excess(pump.framing, initial.len());
     let drain = Drain {
         limit: pump.drain_limit,
-        wait: pump.pool.idle_timeout,
+        wait: pump.pool.config.idle_timeout,
     };
     let drained_clean =
         stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, drain).await;
@@ -150,14 +150,8 @@ pub(super) async fn stream_chunked_into(
             return Ok(false);
         };
         let line_end = line.map_err(h1err_to_io)?;
-        let size_line = String::from_utf8_lossy(&buf[..line_end]);
-        let size_token = size_line.split(';').next().unwrap_or("").trim();
-        let mut remaining = u64::from_str_radix(size_token, 16).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!("invalid chunk size: {e}"),
-            )
-        })?;
+        let mut remaining = parse::chunk_size(&buf[..line_end])
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         buf.drain(..line_end + 2);
 
         if remaining == 0 {
@@ -269,11 +263,12 @@ pub(super) async fn send_request_h1_streaming(
     tracing::Span::current().record("pool.hit", false);
     let installed = legs.fresh.is_some();
 
-    let (mut slot, tls, connect_ms) =
-        match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
-            Leg::H1(slot, tls, connect_ms) => (slot, tls, connect_ms),
-            Leg::H2(opened) => return Ok(H1Outcome::Upgraded { opened, body }),
-        };
+    let opened = match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
+        Leg::H1(opened) => opened,
+        Leg::H2(opened) => return Ok(H1Outcome::Upgraded { opened, body }),
+    };
+    let connect_ms = opened.connect_ms.unwrap_or_default();
+    let (mut slot, tls) = (opened.conn, opened.tls);
     let (head, reusable) =
         exchange_head_on_stream(slot.io.as_mut(), method, url, headers, body, target).await?;
     let leg = HeadLeg {

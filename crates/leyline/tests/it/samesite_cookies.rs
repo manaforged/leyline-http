@@ -1,31 +1,30 @@
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::{Browser, DnsConfig, Family, Preset, ProtocolPolicy, Session};
+use leyline::testing::{self, queue};
+use leyline::{Browser, Protocol, RequestKind, Session};
 
 #[tokio::test]
 async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(200).body("ok").close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
-    session
-        .cookies()
-        .store_set_cookie("strict=1; SameSite=Strict", &site);
-    session
-        .cookies()
-        .store_set_cookie("lax=1; SameSite=Lax", &site);
+    session.cookies().store("strict=1; SameSite=Strict", &site);
+    session.cookies().store("lax=1; SameSite=Lax", &site);
 
-    for (path, preset) in [("/nav", Preset::FormNavigate), ("/xhr", Preset::Xhr)] {
+    for (path, preset) in [
+        ("/nav", RequestKind::FormNavigate),
+        ("/xhr", RequestKind::Xhr),
+    ] {
         session
             .request(http::Method::GET, server.url(path))
-            .preset(preset)
+            .kind(preset)
             .header("referer", "https://other.test/")
             .send()
             .await
@@ -41,7 +40,7 @@ async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
         navigation.text()
     );
     assert_eq!(
-        subresource.header_count("cookie"),
+        subresource.header_values("cookie").len(),
         0,
         "{}",
         subresource.text()
@@ -51,70 +50,69 @@ async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
 
 #[tokio::test]
 async fn samesite_follows_the_sent_fetch_site() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(200).body("ok").close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let preset_session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let referer_session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .headers([("referer", "https://other.test/")])
         .build()
         .unwrap();
 
     for (session, preset) in [
-        (&preset_session, Preset::CrossOrigin),
-        (&referer_session, Preset::Xhr),
+        (&preset_session, RequestKind::CrossOrigin),
+        (&referer_session, RequestKind::Xhr),
     ] {
-        session
-            .cookies()
-            .store_set_cookie("strict=1; SameSite=Strict", &site);
-        session
-            .cookies()
-            .store_set_cookie("lax=1; SameSite=Lax", &site);
+        session.cookies().store("strict=1; SameSite=Strict", &site);
+        session.cookies().store("lax=1; SameSite=Lax", &site);
         session
             .get(server.url("/"))
-            .preset(preset)
+            .kind(preset)
             .send()
             .await
             .unwrap();
         let req = server.next_request().await.unwrap();
         assert_eq!(req.header_values("sec-fetch-site"), vec!["cross-site"]);
-        assert_eq!(req.header_count("cookie"), 0, "{}", req.text());
+        assert_eq!(
+            req.header_values("cookie").len(),
+            0,
+            "{}",
+            String::from_utf8_lossy(&req.raw)
+        );
     }
     server.shutdown().await;
 }
 
 #[tokio::test]
 async fn the_last_session_referer_sets_the_fetch_site() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .headers([
             ("referer", "https://other.test/"),
             ("referer", site.as_str()),
         ])
         .build()
         .unwrap();
-    session
-        .cookies()
-        .store_set_cookie("strict=1; SameSite=Strict", &site);
+    session.cookies().store("strict=1; SameSite=Strict", &site);
 
     session
         .get(server.url("/"))
-        .preset(Preset::Xhr)
+        .kind(RequestKind::Xhr)
         .send()
         .await
         .unwrap();
@@ -130,31 +128,31 @@ async fn the_last_session_referer_sets_the_fetch_site() {
     server.shutdown().await;
 }
 
-fn port_of(server: &TestServer) -> u16 {
+fn port_of(server: &testing::Server) -> u16 {
     url::Url::parse(&server.url("/")).unwrap().port().unwrap()
 }
 
-fn two_sites() -> DnsConfig {
-    let local = "127.0.0.1:0".parse().unwrap();
-    DnsConfig::new()
-        .resolve_host("site-a.test", [local])
-        .resolve_host("site-b.test", [local])
+fn two_sites(builder: leyline::SessionBuilder) -> leyline::SessionBuilder {
+    let local: std::net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+    builder
+        .resolve("site-a.test", [local])
+        .resolve("site-b.test", [local])
 }
 
 #[tokio::test]
 async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only() {
-    let landing = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(200).body("ok").close(),
+    let landing = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
     let land = format!("http://site-a.test:{}/land", port_of(&landing));
-    let start = TestServer::http(queue(vec![
-        TestResponse::new(302)
+    let start = testing::Server::http(queue(vec![
+        testing::Response::new(302)
             .close()
             .header("location", land.clone()),
-        TestResponse::new(302)
+        testing::Response::new(302)
             .close()
             .header("location", land.clone()),
     ]))
@@ -163,19 +161,18 @@ async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only()
     let begin = format!("http://site-b.test:{}/start", port_of(&start));
     let site_a = url::Url::parse(&land).unwrap();
 
-    for browser in [Browser::latest(Family::Firefox), Browser::default()] {
-        let session = Session::builder()
+    for browser in [Browser::firefox(), Browser::default()] {
+        let session = two_sites(Session::builder())
             .browser(browser)
-            .protocol(ProtocolPolicy::Http1)
-            .dns(two_sites())
+            .protocol(Protocol::Http1)
             .build()
             .unwrap();
         session
             .cookies()
-            .store_set_cookie("strict=1; SameSite=Strict", &site_a);
+            .store("strict=1; SameSite=Strict", &site_a);
         session
             .request(http::Method::GET, &begin)
-            .preset(Preset::Navigate)
+            .kind(RequestKind::Navigate)
             .send()
             .await
             .unwrap();
@@ -184,7 +181,12 @@ async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only()
 
     let firefox = landing.next_request().await.unwrap();
     let chrome = landing.next_request().await.unwrap();
-    assert_eq!(firefox.header_count("cookie"), 0, "{}", firefox.text());
+    assert_eq!(
+        firefox.header_values("cookie").len(),
+        0,
+        "{}",
+        firefox.text()
+    );
     assert_eq!(
         chrome.header_values("cookie"),
         vec!["strict=1"],
@@ -197,38 +199,38 @@ async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only()
 
 #[tokio::test]
 async fn an_unusable_or_suppressed_session_referer_is_not_the_initiator() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(200).body("ok").close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let relative = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .headers([("referer", "/home")])
         .build()
         .unwrap();
     let suppressed = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .headers([("referer", "https://other.test/")])
         .build()
         .unwrap();
 
     relative
         .get(server.url("/"))
-        .preset(Preset::Xhr)
+        .kind(RequestKind::Xhr)
         .send()
         .await
         .unwrap();
     suppressed
         .cookies()
-        .store_set_cookie("strict=1; SameSite=Strict", &site);
+        .store("strict=1; SameSite=Strict", &site);
     suppressed
         .get(server.url("/"))
-        .preset(Preset::Xhr)
+        .kind(RequestKind::Xhr)
         .header("referer", "")
         .send()
         .await
@@ -249,19 +251,19 @@ async fn an_unusable_or_suppressed_session_referer_is_not_the_initiator() {
 
 #[tokio::test]
 async fn origin_names_the_initiator() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .headers([("referer", "https://other.test/page")])
         .build()
         .unwrap();
 
     session
         .get(server.url("/"))
-        .preset(Preset::Xhr)
+        .kind(RequestKind::Xhr)
         .send()
         .await
         .unwrap();
@@ -281,33 +283,32 @@ async fn origin_names_the_initiator() {
 async fn chrome_judges_the_final_target_after_a_cross_site_bounce() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
-    let server = TestServer::http_on(
+    let server = testing::Server::http_on(
         listener,
         queue(vec![
-            TestResponse::new(302)
+            testing::Response::new(302)
                 .close()
                 .header("location", format!("http://site-b.test:{port}/hop")),
-            TestResponse::new(302)
+            testing::Response::new(302)
                 .close()
                 .header("location", format!("http://site-a.test:{port}/end")),
-            TestResponse::new(200).body("ok").close(),
+            testing::Response::new(200).body("ok").close(),
         ]),
     )
     .unwrap();
     let site_a = url::Url::parse(&format!("http://site-a.test:{port}/")).unwrap();
-    let session = Session::builder()
+    let session = two_sites(Session::builder())
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
-        .dns(two_sites())
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     session
         .cookies()
-        .store_set_cookie("strict=1; SameSite=Strict", &site_a);
+        .store("strict=1; SameSite=Strict", &site_a);
 
     session
         .get(format!("http://site-a.test:{port}/start"))
-        .preset(Preset::Xhr)
+        .kind(RequestKind::Xhr)
         .header("referer", site_a.as_str())
         .send()
         .await
@@ -327,22 +328,20 @@ async fn chrome_judges_the_final_target_after_a_cross_site_bounce() {
 
 #[tokio::test]
 async fn a_relative_request_referer_is_same_origin() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
     let session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    session
-        .cookies()
-        .store_set_cookie("strict=1; SameSite=Strict", &site);
+    session.cookies().store("strict=1; SameSite=Strict", &site);
 
     session
         .get(server.url("/x"))
-        .preset(Preset::Xhr)
+        .kind(RequestKind::Xhr)
         .header("referer", "/home")
         .send()
         .await
@@ -361,25 +360,30 @@ async fn a_relative_request_referer_is_same_origin() {
 
 #[tokio::test]
 async fn an_https_initiator_sends_a_null_origin_to_http() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .headers([("referer", "https://other.test/page")])
         .build()
         .unwrap();
 
     session
         .post(server.url("/form"))
-        .preset(Preset::FormNavigate)
+        .kind(RequestKind::FormNavigate)
         .body("a=1")
         .send()
         .await
         .unwrap();
 
     let req = server.next_request().await.unwrap();
-    assert_eq!(req.header_values("origin"), vec!["null"], "{}", req.text());
+    assert_eq!(
+        req.header_values("origin"),
+        vec!["null"],
+        "{}",
+        String::from_utf8_lossy(&req.raw)
+    );
     server.shutdown().await;
 }

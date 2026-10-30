@@ -1,6 +1,6 @@
 #![cfg(feature = "compression-gzip")]
 
-use leyline::{ProtocolPolicy, Session};
+use leyline::{Protocol, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 fn gzip(data: &[u8]) -> Vec<u8> {
@@ -36,11 +36,15 @@ async fn repeated_content_encoding_fields_decode_every_layer() {
         }
     });
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
 
-    let buffered = session.get(format!("http://{addr}/b")).await.unwrap();
+    let buffered = session
+        .get(format!("http://{addr}/b"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(buffered.header("content-encoding"), None);
     assert_eq!(buffered.bytes().await.unwrap(), &b"layered body"[..]);
 

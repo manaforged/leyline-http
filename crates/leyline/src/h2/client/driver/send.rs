@@ -8,6 +8,12 @@ use super::*;
 
 mod headers;
 
+#[derive(Clone, Copy)]
+enum DataEnd {
+    Buffered,
+    Streaming { producer_closed: bool },
+}
+
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_body_chunk(&mut self, chunk: BodyChunkIn) -> Result<(), H2Error> {
         match chunk {
@@ -91,7 +97,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             {
                 if let Err(e) = self
                     .writer
-                    .write_rst_stream(stream_id, ErrorCode::InternalError)
+                    .write_frame(&RstStreamFrame {
+                        stream_id,
+                        error_code: ErrorCode::InternalError,
+                    })
                     .await
                 {
                     tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
@@ -102,7 +111,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
             match next_chunk {
                 Some(chunk) if !chunk.is_empty() => {
-                    self.write_streaming_chunk(stream_id, chunk, closed).await?;
+                    self.write_data_frames(
+                        stream_id,
+                        chunk,
+                        DataEnd::Streaming {
+                            producer_closed: closed,
+                        },
+                    )
+                    .await?;
                 }
                 _ => {
                     if closed {
@@ -123,7 +139,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             actor.send_closed = true;
         }
         self.writer
-            .write_data(&DataFrame {
+            .write_frame(&DataFrame {
                 stream_id,
                 end_stream: true,
                 data: Bytes::new(),
@@ -140,45 +156,48 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    pub(super) async fn write_streaming_chunk(
+    async fn write_data_frames(
         &mut self,
         stream_id: u32,
-        mut chunk: Bytes,
-        producer_closed: bool,
+        mut remaining: Bytes,
+        end: DataEnd,
     ) -> Result<(), H2Error> {
-        while !chunk.is_empty() {
+        while !remaining.is_empty() {
             let window = self.effective_send_window(stream_id);
             if window == 0 || self.writer.congested() {
-                self.park_stream(stream_id, PendingSend { remaining: chunk });
+                self.park_stream(stream_id, PendingSend { remaining });
                 return Ok(());
             }
             let max_frame = self.peer_settings.max_frame_size as usize;
-            let chunk_size = chunk
+            let chunk_size = remaining
                 .len()
                 .min(max_frame)
                 .min(window)
                 .min(self.writer.allowance());
-            let piece = chunk.slice(0..chunk_size);
-            chunk = chunk.slice(chunk_size..);
+            let piece = remaining.slice(0..chunk_size);
+            remaining = remaining.slice(chunk_size..);
 
-            let is_last = chunk.is_empty() && producer_closed && self.upload_drained(stream_id);
+            let end_stream = match end {
+                DataEnd::Buffered => remaining.is_empty(),
+                DataEnd::Streaming { producer_closed } => {
+                    remaining.is_empty() && producer_closed && self.upload_drained(stream_id)
+                }
+            };
 
             if let Some(actor) = self.streams.get_mut(stream_id) {
-                if let Err(e) = actor.state.transition(StreamEvent::SendData {
-                    end_stream: is_last,
-                }) {
+                if let Err(e) = actor.state.transition(StreamEvent::SendData { end_stream }) {
                     return Err(map_state_err(stream_id, e));
                 }
-                if is_last {
+                if end_stream && matches!(end, DataEnd::Streaming { .. }) {
                     actor.send_closed = true;
                 }
             }
 
             let wire_len = piece.len() as u64;
             self.writer
-                .write_data(&DataFrame {
+                .write_frame(&DataFrame {
                     stream_id,
-                    end_stream: is_last,
+                    end_stream,
                     data: piece,
                     wire_len,
                 })
@@ -213,48 +232,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         stream_id: u32,
         body: Bytes,
     ) -> Result<(), H2Error> {
-        let mut remaining = body;
-        while !remaining.is_empty() {
-            let window = self.effective_send_window(stream_id);
-            if window == 0 || self.writer.congested() {
-                self.park_stream(stream_id, PendingSend { remaining });
-                return Ok(());
-            }
-            let max_frame = self.peer_settings.max_frame_size as usize;
-            let chunk_size = remaining
-                .len()
-                .min(max_frame)
-                .min(window)
-                .min(self.writer.allowance());
-            let chunk = remaining.slice(0..chunk_size);
-            remaining = remaining.slice(chunk_size..);
-            let data_end_stream = remaining.is_empty();
-
-            if let Some(actor) = self.streams.get_mut(stream_id)
-                && let Err(e) = actor.state.transition(StreamEvent::SendData {
-                    end_stream: data_end_stream,
-                })
-            {
-                return Err(map_state_err(stream_id, e));
-            }
-
-            let wire_len = chunk.len() as u64;
-            self.writer
-                .write_data(&DataFrame {
-                    stream_id,
-                    end_stream: data_end_stream,
-                    data: chunk,
-                    wire_len,
-                })
-                .await?;
-
-            self.conn_send_window -= chunk_size as i64;
-            if let Some(actor) = self.streams.get_mut(stream_id) {
-                actor.send_window -= chunk_size as i64;
-            }
-        }
-
-        Ok(())
+        self.write_data_frames(stream_id, body, DataEnd::Buffered)
+            .await
     }
 
     pub(super) async fn try_drain_pending(&mut self) -> Result<(), H2Error> {

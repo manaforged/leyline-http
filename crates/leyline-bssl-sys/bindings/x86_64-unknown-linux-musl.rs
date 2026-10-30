@@ -10550,16 +10550,6 @@ unsafe extern "C" {
     ) -> ::std::os::raw::c_ulonglong;
     pub fn rand() -> ::std::os::raw::c_int;
     pub fn srand(arg1: ::std::os::raw::c_uint);
-    pub fn malloc(arg1: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void;
-    pub fn calloc(
-        arg1: ::std::os::raw::c_ulong,
-        arg2: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-    pub fn realloc(
-        arg1: *mut ::std::os::raw::c_void,
-        arg2: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-    pub fn free(arg1: *mut ::std::os::raw::c_void);
     pub fn aligned_alloc(
         arg1: ::std::os::raw::c_ulong,
         arg2: ::std::os::raw::c_ulong,

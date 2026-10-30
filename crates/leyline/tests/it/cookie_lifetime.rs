@@ -20,8 +20,8 @@ fn assert_capped(expires: Option<SystemTime>) {
 
 fn stored(set_cookie: &str) -> Cookie {
     let jar = Jar::new();
-    jar.store_set_cookie(set_cookie, &Url::parse("https://example.com/").unwrap());
-    jar.all_cookies().pop().unwrap()
+    jar.store(set_cookie, &Url::parse("https://example.com/").unwrap());
+    jar.all().pop().unwrap()
 }
 
 fn loaded(expires_ms: i64) -> Cookie {
@@ -61,7 +61,7 @@ fn a_saved_jar_drops_records_over_the_size_limits() {
     oversized["value"] = serde_json::json!("v".repeat(5000));
     let saved = serde_json::Value::Array(vec![kept, oversized]);
     let jar: Jar = serde_json::from_value(saved).unwrap();
-    let names: Vec<String> = jar.all_cookies().into_iter().map(|c| c.name).collect();
+    let names: Vec<String> = jar.all().into_iter().map(|c| c.name).collect();
     assert_eq!(names, ["kept"]);
 }
 
@@ -69,7 +69,7 @@ fn a_saved_jar_drops_records_over_the_size_limits() {
 fn a_cookie_keeps_a_default_path_longer_than_1024_octets() {
     let jar = Jar::new();
     let long = format!("https://example.com/{}/page", "d".repeat(1500));
-    jar.store_set_cookie("sid=1", &Url::parse(&long).unwrap());
-    let cookie = jar.all_cookies().pop().expect("the cookie is stored");
+    jar.store("sid=1", &Url::parse(&long).unwrap());
+    let cookie = jar.all().pop().expect("the cookie is stored");
     assert!(cookie.path.len() > 1024, "{}", cookie.path.len());
 }

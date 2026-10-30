@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use leyline::{Body, Kind, ProtocolPolicy, ProxyConfig, Session};
+use leyline::{Body, Kind, Protocol, Proxy, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -62,8 +62,8 @@ async fn server(replies: &[Option<&'static [u8]>]) -> (SocketAddr, Arc<Counts>) 
 
 fn session() -> Session {
     Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .build()
         .unwrap()
 }
@@ -71,10 +71,16 @@ fn session() -> Session {
 #[tokio::test]
 async fn a_response_that_breaks_the_wire_format_is_an_invalid_data_io_error() {
     let (addr, _) = server(&[Some(TWO_LENGTHS)]).await;
-    let err = session().get(format!("http://{addr}/")).await.unwrap_err();
+    let err = session()
+        .get(format!("http://{addr}/"))
+        .send()
+        .await
+        .unwrap_err();
     assert_eq!(err.kind(), Kind::Io, "{err:?}");
     assert_eq!(
-        err.io().map(std::io::Error::kind),
+        std::error::Error::source(&err)
+            .and_then(|s| s.downcast_ref::<std::io::Error>())
+            .map(std::io::Error::kind),
         Some(std::io::ErrorKind::InvalidData),
         "{err:?}"
     );
@@ -85,8 +91,15 @@ async fn a_malformed_response_on_a_reused_connection_is_not_sent_again() {
     let (addr, counts) = server(&[Some(OK), Some(TWO_LENGTHS)]).await;
     let session = session();
     let url = format!("http://{addr}/");
-    session.get(&url).await.unwrap().bytes().await.unwrap();
-    session.get(&url).await.unwrap_err();
+    session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    session.get(&url).send().await.unwrap_err();
     assert_eq!(counts.requests.load(Ordering::SeqCst), 2);
     assert_eq!(counts.connections.load(Ordering::SeqCst), 1);
 }
@@ -96,12 +109,20 @@ async fn a_streaming_body_on_a_dead_pooled_connection_is_a_body_error() {
     let (addr, counts) = server(&[Some(OK), None]).await;
     let session = session();
     let url = format!("http://{addr}/");
-    session.get(&url).await.unwrap().bytes().await.unwrap();
+    session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
     let chunks =
         futures_util::stream::iter([Ok::<_, std::io::Error>(Bytes::from_static(b"payload"))]);
     let err = session
         .put(&url)
         .body(Body::stream(chunks, None))
+        .send()
         .await
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
@@ -120,11 +141,15 @@ async fn a_failing_request_body_stream_is_a_body_error() {
     let err = session()
         .put(format!("http://{addr}/"))
         .body(failing_body())
+        .send()
         .await
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
     assert_eq!(
-        err.io().map(ToString::to_string).as_deref(),
+        std::error::Error::source(&err)
+            .and_then(|s| s.downcast_ref::<std::io::Error>())
+            .map(ToString::to_string)
+            .as_deref(),
         Some("caller body failed"),
         "{err:?}"
     );
@@ -135,10 +160,22 @@ async fn a_failing_request_body_stream_is_not_a_dead_connection() {
     let (addr, _) = server(&[Some(OK)]).await;
     let session = session();
     let url = format!("http://{addr}/");
-    session.get(&url).await.unwrap().bytes().await.unwrap();
-    let err = session.put(&url).body(failing_body()).await.unwrap_err();
+    session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    let err = session
+        .put(&url)
+        .body(failing_body())
+        .send()
+        .await
+        .unwrap_err();
     assert_eq!(err.kind(), Kind::Body, "{err:?}");
-    assert_eq!(session.pool_stats().evictions_dead, 0);
+    assert_eq!(session.stats().evictions_dead(), 0);
 }
 
 #[tokio::test]
@@ -149,6 +186,7 @@ async fn error_for_status_resends_a_success_cut_short_on_a_stale_pooled_connecti
     session
         .get(&url)
         .error_for_status()
+        .send()
         .await
         .unwrap()
         .bytes()
@@ -157,6 +195,7 @@ async fn error_for_status_resends_a_success_cut_short_on_a_stale_pooled_connecti
     let body = session
         .get(&url)
         .error_for_status()
+        .send()
         .await
         .unwrap()
         .bytes()
@@ -170,8 +209,10 @@ async fn error_for_status_resends_a_success_cut_short_on_a_stale_pooled_connecti
 struct Reuse(Arc<std::sync::Mutex<Vec<bool>>>);
 
 impl leyline::trace::Trace for Reuse {
-    fn connect(&self, event: &leyline::trace::Connect<'_>) {
-        self.0.lock().unwrap().push(event.reused);
+    fn event(&self, event: &leyline::trace::Event<'_>) {
+        if let leyline::trace::Event::Connect { reused, .. } = event {
+            self.0.lock().unwrap().push(*reused);
+        }
     }
 }
 
@@ -180,8 +221,8 @@ async fn error_for_status_traces_a_reused_pooled_connection() {
     let (addr, _) = server(&[Some(OK)]).await;
     let reuse = Reuse::default();
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .trace(reuse.clone())
         .build()
         .unwrap();
@@ -190,6 +231,7 @@ async fn error_for_status_traces_a_reused_pooled_connection() {
         session
             .get(&url)
             .error_for_status()
+            .send()
             .await
             .unwrap()
             .bytes()
@@ -239,7 +281,7 @@ async fn an_early_final_response_ends_an_upload_the_server_stopped_reading() {
     });
     let dropped = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let sent = session
@@ -322,7 +364,7 @@ async fn a_peer_that_closes_before_answering_ends_a_waiting_upload() {
         futures_util::stream::pending(),
     ));
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let sent = session
@@ -350,7 +392,7 @@ async fn ready_empty_chunks_do_not_hide_an_early_response() {
     );
     let (body, polled, dropped) = watched(empties);
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let response = session

@@ -8,30 +8,45 @@ const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
 pub(crate) const MAX_NAME_VALUE_OCTETS: usize = 4096;
 pub(crate) const MAX_ATTRIBUTE_OCTETS: usize = 1024;
 
+/// The `SameSite` attribute of a cookie.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SameSite {
+    /// Sends the cookie only on same-site requests.
     Strict,
+    /// Sends the cookie on same-site requests and top-level cross-site navigations.
     Lax,
+    /// Sends the cookie on all requests, including cross-site ones.
     None,
 }
 
+/// A stored cookie and its attributes.
 #[derive(Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cookie {
+    /// The cookie name.
     pub name: String,
+    /// The cookie value.
     pub value: String,
+    /// The domain the cookie belongs to.
     pub domain: String,
+    /// The path the cookie applies to.
     pub path: String,
+    /// Whether the cookie is sent only over HTTPS.
     pub secure: bool,
+    /// Whether the cookie is hidden from scripts.
     pub http_only: bool,
+    /// The `SameSite` policy of the cookie.
     pub same_site: SameSite,
+    /// The expiry time, or `None` for a session cookie.
     #[serde(with = "systime_opt_ms")]
     pub expires: Option<SystemTime>,
+    /// The time the cookie was first stored.
     #[serde(with = "systime_ms")]
     pub creation_time: SystemTime,
     #[serde(with = "systime_ms", default = "SystemTime::now")]
     pub(crate) last_access: SystemTime,
+    /// Whether the cookie matches only the exact host that set it.
     pub host_only: bool,
 }
 
@@ -57,6 +72,7 @@ impl Cookie {
             && self.domain.len() <= MAX_ATTRIBUTE_OCTETS
     }
 
+    /// Returns `true` when the cookie has an expiry time in the past.
     pub fn is_expired(&self) -> bool {
         if let Some(expires) = self.expires {
             SystemTime::now() > expires

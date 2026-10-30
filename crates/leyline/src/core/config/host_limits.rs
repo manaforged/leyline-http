@@ -19,6 +19,20 @@ impl Rule {
     fn is_unlimited(self) -> bool {
         self.max_in_flight.is_none() && self.interval.is_none()
     }
+
+    fn max_in_flight(mut self, n: usize) -> Self {
+        self.max_in_flight = Some(n.max(1));
+        self
+    }
+
+    fn per_second(mut self, rate: f64) -> Self {
+        self.interval = if rate.is_finite() && rate > 0.0 {
+            Duration::try_from_secs_f64(rate.recip()).ok()
+        } else {
+            None
+        };
+        self
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,8 +61,10 @@ impl HostPattern {
     }
 }
 
+/// Per-host concurrency, rate, and pause limits for a session or crawl.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
+#[must_use]
 pub struct HostLimits {
     rule: Rule,
     overrides: Vec<(HostPattern, Rule)>,
@@ -93,36 +109,49 @@ impl Default for HostLimits {
 }
 
 impl HostLimits {
+    /// Returns limits with no per-host cap, no total cap, and a 60-second default pause.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Limits the requests in flight to each host, with a floor of 1.
     pub fn max_in_flight(mut self, n: usize) -> Self {
-        self.rule.max_in_flight = Some(n.max(1));
+        self.rule = self.rule.max_in_flight(n);
         self
     }
 
+    /// Limits each host to `rate` requests per second; a rate that is not a positive finite number removes the limit.
     pub fn per_second(mut self, rate: f64) -> Self {
-        self.rule.interval = if rate > 0.0 {
-            Duration::try_from_secs_f64(rate.recip()).ok()
-        } else {
-            None
-        };
+        self.rule = self.rule.per_second(rate);
         self
     }
 
-    pub fn host(mut self, host: &str, limits: HostLimits) -> Self {
+    /// Limits the requests in flight to a host or `*.domain` pattern, overriding the default.
+    pub fn host_max_in_flight(self, host: &str, n: usize) -> Self {
+        self.host_rule(host, |rule| rule.max_in_flight(n))
+    }
+
+    /// Limits the request rate to a host or `*.domain` pattern, overriding the default.
+    pub fn host_per_second(self, host: &str, rate: f64) -> Self {
+        self.host_rule(host, |rule| rule.per_second(rate))
+    }
+
+    fn host_rule(mut self, host: &str, set: impl FnOnce(Rule) -> Rule) -> Self {
         let pattern = HostPattern::parse(host);
-        self.overrides.retain(|(held, _)| *held != pattern);
-        self.overrides.push((pattern, limits.rule));
+        match self.overrides.iter_mut().find(|(held, _)| *held == pattern) {
+            Some((_, rule)) => *rule = set(*rule),
+            None => self.overrides.push((pattern, set(Rule::default()))),
+        }
         self
     }
 
+    /// Limits the requests in flight across all hosts, with a floor of 1.
     pub fn max_total_in_flight(mut self, n: usize) -> Self {
         self.max_total = Some(n.max(1));
         self
     }
 
+    /// Pauses a host when a response has one of these status codes, replacing any earlier list.
     pub fn pause_on(mut self, statuses: impl IntoIterator<Item = u16>) -> Self {
         self.pause.statuses.clear();
         self.pause.invalid = None;
@@ -137,11 +166,13 @@ impl HostLimits {
         self
     }
 
+    /// Sets the pause length used when a pausing response gives no wait, 60 seconds by default.
     pub fn pause_for(mut self, default: Duration) -> Self {
         self.pause.default = default;
         self
     }
 
+    /// Caps every pause length, 24 hours by default.
     pub fn max_pause(mut self, max: Duration) -> Self {
         self.pause.max = max;
         self
@@ -346,23 +377,22 @@ impl HostLimits {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct HostStats {
+pub(crate) struct HostStats {
     origin: String,
     in_flight: usize,
     waiting: usize,
 }
 
 impl HostStats {
-    pub fn origin(&self) -> &str {
+    pub(crate) fn origin(&self) -> &str {
         &self.origin
     }
 
-    pub fn in_flight(&self) -> usize {
+    pub(crate) fn in_flight(&self) -> usize {
         self.in_flight
     }
 
-    pub fn waiting(&self) -> usize {
+    pub(crate) fn waiting(&self) -> usize {
         self.waiting
     }
 }

@@ -14,9 +14,19 @@ const HTTP2_RESERVED_SETTINGS: [u64; 4] = [0x02, 0x03, 0x04, 0x05];
 const MAX_VARINT: u64 = (1 << 62) - 1;
 const MIN_INITIAL_DATAGRAM_SIZE: u16 = 1200;
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
+)]
+#[cfg_attr(
+    not(any(feature = "http3", feature = "bench-internals")),
+    expect(
+        dead_code,
+        reason = "the fields configure QUIC, which only the http3 feature builds"
+    )
 )]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -66,9 +76,12 @@ pub struct H3Profile {
     pub tls: Option<TlsProfile>,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
@@ -78,9 +91,12 @@ pub enum H3ConnectionIdLength {
     Weighted { weights: Vec<(usize, u32)> },
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -92,9 +108,12 @@ pub enum H3Order {
     Rotate,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,9 +124,12 @@ pub enum H3CryptoSplit {
     Even,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -118,9 +140,12 @@ pub enum H3CryptoReorder {
     SniMidpoint,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -133,9 +158,12 @@ pub struct H3Grease {
     pub value_bits: u32,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -155,9 +183,12 @@ pub struct H3TransportParam {
     pub pinned: bool,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -169,9 +200,12 @@ pub struct H3VersionInformation {
     pub grease: Option<H3VersionGrease>,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -181,9 +215,12 @@ pub enum H3VersionGrease {
     Random,
 }
 
-#[expect(
-    missing_docs,
-    reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+#[cfg_attr(
+    feature = "bench-internals",
+    expect(
+        missing_docs,
+        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
+    )
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]

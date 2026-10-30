@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
-use leyline::{CompressionConfig, Kind, Session, TlsTrustConfig};
+use leyline::{Kind, Session, Tls};
 use support::{
     read_preface, write_data, write_response_headers, write_server_settings, write_settings_ack,
 };
@@ -50,20 +50,22 @@ async fn an_h2_body_over_the_cap_fails_on_the_kept_connection() {
     let connections = Arc::new(AtomicUsize::new(0));
     let port = tls_support::tls_server(cert, key, Arc::clone(&connections), serve).await;
     let session = Session::builder()
-        .compression(CompressionConfig::new().max_body_size(CAP))
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
+        .max_body_size(CAP)
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
         .build()
         .unwrap();
     let url = format!("https://127.0.0.1:{port}/");
-    let first = session.get(&url).await.unwrap().bytes().await.unwrap();
+    let first = session
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
     assert_eq!(first.len(), SMALL);
-    let second = async { session.get(&url).await?.bytes().await }.await;
+    let second = async { session.get(&url).send().await?.bytes().await }.await;
     let err = second.unwrap_err();
-    assert_eq!(err.kind(), Kind::Body, "{err:?}");
+    assert_eq!(err.kind(), Kind::BodyLimit, "{err:?}");
     assert_eq!(connections.load(Ordering::SeqCst), 1);
 }

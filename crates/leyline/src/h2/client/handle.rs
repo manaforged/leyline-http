@@ -7,7 +7,7 @@ use crate::h2::error::{ErrorCode, H2Error};
 
 #[cfg(feature = "websocket")]
 use super::driver::PeerSettingsSnapshot;
-use super::driver::{DriverCommand, DriverRequestBody, Head, ResponseSink};
+use super::driver::{DriverCommand, Head, ResponseSink};
 use super::types::{H2ResponseEx, RequestBody, ResponseBody};
 use crate::core::ResponseMode;
 
@@ -41,12 +41,6 @@ impl H2Client {
             });
         }
 
-        let body_in = match body {
-            RequestBody::None => DriverRequestBody::None,
-            RequestBody::Buffered(b) => DriverRequestBody::Buffered(b),
-            RequestBody::Streaming { stream, .. } => DriverRequestBody::Streaming(stream),
-        };
-
         let (response_tx, response_rx) = oneshot::channel::<Result<H2ResponseEx, H2Error>>();
         let (sink, stream_body_rx) = match mode {
             ResponseMode::Buffered => (ResponseSink::Buffered(response_tx), None),
@@ -60,11 +54,7 @@ impl H2Client {
             }
         };
 
-        let cmd = DriverCommand::SendRequest {
-            head,
-            body: body_in,
-            sink,
-        };
+        let cmd = DriverCommand::SendRequest { head, body, sink };
         self.tx.send(cmd).await.map_err(|e| {
             tracing::debug!(error = %e, "h2 driver command channel closed");
             H2Error::Stream {

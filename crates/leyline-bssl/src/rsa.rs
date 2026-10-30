@@ -10,19 +10,6 @@
 //!
 //! The RSA acronym is derived from the first letters of the surnames of the
 //! algorithm's founding trio.
-//!
-//! # Example
-//!
-//! Generate a 2048-bit RSA key pair and use the public key to encrypt some data.
-//!
-//! ```rust
-//! use leyline_bssl::rsa::{Rsa, Padding};
-//!
-//! let rsa = Rsa::generate(2048).unwrap();
-//! let data = b"foobar";
-//! let mut buf = vec![0; rsa.size() as usize];
-//! let encrypted_len = rsa.public_encrypt(data, &mut buf, Padding::PKCS1).unwrap();
-//! ```
 use foreign_types::{ForeignType, ForeignTypeRef};
 use libc::c_int;
 use openssl_macros::corresponds;
@@ -35,23 +22,7 @@ use crate::error::ErrorStack;
 use crate::ffi;
 use crate::pkey::{HasPrivate, HasPublic, Private, Public};
 use crate::try_int;
-use crate::{cvt, cvt_n, cvt_p};
-
-pub const EVP_PKEY_OP_SIGN: c_int = 1 << 3;
-pub const EVP_PKEY_OP_VERIFY: c_int = 1 << 4;
-pub const EVP_PKEY_OP_VERIFYRECOVER: c_int = 1 << 5;
-pub const EVP_PKEY_OP_SIGNCTX: c_int = 1 << 6;
-pub const EVP_PKEY_OP_VERIFYCTX: c_int = 1 << 7;
-pub const EVP_PKEY_OP_ENCRYPT: c_int = 1 << 8;
-pub const EVP_PKEY_OP_DECRYPT: c_int = 1 << 9;
-
-pub const EVP_PKEY_OP_TYPE_SIG: c_int = EVP_PKEY_OP_SIGN
-    | EVP_PKEY_OP_VERIFY
-    | EVP_PKEY_OP_VERIFYRECOVER
-    | EVP_PKEY_OP_SIGNCTX
-    | EVP_PKEY_OP_VERIFYCTX;
-
-pub const EVP_PKEY_OP_TYPE_CRYPT: c_int = EVP_PKEY_OP_ENCRYPT | EVP_PKEY_OP_DECRYPT;
+use crate::{cvt, cvt_p};
 
 /// Type of encryption padding to use.
 ///
@@ -63,9 +34,6 @@ pub struct Padding(c_int);
 
 impl Padding {
     pub const NONE: Padding = Padding(ffi::RSA_NO_PADDING);
-    pub const PKCS1: Padding = Padding(ffi::RSA_PKCS1_PADDING);
-    pub const PKCS1_OAEP: Padding = Padding(ffi::RSA_PKCS1_OAEP_PADDING);
-    pub const PKCS1_PSS: Padding = Padding(ffi::RSA_PKCS1_PSS_PADDING);
 
     /// Creates a `Padding` from an integer representation.
     #[must_use]
@@ -134,60 +102,6 @@ where
         ffi::i2d_RSAPrivateKey
     }
 
-    /// Decrypts data using the private key, returning the number of decrypted bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` has no private components, or if `to` is smaller
-    /// than `self.size()`.
-    pub fn private_decrypt(
-        &self,
-        from: &[u8],
-        to: &mut [u8],
-        padding: Padding,
-    ) -> Result<usize, ErrorStack> {
-        assert!(i32::try_from(from.len()).is_ok());
-        assert!(to.len() >= self.size() as usize);
-
-        unsafe {
-            let len = cvt_n(ffi::RSA_private_decrypt(
-                from.len(),
-                from.as_ptr(),
-                to.as_mut_ptr(),
-                self.as_ptr(),
-                padding.0,
-            ))?;
-            Ok(len as usize)
-        }
-    }
-
-    /// Encrypts data using the private key, returning the number of encrypted bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `self` has no private components, or if `to` is smaller
-    /// than `self.size()`.
-    pub fn private_encrypt(
-        &self,
-        from: &[u8],
-        to: &mut [u8],
-        padding: Padding,
-    ) -> Result<usize, ErrorStack> {
-        assert!(i32::try_from(from.len()).is_ok());
-        assert!(to.len() >= self.size() as usize);
-
-        unsafe {
-            let len = cvt_n(ffi::RSA_private_encrypt(
-                from.len(),
-                from.as_ptr(),
-                to.as_mut_ptr(),
-                self.as_ptr(),
-                padding.0,
-            ))?;
-            Ok(len as usize)
-        }
-    }
-
     /// Returns a reference to the private exponent of the key.
     #[corresponds(RSA_get0_key)]
     #[must_use]
@@ -225,65 +139,6 @@ where
                 None
             } else {
                 Some(BigNumRef::from_ptr(q.cast_mut()))
-            }
-        }
-    }
-
-    /// Returns a reference to the first exponent used for CRT calculations.
-    #[corresponds(RSA_get0_crt_params)]
-    #[must_use]
-    pub fn dmp1(&self) -> Option<&BigNumRef> {
-        unsafe {
-            let mut dp = ptr::null();
-            RSA_get0_crt_params(self.as_ptr(), &mut dp, ptr::null_mut(), ptr::null_mut());
-            if dp.is_null() {
-                None
-            } else {
-                Some(BigNumRef::from_ptr(dp.cast_mut()))
-            }
-        }
-    }
-
-    /// Returns a reference to the second exponent used for CRT calculations.
-    #[corresponds(RSA_get0_crt_params)]
-    #[must_use]
-    pub fn dmq1(&self) -> Option<&BigNumRef> {
-        unsafe {
-            let mut dq = ptr::null();
-            RSA_get0_crt_params(self.as_ptr(), ptr::null_mut(), &mut dq, ptr::null_mut());
-            if dq.is_null() {
-                None
-            } else {
-                Some(BigNumRef::from_ptr(dq.cast_mut()))
-            }
-        }
-    }
-
-    /// Returns a reference to the coefficient used for CRT calculations.
-    #[corresponds(RSA_get0_crt_params)]
-    #[must_use]
-    pub fn iqmp(&self) -> Option<&BigNumRef> {
-        unsafe {
-            let mut qi = ptr::null();
-            RSA_get0_crt_params(self.as_ptr(), ptr::null_mut(), ptr::null_mut(), &mut qi);
-            if qi.is_null() {
-                None
-            } else {
-                Some(BigNumRef::from_ptr(qi.cast_mut()))
-            }
-        }
-    }
-
-    /// Validates RSA parameters for correctness
-    #[corresponds(RSA_check_key)]
-    #[allow(clippy::unnecessary_cast)]
-    pub fn check_key(&self) -> Result<bool, ErrorStack> {
-        unsafe {
-            let result = ffi::RSA_check_key(self.as_ptr()) as i32;
-            if result == -1 {
-                Err(ErrorStack::get())
-            } else {
-                Ok(result == 1)
             }
         }
     }
@@ -333,58 +188,6 @@ where
         unsafe { ffi::RSA_size(self.as_ptr()) as u32 }
     }
 
-    /// Decrypts data using the public key, returning the number of decrypted bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `to` is smaller than `self.size()`.
-    pub fn public_decrypt(
-        &self,
-        from: &[u8],
-        to: &mut [u8],
-        padding: Padding,
-    ) -> Result<usize, ErrorStack> {
-        assert!(i32::try_from(from.len()).is_ok());
-        assert!(to.len() >= self.size() as usize);
-
-        unsafe {
-            let len = cvt_n(ffi::RSA_public_decrypt(
-                from.len(),
-                from.as_ptr(),
-                to.as_mut_ptr(),
-                self.as_ptr(),
-                padding.0,
-            ))?;
-            Ok(len as usize)
-        }
-    }
-
-    /// Encrypts data using the public key, returning the number of encrypted bytes.
-    ///
-    /// # Panics
-    ///
-    /// Panics if `to` is smaller than `self.size()`.
-    pub fn public_encrypt(
-        &self,
-        from: &[u8],
-        to: &mut [u8],
-        padding: Padding,
-    ) -> Result<usize, ErrorStack> {
-        assert!(i32::try_from(from.len()).is_ok());
-        assert!(to.len() >= self.size() as usize);
-
-        unsafe {
-            let len = cvt_n(ffi::RSA_public_encrypt(
-                from.len(),
-                from.as_ptr(),
-                to.as_mut_ptr(),
-                self.as_ptr(),
-                padding.0,
-            ))?;
-            Ok(len as usize)
-        }
-    }
-
     /// Returns a reference to the modulus of the key.
     #[corresponds(RSA_get0_key)]
     #[must_use]
@@ -409,20 +212,6 @@ where
 }
 
 impl Rsa<Public> {
-    /// Creates a new RSA key with only public components.
-    ///
-    /// `n` is the modulus common to both public and private key.
-    /// `e` is the public exponent.
-    #[corresponds(RSA_new)]
-    pub fn from_public_components(n: BigNum, e: BigNum) -> Result<Rsa<Public>, ErrorStack> {
-        unsafe {
-            let rsa = cvt_p(ffi::RSA_new())?;
-            cvt(RSA_set0_key(rsa, n.as_ptr(), e.as_ptr(), ptr::null_mut()))?;
-            mem::forget((n, e));
-            Ok(Rsa::from_ptr(rsa))
-        }
-    }
-
     from_pem! {
         /// Decodes a PEM-encoded SubjectPublicKeyInfo structure containing an RSA key.
         ///
@@ -483,41 +272,6 @@ impl RsaPrivateKeyBuilder {
         }
     }
 
-    /// Sets the factors of the Rsa key.
-    ///
-    /// `p` and `q` are the first and second factors of `n`.
-    #[corresponds(RSA_set0_factors)]
-    pub fn set_factors(self, p: BigNum, q: BigNum) -> Result<RsaPrivateKeyBuilder, ErrorStack> {
-        unsafe {
-            cvt(RSA_set0_factors(self.rsa.as_ptr(), p.as_ptr(), q.as_ptr()))?;
-            mem::forget((p, q));
-        }
-        Ok(self)
-    }
-
-    /// Sets the Chinese Remainder Theorem params of the Rsa key.
-    ///
-    /// `dmp1`, `dmq1`, and `iqmp` are the exponents and coefficient for
-    /// CRT calculations which is used to speed up RSA operations.
-    #[corresponds(RSA_set0_crt_params)]
-    pub fn set_crt_params(
-        self,
-        dmp1: BigNum,
-        dmq1: BigNum,
-        iqmp: BigNum,
-    ) -> Result<RsaPrivateKeyBuilder, ErrorStack> {
-        unsafe {
-            cvt(RSA_set0_crt_params(
-                self.rsa.as_ptr(),
-                dmp1.as_ptr(),
-                dmq1.as_ptr(),
-                iqmp.as_ptr(),
-            ))?;
-            mem::forget((dmp1, dmq1, iqmp));
-        }
-        Ok(self)
-    }
-
     /// Returns the Rsa key.
     #[must_use]
     pub fn build(self) -> Rsa<Private> {
@@ -526,27 +280,6 @@ impl RsaPrivateKeyBuilder {
 }
 
 impl Rsa<Private> {
-    /// Creates a new RSA key with private components (public components are assumed).
-    ///
-    /// This a convenience method over
-    /// `Rsa::build(n, e, d)?.set_factors(p, q)?.set_crt_params(dmp1, dmq1, iqmp)?.build()`
-    #[allow(clippy::too_many_arguments, clippy::many_single_char_names)]
-    pub fn from_private_components(
-        n: BigNum,
-        e: BigNum,
-        d: BigNum,
-        p: BigNum,
-        q: BigNum,
-        dmp1: BigNum,
-        dmq1: BigNum,
-        iqmp: BigNum,
-    ) -> Result<Rsa<Private>, ErrorStack> {
-        Ok(RsaPrivateKeyBuilder::new(n, e, d)?
-            .set_factors(p, q)?
-            .set_crt_params(dmp1, dmq1, iqmp)?
-            .build())
-    }
-
     /// Generates a public/private key pair with the specified size.
     ///
     /// The public exponent will be 65537.
@@ -607,14 +340,10 @@ impl<T> fmt::Debug for Rsa<T> {
     }
 }
 
-use crate::ffi::{
-    RSA_get0_crt_params, RSA_get0_factors, RSA_get0_key, RSA_set0_crt_params, RSA_set0_factors,
-    RSA_set0_key,
-};
+use crate::ffi::{RSA_get0_factors, RSA_get0_key, RSA_set0_key};
 
 #[cfg(test)]
 mod test {
-    use crate::symm::Cipher;
 
     use super::*;
 
@@ -636,73 +365,6 @@ mod test {
         .unwrap();
 
         assert!(password_queried);
-    }
-
-    #[test]
-    fn test_to_password() {
-        let key = Rsa::generate(2048).unwrap();
-        let pem = key
-            .private_key_to_pem_passphrase(Cipher::aes_128_cbc(), b"foobar")
-            .unwrap();
-        Rsa::private_key_from_pem_passphrase(&pem, b"foobar").unwrap();
-        assert!(Rsa::private_key_from_pem_passphrase(&pem, b"fizzbuzz").is_err());
-    }
-
-    #[test]
-    fn test_public_encrypt_private_decrypt_with_padding() {
-        let key = include_bytes!("../test/rsa.pem.pub");
-        let public_key = Rsa::public_key_from_pem(key).unwrap();
-
-        let mut result = vec![0; public_key.size() as usize];
-        let original_data = b"This is test";
-        let len = public_key
-            .public_encrypt(original_data, &mut result, Padding::PKCS1)
-            .unwrap();
-        assert_eq!(len, 256);
-
-        let pkey = include_bytes!("../test/rsa.pem");
-        let private_key = Rsa::private_key_from_pem(pkey).unwrap();
-        let mut dec_result = vec![0; private_key.size() as usize];
-        let len = private_key
-            .private_decrypt(&result, &mut dec_result, Padding::PKCS1)
-            .unwrap();
-
-        assert_eq!(&dec_result[..len], original_data);
-    }
-
-    #[test]
-    fn test_private_encrypt() {
-        let k0 = super::Rsa::generate(512).unwrap();
-        let k0pkey = k0.public_key_to_pem().unwrap();
-        let k1 = super::Rsa::public_key_from_pem(&k0pkey).unwrap();
-
-        let msg = vec![0xdeu8, 0xadu8, 0xd0u8, 0x0du8];
-
-        let mut emesg = vec![0; k0.size() as usize];
-        k0.private_encrypt(&msg, &mut emesg, Padding::PKCS1)
-            .unwrap();
-        let mut dmesg = vec![0; k1.size() as usize];
-        let len = k1
-            .public_decrypt(&emesg, &mut dmesg, Padding::PKCS1)
-            .unwrap();
-        assert_eq!(msg, &dmesg[..len]);
-    }
-
-    #[test]
-    fn test_public_encrypt() {
-        let k0 = super::Rsa::generate(512).unwrap();
-        let k0pkey = k0.private_key_to_pem().unwrap();
-        let k1 = super::Rsa::private_key_from_pem(&k0pkey).unwrap();
-
-        let msg = vec![0xdeu8, 0xadu8, 0xd0u8, 0x0du8];
-
-        let mut emesg = vec![0; k0.size() as usize];
-        k0.public_encrypt(&msg, &mut emesg, Padding::PKCS1).unwrap();
-        let mut dmesg = vec![0; k1.size() as usize];
-        let len = k1
-            .private_decrypt(&emesg, &mut dmesg, Padding::PKCS1)
-            .unwrap();
-        assert_eq!(msg, &dmesg[..len]);
     }
 
     #[test]
@@ -731,46 +393,6 @@ mod test {
         let keypair = super::Rsa::generate(512).unwrap();
         let pubkey_pem = keypair.public_key_to_pem().unwrap();
         super::Rsa::public_key_from_pem_pkcs1(&pubkey_pem).unwrap();
-    }
-
-    #[test]
-    fn test_pem_pkcs1_encrypt() {
-        let keypair = super::Rsa::generate(2048).unwrap();
-        let pubkey_pem = keypair.public_key_to_pem_pkcs1().unwrap();
-        let pubkey = super::Rsa::public_key_from_pem_pkcs1(&pubkey_pem).unwrap();
-        let msg = b"Hello, world!";
-
-        let mut encrypted = vec![0; pubkey.size() as usize];
-        let len = pubkey
-            .public_encrypt(msg, &mut encrypted, Padding::PKCS1)
-            .unwrap();
-        assert!(len > msg.len());
-        let mut decrypted = vec![0; keypair.size() as usize];
-        let len = keypair
-            .private_decrypt(&encrypted, &mut decrypted, Padding::PKCS1)
-            .unwrap();
-        assert_eq!(len, msg.len());
-        assert_eq!(&decrypted[..len], msg);
-    }
-
-    #[test]
-    fn test_pem_pkcs1_padding() {
-        let keypair = super::Rsa::generate(2048).unwrap();
-        let pubkey_pem = keypair.public_key_to_pem_pkcs1().unwrap();
-        let pubkey = super::Rsa::public_key_from_pem_pkcs1(&pubkey_pem).unwrap();
-        let msg = b"foo";
-
-        let mut encrypted1 = vec![0; pubkey.size() as usize];
-        let mut encrypted2 = vec![0; pubkey.size() as usize];
-        let len1 = pubkey
-            .public_encrypt(msg, &mut encrypted1, Padding::PKCS1)
-            .unwrap();
-        let len2 = pubkey
-            .public_encrypt(msg, &mut encrypted2, Padding::PKCS1)
-            .unwrap();
-        assert!(len1 > (msg.len() + 1));
-        assert_eq!(len1, len2);
-        assert_ne!(encrypted1, encrypted2);
     }
 
     #[test]

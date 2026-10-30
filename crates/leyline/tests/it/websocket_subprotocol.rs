@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicUsize;
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use leyline::http::header::SEC_WEBSOCKET_PROTOCOL;
-use leyline::{Kind, ProtocolPolicy, Session, TlsTrustConfig, WsConnection};
+use leyline::{Kind, Protocol, Session, Tls, WebSocket};
 use leyline_bssl::hash::{MessageDigest, hash};
 use leyline_bssl_tokio::SslStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -53,7 +53,7 @@ async fn upgrade(mut stream: SslStream<TcpStream>, selected: &'static [&'static 
     std::future::pending::<()>().await;
 }
 
-async fn connect(selected: &'static [&'static str]) -> leyline::Result<WsConnection> {
+async fn connect(selected: &'static [&'static str]) -> leyline::Result<WebSocket> {
     let (cert, key) = tls_support::self_signed();
     let der = cert.to_der().unwrap();
     let port = tls_support::tls_server(cert, key, Arc::new(AtomicUsize::new(0)), move |stream| {
@@ -61,18 +61,13 @@ async fn connect(selected: &'static [&'static str]) -> leyline::Result<WsConnect
     })
     .await;
     Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
+        .protocol(Protocol::Http1)
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
         .build()
         .unwrap()
-        .websocket(format!("wss://127.0.0.1:{port}/"))
+        .get(format!("wss://127.0.0.1:{port}/"))
         .header(SEC_WEBSOCKET_PROTOCOL, OFFERED)
-        .connect()
+        .websocket()
         .await
 }
 
@@ -98,4 +93,27 @@ async fn a_second_subprotocol_line_fails_the_handshake() {
 async fn an_offer_without_a_selected_subprotocol_fails_the_handshake() {
     let err = connect(&[]).await.unwrap_err();
     assert_eq!(err.kind(), Kind::Request, "{err:?}");
+}
+
+#[tokio::test]
+async fn a_relative_websocket_url_resolves_against_the_base_url() {
+    let (cert, key) = tls_support::self_signed();
+    let der = cert.to_der().unwrap();
+    let port = tls_support::tls_server(cert, key, Arc::new(AtomicUsize::new(0)), move |stream| {
+        upgrade(stream, &["chat"])
+    })
+    .await;
+    let session = Session::builder()
+        .protocol(Protocol::Http1)
+        .base_url(format!("wss://127.0.0.1:{port}/v1/"))
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
+        .build()
+        .unwrap();
+    let socket = session
+        .get("stream")
+        .header(SEC_WEBSOCKET_PROTOCOL, OFFERED)
+        .websocket()
+        .await
+        .unwrap();
+    assert_eq!(socket.protocol(), Some("chat"));
 }

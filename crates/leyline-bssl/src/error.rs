@@ -43,13 +43,6 @@ impl ErrorStack {
     pub(crate) fn internal_error_str(message: &'static str) -> Self {
         Self(vec![Error::new_internal(Data::Static(message))])
     }
-
-    #[corresponds(ERR_clear_error)]
-    pub(crate) fn clear() {
-        unsafe {
-            ffi::ERR_clear_error();
-        }
-    }
 }
 
 impl ErrorStack {
@@ -162,14 +155,6 @@ impl Error {
                 ffi::ERR_add_error_data(1, cstr.as_ptr().cast_mut());
             }
         }
-    }
-
-    #[inline]
-    #[must_use]
-    #[track_caller]
-    pub fn library_reason(&self, library_code: ErrLib) -> Option<c_int> {
-        debug_assert!(library_code.0 < ffi::ERR_NUM_LIBS.0);
-        (self.library_code() == library_code.0 as c_int).then_some(self.reason_code())
     }
 
     #[must_use]

@@ -16,6 +16,7 @@ use crate::h2::config::PseudoOrder;
 use crate::quic::connection::{
     EstablishedH3, H3Response, check_body_budget, close_reason, flush_egress,
 };
+use crate::util::upload::BodyStream;
 
 const STREAM_RESP_CAPACITY: usize = 32;
 
@@ -25,16 +26,13 @@ const CANCEL_SWEEP_INTERVAL: Duration = Duration::from_millis(100);
 
 const LENGTH_MISMATCH: &str = "h3: response body length does not match content-length";
 
-pub type H3RequestBodyStream =
-    std::pin::Pin<Box<dyn futures_util::Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
-
 type H3BodyChunk = crate::util::upload::BodyChunk<u64>;
 
 enum H3Command {
     Request {
         headers: Vec<quiche::h3::Header>,
         body: Option<Bytes>,
-        body_stream: Option<H3RequestBodyStream>,
+        body_stream: Option<BodyStream>,
         stream_body_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
         mode: ResponseMode,
         retried: bool,
@@ -45,13 +43,6 @@ enum H3Command {
 pub enum H3RespBody {
     Buffered(Vec<u8>),
     Streaming(mpsc::Receiver<std::io::Result<Bytes>>),
-}
-
-pub struct H3ResponseParts {
-    pub status: u16,
-    pub headers: Vec<(String, String)>,
-    pub trailers: Vec<(String, String)>,
-    pub body: H3RespBody,
 }
 
 #[derive(Debug)]
@@ -105,9 +96,9 @@ impl H3Client {
         path: &str,
         headers: &[(String, String)],
         body: Option<Bytes>,
-        body_stream: Option<H3RequestBodyStream>,
+        body_stream: Option<BodyStream>,
         mode: ResponseMode,
-    ) -> Result<H3ResponseParts, H3SendError> {
+    ) -> Result<H3Response<H3RespBody>, H3SendError> {
         if self.closed.load(Ordering::Acquire) {
             return Err(H3SendError::NotSent("h3 connection closed".into()));
         }
@@ -149,7 +140,7 @@ impl H3Client {
             .map_err(|e| H3SendError::NotSent(format!("h3 driver task has exited: {e}")))?;
 
         match resp_rx.await {
-            Ok(Ok(head)) => Ok(H3ResponseParts {
+            Ok(Ok(head)) => Ok(H3Response {
                 status: head.status,
                 headers: head.headers,
                 trailers: head.trailers,

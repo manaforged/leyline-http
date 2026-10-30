@@ -10,14 +10,15 @@ use super::route::Route;
 use crate::core::Result;
 use crate::core::body::{Body, BodyKind, BoxedStream};
 use crate::core::deadline::Deadline;
-use crate::core::error::{Error, Kind};
+use crate::core::error::{Cause, Error};
 use crate::core::response::Response;
 use crate::core::retry::RetryPlan;
+use crate::core::session::Session;
 use crate::core::session::execute::Attempt;
 use crate::core::transport::ResponseMode;
-use crate::util::is_idempotent;
 
 impl RequestBuilder {
+    /// Sends the request with retries and waits for the response headers.
     pub async fn send(self) -> Result<Response> {
         Box::pin(self.run()).await
     }
@@ -27,7 +28,7 @@ impl RequestBuilder {
         let retry_policy = self.retry_policy.clone();
         let session = self.session.clone();
         let deadline = session.deadline(self.timeouts.as_ref());
-        let tag = self.tag.take();
+        let label = self.label.take();
         let status_errors = self.status_errors;
         let attempt = self.into_attempt(deadline);
         let method = attempt.method.clone();
@@ -44,7 +45,7 @@ impl RequestBuilder {
                     attempt,
                     &retry_policy,
                     deadline,
-                    tag,
+                    label,
                     &mut exhausted,
                 ),
             )
@@ -78,8 +79,9 @@ impl RequestBuilder {
             response: ResponseMode::new(
                 self.stream_response,
                 self.status_errors
-                    .then(|| self.session.error_budget(&deadline)),
+                    .then(|| Session::error_budget(&deadline, &self.body_rules)),
             ),
+            body_rules: self.body_rules,
             proxy: self.proxy.take(),
             header_order: self.header_order.take(),
             redirect: self.redirect.take(),
@@ -116,9 +118,9 @@ impl RequestBuilder {
                 }
                 BodyKind::Empty => {}
                 BodyKind::Stream { .. } => {
-                    return Err(Error::new(Kind::Body).with_message(
+                    return Err(Error::new(Cause::Body).with_message(
                         "request-body compression is not supported for streaming bodies; \
-                         buffer the body into bytes before calling `.compress(..)`",
+                         buffer the body into bytes before calling `.compress_body(..)`",
                     ));
                 }
             }
@@ -130,18 +132,17 @@ impl RequestBuilder {
 async fn run_attempts(
     session: &crate::core::session::Session,
     mut attempt: Attempt,
-    retry_policy: &crate::core::retry::RetryPolicy,
+    retry_policy: &crate::core::retry::Retry,
     deadline: Deadline,
-    tag: Option<String>,
+    label: Option<String>,
     exhausted: &mut bool,
 ) -> (Result<Response>, u32) {
-    crate::trace::note_tag(tag);
+    crate::trace::note_label(label);
     let mut route = Route::new(session, &attempt, retry_policy);
     if retry_policy.is_none() {
-        return (counted(route.send(attempt, None).await, 1), 1);
+        return (counted(route.send(attempt).await, 1), 1);
     }
-    let retryable_method =
-        retry_policy.allow_non_idempotent || is_idempotent(attempt.method.as_str());
+    let retryable_method = retry_policy.allows(attempt.method.as_str());
     let replay = attempt.body.replay();
     let mut rewind = Rewind::wrap(&mut attempt.body);
     let base_headers = attempt.headers.clone();
@@ -153,7 +154,7 @@ async fn run_attempts(
         }
         let attempt_body = std::mem::take(&mut attempt.body);
         let this = attempt.again(attempt_body, base_headers.clone());
-        let result = route.send(this, retry_policy.proxy_for_retry(n)).await;
+        let result = route.send(this).await;
 
         let body_retryable = || replay.is_some() || rewind.as_mut().is_some_and(Rewind::reclaim);
         let sleep = match retry_policy.plan(&result, n, retryable_method, body_retryable) {
@@ -277,15 +278,6 @@ impl Stream for Reclaim {
             Some(stream) => stream.as_mut().poll_next(cx),
             None => Poll::Ready(None),
         }
-    }
-}
-
-impl std::future::IntoFuture for RequestBuilder {
-    type Output = Result<Response>;
-    type IntoFuture = std::pin::Pin<Box<dyn std::future::Future<Output = Self::Output> + Send>>;
-
-    fn into_future(self) -> Self::IntoFuture {
-        Box::pin(async move { self.send().await })
     }
 }
 

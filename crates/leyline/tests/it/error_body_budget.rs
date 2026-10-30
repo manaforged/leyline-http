@@ -5,8 +5,8 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 use forward::counting_forwarder;
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::{CompressionConfig, Session, TimeoutConfig};
+use leyline::testing::{self, queue};
+use leyline::{Session, Timeout};
 
 fn gzip(data: &[u8]) -> Vec<u8> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
@@ -16,35 +16,43 @@ fn gzip(data: &[u8]) -> Vec<u8> {
 
 #[tokio::test]
 async fn an_error_body_that_inflates_past_the_body_limit_is_a_status_error() {
-    let server = TestServer::http(queue([TestResponse::new(500)
+    let server = testing::Server::http(queue([testing::Response::new(500)
         .header("content-encoding", "gzip")
         .body(gzip(&vec![b'x'; 4 << 20]))]))
     .await
     .unwrap();
-    let session = Session::builder()
-        .compression(CompressionConfig::new().max_body_size(1 << 20))
-        .build()
-        .unwrap();
+    let session = Session::builder().max_body_size(1 << 20).build().unwrap();
 
     let err = session
         .get(server.url("/"))
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
 
     assert_eq!(err.status().map(|s| s.as_u16()), Some(500), "{err}");
     assert_eq!(err.body(), Some(&vec![b'x'; 64 * 1024][..]));
-    assert_eq!(err.header("content-encoding"), None);
-    assert_eq!(err.header("content-length"), None);
+    assert_eq!(
+        err.headers()
+            .and_then(|h| h.get("content-encoding"))
+            .and_then(|v| v.to_str().ok()),
+        None
+    );
+    assert_eq!(
+        err.headers()
+            .and_then(|h| h.get("content-length"))
+            .and_then(|v| v.to_str().ok()),
+        None
+    );
 }
 
 #[tokio::test]
 async fn error_for_status_reuses_the_connection_across_a_redirect() {
-    let server = TestServer::http(queue([
-        TestResponse::new(302)
+    let server = testing::Server::http(queue([
+        testing::Response::new(302)
             .header("location", "/final")
             .body("moved"),
-        TestResponse::new(200).body("ok"),
+        testing::Response::new(200).body("ok"),
     ]))
     .await
     .unwrap();
@@ -54,6 +62,7 @@ async fn error_for_status_reuses_the_connection_across_a_redirect() {
     let response = session
         .get(format!("http://127.0.0.1:{port}/start"))
         .error_for_status()
+        .send()
         .await
         .unwrap();
 
@@ -63,14 +72,13 @@ async fn error_for_status_reuses_the_connection_across_a_redirect() {
 
 #[tokio::test]
 async fn error_for_status_keeps_the_response_header_timeout_on_a_slow_success_body() {
-    let server = TestServer::http(queue([
-        TestResponse::new(200).chunks(std::iter::repeat_n("x", 10), Duration::from_millis(300))
-    ]))
+    let server = testing::Server::http(queue([testing::Response::new(200)
+        .chunks(std::iter::repeat_n("x", 10), Duration::from_millis(300))]))
     .await
     .unwrap();
     let session = Session::builder()
         .timeout(
-            TimeoutConfig::new()
+            Timeout::new()
                 .total(Duration::from_secs(30))
                 .response_header(Duration::from_millis(500)),
         )
@@ -81,10 +89,11 @@ async fn error_for_status_keeps_the_response_header_timeout_on_a_slow_success_bo
     let err = session
         .get(server.url("/"))
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
 
-    assert!(err.is_timeout(), "{err}");
+    assert!(err.kind() == leyline::Kind::Timeout, "{err}");
     assert!(
         started.elapsed() < Duration::from_secs(2),
         "{:?}",
@@ -94,7 +103,7 @@ async fn error_for_status_keeps_the_response_header_timeout_on_a_slow_success_bo
 
 #[tokio::test]
 async fn a_slow_error_body_stops_at_the_error_body_timeout() {
-    let server = TestServer::http(queue([TestResponse::new(500).chunks(
+    let server = testing::Server::http(queue([testing::Response::new(500).chunks(
         std::iter::repeat_n("x".repeat(64), 40),
         Duration::from_millis(100),
     )]))
@@ -102,7 +111,7 @@ async fn a_slow_error_body_stops_at_the_error_body_timeout() {
     .unwrap();
     let session = Session::builder()
         .timeout(
-            TimeoutConfig::new()
+            Timeout::new()
                 .total(Duration::from_secs(30))
                 .error_body(Duration::from_millis(200)),
         )
@@ -113,6 +122,7 @@ async fn a_slow_error_body_stops_at_the_error_body_timeout() {
     let err = session
         .get(server.url("/"))
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
 
@@ -126,48 +136,50 @@ async fn a_slow_error_body_stops_at_the_error_body_timeout() {
 
 #[tokio::test]
 async fn an_error_body_larger_than_the_body_limit_is_a_status_error() {
-    let server = TestServer::http(queue([TestResponse::new(500).body(vec![b'x'; 2 << 20])]))
-        .await
-        .unwrap();
-    let session = Session::builder()
-        .compression(CompressionConfig::new().max_body_size(1 << 20))
-        .build()
-        .unwrap();
+    let server = testing::Server::http(queue([
+        testing::Response::new(500).body(vec![b'x'; 2 << 20])
+    ]))
+    .await
+    .unwrap();
+    let session = Session::builder().max_body_size(1 << 20).build().unwrap();
 
     let err = session
         .get(server.url("/"))
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
 
     assert_eq!(err.status().map(|s| s.as_u16()), Some(500), "{err}");
     assert_eq!(err.body().map(<[u8]>::len), Some(64 * 1024));
-    assert_eq!(err.header("content-length"), None);
+    assert_eq!(
+        err.headers()
+            .and_then(|h| h.get("content-length"))
+            .and_then(|v| v.to_str().ok()),
+        None
+    );
 }
 
 #[tokio::test]
 async fn error_for_status_reuses_the_connection_across_a_status_retry() {
-    let server = TestServer::http(queue([
-        TestResponse::new(503)
+    let server = testing::Server::http(queue([
+        testing::Response::new(503)
             .header("retry-after", "0")
             .body("busy"),
-        TestResponse::new(200).body("ok"),
+        testing::Response::new(200).body("ok"),
     ]))
     .await
     .unwrap();
     let (port, accepted) = counting_forwarder(server.addr()).await;
     let session = Session::builder()
-        .retry(
-            leyline::RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .jitter(false),
-        )
+        .retry(leyline::Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap();
 
     let response = session
         .get(format!("http://127.0.0.1:{port}/"))
         .error_for_status()
+        .send()
         .await
         .unwrap();
 
@@ -177,14 +189,14 @@ async fn error_for_status_reuses_the_connection_across_a_status_retry() {
 
 #[tokio::test]
 async fn error_for_status_reuses_the_connection_across_a_digest_challenge() {
-    let server = TestServer::http(queue([
-        TestResponse::new(401)
+    let server = testing::Server::http(queue([
+        testing::Response::new(401)
             .header(
                 "www-authenticate",
                 "Digest realm=\"r\", nonce=\"n1\", qop=\"auth\", algorithm=MD5",
             )
             .body("denied"),
-        TestResponse::new(200).body("ok"),
+        testing::Response::new(200).body("ok"),
     ]))
     .await
     .unwrap();
@@ -193,8 +205,9 @@ async fn error_for_status_reuses_the_connection_across_a_digest_challenge() {
 
     let response = session
         .get(format!("http://127.0.0.1:{port}/"))
-        .digest_auth(leyline::DigestAuth::new("user", "pass"))
+        .digest_auth("user", "pass")
         .error_for_status()
+        .send()
         .await
         .unwrap();
 

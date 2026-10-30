@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::{HostLimits, Kind, ProtocolPolicy, Session, StopReason};
+use leyline::testing::{self, queue};
+use leyline::{HostLimits, Kind, Protocol, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
@@ -21,7 +21,7 @@ fn never(_: &[u8], _: usize) -> bool {
 
 fn http1() -> Session {
     Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap()
 }
@@ -73,27 +73,35 @@ async fn a_marker_split_across_chunks_stops_the_transfer_early() {
     let closed_early = Arc::new(AtomicBool::new(false));
     let port = product_page_server(Arc::clone(&closed_early)).await;
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .host_limits(HostLimits::new().max_in_flight(1))
         .build()
         .unwrap();
     let url = format!("http://127.0.0.1:{port}/item");
 
-    let first = session
+    let (first, matched) = session
         .get(&url)
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(64 * 1024, has_marker)
         .await
         .unwrap();
 
-    assert_eq!(first.stopped_by, StopReason::PredicateMatched);
-    assert!(first.bytes.ends_with(b"ock</div>"), "{:?}", first.bytes);
+    assert!(matched);
+    assert!(first.ends_with(b"ock</div>"), "{first:?}");
     let started = Instant::now();
-    let second = session
+    let (_, second) = session
         .get(&url)
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(64 * 1024, has_marker)
         .await
         .unwrap();
-    assert_eq!(second.stopped_by, StopReason::PredicateMatched);
+    assert!(second);
     assert!(
         started.elapsed() < Duration::from_secs(1),
         "{:?}",
@@ -111,46 +119,53 @@ async fn a_marker_split_across_gzip_chunks_matches() {
     encoder.write_all(&page).unwrap();
     let gz = encoder.finish().unwrap();
     let parts: Vec<Vec<u8>> = gz.chunks(16).map(<[u8]>::to_vec).collect();
-    let server = TestServer::http(queue([TestResponse::new(200)
+    let server = testing::Server::http(queue([testing::Response::new(200)
         .header("content-encoding", "gzip")
         .chunks(parts, Duration::ZERO)]))
     .await
     .unwrap();
 
-    let read = http1()
+    let (read, matched) = http1()
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(1 << 20, has_marker)
         .await
         .unwrap();
 
-    assert_eq!(read.stopped_by, StopReason::PredicateMatched);
-    assert!(read.bytes.len() >= 5000 + MARKER.len());
-    assert!(read.bytes.len() < page.len(), "{}", read.bytes.len());
+    assert!(matched);
+    assert!(read.len() >= 5000 + MARKER.len());
+    assert!(read.len() < page.len(), "{}", read.len());
 }
 
 #[tokio::test]
 async fn the_limit_is_reached_without_a_match() {
-    let server = TestServer::http(queue([TestResponse::new(200).body(vec![b'a'; 1000])]))
+    let server = testing::Server::http(queue([testing::Response::new(200).body(vec![b'a'; 1000])]))
         .await
         .unwrap();
 
     let read = http1()
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(100, never)
         .await
         .unwrap();
 
-    assert_eq!(read.stopped_by, StopReason::LimitReached);
-    assert_eq!(read.bytes, vec![b'a'; 100]);
+    assert_eq!(read, (vec![b'a'; 100], false));
 }
 
 #[tokio::test]
 async fn a_match_inside_the_limit_wins_and_one_past_it_does_not() {
     let body = "aaaaMARKERbbbb";
     let marker = |b: &[u8], _: usize| b.windows(6).any(|w| w == b"MARKER");
-    let server = TestServer::http(queue([
-        TestResponse::new(200).body(body),
-        TestResponse::new(200).body(body),
+    let server = testing::Server::http(queue([
+        testing::Response::new(200).body(body),
+        testing::Response::new(200).body(body),
     ]))
     .await
     .unwrap();
@@ -158,27 +173,31 @@ async fn a_match_inside_the_limit_wins_and_one_past_it_does_not() {
 
     let cut = session
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(9, marker)
         .await
         .unwrap();
     let whole = session
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(10, marker)
         .await
         .unwrap();
 
-    assert_eq!(
-        (cut.stopped_by, cut.bytes),
-        (StopReason::LimitReached, b"aaaaMARKE".to_vec())
-    );
-    assert_eq!(whole.stopped_by, StopReason::PredicateMatched);
-    assert_eq!(whole.bytes, b"aaaaMARKER");
+    assert_eq!(cut, (b"aaaaMARKE".to_vec(), false));
+    assert_eq!(whole, (b"aaaaMARKER".to_vec(), true));
 }
 
 #[tokio::test]
 async fn the_end_of_the_body_without_a_match_is_reported() {
-    let server = TestServer::http(queue([
-        TestResponse::new(200).chunks(["ab", "cd", "ef"], Duration::from_millis(20))
+    let server = testing::Server::http(queue([
+        testing::Response::new(200).chunks(["ab", "cd", "ef"], Duration::from_millis(20))
     ]))
     .await
     .unwrap();
@@ -186,6 +205,10 @@ async fn the_end_of_the_body_without_a_match_is_reported() {
 
     let read = http1()
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(100, |body, from| {
             calls.push((body.len(), from));
             false
@@ -193,16 +216,15 @@ async fn the_end_of_the_body_without_a_match_is_reported() {
         .await
         .unwrap();
 
-    assert_eq!(read.stopped_by, StopReason::EndOfBody);
-    assert_eq!(read.bytes, b"abcdef");
+    assert_eq!(read, (b"abcdef".to_vec(), false));
     assert_eq!(calls, [(2, 0), (4, 2), (6, 4)]);
 }
 
 #[tokio::test]
 async fn an_empty_body_and_a_zero_limit_never_call_the_predicate() {
-    let server = TestServer::http(queue([
-        TestResponse::new(200),
-        TestResponse::new(200).body("content"),
+    let server = testing::Server::http(queue([
+        testing::Response::new(200),
+        testing::Response::new(200).body("content"),
     ]))
     .await
     .unwrap();
@@ -211,6 +233,10 @@ async fn an_empty_body_and_a_zero_limit_never_call_the_predicate() {
 
     let empty = session
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(10, |_, _| {
             called = true;
             true
@@ -219,31 +245,30 @@ async fn an_empty_body_and_a_zero_limit_never_call_the_predicate() {
         .unwrap();
     let zero = session
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(0, never)
         .await
         .unwrap();
 
     assert!(!called);
-    assert_eq!(
-        (empty.stopped_by, empty.bytes),
-        (StopReason::EndOfBody, Vec::new())
-    );
-    assert_eq!(
-        (zero.stopped_by, zero.bytes),
-        (StopReason::LimitReached, Vec::new())
-    );
+    assert_eq!(empty, (Vec::new(), false));
+    assert_eq!(zero, (Vec::new(), false));
 }
 
 #[tokio::test]
 async fn error_for_status_still_applies() {
-    let server = TestServer::http(queue([TestResponse::new(503).body("busy")]))
+    let server = testing::Server::http(queue([testing::Response::new(503).body("busy")]))
         .await
         .unwrap();
 
     let err = http1()
         .get(server.url("/"))
         .error_for_status()
-        .read_until(100, never)
+        .stream()
+        .send()
         .await
         .unwrap_err();
 
@@ -267,6 +292,10 @@ async fn a_body_cut_short_is_an_error() {
 
     let err = http1()
         .get(format!("http://127.0.0.1:{port}/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(1000, never)
         .await
         .unwrap_err();
@@ -276,7 +305,7 @@ async fn a_body_cut_short_is_an_error() {
 
 #[tokio::test]
 async fn a_body_that_fails_to_decode_is_a_decode_error() {
-    let server = TestServer::http(queue([TestResponse::new(200)
+    let server = testing::Server::http(queue([testing::Response::new(200)
         .header("content-encoding", "gzip")
         .body("this is not gzip")]))
     .await
@@ -284,6 +313,10 @@ async fn a_body_that_fails_to_decode_is_a_decode_error() {
 
     let err = http1()
         .get(server.url("/"))
+        .stream()
+        .send()
+        .await
+        .unwrap()
         .read_until(1000, never)
         .await
         .unwrap_err();

@@ -146,7 +146,7 @@ async fn capture_client_hello(browser: Browser, route: Route) -> (Vec<u16>, Vec<
         }
         None => format!("https://localhost:{port}/"),
     };
-    drop(builder.build().unwrap().get(url).await);
+    drop(builder.build().unwrap().get(url).send().await);
 
     let record = server.await.unwrap();
     parse_client_hello(&record).expect("valid ClientHello")
@@ -221,4 +221,49 @@ fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
         *bytes.get(offset)?,
         *bytes.get(offset + 1)?,
     ]))
+}
+
+async fn ciphers_sent(session: leyline::Session) -> Vec<u16> {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        read_tls_record(&mut stream).await
+    });
+    let url = format!("https://localhost:{port}/");
+    drop(
+        session
+            .get(url)
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await,
+    );
+    let (ciphers, _) = parse_client_hello(&server.await.unwrap()).unwrap();
+    ciphers
+        .into_iter()
+        .filter(|cipher| cipher & 0x0f0f != 0x0a0a)
+        .collect()
+}
+
+#[tokio::test]
+async fn a_fingerprint_profile_sends_its_own_hello_after_a_derive_and_a_save() {
+    use leyline::{Platform, Session, SessionBuilder};
+    let ja3 = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47,\
+               0-23-65281-11-35-16-51-43-45-10-13-5-18-27-17613-51764-65037,4588-29-23-24,0";
+    let parent = Session::builder()
+        .browser(Browser::Chrome148)
+        .platform(Platform::Windows)
+        .build()
+        .unwrap();
+    let child = parent.to_builder().ja3(ja3).build().unwrap();
+    let saved: SessionBuilder =
+        serde_json::from_str(&serde_json::to_string(&child).unwrap()).unwrap();
+    let reloaded = saved.build().unwrap();
+    assert_ne!(child.profile_id(), parent.profile_id());
+    assert_eq!(reloaded.profile_id(), child.profile_id());
+    let parent_ciphers = ciphers_sent(parent).await;
+    let child_ciphers = ciphers_sent(child).await;
+    assert!(parent_ciphers.contains(&0x0035));
+    assert!(!child_ciphers.contains(&0x0035), "{child_ciphers:04x?}");
+    assert_eq!(ciphers_sent(reloaded).await, child_ciphers);
 }

@@ -75,7 +75,7 @@ async fn coalesced_h2_connect_failure_shares_one_retry() {
         };
         assert!(
             matches!(
-                err.tls(),
+                std::error::Error::source(&err).and_then(|s| s.downcast_ref::<leyline::TlsError>()),
                 Some(leyline::TlsError::HandshakeIo(_) | leyline::TlsError::Rejected(_))
             ),
             "coalescing must preserve the typed TLS handshake I/O failure, got {err:?}"

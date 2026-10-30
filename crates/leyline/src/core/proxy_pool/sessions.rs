@@ -34,9 +34,11 @@ impl IdentitySessions {
             return Ok(session);
         }
         let session = base
-            .with_identity(identity)?
-            .without_proxy_pool()
-            .with_cookie_jar(Jar::new());
+            .to_builder()
+            .identity(identity)
+            .cookies(Jar::new())
+            .build()?
+            .without_proxy_pool();
         Ok(self.insert(base, index, session))
     }
 

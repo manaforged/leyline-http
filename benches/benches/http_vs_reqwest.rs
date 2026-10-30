@@ -55,7 +55,7 @@ fn bench_leyline_serial(c: &mut Criterion) {
     let url = rt.block_on(spawn_server());
     let session = Session::builder().build().expect("leyline session");
     rt.block_on(async {
-        session.get(&url).await.expect("warm");
+        session.get(&url).send().await.expect("warm");
     });
 
     let mut g = c.benchmark_group("http_vs_reqwest");
@@ -69,7 +69,7 @@ fn bench_leyline_serial(c: &mut Criterion) {
                 for _ in 0..iters {
                     let start = Instant::now();
                     for _ in 0..SERIAL_N {
-                        let resp = session.get(&url).await.expect("req ok");
+                        let resp = session.get(&url).send().await.expect("req ok");
                         black_box(resp);
                     }
                     total += start.elapsed();
@@ -131,7 +131,7 @@ fn bench_leyline_concurrent(c: &mut Criterion) {
     let url = rt.block_on(spawn_server());
     let session = Session::builder().build().expect("leyline session");
     rt.block_on(async {
-        session.get(&url).await.expect("warm");
+        session.get(&url).send().await.expect("warm");
     });
 
     let mut g = c.benchmark_group("http_vs_reqwest");
@@ -148,9 +148,9 @@ fn bench_leyline_concurrent(c: &mut Criterion) {
                     for _ in 0..CONC_N {
                         let s = session.clone();
                         let u = url.clone();
-                        futs.push(tokio::spawn(
-                            async move { s.get(&u).await.expect("req ok") },
-                        ));
+                        futs.push(tokio::spawn(async move {
+                            s.get(&u).send().await.expect("req ok")
+                        }));
                     }
                     let results = join_all(futs).await;
                     total += start.elapsed();

@@ -7,10 +7,10 @@ Leyline has two kinds of session:
 
 | You want | Call | What the server sees |
 | --- | --- | --- |
-| Plain HTTP | `leyline::get(url)` or `Session::new()` | A plain client with a `leyline/<version>` user agent. |
-| Look like a browser | `Session::browser(Browser::default())` or `Session::builder().browser(Browser::Chrome154)` | The TLS, HTTP/2, and headers of a captured browser. |
+| Plain HTTP | `Session::new()` | A plain client with a `leyline/<version>` user agent. |
+| Browser profile | `Session::browser(Browser::default())` or `Session::builder().identity(Browser::Chrome154)` | The TLS, HTTP/2, and headers of a captured browser. |
 
-`Session::browser(Browser::default())` impersonates the newest bundled Chrome
+`Session::browser(Browser::default())` sends the newest bundled Chrome profile
 on Windows. `Session::new()` and a builder with no browser build a plain client.
 
 1. [Quick start](guide/quick-start.md): add the dependency, send your first request.
@@ -41,10 +41,4 @@ on Windows. `Session::new()` and a builder with no browser build a plain client.
 Reference pages beside this guide: [profiles](guide/profiles.md) and
 [MSRV](guide/msrv.md).
 
-The Rust blocks in these pages are doctests of the `leyline-http` crate. The
-Tower block in [Requests](guide/requests.md) compiles only with the `tower`
-feature. A plain `cargo test` does not enable it. The pull-request check in CI
-runs `cargo test` with
-`--features leyline-http/full,leyline-http/bench-internals`, which does. The
-`toml`, `sh`, and `js` blocks are not compiled. Blocks that open a socket are
-marked `no_run`, so they compile but do not send traffic.
+The [API reference](https://docs.rs/leyline-http) on docs.rs lists every public item.

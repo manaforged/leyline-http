@@ -18,11 +18,11 @@ system trust-store loading, and streaming bodies always compile.
 | `compression-deflate` | yes | deflate bodies and the zlib certificate decompressor. Pulls in `flate2`. |
 | `compression-zstd` | yes | zstd bodies and the zstd certificate decompressor. Pulls in `zstd`. |
 | `multipart` | yes | Adds `leyline::multipart` and `RequestBuilder::multipart`. |
-| `websocket` | yes | Adds `Session::websocket` and the `Ws*` types. Pulls in tungstenite. |
+| `websocket` | yes | Adds `RequestBuilder::websocket`, `WebSocket`, and `Message`. Pulls in tungstenite. |
 | `http3` | yes | Adds the `Http3` and `Race` policies and `leyline-quiche`. |
 | `html` | yes | Adds `leyline::html`, `Session::crawl`, and `Tab::submit_form`. See [Accounts](accounts.md#log-in-with-the-pages-form). |
-| `socks` | no | SOCKS5 proxies, and HTTP/3 through a SOCKS5 proxy. Without it, a `socks5://` or `socks5h://` session proxy, `ProxyPool` entry, or environment proxy fails `build()` with `Kind::Config`, and one set on a request or with `with_proxy` fails that request with `Kind::Proxy`. |
-| `tower` | no | Adds `LeylineService`. See [Service integration](service-integration.md#use-the-tower-adapter). |
+| `socks` | no | SOCKS5 proxies, and HTTP/3 through a SOCKS5 proxy. Without it, a `socks5://` or `socks5h://` session proxy, proxy list entry, or environment proxy fails `build()` with `Kind::Config`, and one set on a request fails that request with `Kind::Proxy`. |
+| `tower` | no | Implements `tower_service::Service` for `Session`. See [Service integration](service-integration.md#use-the-tower-adapter). |
 | `test-util` | no | Adds `leyline::testing`. Enable it in `[dev-dependencies]` only. See [Testing](testing.md). |
 | `bench-internals` | no | Makes internal items public for Leyline's own tests, benches, and fuzz targets. Outside the semver promise. |
 | `full` | no | Every feature above except `test-util` and `bench-internals`. |
@@ -38,7 +38,7 @@ To start from nothing and add back what you need:
 
 ```toml
 [dependencies]
-leyline-http = { version = "0.1", default-features = false, features = ["compression-brotli", "socks"] }
+leyline-http = { version = "0.2", default-features = false, features = ["compression-brotli", "socks"] }
 ```
 
 Build with `RUSTFLAGS="--cfg leyline_unstable_bssl"`, or enable

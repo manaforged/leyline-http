@@ -1,6 +1,6 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum H3ResponseState {
-    Initial,
+    Initial(usize),
     Final,
     Trailers,
 }
@@ -19,9 +19,13 @@ impl H3ResponseState {
         list: &[(String, String)],
     ) -> Result<H3HeaderBlock, &'static str> {
         match self {
-            Self::Initial => {
+            Self::Initial(informational) => {
                 let (status, headers) = parse_response_head(list)?;
                 if (100..200).contains(&status) {
+                    *informational += 1;
+                    if *informational > crate::util::MAX_INFORMATIONAL {
+                        return Err("h3: too many informational responses");
+                    }
                     Ok(H3HeaderBlock::Informational)
                 } else {
                     *self = Self::Final;
@@ -42,14 +46,14 @@ impl H3ResponseState {
     pub(super) fn data(self) -> Result<(), &'static str> {
         match self {
             Self::Final => Ok(()),
-            Self::Initial => Err("h3: response DATA arrived before a final response head"),
+            Self::Initial(_) => Err("h3: response DATA arrived before a final response head"),
             Self::Trailers => Err("h3: response DATA arrived after trailers"),
         }
     }
 
     pub(super) fn finish(self) -> Result<(), &'static str> {
         match self {
-            Self::Initial => Err("h3: response ended before a final response head"),
+            Self::Initial(_) => Err("h3: response ended before a final response head"),
             Self::Final | Self::Trailers => Ok(()),
         }
     }

@@ -1,0 +1,104 @@
+transient GET attempt 0 200: stop
+transient GET attempt 0 409: stop
+transient GET attempt 0 429: backoff
+transient GET attempt 0 500: stop
+transient GET attempt 0 503: backoff
+transient GET attempt 0 503 retry-after 5: wait 5s
+transient GET attempt 0 503 retry-after 120: declined
+transient GET attempt 0 504: backoff
+transient GET attempt 0 block 403: stop
+transient GET attempt 0 connect refused: backoff
+transient GET attempt 0 tls handshake timeout: backoff
+transient GET attempt 0 timeout after send: backoff
+transient GET attempt 0 reset after send: backoff
+transient GET attempt 3 200: stop
+transient GET attempt 3 409: stop
+transient GET attempt 3 429: exhausted
+transient GET attempt 3 500: stop
+transient GET attempt 3 503: exhausted
+transient GET attempt 3 503 retry-after 5: exhausted
+transient GET attempt 3 503 retry-after 120: exhausted
+transient GET attempt 3 504: exhausted
+transient GET attempt 3 block 403: stop
+transient GET attempt 3 connect refused: stop
+transient GET attempt 3 tls handshake timeout: stop
+transient GET attempt 3 timeout after send: stop
+transient GET attempt 3 reset after send: stop
+transient POST attempt 0 200: stop
+transient POST attempt 0 409: stop
+transient POST attempt 0 429: stop
+transient POST attempt 0 500: stop
+transient POST attempt 0 503: stop
+transient POST attempt 0 503 retry-after 5: stop
+transient POST attempt 0 503 retry-after 120: stop
+transient POST attempt 0 504: stop
+transient POST attempt 0 block 403: stop
+transient POST attempt 0 connect refused: backoff
+transient POST attempt 0 tls handshake timeout: backoff
+transient POST attempt 0 timeout after send: stop
+transient POST attempt 0 reset after send: stop
+transient POST attempt 3 200: stop
+transient POST attempt 3 409: stop
+transient POST attempt 3 429: exhausted
+transient POST attempt 3 500: stop
+transient POST attempt 3 503: exhausted
+transient POST attempt 3 503 retry-after 5: exhausted
+transient POST attempt 3 503 retry-after 120: exhausted
+transient POST attempt 3 504: exhausted
+transient POST attempt 3 block 403: stop
+transient POST attempt 3 connect refused: stop
+transient POST attempt 3 tls handshake timeout: stop
+transient POST attempt 3 timeout after send: stop
+transient POST attempt 3 reset after send: stop
+none GET attempt 0 200: stop
+none GET attempt 0 409: stop
+none GET attempt 0 429: stop
+none GET attempt 0 500: stop
+none GET attempt 0 503: stop
+none GET attempt 0 503 retry-after 5: stop
+none GET attempt 0 503 retry-after 120: stop
+none GET attempt 0 504: stop
+none GET attempt 0 block 403: stop
+none GET attempt 0 connect refused: stop
+none GET attempt 0 tls handshake timeout: stop
+none GET attempt 0 timeout after send: stop
+none GET attempt 0 reset after send: stop
+none GET attempt 3 200: stop
+none GET attempt 3 409: stop
+none GET attempt 3 429: stop
+none GET attempt 3 500: stop
+none GET attempt 3 503: stop
+none GET attempt 3 503 retry-after 5: stop
+none GET attempt 3 503 retry-after 120: stop
+none GET attempt 3 504: stop
+none GET attempt 3 block 403: stop
+none GET attempt 3 connect refused: stop
+none GET attempt 3 tls handshake timeout: stop
+none GET attempt 3 timeout after send: stop
+none GET attempt 3 reset after send: stop
+none POST attempt 0 200: stop
+none POST attempt 0 409: stop
+none POST attempt 0 429: stop
+none POST attempt 0 500: stop
+none POST attempt 0 503: stop
+none POST attempt 0 503 retry-after 5: stop
+none POST attempt 0 503 retry-after 120: stop
+none POST attempt 0 504: stop
+none POST attempt 0 block 403: stop
+none POST attempt 0 connect refused: stop
+none POST attempt 0 tls handshake timeout: stop
+none POST attempt 0 timeout after send: stop
+none POST attempt 0 reset after send: stop
+none POST attempt 3 200: stop
+none POST attempt 3 409: stop
+none POST attempt 3 429: stop
+none POST attempt 3 500: stop
+none POST attempt 3 503: stop
+none POST attempt 3 503 retry-after 5: stop
+none POST attempt 3 503 retry-after 120: stop
+none POST attempt 3 504: stop
+none POST attempt 3 block 403: stop
+none POST attempt 3 connect refused: stop
+none POST attempt 3 tls handshake timeout: stop
+none POST attempt 3 timeout after send: stop
+none POST attempt 3 reset after send: stop

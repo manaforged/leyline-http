@@ -1,6 +1,8 @@
 use std::time::Duration;
 
-use super::days_since_epoch;
+use crate::util::date::{days_from_civil, month};
+
+const MIN_YEAR: u32 = 1601;
 
 #[derive(Default)]
 pub(super) struct Date {
@@ -36,36 +38,20 @@ pub(super) fn token(d: &mut Date, tok: &str) {
         return;
     }
 
-    let m = month(tok);
-    if m > 0 {
+    if let Some(m) = month(tok) {
         d.month = m;
     }
 }
 
-fn month(tok: &str) -> u32 {
-    match tok.get(..3).map(|s| s.to_lowercase()).as_deref() {
-        Some("jan") => 1,
-        Some("feb") => 2,
-        Some("mar") => 3,
-        Some("apr") => 4,
-        Some("may") => 5,
-        Some("jun") => 6,
-        Some("jul") => 7,
-        Some("aug") => 8,
-        Some("sep") => 9,
-        Some("oct") => 10,
-        Some("nov") => 11,
-        Some("dec") => 12,
-        _ => 0,
-    }
-}
-
 pub(super) fn stamp(d: &Date) -> Option<Duration> {
-    if d.day == 0 || d.month == 0 || d.year == 0 {
+    if d.day == 0 || d.month == 0 || d.year < MIN_YEAR {
+        return None;
+    }
+    if d.hour > 23 || d.minute > 59 || d.second > 59 {
         return None;
     }
 
-    let days = days_since_epoch(d.year, d.month, d.day)?;
+    let days = days_from_civil(i32::try_from(d.year).ok()?, d.month, d.day)?;
     if days < 0 {
         return Some(Duration::ZERO);
     }

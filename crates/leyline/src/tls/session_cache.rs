@@ -59,10 +59,6 @@ impl SessionCache {
         }
     }
 
-    pub(crate) fn cleared(&self) -> Self {
-        Self::new(self.policy.clone())
-    }
-
     fn bound(&self, key: &str) -> String {
         format!("{key}{POLICY_SEPARATOR}{}", self.policy.as_str())
     }
@@ -118,7 +114,7 @@ impl SessionCache {
         if let Some(der) = der
             && let Ok(session) = SslSession::from_der(&der)
         {
-            // SAFETY: BoringSSL requires `set_session` to be called on an Ssl not yet handed to `connect()`. `ssl` was just constructed via `config.into_ssl` and has not started its handshake. The `SslSession` is owned for the duration of this block. No concurrent access.
+            // SAFETY: `set_session` requires a session from this `Ssl`'s context. A session parsed from DER carries no context or ex_data, BoringSSL checks its version, cipher, and server name before it resumes, and the cache key binds it to this host, port, route, and TLS policy. `ssl` has not started its handshake.
             drop(unsafe { ssl.set_session(&session) });
         }
         ssl.set_ex_data(

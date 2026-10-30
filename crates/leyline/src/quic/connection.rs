@@ -1,8 +1,7 @@
 use leyline_quiche as quiche;
 
 use crate::tls::{
-    FingerprintConnector, HelloOptions, Resolver, TlsMinVersion, TlsTrustConfig,
-    apply_tls_with_trust,
+    FingerprintConnector, HelloOptions, Resolver, Tls, TlsMinVersion, apply_tls_with_trust,
 };
 
 use crate::quic::config::H3Config;
@@ -12,10 +11,10 @@ use crate::quic::wire;
 const DGRAM_QUEUE_LEN: usize = 16;
 
 #[derive(Debug)]
-pub struct H3Response {
+pub struct H3Response<B = Vec<u8>> {
     pub status: u16,
     pub headers: Vec<(String, String)>,
-    pub body: Vec<u8>,
+    pub body: B,
     pub trailers: Vec<(String, String)>,
 }
 
@@ -32,11 +31,7 @@ pub(crate) struct EstablishedH3 {
 }
 
 impl H3Config {
-    fn build_quic_config(
-        &self,
-        trust: &TlsTrustConfig,
-        host: &str,
-    ) -> Result<quiche::Config, String> {
+    fn build_quic_config(&self, trust: &Tls, host: &str) -> Result<quiche::Config, String> {
         let mut ssl_builder =
             leyline_bssl::ssl::SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
                 .map_err(|e| format!("quic ssl ctx: {e}"))?;
@@ -117,7 +112,7 @@ impl H3Config {
 
 pub(crate) async fn connect_and_handshake(
     h3_cfg: &H3Config,
-    trust: &TlsTrustConfig,
+    trust: &Tls,
     connector: &FingerprintConnector,
     host: &str,
     port: u16,

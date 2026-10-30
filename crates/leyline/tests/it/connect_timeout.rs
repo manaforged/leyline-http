@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use leyline::{ProtocolPolicy, ProxyConfig, RetryPolicy, Session, TimeoutConfig};
+use leyline::{Protocol, Proxy, Session, Timeout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -22,10 +22,10 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .timeout(
-            TimeoutConfig::new()
+            Timeout::new()
                 .total(Duration::from_secs(10))
                 .connect(Duration::from_millis(300)),
         )
@@ -35,6 +35,7 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
     let start = Instant::now();
     let resp = session
         .get(format!("http://{addr}/"))
+        .send()
         .await
         .expect("a 300ms connect timeout must not clip a response served at 600ms");
     let elapsed = start.elapsed();
@@ -51,9 +52,9 @@ async fn connect_timeout_does_not_bound_the_response_phase() {
 #[tokio::test]
 async fn connect_timeout_bounds_an_unreachable_endpoint() {
     let session = Session::builder()
-        .proxy(ProxyConfig::new().env(false))
+        .proxy(Proxy::new().env(false))
         .timeout(
-            TimeoutConfig::new()
+            Timeout::new()
                 .total(Duration::from_secs(10))
                 .connect(Duration::from_millis(300)),
         )
@@ -63,7 +64,7 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
     let start = Instant::now();
     let result = session
         .request(http::Method::GET, "https://192.0.2.1:443/")
-        .retry(RetryPolicy::none())
+        .retry(0)
         .send()
         .await;
     let elapsed = start.elapsed();
@@ -81,8 +82,8 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
 #[tokio::test]
 async fn connect_timeout_is_one_window_per_request_on_http_and_https() {
     let session = Session::builder()
-        .proxy(ProxyConfig::new().env(false))
-        .timeout(TimeoutConfig::new().connect(Duration::from_millis(300)))
+        .proxy(Proxy::new().env(false))
+        .timeout(Timeout::new().connect(Duration::from_millis(300)))
         .build()
         .expect("session builds");
 
@@ -90,7 +91,7 @@ async fn connect_timeout_is_one_window_per_request_on_http_and_https() {
         let start = Instant::now();
         let result = session
             .request(http::Method::GET, url)
-            .retry(RetryPolicy::none())
+            .retry(0)
             .send()
             .await;
         let elapsed = start.elapsed();

@@ -1,6 +1,6 @@
 use std::time::{Duration, Instant};
 
-use leyline::{Error, ProtocolPolicy, ProxyConfig, Session};
+use leyline::{Error, Protocol, Proxy, Session};
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpListener;
 
@@ -18,10 +18,10 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .timeout(
-            leyline::TimeoutConfig::default()
+            leyline::Timeout::default()
                 .total(Duration::from_secs(10))
                 .response_header(Duration::from_millis(300)),
         )
@@ -29,12 +29,14 @@ async fn response_header_timeout_fires_when_upstream_goes_silent() {
         .expect("session builds");
 
     let start = Instant::now();
-    let result = session.get(format!("http://{addr}/")).await;
+    let result = session.get(format!("http://{addr}/")).send().await;
     let elapsed = start.elapsed();
 
     assert!(
-        result.as_ref().is_err_and(Error::is_timeout),
-        "expected Error::new(Kind::Timeout), got {result:?}"
+        result
+            .as_ref()
+            .is_err_and(|e: &Error| e.kind() == leyline::Kind::Timeout),
+        "expected Error::new(leyline::Kind::Timeout), got {result:?}"
     );
     assert!(
         elapsed < Duration::from_secs(2),
@@ -63,14 +65,15 @@ async fn no_response_header_timeout_means_request_survives_past_the_ttfb_window(
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .timeout(Duration::from_secs(10))
         .build()
         .expect("session builds");
 
     let resp = session
         .get(format!("http://{addr}/"))
+        .send()
         .await
         .expect("request without a TTFB cap survives the 600ms stall");
     assert_eq!(resp.status(), 200);
@@ -107,24 +110,27 @@ async fn session_recovers_after_ttfb_timeout_no_pool_wedge() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .timeout(
-            leyline::TimeoutConfig::default()
+            leyline::Timeout::default()
                 .total(Duration::from_secs(10))
                 .response_header(Duration::from_millis(250)),
         )
         .build()
         .expect("session builds");
 
-    let first = session.get(format!("http://{addr}/")).await;
+    let first = session.get(format!("http://{addr}/")).send().await;
     assert!(
-        first.as_ref().is_err_and(Error::is_timeout),
+        first
+            .as_ref()
+            .is_err_and(|e: &Error| e.kind() == leyline::Kind::Timeout),
         "first request should TTFB-timeout, got {first:?}"
     );
 
     let second = session
         .get(format!("http://{addr}/"))
+        .send()
         .await
         .expect("session must recover and succeed after a TTFB timeout");
     assert_eq!(second.status(), 200);
@@ -146,18 +152,20 @@ async fn total_backstop_bounds_silence_when_ttfb_unset() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .timeout(Duration::from_millis(400))
         .build()
         .expect("session builds");
 
     let start = Instant::now();
-    let result = session.get(format!("http://{addr}/")).await;
+    let result = session.get(format!("http://{addr}/")).send().await;
     let elapsed = start.elapsed();
 
     assert!(
-        result.as_ref().is_err_and(Error::is_timeout),
+        result
+            .as_ref()
+            .is_err_and(|e: &Error| e.kind() == leyline::Kind::Timeout),
         "expected total Timeout, got {result:?}"
     );
     assert!(

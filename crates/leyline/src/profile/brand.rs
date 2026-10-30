@@ -3,8 +3,8 @@ use std::sync::{Arc, LazyLock};
 
 use serde::Deserialize;
 
-use crate::profile::{BrowserProfile, HeaderStyle, Platform, PlatformIdentity, TlsProfile};
-use crate::{Error, Kind};
+use crate::Error;
+use crate::profile::{BrowserHeaders, BrowserProfile, HeaderStyle, Platform, TlsProfile};
 
 include!(concat!(env!("OUT_DIR"), "/chromium_brand.rs"));
 
@@ -26,10 +26,7 @@ impl std::str::FromStr for ChromiumBrand {
             .find(|(_, key)| key.eq_ignore_ascii_case(name))
             .map(|(brand, _)| *brand)
             .ok_or_else(|| {
-                Error::new(Kind::Config).with_message(format!(
-                    "unknown Chromium brand {name:?}; expected one of {}",
-                    BRAND_KEYS.join(", ")
-                ))
+                crate::profile::browser::unknown("Chromium brand", name, BRAND_KEYS.iter().copied())
             })
     }
 }
@@ -64,10 +61,6 @@ impl std::fmt::Display for BrandOverlayError {
 impl std::error::Error for BrandOverlayError {}
 
 impl ChromiumBrand {
-    pub fn all() -> &'static [ChromiumBrand] {
-        BRAND_ALL
-    }
-
     #[must_use]
     pub fn id(&self) -> &'static str {
         BRAND_KEYS[*self as usize]
@@ -114,7 +107,7 @@ impl ChromiumBrand {
         self,
         chromium_major: u32,
         platform: Platform,
-        identity: &mut PlatformIdentity,
+        identity: &mut BrowserHeaders,
     ) -> Result<(), BrandOverlayError> {
         if let Some(overlay) = self.overlay(chromium_major, platform, &identity.user_agent)? {
             identity.user_agent = overlay.user_agent;

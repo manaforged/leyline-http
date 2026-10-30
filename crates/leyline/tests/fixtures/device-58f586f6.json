@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "identity": {
+    "http": "chrome-156",
+    "tls": "chrome-156",
+    "platform": "macos",
+    "brand": "edge"
+  },
+  "platform": "macos",
+  "brand": "edge",
+  "profile_id": "6153cb57b2f0fa34",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0",
+  "proxy": null,
+  "languages": null,
+  "env_proxy": false,
+  "state": {
+    "tls_sessions": [],
+    "alt_svc": [],
+    "hsts": []
+  },
+  "strict": false
+}

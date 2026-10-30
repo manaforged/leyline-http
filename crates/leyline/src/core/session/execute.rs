@@ -4,19 +4,19 @@ use crate::FetchSite;
 use crate::core::transport::{ErrorBudget, Prepared, ResponseMode};
 use std::sync::Arc;
 
-use crate::profile::Preset;
+use crate::profile::RequestKind;
 
 use self::auth::{DigestLeg, unreplayable_body};
 use self::journey::{Journey, redirect_location};
 use super::Session;
 use crate::core::body::Body;
-use crate::core::config::TimeoutConfig;
+use crate::core::config::Timeout;
 use crate::core::deadline::Deadline;
 use crate::core::digest::DigestAuth;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::headers::HeaderList;
 use crate::core::response::{Response, ResponseBody};
-use crate::core::{ProxyConfig, RedirectPolicy};
+use crate::core::{BodyRules, Proxy, Redirect};
 use crate::trace;
 use crate::util::{lock, redact, without_userinfo};
 
@@ -28,14 +28,15 @@ mod response;
 pub(crate) struct Attempt {
     pub(crate) method: http::Method,
     pub(crate) url: String,
-    pub(crate) preset: Option<Preset>,
+    pub(crate) preset: Option<RequestKind>,
     pub(crate) body: Body,
     pub(crate) headers: Option<HeaderList>,
     pub(crate) deadline: Deadline,
     pub(crate) response: ResponseMode,
-    pub(crate) proxy: Option<ProxyConfig>,
+    pub(crate) body_rules: BodyRules,
+    pub(crate) proxy: Option<Proxy>,
     pub(crate) header_order: Option<Vec<String>>,
-    pub(crate) redirect: Option<RedirectPolicy>,
+    pub(crate) redirect: Option<Redirect>,
     pub(crate) digest: Option<DigestAuth>,
     pub(crate) initiator: Option<Url>,
     pub(crate) trusted_origin: Option<Url>,
@@ -51,6 +52,7 @@ impl Attempt {
             headers,
             deadline: self.deadline,
             response: self.response,
+            body_rules: self.body_rules,
             proxy: self.proxy.clone(),
             header_order: self.header_order.clone(),
             redirect: self.redirect.clone(),
@@ -62,15 +64,14 @@ impl Attempt {
 }
 
 impl Session {
-    pub(crate) fn deadline(&self, request: Option<&TimeoutConfig>) -> Deadline {
+    pub(crate) fn deadline(&self, request: Option<&Timeout>) -> Deadline {
         Deadline::new(&self.inner.timeouts, request)
     }
 
-    pub(crate) fn error_budget(&self, deadline: &Deadline) -> ErrorBudget {
-        let compression = &self.inner.compression;
+    pub(crate) fn error_budget(deadline: &Deadline, rules: &BodyRules) -> ErrorBudget {
         ErrorBudget::new(
             deadline.error_body_wait(),
-            compression.max_error_body.min(compression.max_body_size),
+            rules.max_error_body.min(rules.max_body_size),
         )
     }
 
@@ -101,10 +102,17 @@ impl Session {
         }
     }
 
+    /// Shuts the session down so that pending and new requests fail.
     pub fn shutdown(&self) {
         self.inner.shutdown.cancel();
     }
 
+    pub(crate) fn stopped(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
+        let token = self.inner.shutdown.clone();
+        async move { token.cancelled().await }
+    }
+
+    /// Returns whether `shutdown` has been called on this session.
     pub fn is_shut_down(&self) -> bool {
         self.inner.shutdown.is_cancelled()
     }
@@ -151,6 +159,7 @@ impl Session {
             headers: extra_headers,
             deadline,
             response,
+            body_rules,
             proxy: request_proxy,
             header_order,
             redirect,
@@ -221,7 +230,7 @@ impl Session {
             }
 
             let mut response = self
-                .assemble_response(leg, journey, audit_headers, response, &deadline)
+                .assemble_response(leg, journey, audit_headers, response, body_rules, &deadline)
                 .await?;
             if let ResponseBody::Streaming(body) = &mut response.body {
                 body.hold(pass.take());
@@ -316,7 +325,7 @@ mod reorder_tests;
 struct Turn<'a> {
     code: u16,
     headers: &'a [(http::HeaderName, http::HeaderValue)],
-    redirect_policy: &'a RedirectPolicy,
+    redirect_policy: &'a Redirect,
     redirect_cap: usize,
 }
 
@@ -332,7 +341,7 @@ impl Turn<'_> {
         {
             journey.follow(hop, self.code, &location, replay_body)?;
             if journey.chain.len() > self.redirect_cap {
-                return Err(Error::new(Kind::Redirect)
+                return Err(Error::new(Cause::Redirect)
                     .with_message(format!("too many redirects (max {})", self.redirect_cap)));
             }
             if let Some(digest) = digest {

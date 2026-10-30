@@ -4,7 +4,7 @@ use crate::h3_support;
 use std::time::{Duration, Instant};
 
 use h3_support::{Limits, Reply, h3_server};
-use leyline::{CompressionConfig, Kind, TimeoutConfig};
+use leyline::{Kind, Timeout};
 
 #[tokio::test]
 async fn an_h3_error_with_a_stalled_body_returns_at_the_error_body_timeout() {
@@ -12,7 +12,7 @@ async fn an_h3_error_with_a_stalled_body_returns_at_the_error_body_timeout() {
     let session = server
         .session()
         .timeout(
-            TimeoutConfig::new()
+            Timeout::new()
                 .total(Duration::from_secs(20))
                 .error_body(Duration::from_millis(300)),
         )
@@ -23,6 +23,7 @@ async fn an_h3_error_with_a_stalled_body_returns_at_the_error_body_timeout() {
     let err = session
         .get(server.url())
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
 
@@ -37,17 +38,14 @@ async fn an_h3_error_with_a_stalled_body_returns_at_the_error_body_timeout() {
 #[tokio::test]
 async fn an_h3_success_under_error_for_status_is_buffered_under_the_body_cap() {
     let server = h3_server(vec![Reply::Body(16)], Limits::default()).await;
-    let session = server
-        .session()
-        .compression(CompressionConfig::new().max_body_size(8))
-        .build()
-        .unwrap();
+    let session = server.session().max_body_size(8).build().unwrap();
 
     let err = session
         .get(server.url())
         .error_for_status()
+        .send()
         .await
         .unwrap_err();
 
-    assert_eq!(err.kind(), Kind::Body, "{err:?}");
+    assert_eq!(err.kind(), Kind::BodyLimit, "{err:?}");
 }

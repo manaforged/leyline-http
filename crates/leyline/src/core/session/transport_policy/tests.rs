@@ -1,4 +1,4 @@
-use super::ProtocolPolicy;
+use super::Protocol;
 use crate::Session;
 use crate::profile::Browser;
 #[cfg(feature = "http3")]
@@ -10,7 +10,11 @@ fn rotate() {
         .proxy("http://first:1")
         .build()
         .expect("bare session builds");
-    let rotated = session.with_proxy("http://second:2");
+    let rotated = session
+        .to_builder()
+        .proxy("http://second:2")
+        .build()
+        .unwrap();
 
     let url = url::Url::parse("https://example.test/").unwrap();
     assert_eq!(
@@ -24,54 +28,55 @@ fn rotate() {
 #[test]
 fn race() {
     let session = Session::builder()
-        .browser(Browser::default_browser())
-        .protocol(ProtocolPolicy::Race)
+        .identity(Browser::default_browser())
+        .protocol(Protocol::Race)
         .build()
         .expect("chrome race session builds");
-    assert_eq!(session.protocol_policy(), ProtocolPolicy::Race);
+    assert_eq!(session.protocol_policy(), Protocol::Race);
 }
 
 #[cfg(feature = "http3")]
 #[test]
 fn chrome_race() {
-    let session = Session::browser(Browser::default());
-    assert_eq!(session.protocol_policy(), ProtocolPolicy::Race);
+    let session = Session::from(Browser::default());
+    assert_eq!(session.protocol_policy(), Protocol::Race);
 }
 
 #[cfg(feature = "http3")]
 #[test]
 fn http1_then_edge_keeps_http1() {
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .browser(Browser::default_browser())
-        .brand(ChromiumBrand::Edge)
+        .protocol(Protocol::Http1)
+        .identity(
+            crate::core::Identity::from(Browser::default_browser()).with_brand(ChromiumBrand::Edge),
+        )
         .build()
         .expect("edge http1 session builds");
-    assert_eq!(session.protocol_policy(), ProtocolPolicy::Http1);
+    assert_eq!(session.protocol_policy(), Protocol::Http1);
 }
 
 #[cfg(feature = "http3")]
 #[test]
 fn http1_then_chrome_keeps_http1() {
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .browser(Browser::default_browser())
+        .protocol(Protocol::Http1)
+        .identity(Browser::default_browser())
         .build()
         .expect("chrome http1 session builds");
-    assert_eq!(session.protocol_policy(), ProtocolPolicy::Http1);
+    assert_eq!(session.protocol_policy(), Protocol::Http1);
 }
 
 #[test]
 fn bare() {
     let session = Session::builder().build().unwrap();
-    assert_eq!(session.protocol_policy(), ProtocolPolicy::Auto);
+    assert_eq!(session.protocol_policy(), Protocol::Auto);
 }
 
 #[test]
 fn firefox_auto() {
     let session = Session::builder()
-        .browser(Browser::latest(crate::profile::Family::Firefox))
+        .identity(Browser::firefox())
         .build()
         .unwrap();
-    assert_eq!(session.protocol_policy(), ProtocolPolicy::Auto);
+    assert_eq!(session.protocol_policy(), Protocol::Auto);
 }

@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use crate::h2::config::{PseudoOrder, SettingId};
+use crate::h2::config::{
+    DEFAULT_HEADER_TABLE_SIZE, DEFAULT_MAX_FRAME_SIZE, DEFAULT_WINDOW_SIZE, PseudoOrder,
+};
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::hpack;
 use crate::header_str::HeaderStr;
@@ -20,11 +22,11 @@ pub struct PeerSettings {
 impl Default for PeerSettings {
     fn default() -> Self {
         Self {
-            header_table_size: 4096,
+            header_table_size: DEFAULT_HEADER_TABLE_SIZE,
             enable_push: true,
             max_concurrent_streams: None,
-            initial_window_size: 65535,
-            max_frame_size: 16384,
+            initial_window_size: DEFAULT_WINDOW_SIZE,
+            max_frame_size: DEFAULT_MAX_FRAME_SIZE,
             max_header_list_size: None,
             enable_connect_protocol: false,
         }
@@ -61,7 +63,7 @@ impl PeerSettings {
                     self.initial_window_size = val;
                 }
                 0x5 => {
-                    if !(16384..=16777215).contains(&val) {
+                    if !(DEFAULT_MAX_FRAME_SIZE..=16777215).contains(&val) {
                         return Err(H2Error::Connection {
                             code: ErrorCode::ProtocolError,
                             reason: format!("MAX_FRAME_SIZE {val} out of range"),
@@ -214,19 +216,6 @@ impl PseudoHeaders {
             push(":protocol", proto);
         }
         Ok((list, len))
-    }
-}
-
-pub(crate) fn id_to_u16(id: &SettingId) -> u16 {
-    match id {
-        SettingId::HeaderTableSize => 0x1,
-        SettingId::EnablePush => 0x2,
-        SettingId::MaxConcurrentStreams => 0x3,
-        SettingId::InitialWindowSize => 0x4,
-        SettingId::MaxFrameSize => 0x5,
-        SettingId::MaxHeaderListSize => 0x6,
-        SettingId::Unknown8 => 0x8,
-        SettingId::Unknown9 => 0x9,
     }
 }
 

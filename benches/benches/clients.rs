@@ -17,7 +17,7 @@ use tokio::net::TcpListener;
 use tokio::runtime::Runtime;
 use tokio_rustls::TlsAcceptor;
 
-use leyline::{HttpVersion, Session};
+use leyline::Session;
 
 const SMALL: usize = 16 * 1024;
 
@@ -92,16 +92,21 @@ async fn origin(h2: bool) -> String {
     format!("https://127.0.0.1:{}/", addr.port())
 }
 
-async fn ley(session: &Session, url: &str) -> (Bytes, HttpVersion) {
-    let resp = session.get(url).await.expect("leyline request");
+async fn ley(session: &Session, url: &str) -> (Bytes, leyline::http::Version) {
+    let resp = session.get(url).send().await.expect("leyline request");
     let version = resp.version();
     let body = resp.bytes().await.expect("leyline body");
     (body, version)
 }
 
 async fn ley_stream(session: &Session, url: &str) -> Bytes {
-    let resp = session.get(url).stream().await.expect("leyline request");
-    let mut stream = resp.into_stream().expect("leyline stream");
+    let resp = session
+        .get(url)
+        .stream()
+        .send()
+        .await
+        .expect("leyline request");
+    let mut stream = resp.bytes_stream().expect("leyline stream");
     let mut out = Vec::with_capacity(BIG);
     while let Some(chunk) = stream.next().await {
         out.extend_from_slice(&chunk.expect("leyline chunk"));
@@ -129,7 +134,11 @@ async fn req_stream(client: &reqwest13::Client, url: &str) -> Bytes {
 async fn verify(session: &Session, client: &reqwest13::Client, h1: &str, h2: &str, big: &str) {
     let (body, version) = ley(session, h1).await;
     assert_eq!(body, *SMALL_BODY, "leyline h1 16k body mismatch");
-    assert_eq!(version, HttpVersion::Http1_1, "leyline h1 version");
+    assert_eq!(
+        version,
+        leyline::http::Version::HTTP_11,
+        "leyline h1 version"
+    );
 
     let (body, version) = req(client, h1).await;
     assert_eq!(body, *SMALL_BODY, "reqwest h1 16k body mismatch");
@@ -137,7 +146,11 @@ async fn verify(session: &Session, client: &reqwest13::Client, h1: &str, h2: &st
 
     let (body, version) = ley(session, h2).await;
     assert_eq!(body, *SMALL_BODY, "leyline h2 16k body mismatch");
-    assert_eq!(version, HttpVersion::Http2, "leyline h2 version");
+    assert_eq!(
+        version,
+        leyline::http::Version::HTTP_2,
+        "leyline h2 version"
+    );
 
     let (body, version) = req(client, h2).await;
     assert_eq!(body, *SMALL_BODY, "reqwest h2 16k body mismatch");
@@ -164,7 +177,7 @@ fn bench(c: &mut Criterion) {
     let big = format!("{h1}big");
 
     let session = Session::builder()
-        .tls_trust(leyline::TlsTrustConfig::new().danger_accept_invalid_certs(true))
+        .tls(leyline::Tls::new().danger_accept_invalid_certs(true))
         .build()
         .expect("leyline session");
     let client = reqwest13::Client::builder()

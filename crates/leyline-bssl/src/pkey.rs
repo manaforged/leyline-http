@@ -1,21 +1,16 @@
 use foreign_types::{ForeignType, ForeignTypeRef};
-use libc::{c_int, c_long};
+use libc::c_int;
 use openssl_macros::corresponds;
-use std::ffi::CString;
 use std::fmt;
 use std::mem;
 use std::ptr;
 
-use crate::bio::MemBioSlice;
-use crate::dh::Dh;
-use crate::dsa::Dsa;
 use crate::ec::EcKey;
 use crate::error::ErrorStack;
 use crate::ffi;
 use crate::rsa::Rsa;
 use crate::try_int;
-use crate::util::{invoke_passwd_cb, CallbackState};
-use crate::{cvt, cvt_0i, cvt_p};
+use crate::{cvt, cvt_p};
 
 pub enum Params {}
 
@@ -96,30 +91,6 @@ impl<T> PKeyRef<T> {
         }
     }
 
-    #[corresponds(EVP_PKEY_get1_DSA)]
-    pub fn dsa(&self) -> Result<Dsa<T>, ErrorStack> {
-        unsafe {
-            let dsa = cvt_p(ffi::EVP_PKEY_get1_DSA(self.as_ptr()))?;
-            Ok(Dsa::from_ptr(dsa))
-        }
-    }
-
-    #[corresponds(EVP_PKEY_get1_DH)]
-    pub fn dh(&self) -> Result<Dh<T>, ErrorStack> {
-        unsafe {
-            let dh = cvt_p(ffi::EVP_PKEY_get1_DH(self.as_ptr()))?;
-            Ok(Dh::from_ptr(dh))
-        }
-    }
-
-    #[corresponds(EVP_PKEY_get1_EC_KEY)]
-    pub fn ec_key(&self) -> Result<EcKey<T>, ErrorStack> {
-        unsafe {
-            let ec_key = cvt_p(ffi::EVP_PKEY_get1_EC_KEY(self.as_ptr()))?;
-            Ok(EcKey::from_ptr(ec_key))
-        }
-    }
-
     #[corresponds(EVP_PKEY_id)]
     #[must_use]
     pub fn id(&self) -> Id {
@@ -153,40 +124,6 @@ where
     pub fn bits(&self) -> u32 {
         unsafe { ffi::EVP_PKEY_bits(self.as_ptr()) as u32 }
     }
-
-    #[must_use]
-    pub fn public_eq<U>(&self, other: &PKeyRef<U>) -> bool
-    where
-        U: HasPublic,
-    {
-        unsafe { ffi::EVP_PKEY_cmp(self.as_ptr(), other.as_ptr()) == 1 }
-    }
-
-    #[corresponds(EVP_PKEY_get_raw_public_key)]
-    pub fn raw_public_key_len(&self) -> Result<usize, ErrorStack> {
-        unsafe {
-            let mut size = 0;
-            _ = cvt_0i(ffi::EVP_PKEY_get_raw_public_key(
-                self.as_ptr(),
-                std::ptr::null_mut(),
-                &mut size,
-            ))?;
-            Ok(size)
-        }
-    }
-
-    #[corresponds(EVP_PKEY_get_raw_public_key)]
-    pub fn raw_public_key<'a>(&self, out: &'a mut [u8]) -> Result<&'a [u8], ErrorStack> {
-        unsafe {
-            let mut size = out.len();
-            _ = cvt_0i(ffi::EVP_PKEY_get_raw_public_key(
-                self.as_ptr(),
-                out.as_mut_ptr(),
-                &mut size,
-            ))?;
-            Ok(&out[..size])
-        }
-    }
 }
 
 impl<T> PKeyRef<T>
@@ -213,32 +150,6 @@ where
         #[corresponds(i2d_PKCS8PrivateKey_bio)]
         private_key_to_der_pkcs8_passphrase,
         ffi::i2d_PKCS8PrivateKey_bio
-    }
-
-    #[corresponds(EVP_PKEY_get_raw_private_key)]
-    pub fn raw_private_key_len(&self) -> Result<usize, ErrorStack> {
-        unsafe {
-            let mut size = 0;
-            _ = cvt_0i(ffi::EVP_PKEY_get_raw_private_key(
-                self.as_ptr(),
-                std::ptr::null_mut(),
-                &mut size,
-            ))?;
-            Ok(size)
-        }
-    }
-
-    #[corresponds(EVP_PKEY_get_raw_private_key)]
-    pub fn raw_private_key<'a>(&self, out: &'a mut [u8]) -> Result<&'a [u8], ErrorStack> {
-        unsafe {
-            let mut size = out.len();
-            _ = cvt_0i(ffi::EVP_PKEY_get_raw_private_key(
-                self.as_ptr(),
-                out.as_mut_ptr(),
-                &mut size,
-            ))?;
-            Ok(&out[..size])
-        }
     }
 }
 
@@ -338,60 +249,6 @@ impl PKey<Private> {
         ffi::d2i_AutoPrivateKey,
         ::libc::c_long
     }
-
-    pub fn private_key_from_pkcs8(der: &[u8]) -> Result<PKey<Private>, ErrorStack> {
-        unsafe {
-            ffi::init();
-            let len = der.len().min(c_long::MAX as usize) as c_long;
-            let p8inf = cvt_p(ffi::d2i_PKCS8_PRIV_KEY_INFO(
-                ptr::null_mut(),
-                &mut der.as_ptr(),
-                len,
-            ))?;
-            let res = cvt_p(ffi::EVP_PKCS82PKEY(p8inf)).map(|p| PKey::from_ptr(p));
-            ffi::PKCS8_PRIV_KEY_INFO_free(p8inf);
-            res
-        }
-    }
-
-    pub fn private_key_from_pkcs8_callback<F>(
-        der: &[u8],
-        callback: F,
-    ) -> Result<PKey<Private>, ErrorStack>
-    where
-        F: FnOnce(&mut [u8]) -> Result<usize, ErrorStack>,
-    {
-        unsafe {
-            ffi::init();
-            let mut cb = CallbackState::new(callback);
-            let bio = MemBioSlice::new(der)?;
-            cvt_p(ffi::d2i_PKCS8PrivateKey_bio(
-                bio.as_ptr(),
-                ptr::null_mut(),
-                Some(invoke_passwd_cb::<F>),
-                std::ptr::addr_of_mut!(cb).cast(),
-            ))
-            .map(|p| PKey::from_ptr(p))
-        }
-    }
-
-    pub fn private_key_from_pkcs8_passphrase(
-        der: &[u8],
-        passphrase: &[u8],
-    ) -> Result<PKey<Private>, ErrorStack> {
-        unsafe {
-            ffi::init();
-            let bio = MemBioSlice::new(der)?;
-            let passphrase = CString::new(passphrase).map_err(ErrorStack::internal_error)?;
-            cvt_p(ffi::d2i_PKCS8PrivateKey_bio(
-                bio.as_ptr(),
-                ptr::null_mut(),
-                None,
-                passphrase.as_ptr().cast_mut().cast(),
-            ))
-            .map(|p| PKey::from_ptr(p))
-        }
-    }
 }
 
 impl PKey<Public> {
@@ -415,51 +272,8 @@ use crate::ffi::EVP_PKEY_up_ref;
 
 #[cfg(test)]
 mod tests {
-    use hex::FromHex as _;
-
-    use crate::derive::Deriver;
-    use crate::ec::EcKey;
-    use crate::nid::Nid;
-    use crate::rsa::Rsa;
-    use crate::symm::Cipher;
 
     use super::*;
-
-    #[test]
-    fn test_to_password() {
-        let rsa = Rsa::generate(2048).unwrap();
-        let pkey = PKey::from_rsa(rsa).unwrap();
-        let pem = pkey
-            .private_key_to_pem_pkcs8_passphrase(Cipher::aes_128_cbc(), b"foobar")
-            .unwrap();
-        PKey::private_key_from_pem_passphrase(&pem, b"foobar").unwrap();
-        assert!(PKey::private_key_from_pem_passphrase(&pem, b"fizzbuzz").is_err());
-    }
-
-    #[test]
-    fn test_unencrypted_pkcs8() {
-        let key = include_bytes!("../test/pkcs8-nocrypt.der");
-        PKey::private_key_from_pkcs8(key).unwrap();
-    }
-
-    #[test]
-    fn test_encrypted_pkcs8_passphrase() {
-        let key = include_bytes!("../test/pkcs8.der");
-        PKey::private_key_from_pkcs8_passphrase(key, b"mypass").unwrap();
-    }
-
-    #[test]
-    fn test_encrypted_pkcs8_callback() {
-        let mut password_queried = false;
-        let key = include_bytes!("../test/pkcs8.der");
-        PKey::private_key_from_pkcs8_callback(key, |password| {
-            password_queried = true;
-            password[..6].copy_from_slice(b"mypass");
-            Ok(6)
-        })
-        .unwrap();
-        assert!(password_queried);
-    }
 
     #[test]
     fn test_private_key_from_pem() {
@@ -506,80 +320,6 @@ mod tests {
 
         assert_eq!(hex::encode(&priv_key[4..=6]), "020100");
         assert_eq!(hex::encode(&priv_key[9..=19]), "06092a864886f70d010101");
-    }
-
-    #[test]
-    fn test_rsa_accessor() {
-        let rsa = Rsa::generate(2048).unwrap();
-        let pkey = PKey::from_rsa(rsa).unwrap();
-        pkey.rsa().unwrap();
-        assert_eq!(pkey.id(), Id::RSA);
-        assert!(pkey.dsa().is_err());
-    }
-
-    #[test]
-    fn test_ec_key_accessor() {
-        let ec_key = EcKey::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let pkey = PKey::from_ec_key(ec_key).unwrap();
-        pkey.ec_key().unwrap();
-        assert_eq!(pkey.id(), Id::EC);
-        assert!(pkey.rsa().is_err());
-    }
-
-    #[test]
-    fn test_raw_accessors() {
-        const ED25519_PRIVATE_KEY_DER: &str = concat!(
-            "302e020100300506032b6570042204207c8c6497f9960d5595d7815f550569e5",
-            "f77764ac97e63e339aaa68cc1512b683"
-        );
-        let pkey =
-            PKey::private_key_from_der(&Vec::from_hex(ED25519_PRIVATE_KEY_DER).unwrap()).unwrap();
-        assert_eq!(pkey.id(), Id::ED25519);
-
-        let priv_len = pkey.raw_private_key_len().unwrap();
-        assert_eq!(priv_len, 32);
-        let mut raw_private_key_buf = [0; 40];
-        let raw_private_key = pkey.raw_private_key(&mut raw_private_key_buf).unwrap();
-        assert_eq!(raw_private_key.len(), 32);
-        assert_ne!(raw_private_key, [0; 32]);
-        pkey.raw_private_key(&mut [0; 5])
-            .expect_err("buffer too small");
-
-        let pub_len = pkey.raw_public_key_len().unwrap();
-        assert_eq!(pub_len, 32);
-        let mut raw_public_key_buf = [0; 40];
-        let raw_public_key = pkey.raw_public_key(&mut raw_public_key_buf).unwrap();
-        assert_eq!(raw_public_key.len(), 32);
-        assert_ne!(raw_public_key, [0; 32]);
-        assert_ne!(raw_public_key, raw_private_key);
-        pkey.raw_public_key(&mut [0; 5])
-            .expect_err("buffer too small");
-    }
-
-    #[test]
-    fn test_generate_x25519() {
-        let key = PKey::generate(Id::X25519).unwrap();
-        assert_eq!(key.id(), Id::X25519);
-
-        let mut pubkey = [0u8; 32];
-        assert_eq!(key.raw_public_key(&mut pubkey).unwrap().len(), 32);
-    }
-
-    #[test]
-    fn test_generate_x25519_derivation() {
-        let alice = PKey::generate(Id::X25519).unwrap();
-        let bob = PKey::generate(Id::X25519).unwrap();
-
-        let mut alice_deriver = Deriver::new(&alice).unwrap();
-        alice_deriver.set_peer(&bob).unwrap();
-        let shared_alice = alice_deriver.derive_to_vec().unwrap();
-
-        let mut bob_deriver = Deriver::new(&bob).unwrap();
-        bob_deriver.set_peer(&alice).unwrap();
-        let shared_bob = bob_deriver.derive_to_vec().unwrap();
-
-        assert!(!shared_alice.is_empty());
-        assert_eq!(shared_alice, shared_bob);
     }
 
     #[test]

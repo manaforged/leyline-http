@@ -10,7 +10,7 @@ use crate::FetchSite;
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
-use crate::profile::Preset;
+use crate::profile::RequestKind;
 use crate::profile::preset::HeaderPair;
 use crate::util::sensitive_header;
 
@@ -21,7 +21,7 @@ impl Session {
     )]
     pub(super) fn attempt_headers(
         &self,
-        preset: Option<Preset>,
+        preset: Option<RequestKind>,
         request: RequestContext<'_>,
         current_url: &Url,
         current_method: &str,
@@ -106,7 +106,7 @@ impl Session {
     pub(super) fn leg_headers(
         &self,
         journey: &Journey,
-        preset: Option<Preset>,
+        preset: Option<RequestKind>,
         header_order: Option<&[String]>,
     ) -> Vec<HeaderPair> {
         let origin = url_origin(&journey.url);
@@ -239,9 +239,7 @@ impl Session {
             Some(sent) => sent.eq_ignore_ascii_case(FetchSite::CrossSite.as_str()),
             None => computed(),
         };
-        let safe_method = ["GET", "HEAD"]
-            .iter()
-            .any(|m| method.eq_ignore_ascii_case(m));
+        let safe_method = is_safe_method(method);
         let top_level = header_value(headers, "sec-fetch-dest")
             .is_none_or(|dest| dest.eq_ignore_ascii_case("document"));
         if let Some(cookie_val) =
@@ -256,7 +254,8 @@ impl Session {
     fn samesite_checks_redirect_chain(&self) -> bool {
         self.inner
             .identity
-            .map(super::super::Identity::http)
+            .as_ref()
+            .and_then(super::super::Identity::http)
             .or(self.inner.browser)
             .is_some_and(|browser| browser.family().samesite_checks_redirect_chain())
     }
@@ -341,11 +340,14 @@ fn cors_mode(headers: &[HeaderPair]) -> bool {
         .is_some_and(|mode| CORS_MODES.iter().any(|m| mode.eq_ignore_ascii_case(m)))
 }
 
-fn sends_origin(method: &str, headers: &[HeaderPair]) -> bool {
-    if !["GET", "HEAD"]
+fn is_safe_method(method: &str) -> bool {
+    ["GET", "HEAD"]
         .iter()
         .any(|m| method.eq_ignore_ascii_case(m))
-    {
+}
+
+fn sends_origin(method: &str, headers: &[HeaderPair]) -> bool {
+    if !is_safe_method(method) {
         return true;
     }
     let cors = cors_mode(headers);

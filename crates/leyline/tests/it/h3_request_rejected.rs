@@ -17,9 +17,10 @@ async fn a_rejected_request_streams_the_response_to_its_retry() {
         .unwrap()
         .get(server.url())
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
     let mut read = 0;
     while let Some(chunk) = body.next().await {
@@ -37,6 +38,7 @@ async fn a_rejected_request_after_goaway_is_resent_on_a_new_connection() {
     for _ in 0..2 {
         let body = session
             .get(server.url())
+            .send()
             .await
             .unwrap()
             .bytes()
@@ -51,7 +53,7 @@ async fn a_rejection_after_the_response_head_is_not_resent() {
     let rejected = Reply::Truncate(0, WireErrorCode::RequestRejected as u64);
     let server = h3_server(vec![rejected, Reply::Body(LENGTH)], Limits::default()).await;
     let session = server.session().build().unwrap();
-    session.get(server.url()).await.unwrap_err();
+    session.get(server.url()).send().await.unwrap_err();
 }
 
 #[tokio::test]
@@ -64,17 +66,16 @@ async fn retry_unsent_resends_a_post_rejected_twice() {
     .await;
     let session = server
         .session()
-        .retry(
-            leyline::RetryPolicy::transient()
-                .initial_backoff(std::time::Duration::from_millis(1))
-                .jitter(false)
-                .retry_unsent(true),
-        )
+        .retry(leyline::Retry::new(3).backoff(
+            std::time::Duration::from_millis(1),
+            std::time::Duration::from_secs(1),
+        ))
         .build()
         .unwrap();
     let body = session
         .post(server.url())
         .body("order=1")
+        .send()
         .await
         .unwrap()
         .bytes()
@@ -98,16 +99,15 @@ async fn a_twice_rejected_request_keeps_the_pooled_connection() {
     .await;
     let session = server
         .session()
-        .retry(
-            leyline::RetryPolicy::transient()
-                .initial_backoff(std::time::Duration::from_millis(1))
-                .jitter(false)
-                .retry_unsent(true),
-        )
+        .retry(leyline::Retry::new(3).backoff(
+            std::time::Duration::from_millis(1),
+            std::time::Duration::from_secs(1),
+        ))
         .build()
         .unwrap();
     session
         .get(server.url())
+        .send()
         .await
         .unwrap()
         .bytes()
@@ -116,6 +116,7 @@ async fn a_twice_rejected_request_keeps_the_pooled_connection() {
     let body = session
         .post(server.url())
         .body("order=1")
+        .send()
         .await
         .unwrap()
         .bytes()

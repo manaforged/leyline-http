@@ -12,9 +12,6 @@ pub(crate) fn install_from_env(_builder: &mut SslContextBuilder) {}
 
 #[cfg(debug_assertions)]
 pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
-    if !cfg!(debug_assertions) {
-        return;
-    }
     let Ok(path) = std::env::var("SSLKEYLOGFILE") else {
         return;
     };

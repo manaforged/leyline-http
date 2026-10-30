@@ -1,9 +1,9 @@
 use http::StatusCode;
 
-use super::{Error, Kind};
+use super::{Cause, Error};
 use crate::tls::TlsError;
 
-const LABELS: [&str; 16] = [
+const LABELS: [&str; 18] = [
     "timeout",
     "dns",
     "connect",
@@ -14,39 +14,62 @@ const LABELS: [&str; 16] = [
     "body_limit",
     "body",
     "decode",
-    "protocol",
+    "json",
+    "http2",
+    "http3",
     "redirect",
     "url",
     "config",
     "request",
-    "other",
+    "io",
 ];
 
+/// The category of an `Error`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum ErrorCategory {
+pub enum Kind {
+    /// A time limit expired: `total`, `response_header`, `connect` (DNS, TCP, proxy, TLS, or QUIC handshake), or `read` or `body` during a body read.
     Timeout,
+    /// Name resolution failed.
     Dns,
+    /// The TCP connect failed, or the socket was refused or unreachable.
     Connect,
+    /// The TLS handshake or certificate verification failed.
     Tls,
+    /// The proxy dial, handshake, authentication, or `CONNECT` failed, or the session rejected an invalid environment proxy.
     Proxy,
+    /// The proxy could not reach the origin.
     ProxyTarget,
+    /// `error_for_status` rejected the status.
     Status,
+    /// A response body passed `max_body_size` or a caller limit.
     BodyLimit,
+    /// A body cannot be used: a response body already taken, a request body that cannot be compressed or resent, or a WebSocket protocol violation or oversized message.
     Body,
+    /// Decompression failed: bad data, a truncated stream, or more than 4 codings.
     Decode,
-    Protocol,
+    /// JSON serialization or deserialization failed.
+    Json,
+    /// An HTTP/2 protocol failure occurred.
+    Http2,
+    /// An HTTP/3 protocol or handshake failure occurred.
+    Http3,
+    /// A redirect could not be followed: a custom policy passed 32 hops, a `Location` scheme other than http or https, or a redirect that must resend a streamed request body.
     Redirect,
+    /// The URL did not parse.
     Url,
+    /// The session, request, TLS, trust store, or proxy configuration is invalid, including an invalid environment proxy at `build()`.
     Config,
+    /// The request is malformed at the HTTP level, such as a bad header.
     Request,
-    Other,
+    /// Socket I/O failed after the connect, or an HTTP/1.1 response broke the wire format.
+    Io,
 }
 
-const _: () = assert!(LABELS.len() == ErrorCategory::Other as usize + 1);
+const _: () = assert!(LABELS.len() == Kind::Io as usize + 1);
 
-impl ErrorCategory {
-    pub(crate) const ALL: [ErrorCategory; 16] = [
+impl Kind {
+    pub(crate) const ALL: [Kind; 18] = [
         Self::Timeout,
         Self::Dns,
         Self::Connect,
@@ -57,18 +80,22 @@ impl ErrorCategory {
         Self::BodyLimit,
         Self::Body,
         Self::Decode,
-        Self::Protocol,
+        Self::Json,
+        Self::Http2,
+        Self::Http3,
         Self::Redirect,
         Self::Url,
         Self::Config,
         Self::Request,
-        Self::Other,
+        Self::Io,
     ];
 
+    /// Returns the lowercase label for the kind, such as `"timeout"`.
     pub fn as_str(self) -> &'static str {
         LABELS[self as usize]
     }
 
+    /// Returns the status a gateway should answer with: 504 for a timeout, 500 for a local fault, 502 otherwise, and `None` for `Status`.
     pub fn gateway_status(self) -> Option<StatusCode> {
         match self {
             Self::Status => None,
@@ -79,22 +106,23 @@ impl ErrorCategory {
     }
 }
 
-impl std::fmt::Display for ErrorCategory {
+impl std::fmt::Display for Kind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
 impl Error {
-    pub fn category(&self) -> ErrorCategory {
+    /// Returns the error's category.
+    pub fn kind(&self) -> Kind {
         if self.is_timeout() {
-            return ErrorCategory::Timeout;
+            return Kind::Timeout;
         }
         if self.is_status() {
-            return ErrorCategory::Status;
+            return Kind::Status;
         }
         if self.is_body_limit() {
-            return ErrorCategory::BodyLimit;
+            return Kind::BodyLimit;
         }
         match self.tls() {
             Some(tls) => tls_category(tls),
@@ -102,43 +130,40 @@ impl Error {
         }
     }
 
-    pub fn is_dns(&self) -> bool {
-        matches!(self.tls(), Some(TlsError::Dns(_)))
-    }
-
-    fn kind_category(&self) -> ErrorCategory {
+    fn kind_category(&self) -> Kind {
         match self.inner.kind {
-            Kind::Proxy => ErrorCategory::Proxy,
-            Kind::Tls => ErrorCategory::Tls,
-            Kind::Connect => ErrorCategory::Connect,
-            _ if self.is_socket_unreachable() => ErrorCategory::Connect,
-            Kind::Status => ErrorCategory::Status,
-            Kind::Body => ErrorCategory::Body,
-            Kind::Decode | Kind::Json => ErrorCategory::Decode,
-            Kind::Http2 | Kind::Http3 => ErrorCategory::Protocol,
-            Kind::Redirect => ErrorCategory::Redirect,
-            Kind::Url => ErrorCategory::Url,
-            Kind::Config => ErrorCategory::Config,
-            Kind::Request => ErrorCategory::Request,
-            _ => ErrorCategory::Other,
+            Cause::Proxy => Kind::Proxy,
+            Cause::Tls => Kind::Tls,
+            Cause::Connect => Kind::Connect,
+            _ if self.is_socket_unreachable() => Kind::Connect,
+            Cause::Status => Kind::Status,
+            Cause::Body => Kind::Body,
+            Cause::Decode => Kind::Decode,
+            Cause::Json => Kind::Json,
+            Cause::Http2 => Kind::Http2,
+            #[cfg(feature = "http3")]
+            Cause::Http3 => Kind::Http3,
+            Cause::Redirect => Kind::Redirect,
+            Cause::Url => Kind::Url,
+            Cause::Config => Kind::Config,
+            Cause::Request => Kind::Request,
+            _ => Kind::Io,
         }
     }
 }
 
-fn tls_category(err: &TlsError) -> ErrorCategory {
+fn tls_category(err: &TlsError) -> Kind {
     match err {
-        TlsError::Dns(_) => ErrorCategory::Dns,
-        TlsError::TcpConnect(_) => ErrorCategory::Connect,
-        TlsError::ProxyTargetUnreachable { .. } => ErrorCategory::ProxyTarget,
-        TlsError::Proxy { .. } => ErrorCategory::Proxy,
-        TlsError::SslConfig(_) | TlsError::Profile(_) | TlsError::TrustStore(_) => {
-            ErrorCategory::Config
-        }
+        TlsError::Dns(_) => Kind::Dns,
+        TlsError::TcpConnect(_) => Kind::Connect,
+        TlsError::ProxyTargetUnreachable { .. } => Kind::ProxyTarget,
+        TlsError::Proxy { .. } => Kind::Proxy,
+        TlsError::SslConfig(_) | TlsError::Profile(_) | TlsError::TrustStore(_) => Kind::Config,
         TlsError::Handshake(_)
         | TlsError::Rejected(_)
         | TlsError::HandshakeIo(_)
         | TlsError::Certificate { .. }
         | TlsError::Hostname(_)
-        | TlsError::Pinning(_) => ErrorCategory::Tls,
+        | TlsError::Pinning(_) => Kind::Tls,
     }
 }

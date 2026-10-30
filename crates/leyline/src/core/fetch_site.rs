@@ -4,7 +4,7 @@ use crate::cookie::parse::registrable_domain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
-pub enum FetchSite {
+pub(crate) enum FetchSite {
     SameOrigin,
     SameSite,
     CrossSite,
@@ -12,7 +12,7 @@ pub enum FetchSite {
 
 impl FetchSite {
     #[must_use]
-    pub fn of(context: &Url, request: &Url) -> Self {
+    pub(crate) fn of(context: &Url, request: &Url) -> Self {
         if context.origin() == request.origin() {
             return Self::SameOrigin;
         }
@@ -44,7 +44,7 @@ impl FetchSite {
     }
 
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::SameOrigin => "same-origin",
             Self::SameSite => "same-site",

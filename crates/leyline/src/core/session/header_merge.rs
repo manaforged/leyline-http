@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use crate::profile::preset::HeaderPair;
-use crate::profile::{HeaderAnchor, infer_anchor};
+use crate::profile::{HeaderPosition, infer_anchor};
 
 use crate::core::headers::HeaderList;
 
@@ -74,7 +74,7 @@ fn text(v: &http::HeaderValue) -> Cow<'static, str> {
     Cow::Owned(String::from_utf8_lossy(v.as_bytes()).into_owned())
 }
 
-fn anchor_target_index(headers: &[HeaderPair], anchor: Option<HeaderAnchor>) -> usize {
+fn anchor_target_index(headers: &[HeaderPair], anchor: Option<HeaderPosition>) -> usize {
     let Some(anchor) = anchor else {
         return headers.len();
     };

@@ -10,33 +10,17 @@ use tokio::time::sleep;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub struct HappyEyeballsConfig {
+pub(crate) struct HappyEyeballs {
     pub(crate) resolve_delay: Duration,
     pub(crate) attempt_limit: usize,
 }
 
-impl Default for HappyEyeballsConfig {
+impl Default for HappyEyeballs {
     fn default() -> Self {
         Self {
             resolve_delay: Duration::from_millis(250),
             attempt_limit: 8,
         }
-    }
-}
-
-impl HappyEyeballsConfig {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn resolve_delay(mut self, d: Duration) -> Self {
-        self.resolve_delay = d;
-        self
-    }
-
-    pub fn attempt_limit(mut self, n: usize) -> Self {
-        self.attempt_limit = n;
-        self
     }
 }
 
@@ -69,20 +53,13 @@ pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
 
 pub(crate) async fn happy_eyeballs_connect<F, Fut>(
     addrs: Vec<SocketAddr>,
-    config: HappyEyeballsConfig,
+    config: HappyEyeballs,
     connect_fn: F,
 ) -> Result<(TcpStream, SocketAddr), io::Error>
 where
     F: Fn(SocketAddr) -> Fut + Send + Sync,
     Fut: Future<Output = Result<TcpStream, io::Error>> + Send + 'static,
 {
-    if addrs.is_empty() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "no addresses resolved",
-        ));
-    }
-
     let interleaved = interleave_by_family(addrs);
     let attempt_limit = config.attempt_limit.max(1);
     let mut iter = interleaved.into_iter().take(attempt_limit);

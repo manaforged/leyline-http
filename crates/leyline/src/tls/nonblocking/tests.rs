@@ -1,12 +1,12 @@
 use super::{apply_socket_config, nonblocking_connect_started};
-use crate::core::SocketConfig;
+use crate::core::SocketOptions;
 
 #[test]
 fn default_keepalive_retries_never_fatal_under_strict() {
     let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
-    let config = SocketConfig {
+    let config = SocketOptions {
         strict: true,
-        ..SocketConfig::default()
+        ..SocketOptions::default()
     };
     assert!(config.tcp_keepalive_retries.is_some());
     apply_socket_config(&socket, &config).expect("expected Ok");
@@ -17,9 +17,9 @@ fn default_keepalive_retries_never_fatal_under_strict() {
 fn tcp_user_timeout_reads_back() {
     let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
     let timeout = std::time::Duration::from_secs(7);
-    let config = SocketConfig {
+    let config = SocketOptions {
         tcp_user_timeout: Some(timeout),
-        ..SocketConfig::default()
+        ..SocketOptions::default()
     };
     apply_socket_config(&socket, &config).unwrap();
     assert_eq!(socket.tcp_user_timeout().unwrap(), Some(timeout));
@@ -29,10 +29,10 @@ fn tcp_user_timeout_reads_back() {
 #[test]
 fn tcp_user_timeout_unsupported_errors_under_strict() {
     let socket = socket2::Socket::new(socket2::Domain::IPV4, socket2::Type::STREAM, None).unwrap();
-    let config = SocketConfig {
+    let config = SocketOptions {
         strict: true,
         tcp_user_timeout: Some(std::time::Duration::from_secs(7)),
-        ..SocketConfig::default()
+        ..SocketOptions::default()
     };
     let err = apply_socket_config(&socket, &config).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);

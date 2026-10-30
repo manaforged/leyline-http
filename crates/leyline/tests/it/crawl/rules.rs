@@ -2,8 +2,8 @@ use super::*;
 
 #[tokio::test]
 async fn a_crawl_that_respects_robots_obeys_robots_txt_and_nofollow() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /private\n"),
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /private\n"),
         "/" => html(
             r#"<a href="/a#top">A</a> <a href="/private/x">P</a>
                <a href="/b" rel="nofollow">B</a> <a href="http://other.invalid/">O</a>
@@ -36,14 +36,14 @@ async fn a_crawl_that_respects_robots_obeys_robots_txt_and_nofollow() {
         page_targets(&server).await,
         BTreeSet::from(["/", "/a", "/c", "/d"].map(String::from))
     );
-    assert_eq!(crawl.stats().skipped(SkipReason::Robots), 1);
-    assert_eq!(crawl.stats().pages(), 4);
+    assert_eq!(crawl.skipped(SkipReason::Robots), 1);
+    assert_eq!(crawl.pages(), 4);
 }
 
 #[tokio::test]
 async fn a_crawl_ignores_robots_rules_when_told() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /\n"),
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /\n"),
         "/" => html(
             r#"<meta name="robots" content="noindex, nofollow"><a href="/private" rel="nofollow">P</a>"#,
         ),
@@ -51,7 +51,7 @@ async fn a_crawl_ignores_robots_rules_when_told() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/")).ignore_robots();
+    let mut crawl = Session::new().crawl(server.url("/")).respect(None);
     let mut pages = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -66,18 +66,17 @@ async fn a_crawl_ignores_robots_rules_when_told() {
 
 #[tokio::test]
 async fn a_crawl_for_ai_training_obeys_content_signals() {
-    let handler = |request: &leyline::testing::RecordedRequest| match request.target.as_str() {
-        "/robots.txt" => {
-            TestResponse::new(200).body("User-agent: *\nContent-Signal: search=yes, ai-train=no\n")
-        }
+    let handler = |request: &leyline::testing::Request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200)
+            .body("User-agent: *\nContent-Signal: search=yes, ai-train=no\n"),
         _ => html("<p>home</p>"),
     };
-    let server = TestServer::http(handler).await.unwrap();
+    let server = testing::Server::http(handler).await.unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
         .respect(Respect::AiTraining);
     assert!(crawl.next().await.is_none());
-    assert_eq!(crawl.stats().skipped(SkipReason::Signal), 1);
+    assert_eq!(crawl.skipped(SkipReason::Signal), 1);
     assert!(page_targets(&server).await.is_empty());
 
     let mut crawl = Session::new()
@@ -97,17 +96,17 @@ async fn a_crawl_reads_sitemaps_from_robots_and_indexes() {
     let pages = gzip(&format!(
         "<urlset><url><loc>{base}/orphan?a=1&amp;b=2</loc></url><url><loc>{base}/hidden</loc></url><url><loc>http://other.invalid/x</loc></url></urlset>"
     ));
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body(robots.clone()),
-        "/sitemap_index.xml" => TestResponse::new(200)
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body(robots.clone()),
+        "/sitemap_index.xml" => testing::Response::new(200)
             .header("content-type", "application/xml")
             .body(index.clone()),
-        "/pages.xml.gz" => TestResponse::new(200)
+        "/pages.xml.gz" => testing::Response::new(200)
             .header("content-type", "application/gzip")
             .body(pages.clone()),
         "/" => html("<p>home, no links</p>"),
         "/orphan?a=1&b=2" => html("<p>a page only the sitemap lists</p>"),
-        _ => TestResponse::new(404),
+        _ => testing::Response::new(404),
     })
     .unwrap();
     let mut crawl = Session::new()
@@ -132,7 +131,7 @@ async fn a_crawl_reads_sitemaps_from_robots_and_indexes() {
     let sent = targets(&server).await;
     assert!(sent.contains("/pages.xml.gz"), "{sent:?}");
     assert!(!sent.contains("/hidden"), "{sent:?}");
-    assert_eq!(crawl.stats().skipped(SkipReason::Robots), 1);
+    assert_eq!(crawl.skipped(SkipReason::Robots), 1);
 }
 
 #[tokio::test]
@@ -140,11 +139,11 @@ async fn a_crawl_falls_back_to_sitemap_xml() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let sitemap = format!("<urlset><url><loc>{base}/orphan</loc></url></urlset>");
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-        "/sitemap.xml" => TestResponse::new(200).body(sitemap.clone()),
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+        "/sitemap.xml" => testing::Response::new(200).body(sitemap.clone()),
         "/" => html("<p>home</p>"),
         "/orphan" => html("<p>orphan</p>"),
-        _ => TestResponse::new(404),
+        _ => testing::Response::new(404),
     })
     .unwrap();
     let mut crawl = Session::new().crawl(server.url("/"));
@@ -160,8 +159,8 @@ async fn a_crawl_falls_back_to_sitemap_xml() {
 async fn a_crawl_applies_the_sites_crawl_delay() {
     let stamps = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = stamps.clone();
-    let server = TestServer::http(move |request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nCrawl-delay: 2\n"),
+    let server = testing::Server::http(move |request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 2\n"),
         path => {
             seen.lock().unwrap().push(std::time::Instant::now());
             match path {
@@ -189,8 +188,8 @@ async fn a_crawl_applies_the_sites_crawl_delay() {
 
 #[tokio::test]
 async fn a_crawl_reads_robots_txt_again_after_a_day() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /never\n"),
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /never\n"),
         "/" => html(r#"<a href="/a">A</a>"#),
         "/a" => html(r#"<p>a</p><a href="/b">B</a>"#),
         _ => html("<p>b</p>"),
@@ -223,9 +222,9 @@ async fn a_crawl_reads_robots_txt_again_after_a_day() {
 
 #[tokio::test]
 async fn a_crawl_for_ai_training_obeys_content_usage_by_path_and_header() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/robots.txt" => {
-            TestResponse::new(200).body("User-agent: *\nContent-Usage: /closed/ train-ai=n\n")
+            testing::Response::new(200).body("User-agent: *\nContent-Usage: /closed/ train-ai=n\n")
         }
         "/" => html(r#"<a href="/open">O</a><a href="/closed/x">C</a><a href="/header">H</a>"#),
         "/header" => html("<p>header says no</p>").header("content-usage", "train-ai=n"),
@@ -243,13 +242,13 @@ async fn a_crawl_for_ai_training_obeys_content_usage_by_path_and_header() {
     }
     assert_eq!(kept, BTreeSet::from(["/".to_owned(), "/open".to_owned()]));
     assert!(!page_targets(&server).await.contains("/closed/x"));
-    assert_eq!(crawl.stats().skipped(SkipReason::Signal), 2);
+    assert_eq!(crawl.skipped(SkipReason::Signal), 2);
 }
 
 #[tokio::test]
 async fn a_crawl_obeys_robots_rules_by_default() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /private\n"),
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /private\n"),
         "/" => html(r#"<a href="/private">P</a><a href="/open">O</a><a href="/hidden">H</a>"#),
         "/hidden" => html(r#"<meta name="robots" content="noindex"><p>hidden</p>"#),
         _ => html("<p>page</p>"),
@@ -271,11 +270,11 @@ async fn a_crawl_obeys_robots_rules_by_default() {
 async fn a_crawl_retries_a_robots_txt_that_fails_with_500() {
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let count = calls.clone();
-    let server = TestServer::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target.as_str() {
         "/robots.txt" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
-            TestResponse::new(500)
+            testing::Response::new(500)
         }
-        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /never\n"),
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /never\n"),
         "/" => html(r#"<a href="/a">A</a>"#),
         _ => html("<p>a</p>"),
     })

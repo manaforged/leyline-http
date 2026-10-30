@@ -150,13 +150,13 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     use crate::cookie::Jar;
     let jar = Jar::new();
     let a = url::Url::parse("https://1.2.3.4/").unwrap();
-    jar.store_set_cookie("k=v; Domain=3.4; Path=/", &a);
+    jar.store("k=v; Domain=3.4; Path=/", &a);
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
+        jar.get(&url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
         None
     );
     assert_eq!(
-        jar.get_cookie(&url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
+        jar.get(&url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
         Some("v".into())
     );
 }
@@ -185,4 +185,17 @@ fn ctl_bytes_in_name_or_value_are_rejected() {
     assert!(parse_set_cookie("a\u{7f}=v; Path=/", &url).is_none());
     let c = parse_set_cookie("a=hello world; Path=/", &url).expect("printable value stored");
     assert_eq!(c.value, "hello world");
+}
+
+#[test]
+fn a_cookie_date_out_of_range_is_ignored() {
+    assert!(parse_cookie_date("Wed, 21 Oct 2015 07:28:00 GMT").is_some());
+    for bad in [
+        "Wed, 21 Oct 2015 99:99:99 GMT",
+        "Wed, 21 Oct 2015 24:00:00 GMT",
+        "Wed, 21 Oct 2015 07:60:00 GMT",
+        "Wed, 21 Oct 1600 07:28:00 GMT",
+    ] {
+        assert_eq!(parse_cookie_date(bad), None, "{bad}");
+    }
 }

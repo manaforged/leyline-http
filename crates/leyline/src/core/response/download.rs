@@ -47,10 +47,11 @@ impl Drop for CallerWaits {
 }
 
 impl Response {
-    pub async fn download_to(self, path: impl AsRef<Path>, limit: Option<u64>) -> Result<u64> {
+    /// Writes the body to a temporary file, renames it to `path`, and returns the number of bytes written.
+    pub async fn download_to(self, path: impl AsRef<Path>) -> Result<u64> {
         let path = path.as_ref().to_path_buf();
         let partial = PartialFile::new(atomic::temp_path(&path)?);
-        let written = self.write_file(&partial.path, &path, limit).await?;
+        let written = self.write_file(&partial.path, &path).await?;
         let caller = CallerWaits::default();
         let waiting = Arc::clone(&caller.0);
         tokio::task::spawn_blocking(move || {
@@ -69,13 +70,13 @@ impl Response {
         Ok(written)
     }
 
-    async fn write_file(self, temp: &Path, target: &Path, limit: Option<u64>) -> Result<u64> {
+    async fn write_file(self, temp: &Path, target: &Path) -> Result<u64> {
         let mut file = tokio::fs::File::from_std(atomic::create_temp(
             temp,
             target,
             atomic::FileMode::KeepExisting,
         )?);
-        let written = self.copy_decoded_to(&mut file, limit).await?;
+        let written = self.write_to(&mut file).await?;
         file.flush().await?;
         file.sync_all().await?;
         Ok(written)

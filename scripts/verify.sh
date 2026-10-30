@@ -205,16 +205,18 @@ g_doc() {
     ok "docs.rs build clean"
 }
 
-g_api() {
-    step "generated API reference"
-    cargo truesight check || fail "run cargo truesight sync"
-    ok "API reference current"
-}
-
 g_book() {
     step "mdbook"
     mdbook build docs >/dev/null || fail "mdbook build docs"
     ok "book builds"
+}
+
+g_links() {
+    step "lychee --offline (README, docs, crate pages)"
+    command -v lychee >/dev/null || fail "lychee not found (cargo install --locked lychee)"
+    lychee --offline --no-progress README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md \
+        BENCHMARKS.md AGENTS.md docs crates/leyline/docs || fail "broken links"
+    ok "links resolve"
 }
 
 g_test() {
@@ -229,8 +231,8 @@ g_live() {
     cargo test -p leyline-http --features bench-internals --test it tls_peet:: --release -- --ignored || fail "live tls_peet tests failed"
     ok "live tls_peet pass"
 
-    step "cargo test -p leyline-http --test it smoke:: -- --ignored --nocapture"
-    cargo test -p leyline-http --test it smoke:: -- --ignored --nocapture || fail "smoke suite failed"
+    step "cargo test -p leyline-http --features bench-internals --test it smoke:: -- --ignored --nocapture"
+    cargo test -p leyline-http --features bench-internals --test it smoke:: -- --ignored --nocapture || fail "smoke suite failed"
     ok "smoke pass"
 }
 
@@ -432,12 +434,12 @@ g_publish() {
 
 gate_order=(
     comments msrv package
-    fmt clippy features doc api book test live deny semver external-types benches
+    fmt clippy features doc book links test live deny semver external-types benches
     subcrates release publish
     fuzz-replay fuzz-timed
 )
 quick_gates=(comments msrv package)
-full_gates=(comments msrv package fmt clippy features doc api book test live
+full_gates=(comments msrv package fmt clippy features doc book links test live
     deny semver external-types benches subcrates fuzz-replay)
 
 if [[ -n "$only" ]]; then

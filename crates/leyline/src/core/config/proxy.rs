@@ -1,11 +1,15 @@
-use crate::core::Kind;
+use std::time::Duration;
+
+use crate::core::Cause;
+use crate::core::proxy_pool::ProxyPool;
+use crate::profile::{Browser, Platform};
 use crate::util::redact;
 
 use super::host::{normalize_host, pattern_matches};
 
 #[derive(Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(try_from = "String", into = "String")]
-pub struct ProxyUrl(String);
+pub(crate) struct ProxyUrl(String);
 
 impl TryFrom<String> for ProxyUrl {
     type Error = crate::core::Error;
@@ -22,28 +26,27 @@ impl std::fmt::Debug for ProxyUrl {
 }
 
 impl ProxyUrl {
-    pub fn parse(raw: impl AsRef<str>) -> crate::core::Result<Self> {
+    pub(crate) fn parse(raw: impl AsRef<str>) -> crate::core::Result<Self> {
         let raw = raw.as_ref().trim();
         let parsed = Self::parse_inner(raw)?;
         match parsed.scheme() {
             "http" | "https" | "socks5" | "socks5h" => {}
             other => {
-                return Err(crate::core::Error::new(Kind::Config).with_message(format!(
+                return Err(crate::core::Error::new(Cause::Config).with_message(format!(
                     "unsupported proxy scheme {other:?}; expected http, https, socks5, or socks5h"
                 )));
             }
         }
         if parsed.host_str().is_none() {
-            return Err(
-                crate::core::Error::new(Kind::Config).with_message("proxy URL must include a host")
-            );
+            return Err(crate::core::Error::new(Cause::Config)
+                .with_message("proxy URL must include a host"));
         }
         Ok(Self(raw.to_string()))
     }
 
     #[cfg(not(feature = "socks"))]
     pub(crate) fn socks_feature_error(raw: &str) -> crate::core::Error {
-        crate::core::Error::new(Kind::Config).with_message(format!(
+        crate::core::Error::new(Cause::Config).with_message(format!(
             "proxy {} needs the `socks` feature: enable `features = [\"socks\"]` or use an \
              http or https proxy",
             redact(raw)
@@ -56,7 +59,7 @@ impl ProxyUrl {
 
     fn parse_inner(raw: &str) -> crate::core::Result<url::Url> {
         url::Url::parse(raw).map_err(|e| {
-            crate::core::Error::new(Kind::Config).with_message(format!("invalid proxy URL: {e}"))
+            crate::core::Error::new(Cause::Config).with_message(format!("invalid proxy URL: {e}"))
         })
     }
 
@@ -78,15 +81,18 @@ impl From<ProxyUrl> for String {
     }
 }
 
+#[doc = include_str!("../../../docs/proxy.md")]
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct ProxyConfig {
+#[must_use]
+pub struct Proxy {
     pub(super) rules: Vec<ProxyRule>,
     pub(super) no_proxy: NoProxy,
     pub(super) no_proxy_explicit: bool,
     pub(super) use_env: bool,
     pub(super) from_env: bool,
     pub(super) rejected: Option<RejectedProxy>,
+    pub(crate) pool: Option<ProxyPool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -95,7 +101,7 @@ pub(super) struct RejectedProxy {
 }
 
 impl RejectedProxy {
-    fn error(self, kind: Kind) -> crate::core::Error {
+    fn error(self, kind: Cause) -> crate::core::Error {
         crate::core::Error::new(kind).with_message(format!(
             "the {} environment variable is not a valid proxy URL (expected an http, https, \
              socks5, or socks5h URL with a host); fix or unset it, or set a proxy with \
@@ -105,20 +111,21 @@ impl RejectedProxy {
     }
 }
 
-impl std::fmt::Debug for ProxyConfig {
+impl std::fmt::Debug for Proxy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProxyConfig")
+        f.debug_struct("Proxy")
             .field("rules", &self.rules)
             .field("no_proxy", &self.no_proxy)
             .field("no_proxy_explicit", &self.no_proxy_explicit)
             .field("use_env", &self.use_env)
             .field("from_env", &self.from_env)
             .field("rejected", &self.rejected)
+            .field("pool", &self.pool)
             .finish()
     }
 }
 
-impl Default for ProxyConfig {
+impl Default for Proxy {
     fn default() -> Self {
         Self {
             rules: Vec::new(),
@@ -127,28 +134,87 @@ impl Default for ProxyConfig {
             use_env: true,
             from_env: false,
             rejected: None,
+            pool: None,
         }
     }
 }
 
-impl ProxyConfig {
+impl Proxy {
+    /// Returns the default settings: environment proxies on and no explicit rules.
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn rule(mut self, rule: ProxyRule) -> Self {
-        self.rules.push(rule);
+    /// Sets one proxy for every scheme, replacing any earlier all-scheme proxy.
+    pub fn all(self, proxy_url: impl Into<String>) -> Self {
+        self.set_default_proxy(proxy_url)
+    }
+
+    /// Adds a proxy for `http` URLs.
+    pub fn http(mut self, proxy_url: impl Into<String>) -> Self {
+        self.rules.push(ProxyRule::http(proxy_url));
         self
     }
 
-    pub fn no_proxy(mut self, no_proxy: NoProxy) -> Self {
-        self.no_proxy = no_proxy;
+    /// Adds a proxy for `https` URLs.
+    pub fn https(mut self, proxy_url: impl Into<String>) -> Self {
+        self.rules.push(ProxyRule::https(proxy_url));
+        self
+    }
+
+    /// Sets the host patterns that bypass the proxy, replacing the `NO_PROXY` value.
+    pub fn no_proxy<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.no_proxy = NoProxy::new(patterns);
         self.no_proxy_explicit = true;
         self
     }
 
+    /// Sets whether proxies from environment variables apply, on by default.
     pub fn env(mut self, on: bool) -> Self {
         self.use_env = on;
+        self
+    }
+
+    /// Returns a rotating pool over the given proxies.
+    pub fn list<P: Into<Proxy>>(proxies: impl IntoIterator<Item = P>) -> Self {
+        Self::pooled(ProxyPool::new(proxies))
+    }
+
+    /// Returns a pool where each proxy carries its own browser and platform identity.
+    pub fn identified<P: Into<Proxy>>(
+        proxies: impl IntoIterator<Item = (P, Browser, Platform)>,
+    ) -> Self {
+        Self::pooled(ProxyPool::identified(proxies))
+    }
+
+    /// Sets how long a pool keeps reusing one proxy, zero by default.
+    pub fn sticky_for(self, duration: Duration) -> Self {
+        self.map_pool(|pool| pool.sticky_for(duration))
+    }
+
+    /// Sets how many failures ban a pooled proxy, 3 by default.
+    pub fn ban_after(self, failures: u32) -> Self {
+        self.map_pool(|pool| pool.ban_after(failures))
+    }
+
+    /// Sets how long a banned pooled proxy stays out, 60 seconds by default.
+    pub fn ban_for(self, duration: Duration) -> Self {
+        self.map_pool(|pool| pool.ban_for(duration))
+    }
+
+    fn pooled(pool: ProxyPool) -> Self {
+        Self {
+            pool: Some(pool),
+            ..Self::new()
+        }
+    }
+
+    fn map_pool(mut self, change: impl FnOnce(ProxyPool) -> ProxyPool) -> Self {
+        self.pool = self.pool.take().map(change);
         self
     }
 
@@ -173,7 +239,7 @@ impl ProxyConfig {
         self.rejected.is_some()
     }
 
-    pub(crate) fn rejection(&self, kind: Kind) -> Option<crate::core::Error> {
+    pub(crate) fn rejection(&self, kind: Cause) -> Option<crate::core::Error> {
         self.rejected.map(|rejected| rejected.error(kind))
     }
 
@@ -202,7 +268,7 @@ impl ProxyConfig {
 
     pub(crate) fn proxy_for(&self, url: &url::Url) -> crate::core::Result<Option<&str>> {
         if let Some(rejected) = self.rejected {
-            return Err(rejected.error(Kind::Proxy));
+            return Err(rejected.error(Cause::Proxy));
         }
         let host = url.host_str().unwrap_or("");
         let Some(winner) = self
@@ -220,33 +286,32 @@ impl ProxyConfig {
     }
 }
 
-impl From<&str> for ProxyConfig {
+impl From<&str> for Proxy {
     fn from(proxy_url: &str) -> Self {
         Self::new().set_default_proxy(proxy_url)
     }
 }
 
-impl From<&String> for ProxyConfig {
+impl From<&String> for Proxy {
     fn from(proxy_url: &String) -> Self {
         Self::new().set_default_proxy(proxy_url.as_str())
     }
 }
 
-impl From<String> for ProxyConfig {
+impl From<String> for Proxy {
     fn from(proxy_url: String) -> Self {
         Self::new().set_default_proxy(proxy_url)
     }
 }
 
-impl From<ProxyUrl> for ProxyConfig {
+impl From<ProxyUrl> for Proxy {
     fn from(proxy_url: ProxyUrl) -> Self {
         Self::new().set_default_proxy(proxy_url)
     }
 }
 
 #[derive(Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct ProxyRule {
+pub(crate) struct ProxyRule {
     scheme: ProxyRuleScheme,
     url: String,
 }
@@ -261,15 +326,15 @@ impl std::fmt::Debug for ProxyRule {
 }
 
 impl ProxyRule {
-    pub fn all(proxy_url: impl Into<String>) -> Self {
+    pub(crate) fn all(proxy_url: impl Into<String>) -> Self {
         Self::for_scheme(ProxyRuleScheme::All, proxy_url)
     }
 
-    pub fn http(proxy_url: impl Into<String>) -> Self {
+    pub(crate) fn http(proxy_url: impl Into<String>) -> Self {
         Self::for_scheme(ProxyRuleScheme::Http, proxy_url)
     }
 
-    pub fn https(proxy_url: impl Into<String>) -> Self {
+    pub(crate) fn https(proxy_url: impl Into<String>) -> Self {
         Self::for_scheme(ProxyRuleScheme::Https, proxy_url)
     }
 
@@ -308,8 +373,7 @@ impl ProxyRuleScheme {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct NoProxy {
+pub(crate) struct NoProxy {
     patterns: Vec<String>,
 }
 
@@ -331,7 +395,7 @@ impl NoProxy {
             .and_then(|raw| Self::from_string(&raw))
     }
 
-    pub fn new<I, S>(patterns: I) -> Self
+    pub(crate) fn new<I, S>(patterns: I) -> Self
     where
         I: IntoIterator<Item = S>,
         S: Into<String>,

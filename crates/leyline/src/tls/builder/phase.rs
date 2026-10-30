@@ -5,57 +5,35 @@ use crate::profile::TlsProfile;
 use crate::tls::error::TlsError;
 
 #[cfg(feature = "compression-brotli")]
-use super::BrotliDecompressor;
+use super::cert::Brotli;
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
-use super::ZlibDecompressor;
+use super::cert::Zlib;
 #[cfg(feature = "compression-zstd")]
-use super::ZstdDecompressor;
+use super::cert::Zstd;
+#[cfg(any(
+    feature = "compression-gzip",
+    feature = "compression-brotli",
+    feature = "compression-deflate",
+    feature = "compression-zstd"
+))]
+use super::cert::add_decompressor;
 #[cfg(not(all(
     feature = "compression-brotli",
     feature = "compression-zstd",
     any(feature = "compression-gzip", feature = "compression-deflate")
 )))]
 use super::missing;
-use super::{TlsMinVersion, profile_min_version, tls13_cipher_ids};
+use super::{TlsMinVersion, partition_ciphers, profile_min_version};
 
 pub(super) fn ciphers(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
-    let tls13 = tls13_cipher_ids(&tls.ciphers)?;
-    let list = tls
-        .ciphers
-        .iter()
-        .filter(|name| {
-            crate::iana::cipher_id(name).is_none_or(|id| !crate::iana::is_tls13_cipher(id))
-        })
-        .map(String::as_str)
-        .collect::<Vec<_>>()
-        .join(":");
+    let (tls13, tls12) = partition_ciphers(&tls.ciphers)?;
+    let list = tls12.join(":");
     if !list.is_empty() {
         builder
             .set_cipher_list(&list)
             .map_err(TlsError::from_stack)?;
     }
-
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "windows",
-        all(target_arch = "aarch64", target_os = "macos")
-    ))]
-    if !tls13.is_empty() {
-        builder
-            .set_tls13_cipher_order(&tls13)
-            .map_err(TlsError::from_stack)?;
-    }
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "windows",
-        all(target_arch = "aarch64", target_os = "macos")
-    )))]
-    if !tls13.is_empty() && tls.extension_permutation.is_some() {
-        return Err(TlsError::Profile(
-            "exact TLS order requires a rebuilt BoringSSL bundle for this target".into(),
-        ));
-    }
-    Ok(())
+    exact::tls13_cipher_order(builder, tls, &tls13)
 }
 
 pub(super) fn curves(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
@@ -114,9 +92,7 @@ pub(super) fn compression(
 
 #[cfg(feature = "compression-brotli")]
 fn add_brotli(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    builder
-        .add_certificate_compression_algorithm(BrotliDecompressor)
-        .map_err(TlsError::from_stack)
+    add_decompressor::<Brotli>(builder)
 }
 
 #[cfg(not(feature = "compression-brotli"))]
@@ -126,9 +102,7 @@ fn add_brotli(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
 
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 fn add_zlib(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    builder
-        .add_certificate_compression_algorithm(ZlibDecompressor)
-        .map_err(TlsError::from_stack)
+    add_decompressor::<Zlib>(builder)
 }
 
 #[cfg(not(any(feature = "compression-gzip", feature = "compression-deflate")))]
@@ -138,9 +112,7 @@ fn add_zlib(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
 
 #[cfg(feature = "compression-zstd")]
 fn add_zstd(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    builder
-        .add_certificate_compression_algorithm(ZstdDecompressor)
-        .map_err(TlsError::from_stack)
+    add_decompressor::<Zstd>(builder)
 }
 
 #[cfg(not(feature = "compression-zstd"))]
@@ -181,7 +153,7 @@ pub(super) fn extensions(
             .map_err(TlsError::from_stack)?;
     }
 
-    order(builder, tls)?;
+    exact::extension_order(builder, tls)?;
 
     builder.set_grease_enabled(tls.grease);
     builder.set_grease_sigalgs_enabled(tls.grease && tls.sigalg_grease);
@@ -192,28 +164,79 @@ pub(super) fn extensions(
     Ok(())
 }
 
-fn order(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
-    #[cfg(any(
-        target_os = "linux",
-        target_os = "windows",
-        all(target_arch = "aarch64", target_os = "macos")
-    ))]
-    if let Some(order) = &tls.extension_permutation {
-        builder
-            .set_extension_order(order)
-            .map_err(TlsError::from_stack)?;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "windows",
+    all(target_arch = "aarch64", target_os = "macos")
+))]
+mod exact {
+    use leyline_bssl::ssl::SslContextBuilder;
+
+    use crate::profile::TlsProfile;
+    use crate::tls::error::TlsError;
+
+    pub(super) fn tls13_cipher_order(
+        builder: &mut SslContextBuilder,
+        _tls: &TlsProfile,
+        tls13: &[u16],
+    ) -> Result<(), TlsError> {
+        if !tls13.is_empty() {
+            builder
+                .set_tls13_cipher_order(tls13)
+                .map_err(TlsError::from_stack)?;
+        }
+        Ok(())
     }
-    #[cfg(not(any(
-        target_os = "linux",
-        target_os = "windows",
-        all(target_arch = "aarch64", target_os = "macos")
-    )))]
-    if tls.extension_permutation.is_some() {
-        return Err(TlsError::Profile(
-            "exact TLS extension order requires a rebuilt BoringSSL bundle for this target".into(),
-        ));
+
+    pub(super) fn extension_order(
+        builder: &mut SslContextBuilder,
+        tls: &TlsProfile,
+    ) -> Result<(), TlsError> {
+        if let Some(order) = &tls.extension_permutation {
+            builder
+                .set_extension_order(order)
+                .map_err(TlsError::from_stack)?;
+        }
+        Ok(())
     }
-    Ok(())
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "windows",
+    all(target_arch = "aarch64", target_os = "macos")
+)))]
+mod exact {
+    use leyline_bssl::ssl::SslContextBuilder;
+
+    use crate::profile::TlsProfile;
+    use crate::tls::error::TlsError;
+
+    pub(super) fn tls13_cipher_order(
+        _builder: &mut SslContextBuilder,
+        tls: &TlsProfile,
+        tls13: &[u16],
+    ) -> Result<(), TlsError> {
+        if !tls13.is_empty() && tls.extension_permutation.is_some() {
+            return Err(TlsError::Profile(
+                "exact TLS order requires a rebuilt BoringSSL bundle for this target".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(super) fn extension_order(
+        _builder: &mut SslContextBuilder,
+        tls: &TlsProfile,
+    ) -> Result<(), TlsError> {
+        if tls.extension_permutation.is_some() {
+            return Err(TlsError::Profile(
+                "exact TLS extension order requires a rebuilt BoringSSL bundle for this target"
+                    .into(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 pub(super) fn versions(

@@ -39,3 +39,15 @@ const HTTP11_ARR: [u8; wire_len(HTTP11_ONLY)] = wire(HTTP11_ONLY);
 
 pub(crate) const BROWSER_WIRE: &[u8] = &BROWSER_ARR;
 pub(crate) const HTTP11_WIRE: &[u8] = &HTTP11_ARR;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AlpnPlan {
+    Browser,
+    Http11,
+}
+
+impl AlpnPlan {
+    pub(crate) fn alps(self) -> bool {
+        self == Self::Browser
+    }
+}

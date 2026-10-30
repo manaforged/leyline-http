@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use super::proxy::NoProxy;
 use super::*;
 
 #[test]
@@ -59,14 +60,15 @@ fn no_proxy_does_not_match_unrelated_ipv6() {
     );
 }
 
-fn cfg_with_env_no_proxy(patterns: &str) -> ProxyConfig {
-    ProxyConfig {
+fn cfg_with_env_no_proxy(patterns: &str) -> Proxy {
+    Proxy {
         rules: Vec::new(),
         no_proxy: NoProxy::from_string(patterns).unwrap(),
         no_proxy_explicit: false,
         use_env: true,
         from_env: false,
         rejected: None,
+        pool: None,
     }
 }
 
@@ -74,7 +76,7 @@ fn cfg_with_env_no_proxy(patterns: &str) -> ProxyConfig {
 fn env_no_proxy_never_bypasses_explicit_proxies() {
     let url = url::Url::parse("https://target.test/x").unwrap();
     assert_eq!(
-        ProxyConfig::from("http://req:1").proxy_for(&url).unwrap(),
+        Proxy::from("http://req:1").proxy_for(&url).unwrap(),
         Some("http://req:1"),
         "env NO_PROXY bypassed a per-request proxy override"
     );
@@ -84,7 +86,7 @@ fn env_no_proxy_never_bypasses_explicit_proxies() {
         Some("http://sess:1"),
         "env NO_PROXY bypassed an explicit session proxy"
     );
-    let cfg = cfg_with_env_no_proxy("target.test").rule(ProxyRule::all("http://rule:1"));
+    let cfg = cfg_with_env_no_proxy("target.test").all("http://rule:1");
     assert_eq!(
         cfg.proxy_for(&url).unwrap(),
         Some("http://rule:1"),
@@ -105,7 +107,7 @@ fn env_no_proxy_bypasses_env_derived_proxy() {
 
 #[test]
 fn explicit_no_proxy_bypasses_all_proxies() {
-    let cfg = ProxyConfig::new().no_proxy(NoProxy::from_string("target.test").unwrap());
+    let cfg = Proxy::new().no_proxy(["target.test"]);
     let url = url::Url::parse("https://target.test/x").unwrap();
     assert_eq!(cfg.proxy_for(&url).unwrap(), None);
     assert_eq!(
@@ -115,17 +117,13 @@ fn explicit_no_proxy_bypasses_all_proxies() {
             .unwrap(),
         None
     );
-    assert_eq!(
-        cfg.rule(ProxyRule::all("http://rule:1"))
-            .proxy_for(&url)
-            .unwrap(),
-        None
-    );
+    assert_eq!(cfg.all("http://rule:1").proxy_for(&url).unwrap(), None);
 }
 
 #[test]
 fn compression_none_disables_known_codecs() {
-    let cfg = CompressionConfig::none();
+    let mut cfg = BodyRules::default();
+    cfg.offer([]);
     assert!(!cfg.allows("gzip"));
     assert!(!cfg.allows("br"));
     assert!(cfg.allows("identity"));
@@ -134,7 +132,7 @@ fn compression_none_disables_known_codecs() {
 #[test]
 fn default_timeout_matches_browser_scale_patience() {
     assert_eq!(
-        TimeoutConfig::default().total_limit(),
+        Timeout::default().total_limit(),
         Some(Duration::from_secs(300))
     );
 }

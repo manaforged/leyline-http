@@ -1,12 +1,6 @@
 use std::fmt;
 
-use crate::core::error::{Error, Kind};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LimitSource {
-    Session,
-    Caller,
-}
+use crate::core::error::{Cause, Error};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Overflow {
@@ -30,7 +24,7 @@ impl Cap {
 
     pub(crate) fn truncate_at(session: BodyLimit, caller: usize) -> Self {
         Self {
-            limit: session.tighter(u64::try_from(caller).ok()),
+            limit: BodyLimit::session(session.bytes.min(caller)),
             overflow: Overflow::Truncate,
         }
     }
@@ -43,33 +37,15 @@ impl Cap {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BodyLimit {
     pub(crate) bytes: usize,
-    pub(crate) source: LimitSource,
 }
 
 impl BodyLimit {
     pub(crate) fn session(bytes: usize) -> Self {
-        Self {
-            bytes,
-            source: LimitSource::Session,
-        }
-    }
-
-    pub(crate) fn caller(bytes: usize) -> Self {
-        Self {
-            bytes,
-            source: LimitSource::Caller,
-        }
-    }
-
-    pub(crate) fn tighter(self, caller: Option<u64>) -> Self {
-        match caller.map(|bytes| usize::try_from(bytes).unwrap_or(usize::MAX)) {
-            Some(bytes) if bytes <= self.bytes => Self::caller(bytes),
-            _ => self,
-        }
+        Self { bytes }
     }
 
     pub(crate) fn error(self) -> Error {
-        Error::new(Kind::Body)
+        Error::new(Cause::Body)
             .with_message(self.to_string())
             .with_source(self)
     }
@@ -85,18 +61,11 @@ impl BodyLimit {
 
 impl fmt::Display for BodyLimit {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.source {
-            LimitSource::Session => write!(
-                f,
-                "response body exceeds max_body_size ({} bytes)",
-                self.bytes
-            ),
-            LimitSource::Caller => write!(
-                f,
-                "response body exceeds the caller's limit ({} bytes)",
-                self.bytes
-            ),
-        }
+        write!(
+            f,
+            "response body exceeds max_body_size ({} bytes)",
+            self.bytes
+        )
     }
 }
 

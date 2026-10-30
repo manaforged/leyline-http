@@ -2,12 +2,9 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::trace::{Summary, Trace};
-use leyline::{
-    Browser, ChromiumBrand, Family, Identity, Kind, Platform, Preset, ProtocolPolicy, RetryPolicy,
-    Session,
-};
+use leyline::testing::{self, queue};
+use leyline::trace::{Event, Trace};
+use leyline::{Browser, Kind, Platform, Protocol, Proxy, RequestKind, Retry, Session};
 
 fn gzip(data: &[u8]) -> Vec<u8> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -23,21 +20,24 @@ fn plain() -> Session {
 async fn decoded_copy_writes_plain_bytes_and_stops_at_the_limit() {
     let text = b"leyline ".repeat(4_000);
     let gz = || {
-        TestResponse::new(200)
+        testing::Response::new(200)
             .body("ok")
             .close()
             .header("content-encoding", "gzip")
             .body(gzip(&text))
     };
-    let server = TestServer::http(queue(vec![gz(), gz()])).await.unwrap();
+    let server = testing::Server::http(queue(vec![gz(), gz()]))
+        .await
+        .unwrap();
 
     let mut out = Vec::new();
     let written = plain()
         .get(server.url("/a"))
         .stream()
+        .send()
         .await
         .unwrap()
-        .copy_decoded_to(&mut out, None)
+        .write_to(&mut out)
         .await
         .unwrap();
     assert_eq!(out, text);
@@ -46,13 +46,15 @@ async fn decoded_copy_writes_plain_bytes_and_stops_at_the_limit() {
     let mut capped = Vec::new();
     let err = plain()
         .get(server.url("/b"))
+        .max_body_size(1_000)
         .stream()
+        .send()
         .await
         .unwrap()
-        .copy_decoded_to(&mut capped, Some(1_000))
+        .write_to(&mut capped)
         .await
         .unwrap_err();
-    assert!(err.is_body_limit(), "{err:?}");
+    assert!(err.kind() == Kind::BodyLimit, "{err:?}");
     assert!(capped.len() <= 1_000);
 }
 
@@ -66,11 +68,12 @@ async fn proxy_failures_are_told_apart_from_origin_failures() {
         .build()
         .unwrap()
         .get("https://origin.invalid/")
+        .send()
         .await
         .unwrap_err();
     assert!(err.is_proxy(), "{err:?}");
 
-    let gateway = TestServer::http(queue(vec![TestResponse::new(502).close()]))
+    let gateway = testing::Server::http(queue(vec![testing::Response::new(502).close()]))
         .await
         .unwrap();
     let err = Session::builder()
@@ -78,45 +81,51 @@ async fn proxy_failures_are_told_apart_from_origin_failures() {
         .build()
         .unwrap()
         .get("https://origin.invalid/")
+        .send()
         .await
         .unwrap_err();
-    assert_eq!(err.kind(), Kind::Proxy);
+    assert_eq!(err.kind(), Kind::ProxyTarget);
     assert!(!err.is_proxy(), "{err:?}");
 }
 
 #[test]
 fn saved_identity_rebuilds_the_same_device() {
-    let saved = Identity::locked(Browser::latest(Family::Chrome), Platform::MacOS)
-        .with_brand(ChromiumBrand::Edge);
-    let json = serde_json::to_string(&saved).unwrap();
-    let restored: Identity = serde_json::from_str(&json).unwrap();
-
-    let first = Session::builder().identity(saved).build().unwrap();
-    let second = Session::builder().identity(restored).build().unwrap();
-    assert_eq!(second.identity().brand(), Some(ChromiumBrand::Edge));
-    assert_eq!(second.identity().platform(), Platform::MacOS);
-    assert_eq!(
-        first.identity().profile_id(),
-        second.identity().profile_id()
-    );
-    assert!(first.identity().profile_id().is_some());
-
-    let other = Session::builder()
-        .browser(Browser::latest(Family::Firefox))
+    let first = Session::builder()
+        .browser(Browser::edge())
+        .platform(Platform::MacOS)
         .build()
         .unwrap();
-    assert_ne!(first.identity().profile_id(), other.identity().profile_id());
+    let json = serde_json::to_string(&first).unwrap();
+    let restored: leyline::SessionBuilder = serde_json::from_str(&json).unwrap();
+    let second = restored.build().unwrap();
+    assert!(
+        second.user_agent().contains(" Edg/"),
+        "{}",
+        second.user_agent()
+    );
+    assert_eq!(second.platform(), Platform::MacOS);
+    assert_eq!(first.profile_id(), second.profile_id());
+    assert!(first.profile_id().is_some());
 
-    let round = first.identity().to_identity().unwrap();
-    let again = Session::builder().identity(round).build().unwrap();
-    assert_eq!(again.identity().profile_id(), first.identity().profile_id());
+    let other = Session::builder()
+        .browser(Browser::firefox())
+        .build()
+        .unwrap();
+    assert_ne!(first.profile_id(), other.profile_id());
+
+    let round = serde_json::to_string(&first).unwrap();
+    let again = serde_json::from_str::<leyline::SessionBuilder>(&round)
+        .unwrap()
+        .build()
+        .unwrap();
+    assert_eq!(again.profile_id(), first.profile_id());
 }
 
 #[tokio::test]
 async fn session_bearer_auth_and_base_url() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(200).body("ok").close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
@@ -125,9 +134,10 @@ async fn session_bearer_auth_and_base_url() {
         .bearer_auth("session-token")
         .build()
         .unwrap();
-    api.get("repos/x").await.unwrap();
+    api.get("repos/x").send().await.unwrap();
     api.get("/health")
         .bearer_auth("request-token")
+        .send()
         .await
         .unwrap();
 
@@ -144,7 +154,7 @@ async fn session_bearer_auth_and_base_url() {
         ["Bearer request-token"]
     );
 
-    let err = plain().get("repos/x").await.unwrap_err();
+    let err = plain().get("repos/x").send().await.unwrap_err();
     assert_eq!(err.kind(), Kind::Url);
 }
 
@@ -154,35 +164,40 @@ type Seen = (String, Option<u16>, u32, bool);
 struct Summaries(Mutex<Vec<Seen>>);
 
 impl Trace for Summaries {
-    fn summary(&self, ev: &Summary<'_>) {
-        self.0.lock().unwrap().push((
-            ev.url.map(|u| u.path().to_owned()).unwrap_or_default(),
-            ev.status.map(|s| s.as_u16()),
-            ev.attempts,
-            ev.outcome.is_ok(),
-        ));
+    fn event(&self, event: &Event<'_>) {
+        if let Event::Summary {
+            url,
+            status,
+            attempts,
+            outcome,
+            ..
+        } = event
+        {
+            self.0.lock().unwrap().push((
+                url.map(|u| u.path().to_owned()).unwrap_or_default(),
+                status.map(|s| s.as_u16()),
+                *attempts,
+                outcome.is_ok(),
+            ));
+        }
     }
 }
 
 #[tokio::test]
 async fn one_summary_per_request_counts_retries() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(503).close(),
-        TestResponse::new(200).body("ok").close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(503).close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
     let hook = Arc::new(Summaries::default());
     let session = Session::builder()
         .trace(Arc::clone(&hook))
-        .retry(
-            RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .jitter(false),
-        )
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap();
-    let resp = session.get(server.url("/flaky")).await.unwrap();
+    let resp = session.get(server.url("/flaky")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(
         *hook.0.lock().unwrap(),
@@ -192,8 +207,8 @@ async fn one_summary_per_request_counts_retries() {
 
 #[tokio::test]
 async fn request_cookie_jar_leaves_the_session_jar_alone() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200)
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200)
             .body("ok")
             .close()
             .header("set-cookie", "sid=abc; Path=/"),
@@ -203,30 +218,35 @@ async fn request_cookie_jar_leaves_the_session_jar_alone() {
     let session = plain();
     let jar = leyline::cookie::Jar::new();
     session
+        .to_builder()
+        .cookies(jar.clone())
+        .build()
+        .unwrap()
         .get(server.url("/login"))
-        .cookie_jar(jar.clone())
+        .send()
         .await
         .unwrap();
     let url = url::Url::parse(&server.url("/")).unwrap();
-    assert_eq!(jar.get_cookie(&url, "sid").as_deref(), Some("abc"));
-    assert_eq!(session.cookies().get_cookie(&url, "sid"), None);
+    assert_eq!(jar.get(&url, "sid").as_deref(), Some("abc"));
+    assert_eq!(session.cookies().get(&url, "sid"), None);
 }
 
 #[tokio::test]
 async fn initiator_sets_referer_origin_and_fetch_site() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let session = Session::builder()
         .browser(Browser::default())
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     session
         .post(server.url("/cart"))
         .json(&serde_json::json!({"sku": 1}))
-        .preset(Preset::Xhr)
-        .initiator("http://shop.example/product/1")
+        .kind(RequestKind::Xhr)
+        .from_page("http://shop.example/product/1")
+        .send()
         .await
         .unwrap();
     let req = server.next_request().await.unwrap();
@@ -236,24 +256,23 @@ async fn initiator_sets_referer_origin_and_fetch_site() {
 }
 
 #[tokio::test]
-async fn retries_rotate_to_the_next_proxy() {
+async fn a_retry_moves_to_the_next_pool_proxy() {
     let dead = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let dead_port = dead.local_addr().unwrap().port();
     drop(dead);
-    let good = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
+    let good = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
     let resp = Session::builder()
-        .proxy(format!("http://127.0.0.1:{dead_port}"))
-        .retry(
-            RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .jitter(false)
-                .rotate_proxies([format!("http://{}", good.addr())]),
-        )
+        .proxy(Proxy::list([
+            format!("http://127.0.0.1:{dead_port}"),
+            format!("http://{}", good.addr()),
+        ]))
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap()
         .get("http://origin.test/item")
+        .send()
         .await
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
@@ -264,34 +283,23 @@ async fn retries_rotate_to_the_next_proxy() {
 }
 
 #[tokio::test]
-async fn top_level_get_is_a_plain_request() {
-    let server = TestServer::http(queue(vec![TestResponse::new(200).body("ok").close()]))
-        .await
-        .unwrap();
-    let resp = leyline::get(server.url("/hello")).await.unwrap();
-    assert_eq!(resp.text().await.unwrap(), "ok");
-    let sent = server.next_request().await.unwrap();
-    assert!(sent.header_values("sec-ch-ua").is_empty());
-}
-
-#[tokio::test]
 async fn new_is_plain_and_browser_is_one_line() {
-    let server = TestServer::http(queue(vec![
-        TestResponse::new(200).body("ok").close(),
-        TestResponse::new(200).body("ok").close(),
+    let server = testing::Server::http(queue(vec![
+        testing::Response::new(200).body("ok").close(),
+        testing::Response::new(200).body("ok").close(),
     ]))
     .await
     .unwrap();
     let plain = Session::new();
-    assert_eq!(plain.identity().browser(), None);
-    plain.get(server.url("/plain")).await.unwrap();
+    assert_eq!(plain.browser(), None);
+    plain.get(server.url("/plain")).send().await.unwrap();
     let sent = server.next_request().await.unwrap();
     assert!(sent.header_values("sec-ch-ua").is_empty());
     assert!(!sent.header_values("user-agent")[0].contains("Chrome"));
 
-    let chrome = Session::browser(Browser::default());
-    assert_eq!(chrome.identity().platform(), Platform::Windows);
-    chrome.get(server.url("/chrome")).await.unwrap();
+    let chrome = Session::from(Browser::default());
+    assert_eq!(chrome.platform(), Platform::Windows);
+    chrome.get(server.url("/chrome")).send().await.unwrap();
     let sent = server.next_request().await.unwrap();
     assert!(sent.header_values("user-agent")[0].contains("Chrome"));
     assert!(!sent.header_values("sec-ch-ua").is_empty());
@@ -300,8 +308,96 @@ async fn new_is_plain_and_browser_is_one_line() {
 #[test]
 fn every_browser_builds_a_one_line_session() {
     for &browser in Browser::all() {
-        let identity = Session::browser(browser).identity();
-        assert_eq!(identity.browser(), Some(browser), "{browser}");
-        assert_ne!(identity.platform(), Platform::Host, "{browser}");
+        let session = Session::from(browser);
+        assert_eq!(session.browser(), Some(browser), "{browser}");
+        assert_ne!(session.platform(), Platform::Host, "{browser}");
     }
+}
+
+#[test]
+fn edge_and_opera_are_browsers() {
+    assert_eq!("edge-154".parse::<Browser>().unwrap(), Browser::Edge154);
+    assert_eq!(Browser::Opera139.to_string(), "Opera 139");
+    assert_eq!(Browser::Opera139.version(), 139);
+    assert!(Browser::all().contains(&Browser::Opera139));
+    let edge = Session::from(Browser::edge());
+    assert!(edge.user_agent().contains(" Edg/"), "{}", edge.user_agent());
+    assert_eq!(edge.browser(), Some(Browser::edge()));
+    let opera = Session::from(Browser::Opera139);
+    assert!(
+        opera.user_agent().contains(" OPR/139."),
+        "{}",
+        opera.user_agent()
+    );
+}
+
+#[test]
+fn browser_platform_hello_and_languages_are_session_setters() {
+    let hello = Browser::Chrome154.next_hello().unwrap();
+    let session = Session::builder()
+        .platform(Platform::Linux)
+        .browser(Browser::Chrome154)
+        .hello(hello)
+        .languages(["de-DE", "de"])
+        .build()
+        .unwrap();
+    assert_eq!(session.browser(), Some(Browser::Chrome154));
+    assert_eq!(session.hello(), Some(hello));
+    assert_ne!(hello, Browser::Chrome154);
+    assert_eq!(session.platform(), Platform::Linux);
+    assert_eq!(
+        session.languages(),
+        Some(&["de-DE".to_owned(), "de".to_owned()][..])
+    );
+    let mixed = Session::builder()
+        .browser(Browser::Chrome154)
+        .hello(Browser::firefox())
+        .build()
+        .unwrap_err();
+    assert_eq!(mixed.kind(), Kind::Config);
+}
+
+#[test]
+fn profile_toml_and_fingerprint_strings_are_session_setters() {
+    let chrome = Session::from(Browser::Chrome148);
+    let toml = chrome.profile().unwrap();
+    let loaded = Session::builder()
+        .profile(toml)
+        .platform(chrome.platform())
+        .build()
+        .unwrap();
+    assert_eq!(loaded.profile_id(), chrome.profile_id());
+    let ja3 = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47,\
+               0-23-65281-11-35-16-51-43-45-10-13-5-18-27-17613-51764-65037,4588-29-23-24,0";
+    let mixed = Session::builder()
+        .browser(Browser::Chrome148)
+        .ja3(ja3)
+        .build()
+        .unwrap();
+    assert!(mixed.profile_id().is_some());
+    assert_ne!(mixed.profile_id(), chrome.profile_id());
+    for replaced in [
+        Session::builder()
+            .profile(toml)
+            .browser(Browser::Firefox148),
+        mixed.to_builder().browser(Browser::Firefox148),
+    ] {
+        assert_eq!(
+            replaced.build().unwrap().browser(),
+            Some(Browser::Firefox148)
+        );
+    }
+    for bad in [
+        Session::builder().profile("not a profile"),
+        Session::builder().browser(Browser::Chrome148).ja3("771,x"),
+        Session::builder()
+            .browser(Browser::Chrome148)
+            .ja3(ja3)
+            .browser(Browser::Firefox148),
+    ] {
+        assert_eq!(bad.build().unwrap_err().kind(), Kind::Config);
+    }
+    let headers = Browser::Chrome148.headers(Platform::Windows).unwrap();
+    assert_eq!(headers[0].0, "user-agent");
+    assert!(headers.iter().any(|(name, _)| *name == "sec-ch-ua"));
 }

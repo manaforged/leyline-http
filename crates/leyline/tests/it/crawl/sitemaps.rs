@@ -10,16 +10,16 @@ async fn a_crawl_opens_child_sitemaps_only_while_it_needs_pages() {
         .collect();
     let index = format!("<sitemapindex>{children}</sitemapindex>");
     let page_base = base.clone();
-    let server = TestServer::http_on(listener, move |request| {
+    let server = testing::Server::http_on(listener, move |request| {
         let target = request.target.as_str();
         match target {
-            "/robots.txt" => TestResponse::new(200).body(robots.clone()),
-            "/index.xml" => TestResponse::new(200).body(index.clone()),
+            "/robots.txt" => testing::Response::new(200).body(robots.clone()),
+            "/index.xml" => testing::Response::new(200).body(index.clone()),
             _ if target.ends_with(".xml") => {
                 let urls: String = (0..3)
                     .map(|j| format!("<url><loc>{page_base}{}/{j}</loc></url>", &target[..3]))
                     .collect();
-                TestResponse::new(200).body(format!("<urlset>{urls}</urlset>"))
+                testing::Response::new(200).body(format!("<urlset>{urls}</urlset>"))
             }
             path => html(&format!("<p>{path}</p>")),
         }
@@ -56,16 +56,16 @@ async fn a_crawl_reads_every_sitemap_form_and_only_the_ones_it_may() {
     let child = format!("<urlset><url><loc><![CDATA[{base}/cdata?a=1&b=2]]></loc></url></urlset>");
     let missing = format!("<urlset><url><loc>{base}/ghost</loc></url></urlset>");
     let list = format!("{base}/plain\n");
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body(robots.clone()),
-        "/index.xml" => TestResponse::new(200).body(index.clone()),
-        "/ns.xml" => TestResponse::new(200).body(child.clone()),
-        "/missing.xml" => TestResponse::new(404).body(missing.clone()),
-        "/list.txt" => TestResponse::new(200)
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body(robots.clone()),
+        "/index.xml" => testing::Response::new(200).body(index.clone()),
+        "/ns.xml" => testing::Response::new(200).body(child.clone()),
+        "/missing.xml" => testing::Response::new(404).body(missing.clone()),
+        "/list.txt" => testing::Response::new(200)
             .header("content-type", "text/plain")
             .body(list.clone()),
         "/private/hidden.xml" | "/private/listed.xml" | "/far.xml" => {
-            TestResponse::new(200).body("<urlset/>")
+            testing::Response::new(200).body("<urlset/>")
         }
         path => html(&format!("<p>{path}</p>")),
     })
@@ -98,8 +98,8 @@ async fn a_crawl_reads_every_sitemap_form_and_only_the_ones_it_may() {
 
 #[tokio::test]
 async fn a_crawl_ends_at_its_limit_without_waiting_for_sitemaps() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/sitemap.xml" => TestResponse::new(200)
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/sitemap.xml" => testing::Response::new(200)
             .body("<urlset></urlset>")
             .delay(Duration::from_secs(10)),
         "/" => html(r#"<p>home</p><a href="/a">A</a>"#),
@@ -134,19 +134,16 @@ async fn a_crawl_reads_a_sitemap_on_another_host_of_the_same_site_only() {
     );
     let map =
         format!("<urlset><url><loc>http://www.example.test:{port}/listed</loc></url></urlset>");
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body(robots.clone()),
-        "/map.xml" => TestResponse::new(200).body(map.clone()),
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body(robots.clone()),
+        "/map.xml" => testing::Response::new(200).body(map.clone()),
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
     let session = Session::builder()
-        .dns(
-            leyline::DnsConfig::new()
-                .resolve_host("www.example.test", [local])
-                .resolve_host("maps.example.test", [local])
-                .resolve_host("other.test", [local]),
-        )
+        .resolve("www.example.test", [local])
+        .resolve("maps.example.test", [local])
+        .resolve("other.test", [local])
         .build()
         .unwrap();
     let mut crawl = session
@@ -167,8 +164,8 @@ async fn a_crawl_skips_image_locations_in_a_sitemap() {
     let map = format!(
         r#"<urlset xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"><url><loc>{base}/page</loc><image:image><image:loc>{base}/photo.jpg</image:loc></image:image></url></urlset>"#
     );
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-        "/sitemap.xml" => TestResponse::new(200).body(map.clone()),
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+        "/sitemap.xml" => testing::Response::new(200).body(map.clone()),
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
@@ -185,9 +182,9 @@ async fn a_crawl_skips_image_locations_in_a_sitemap() {
 
 #[tokio::test]
 async fn a_crawl_does_not_follow_a_sitemap_redirect_past_robots() {
-    let server = TestServer::http(|request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body("User-agent: *\nDisallow: /private\n"),
-        "/sitemap.xml" => TestResponse::new(301).header("location", "/private/map.xml"),
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /private\n"),
+        "/sitemap.xml" => testing::Response::new(301).header("location", "/private/map.xml"),
         path => html(&format!("<p>{path}</p>")),
     })
     .await
@@ -210,10 +207,10 @@ async fn a_crawl_counts_a_failed_sitemap_and_skips_a_cut_gzip() {
         "<urlset><url><loc>{base}/listed</loc></url></urlset>"
     ));
     let cut = full[..full.len() - 12].to_vec();
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-        "/robots.txt" => TestResponse::new(200).body(robots.clone()),
-        "/broken.xml" => TestResponse::new(500),
-        "/cut.xml.gz" => TestResponse::new(200).body(cut.clone()),
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+        "/robots.txt" => testing::Response::new(200).body(robots.clone()),
+        "/broken.xml" => testing::Response::new(500),
+        "/cut.xml.gz" => testing::Response::new(200).body(cut.clone()),
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
@@ -223,7 +220,7 @@ async fn a_crawl_counts_a_failed_sitemap_and_skips_a_cut_gzip() {
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
-    assert_eq!(crawl.stats().errors(), 2);
+    assert_eq!(crawl.errors(), 2);
 }
 
 #[tokio::test]
@@ -233,11 +230,11 @@ async fn a_crawl_tries_a_busy_sitemap_again() {
     let map = format!("<urlset><url><loc>{base}/listed</loc></url></urlset>");
     let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let count = calls.clone();
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
         "/sitemap.xml" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
-            TestResponse::new(503)
+            testing::Response::new(503)
         }
-        "/sitemap.xml" => TestResponse::new(200).body(map.clone()),
+        "/sitemap.xml" => testing::Response::new(200).body(map.clone()),
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
@@ -253,9 +250,9 @@ async fn a_crawl_tries_a_busy_sitemap_again() {
 
 #[tokio::test]
 async fn a_site_without_a_sitemap_is_not_an_error() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/" => html("<p>home</p>"),
-        _ => TestResponse::new(404),
+        _ => testing::Response::new(404),
     })
     .await
     .unwrap();
@@ -265,7 +262,7 @@ async fn a_site_without_a_sitemap_is_not_an_error() {
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
-    assert_eq!(crawl.stats().errors(), 0);
+    assert_eq!(crawl.errors(), 0);
 }
 
 #[test]
@@ -285,13 +282,13 @@ fn a_sitemap_retry_waiting_for_a_free_sitemap_slot_does_not_spin() {
             let map = format!("<urlset><url><loc>{base}/listed</loc></url></urlset>");
             let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let count = calls.clone();
-            let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-                "/robots.txt" => TestResponse::new(200).body(robots.clone()),
+            let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+                "/robots.txt" => testing::Response::new(200).body(robots.clone()),
                 "/busy.xml" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
-                    TestResponse::new(503)
+                    testing::Response::new(503)
                 }
-                "/busy.xml" => TestResponse::new(200).body(map.clone()),
-                "/slow1.xml" | "/slow2.xml" => TestResponse::new(200)
+                "/busy.xml" => testing::Response::new(200).body(map.clone()),
+                "/slow1.xml" | "/slow2.xml" => testing::Response::new(200)
                     .body("<urlset></urlset>")
                     .delay(Duration::from_secs(2)),
                 path => html(&format!("<p>{path}</p>")),
@@ -317,9 +314,9 @@ async fn a_crawl_follows_a_sitemap_to_its_new_address() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let map = format!("<urlset><url><loc>{base}/orphan</loc></url></urlset>");
-    let server = TestServer::http_on(listener, move |request| match request.target.as_str() {
-        "/sitemap.xml" => TestResponse::new(301).header("location", "/maps/real.xml"),
-        "/maps/real.xml" => TestResponse::new(200).body(map.clone()),
+    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+        "/sitemap.xml" => testing::Response::new(301).header("location", "/maps/real.xml"),
+        "/maps/real.xml" => testing::Response::new(200).body(map.clone()),
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();

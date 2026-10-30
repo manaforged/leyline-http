@@ -1,9 +1,8 @@
+use crate::audit::{JA3_POINT_FORMATS, JA3_RECORD_VERSION};
 use crate::iana::{cipher_name, curve_name};
 use crate::profile::TlsProfile;
 
 use super::parse_list;
-
-const RECORD_VERSION: &str = "771";
 
 impl TlsProfile {
     pub(super) fn apply_ja3(&mut self, raw: &str) -> Result<(), String> {
@@ -15,15 +14,16 @@ impl TlsProfile {
                 fields.len()
             ));
         };
-        if *version != RECORD_VERSION {
+        if *version != JA3_RECORD_VERSION.to_string() {
             return Err(format!(
-                "version {version} is not {RECORD_VERSION}; leyline sends TLS 1.2 as the ClientHello \
-                 version"
+                "version {version} is not {JA3_RECORD_VERSION}; leyline sends TLS 1.2 as the \
+                 ClientHello version"
             ));
         }
-        if parse_list(point_formats, 10, "point format")? != [0] {
+        if parse_list(point_formats, 10, "point format")? != [JA3_POINT_FORMATS] {
             return Err(format!(
-                "point formats {point_formats:?} are not \"0\"; BoringSSL sends only uncompressed"
+                "point formats {point_formats:?} are not \"{JA3_POINT_FORMATS}\"; BoringSSL sends \
+                 only uncompressed"
             ));
         }
         self.ciphers =

@@ -1,12 +1,14 @@
 use url::Url;
 
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 
 mod sealed {
     pub trait Sealed {}
 }
 
+/// Converts a value into a parsed `Url`.
 pub trait IntoUrl: sealed::Sealed {
+    /// Parses the value as a URL and fails when it is not a valid absolute URL.
     fn into_url(self) -> Result<Url>;
 
     #[doc(hidden)]
@@ -34,7 +36,7 @@ impl sealed::Sealed for &str {}
 impl IntoUrl for &str {
     fn into_url(self) -> Result<Url> {
         if self.chars().any(|c| c.is_ascii_control()) {
-            return Err(Error::new(Kind::Url).with_message("URL contains a control character"));
+            return Err(Error::new(Cause::Url).with_message("URL contains a control character"));
         }
         Url::parse(self).map_err(Error::from_url_parse)
     }

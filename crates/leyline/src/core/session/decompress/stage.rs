@@ -14,7 +14,10 @@ use super::limit::Cap;
     feature = "compression-zstd"
 ))]
 use super::sink::Sink;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
+
+#[cfg(feature = "compression-zstd")]
+const ZSTD_WINDOW_LOG_MAX: u32 = 23;
 
 pub(super) enum Stage {
     Identity,
@@ -42,7 +45,7 @@ pub(super) enum Stage {
     feature = "compression-zstd"
 )))]
 fn missing_feature(name: &str, feature: &str) -> Error {
-    Error::new(Kind::Decode).with_message(format!(
+    Error::new(Cause::Decode).with_message(format!(
         "{name} body received but the {feature} feature is not compiled in"
     ))
 }
@@ -56,7 +59,7 @@ fn missing_feature(name: &str, feature: &str) -> Error {
 fn decode_error(name: &str, error: std::io::Error) -> Error {
     match super::BodyLimit::of_io(&error) {
         Some(limit) => limit.error(),
-        None => Error::new(Kind::Decode).with_message(format!("{name}: {error}")),
+        None => Error::new(Cause::Decode).with_message(format!("{name}: {error}")),
     }
 }
 
@@ -64,7 +67,7 @@ fn decode_error(name: &str, error: std::io::Error) -> Error {
 fn require_end(writer: &mut dyn Write, name: &str) -> Result<()> {
     match writer.write(&[0]) {
         Ok(0) => Ok(()),
-        _ => Err(Error::new(Kind::Decode).with_message(format!("{name}: truncated stream"))),
+        _ => Err(Error::new(Cause::Decode).with_message(format!("{name}: truncated stream"))),
     }
 }
 
@@ -180,10 +183,16 @@ impl Stage {
                 #[cfg(feature = "compression-zstd")]
                 {
                     zstd::stream::raw::Decoder::new()
+                        .and_then(|mut d| {
+                            d.set_parameter(zstd::stream::raw::DParameter::WindowLogMax(
+                                ZSTD_WINDOW_LOG_MAX,
+                            ))?;
+                            Ok(d)
+                        })
                         .map(|d| {
                             Self::Zstd(Box::new(zstd::stream::zio::Writer::new(Sink::new(cap), d)))
                         })
-                        .map_err(|e| Error::new(Kind::Decode).with_message(format!("zstd: {e}")))
+                        .map_err(|e| Error::new(Cause::Decode).with_message(format!("zstd: {e}")))
                 }
                 #[cfg(not(feature = "compression-zstd"))]
                 {

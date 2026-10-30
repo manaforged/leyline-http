@@ -1,4 +1,5 @@
 #![forbid(unsafe_code)]
+/// Returns the URL with its credentials and query masked as `***` and its fragment removed.
 pub fn redact(raw: &str) -> String {
     let Ok(mut parsed) = url::Url::parse(raw) else {
         return mask_userinfo(&mask_query(raw));
@@ -29,7 +30,7 @@ pub fn redact(raw: &str) -> String {
     }
 }
 
-fn mask_query(text: &str) -> String {
+pub(crate) fn mask_query(text: &str) -> String {
     let text = text.split_once('#').map_or(text, |(head, _)| head);
     match text.split_once('?') {
         Some((head, _)) => format!("{head}?***"),
@@ -66,13 +67,6 @@ pub(crate) fn without_userinfo(mut url: url::Url) -> url::Url {
         tracing::trace!("url cannot carry userinfo");
     }
     url
-}
-
-pub(crate) fn redact_target(target: &str) -> String {
-    match target.split_once('?') {
-        Some((path, _)) => format!("{path}?***"),
-        None => target.to_owned(),
-    }
 }
 
 pub(crate) fn request_target(url: &url::Url) -> &str {
@@ -204,8 +198,11 @@ fn hex_val(b: u8) -> Option<u8> {
     }
 }
 
+pub(crate) const MAX_INFORMATIONAL: usize = 16;
+
 pub(crate) mod atomic;
 pub(crate) mod autosave;
+pub(crate) mod date;
 pub(crate) mod upload;
 
 #[cfg(test)]

@@ -12,7 +12,7 @@ the `io` feature.
 `Option<u64>` length. Give the length whenever you know it: Leyline then
 sends `Content-Length` on every protocol. Without it, HTTP/1.1 sends
 `Transfer-Encoding: chunked` and HTTP/2 and HTTP/3 declare no length, which
-some origins reject. `Body::len_hint()` reports the declared length.
+some origins reject.
 
 ```rust,no_run
 use leyline::Body;
@@ -26,14 +26,14 @@ let resp = session
     .post("https://example.com/upload")
     .header("content-type", "application/octet-stream")
     .body(body)
-    .await?;
+    .send().await?;
 println!("{}", resp.status());
 # Ok(())
 # }
 ```
 
 When your stream returns an error, the request fails with `Kind::Body`, and
-`Error::io()` returns your error. Leyline does not resend, because a stream
+the error's `source()` chain carries your error. Leyline does not resend, because a stream
 cannot be replayed. An HTTP/2 or HTTP/3 connection resets only that stream
 and stays open. An HTTP/1.1 connection closes, because it holds part of the
 request.
@@ -53,16 +53,21 @@ For retries or replayable redirects, buffer the body and send it as `Bytes`.
 ## Stream a response body
 
 Call `.stream()` on the request builder. The response arrives with the
-headers, and `into_stream()` returns the body as a `BodyStream`, a
-`futures_util::Stream<Item = io::Result<Bytes>>`.
+headers, and `bytes_stream()` returns the decoded body as a
+`futures_util::Stream<Item = leyline::Result<Bytes>>`.
 
 ```rust,no_run
 use futures_util::StreamExt;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let resp = session.get("https://example.com/big").stream().await?;
-let mut body = resp.into_decoded_stream(Some(64 * 1024 * 1024))?;
+let resp = session
+    .get("https://example.com/big")
+    .max_body_size(64 * 1024 * 1024)
+    .stream()
+    .send()
+    .await?;
+let mut body = resp.bytes_stream()?;
 let mut total = 0u64;
 while let Some(chunk) = body.next().await {
     total += chunk?.len() as u64;
@@ -77,28 +82,29 @@ drain and decode it. A streamed response carries no trailers.
 
 ### Decoded or raw
 
-| Calls | Bytes | Cap | Use it to |
-| --- | --- | --- | --- |
-| `into_decoded_stream(limit)`, `copy_decoded_to(writer, limit)` | Content coding removed | The smaller of `limit` and `max_body_size` | Save a file, parse the body |
-| `into_stream()`, `copy_to(writer)` | As sent, still encoded | None | Pass the body on with its `content-encoding`, as a proxy does |
+`bytes_stream()`, `write_to(writer)`, and `download_to(path)` decode chunk by
+chunk and work on a buffered response too. Send the request with
+`.decode(false)` to get the bytes as sent, still encoded, for example to pass
+the body on with its `content-encoding`, as a proxy does.
 
-The decoded calls decode chunk by chunk and work on a buffered response too.
-`limit: None` means `max_body_size`. A body of exactly `limit` bytes passes. A
-longer one fails with `Error::is_body_limit()` true, and the chunk that
-crosses the limit is not written. A coding that `CompressionConfig` turns off
-passes through still encoded. See [Responses](responses.md#bodies).
+Every call stops at `max_body_size`: the request's, or else the session's.
+A body of exactly that many bytes passes. A longer one fails with
+`Kind::BodyLimit`, and the chunk that crosses the limit is not written. A
+coding the session does not offer passes through still encoded. See
+[Responses](responses.md#bodies).
 
 ## Download a file
 
-`RequestBuilder::download(path, limit)` sends the request with `.stream()`
-and saves the decoded body to `path`. It returns the number of bytes written.
-`Response::download_to(path, limit)` does the same for a response you hold.
+`Response::download_to(path)` saves the decoded body to `path` and
+returns the number of bytes written. Send the request with `.stream()`, so
+the body is not buffered first, and with `.error_for_status()`, so an error
+response is not saved.
 
 | Step | What happens |
 | --- | --- |
-| Status | With `download`, a status of 400 or more is a `Kind::Status` error with the status, the URL, the headers, and the start of the body, within the [status-error limits](responses.md#turn-a-status-into-an-error). Nothing is written. `download_to` does not check the status; call `error_for_status()` first |
+| Status | With `RequestBuilder::error_for_status()`, a status of 400 or more is a `Kind::Status` error with the status, the URL, the headers, and the start of the body, within the [status-error limits](responses.md#turn-a-status-into-an-error), and nothing is written. `download_to` itself does not check the status |
 | Write | The decoded body goes to a temporary file `.<name>.<16 hex>.part` in the same directory |
-| Limit | The smaller of `limit` and `max_body_size`, in decoded bytes. `content_length()` is the encoded size |
+| Limit | `max_body_size`, the request's or else the session's, in decoded bytes. `content_length()` is the encoded size |
 | Commit | Leyline flushes and syncs the file, renames it to `path`, and on Unix syncs the directory. When `path` already exists, the new file keeps its permission bits, without setuid, setgid, or sticky bits. The commit starts on a blocking thread after the file is synced. Once it has started, it finishes even if the future is dropped |
 | Error or drop | Before the commit starts, Leyline removes the temporary file, and `path` does not exist or keeps its old content |
 | Directory sync failure | `path` already holds the new file. The error is `Kind::Io`, and its message says that the target was replaced but the directory sync failed |
@@ -111,7 +117,7 @@ For a `.stream()` request, `total` covers the request up to the response
 head. Two timeouts bound the body:
 
 - `read` limits the gap between two chunks. It stops a server that goes
-  quiet. A gap past it is an `io::ErrorKind::TimedOut` error from the stream.
+  quiet. A gap past it is a `Kind::Timeout` error from the stream.
 - `body` limits the whole body, from its first read. It stops a server that sends
   slowly but never stops. A plain `Duration` passed to `.timeout` sets only
   `total`, which ends at the head of a streamed response.
@@ -119,22 +125,27 @@ head. Two timeouts bound the body:
 ```rust,no_run
 use std::time::Duration;
 
-use leyline::TimeoutConfig;
+use leyline::Timeout;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 match session
     .get("https://example.com/image.iso")
     .timeout(
-        TimeoutConfig::new()
+        Timeout::new()
             .read(Duration::from_secs(30))
             .body(Duration::from_secs(600)),
     )
-    .download("image.iso", Some(8 * 1024 * 1024 * 1024))
+    .error_for_status()
+    .max_body_size(8 * 1024 * 1024 * 1024)
+    .stream()
+    .send()
+    .await?
+    .download_to("image.iso")
     .await
 {
     Ok(n) => println!("{n} bytes"),
-    Err(e) if e.is_body_limit() => eprintln!("too large: {e}"),
+    Err(e) if e.kind() == leyline::Kind::BodyLimit => eprintln!("too large: {e}"),
     Err(e) => return Err(e),
 }
 # Ok(())
@@ -147,43 +158,42 @@ download from your code, drop the future; see
 
 ## Stop at a marker
 
-`RequestBuilder::read_until(limit, done)` sends the request, reads and decodes
-the body as the chunks arrive, and stops when you tell it to. Use it when the
-value you need sits near the top of a large page. It streams the response
-itself, so the body is not buffered first, and it keeps the request's
-redirects, retries, authentication, host limits, and `error_for_status()`.
+`Response::read_until(limit, done)` reads and decodes the body as the chunks
+arrive, and stops when you tell it to. Use it when the value you need sits
+near the top of a large page. Send the request with `.stream()`, so the body
+is not buffered first; the request keeps its redirects, retries,
+authentication, host limits, and `error_for_status()`.
 
 After each chunk that adds decoded bytes, Leyline calls `done(body, from)`:
 `body` is every decoded byte so far, and `from` is where the new bytes start.
-Return `true` to stop. The call returns a `PrefixRead`: the decoded prefix in
-`bytes`, and why the read stopped in `stopped_by`.
+Return `true` to stop. The call returns `(bytes, matched)`: the decoded
+prefix, and `true` when `done` returned `true`. A match inside the first
+`limit` bytes wins over the limit.
 
-| `StopReason` | Meaning |
-| --- | --- |
-| `PredicateMatched` | `done` returned `true`. A match inside the first `limit` bytes wins over the limit |
-| `LimitReached` | The prefix reached `limit` decoded bytes. The body may or may not continue; Leyline reads no further to find out |
-| `EndOfBody` | The body ended first |
-
-`LimitReached` and `EndOfBody` mean that `done` found no answer, not that the
-answer is "no". A zero `limit` reads nothing and returns `LimitReached`, and
-`done` is never called for an empty body.
+`matched` is `false` when the prefix reached `limit` decoded bytes or the body
+ended first; compare the length with `limit` to tell the two apart. At the
+limit, the body may or may not continue; Leyline reads no further to find out.
+`false` means that `done` found no answer, not that the answer is "no". A zero
+`limit` reads nothing, and `done` is never called for an empty body.
 
 ```rust,no_run
-use leyline::StopReason;
-
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let marker = b"</head>";
-let read = session
+let (head, matched) = session
     .get("https://example.com/big")
+    .stream()
+    .send()
+    .await?
     .read_until(256 * 1024, |body, from| {
         let start = from.saturating_sub(marker.len() - 1);
         body[start..].windows(marker.len()).any(|w| w == marker)
     })
     .await?;
-match read.stopped_by {
-    StopReason::PredicateMatched => println!("head is {} bytes", read.bytes.len()),
-    other => println!("no </head> found: {other:?}"),
+if matched {
+    println!("head is {} bytes", head.len());
+} else {
+    println!("no </head> found in {} bytes", head.len());
 }
 # Ok(())
 # }
@@ -206,7 +216,7 @@ resets the stream and keeps the connection.
 [Retries and timeouts](retries-and-timeouts.md#the-timeouts).
 
 `Response::read_until` does the same on a response you already have and
-returns only the bytes. Send that request with `.stream()` first; without
+returns the bytes read and whether `done` matched. Send that request with `.stream()` first; without
 it, the body is already buffered, and stopping early saves nothing.
 
 Corrupt compressed data fails with `Kind::Decode`, a body cut short with
@@ -223,5 +233,5 @@ reader slows the sender instead of growing a buffer.
 | HTTP/2 | 32 chunks | The driver keeps serving other streams. It queues the stalled stream's data and sends no window update for it, so the queue stays within the stream's receive window |
 | HTTP/3 | 32 chunks | Leyline stops reading the QUIC stream, and QUIC flow control slows the peer |
 
-Dropping a `BodyStream` before its end stops the transfer. See
+Dropping the `bytes_stream()` stream before its end stops the transfer. See
 [Cancellation](cancellation.md) for what happens to the connection.

@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
-use super::{Connect, Done, Head, Sent, Trace};
+use super::{Event, Trace};
 use crate::Session;
 use crate::util::lock;
 
@@ -29,20 +29,16 @@ impl Recorder {
 }
 
 impl Trace for Recorder {
-    fn connect(&self, ev: &Connect<'_>) {
-        self.push(ev.id, format!("connect reused={}", ev.reused));
-    }
-
-    fn sent(&self, ev: &Sent<'_>) {
-        self.push(ev.id, "sent".to_string());
-    }
-
-    fn head(&self, ev: &Head<'_>) {
-        self.push(ev.id, format!("head status={}", ev.status));
-    }
-
-    fn done(&self, ev: &Done<'_>) {
-        self.push(ev.id, format!("done ok={}", ev.outcome.is_ok()));
+    fn event(&self, event: &Event<'_>) {
+        match *event {
+            Event::Connect { id, reused, .. } => self.push(id, format!("connect reused={reused}")),
+            Event::Sent { id, .. } => self.push(id, "sent".to_string()),
+            Event::Head { id, status, .. } => self.push(id, format!("head status={status}")),
+            Event::Done { id, outcome, .. } => {
+                self.push(id, format!("done ok={}", outcome.is_ok()))
+            }
+            _ => {}
+        }
     }
 }
 
@@ -165,9 +161,11 @@ async fn response_timing_reports_a_fresh_dial() {
         .await
         .unwrap();
 
-    let timing = resp.timing();
-    assert!(!timing.reused, "a fresh dial is not a reuse");
-    assert!(timing.connect_ms.is_some(), "a fresh dial records connect");
+    assert!(!resp.reused(), "a fresh dial is not a reuse");
+    assert!(
+        resp.connect_time().is_some(),
+        "a fresh dial records connect"
+    );
 }
 
 #[tokio::test]

@@ -2,11 +2,11 @@ use super::*;
 
 #[tokio::test]
 async fn a_crawl_stops_at_the_page_budget_and_skips_files() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/" => html(
             r#"<a href="/report.pdf">R</a><a href="/1">1</a><a href="/2">2</a><a href="/3">3</a><a href="/4">4</a>"#,
         ),
-        "/report.pdf" => TestResponse::new(200)
+        "/report.pdf" => testing::Response::new(200)
             .header("content-type", "application/pdf")
             .body("%PDF"),
         path => html(&format!("<p>page {path}</p>")),
@@ -20,15 +20,15 @@ async fn a_crawl_stops_at_the_page_budget_and_skips_files() {
         kept += 1;
     }
     assert_eq!(kept, 3);
-    assert_eq!(crawl.stats().skipped(SkipReason::NotHtml), 1);
+    assert_eq!(crawl.skipped(SkipReason::NotHtml), 1);
     assert!(!targets(&server).await.contains("/4"));
 }
 
 #[tokio::test]
 async fn a_shut_down_session_ends_the_crawl() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/" => html(r#"<a href="/slow1">1</a><a href="/slow2">2</a>"#),
-        "/robots.txt" | "/sitemap.xml" => TestResponse::new(404),
+        "/robots.txt" | "/sitemap.xml" => testing::Response::new(404),
         _ => html("<p>slow</p>").delay(Duration::from_secs(5)),
     })
     .await
@@ -48,11 +48,11 @@ async fn a_shut_down_session_ends_the_crawl() {
 
 #[tokio::test]
 async fn a_crawl_sniffs_a_page_without_a_content_type() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/" => html(r#"<a href="/plain">P</a><a href="/data">D</a>"#),
-        "/plain" => TestResponse::new(200).body("\n  <!doctype html><p>no header</p>"),
-        "/data" => TestResponse::new(200).body("{\"a\": 1}"),
-        _ => TestResponse::new(404),
+        "/plain" => testing::Response::new(200).body("\n  <!doctype html><p>no header</p>"),
+        "/data" => testing::Response::new(200).body("{\"a\": 1}"),
+        _ => testing::Response::new(404),
     })
     .await
     .unwrap();
@@ -66,15 +66,15 @@ async fn a_crawl_sniffs_a_page_without_a_content_type() {
         kept.insert(page.unwrap().url().path().to_owned());
     }
     assert_eq!(kept, BTreeSet::from(["/".to_owned(), "/plain".to_owned()]));
-    assert_eq!(crawl.stats().skipped(SkipReason::NotHtml), 1);
+    assert_eq!(crawl.skipped(SkipReason::NotHtml), 1);
 }
 
 #[tokio::test]
 async fn a_crawl_resolves_links_against_the_base_element() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/" => html(r#"<base href="/docs/"><a href="guide">G</a>"#),
         "/docs/guide" => html("<p>guide</p>"),
-        _ => TestResponse::new(404),
+        _ => testing::Response::new(404),
     })
     .await
     .unwrap();
@@ -90,9 +90,9 @@ async fn a_crawl_resolves_links_against_the_base_element() {
 
 #[tokio::test]
 async fn a_crawl_sniffs_html_that_breaks_its_first_tag_with_a_newline() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/" => html(r#"<a href="/bare">B</a>"#),
-        _ => TestResponse::new(200).body("<html\n><p>no content type</p></html>"),
+        _ => testing::Response::new(200).body("<html\n><p>no content type</p></html>"),
     })
     .await
     .unwrap();
@@ -108,9 +108,9 @@ async fn a_crawl_sniffs_html_that_breaks_its_first_tag_with_a_newline() {
 
 #[tokio::test]
 async fn a_crawl_sniffs_html_that_starts_with_a_comment() {
-    let server = TestServer::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target.as_str() {
         "/" => html(r#"<a href="/bare">B</a>"#),
-        _ => TestResponse::new(200).body("<!--generated--><p>no content type</p>"),
+        _ => testing::Response::new(200).body("<!--generated--><p>no content type</p>"),
     })
     .await
     .unwrap();

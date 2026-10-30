@@ -1,14 +1,14 @@
 use md5::{Digest as Md5Digest, Md5};
 use sha2::{Sha256, Sha512_256};
 
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 
 mod scan;
 
 use scan::{Pair, pairs};
 
 #[derive(Clone)]
-pub struct DigestAuth {
+pub(crate) struct DigestAuth {
     pub(crate) username: String,
     pub(crate) password: String,
 }
@@ -22,7 +22,7 @@ impl std::fmt::Debug for DigestAuth {
 }
 
 impl DigestAuth {
-    pub fn new(username: impl Into<String>, password: impl Into<String>) -> Self {
+    pub(crate) fn new(username: impl Into<String>, password: impl Into<String>) -> Self {
         Self {
             username: username.into(),
             password: password.into(),
@@ -101,7 +101,7 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let body = trimmed
         .strip_prefix("Digest ")
         .or_else(|| trimmed.strip_prefix("digest "))
-        .ok_or_else(|| Error::new(Kind::Request).with_message("digest: not a Digest challenge"))?;
+        .ok_or_else(|| Error::new(Cause::Request).with_message("digest: not a Digest challenge"))?;
 
     let mut ch = Challenge::default();
     for pair in pairs(body) {
@@ -110,7 +110,7 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
 
     if ch.nonce.is_empty() {
         return Err(
-            Error::new(Kind::Request).with_message("digest: challenge missing required `nonce`")
+            Error::new(Cause::Request).with_message("digest: challenge missing required `nonce`")
         );
     }
 
@@ -142,7 +142,7 @@ fn algorithm(val: &str) -> Result<Algorithm> {
         "SHA-256-sess" | "sha-256-sess" => Ok(Algorithm::Sha256Sess),
         "SHA-512-256" | "sha-512-256" => Ok(Algorithm::Sha512_256),
         "SHA-512-256-sess" | "sha-512-256-sess" => Ok(Algorithm::Sha512_256Sess),
-        other => Err(Error::new(Kind::Request)
+        other => Err(Error::new(Cause::Request)
             .with_message(format!("digest: unsupported algorithm {other}"))),
     }
 }

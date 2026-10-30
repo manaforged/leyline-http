@@ -1,8 +1,8 @@
 use super::{
-    WsConnection, is_reserved_ws_header, overlay_headers, tungstenite_config, ws_header_pair,
+    WebSocket, is_reserved_ws_header, overlay_headers, tungstenite_config, ws_header_pair,
 };
-use crate::core::WebSocketConfig;
-use crate::core::error::{Error, Kind};
+use crate::core::config::WebSocketOptions;
+use crate::core::error::{Cause, Error};
 use crate::profile::preset::HeaderPair;
 
 #[test]
@@ -51,21 +51,21 @@ fn valid_header_pair_ok() {
 
 #[test]
 fn only_missing_connect_protocol_falls_back() {
-    assert!(WsConnection::is_h2_fallback_trigger(
-        &Error::new(Kind::Request).with_message("h2-no-connect-protocol")
+    assert!(WebSocket::is_h2_fallback_trigger(
+        &Error::new(Cause::Request).with_message("h2-no-connect-protocol")
     ));
-    assert!(!WsConnection::is_h2_fallback_trigger(
-        &Error::new(Kind::Request).with_message("peer reset")
+    assert!(!WebSocket::is_h2_fallback_trigger(
+        &Error::new(Cause::Request).with_message("peer reset")
     ));
 }
 
 #[test]
 fn websocket_config_limits_are_applied() {
-    let cfg = WebSocketConfig {
+    let cfg = WebSocketOptions {
         max_frame_size: Some(4096),
         max_message_size: Some(8192),
         read_buffer_size: Some(1024),
-        ..WebSocketConfig::default()
+        ..WebSocketOptions::default()
     };
     let mapped = tungstenite_config(&cfg);
     assert_eq!(mapped.max_frame_size, Some(4096));

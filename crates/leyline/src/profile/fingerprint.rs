@@ -4,17 +4,28 @@ mod ja4;
 
 use crate::iana::is_grease;
 use crate::profile::{BrowserProfile, TlsProfile};
-use crate::{Error, Kind};
+use crate::{Cause, Error};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct FingerprintSpec {
-    ja3: Option<String>,
-    ja4_r: Option<String>,
-    akamai: Option<String>,
-    header_order: Option<Vec<String>>,
+    layer: FingerprintLayer,
     base: Option<BrowserProfile>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct FingerprintLayer {
+    #[serde(default)]
     name: Option<String>,
+    #[serde(default)]
+    ja4_r: Option<String>,
+    #[serde(default)]
+    ja3: Option<String>,
+    #[serde(default)]
+    akamai: Option<String>,
+    #[serde(default)]
+    header_order: Option<Vec<String>>,
 }
 
 impl FingerprintSpec {
@@ -25,19 +36,19 @@ impl FingerprintSpec {
 
     #[must_use]
     pub fn ja3(mut self, raw: impl Into<String>) -> Self {
-        self.ja3 = Some(raw.into());
+        self.layer.ja3 = Some(raw.into());
         self
     }
 
     #[must_use]
     pub fn ja4_r(mut self, raw: impl Into<String>) -> Self {
-        self.ja4_r = Some(raw.into());
+        self.layer.ja4_r = Some(raw.into());
         self
     }
 
     #[must_use]
     pub fn akamai(mut self, raw: impl Into<String>) -> Self {
-        self.akamai = Some(raw.into());
+        self.layer.akamai = Some(raw.into());
         self
     }
 
@@ -47,7 +58,7 @@ impl FingerprintSpec {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.header_order = Some(order.into_iter().map(Into::into).collect());
+        self.layer.header_order = Some(order.into_iter().map(Into::into).collect());
         self
     }
 
@@ -56,34 +67,56 @@ impl FingerprintSpec {
         self.base = Some(profile);
         self
     }
-
-    #[must_use]
-    pub fn name(mut self, name: impl Into<String>) -> Self {
-        self.name = Some(name.into());
-        self
-    }
 }
 
 fn config_error(format: &str, why: impl std::fmt::Display) -> Error {
-    Error::new(Kind::Config).with_message(format!("{format} fingerprint: {why}"))
+    Error::new(Cause::Config).with_message(format!("{format} fingerprint: {why}"))
 }
 
 impl BrowserProfile {
     pub fn from_fingerprint(spec: FingerprintSpec) -> crate::Result<Self> {
-        let mut profile = spec.base.unwrap_or_else(|| (*Self::bare_shared()).clone());
-        if let Some(name) = spec.name {
-            profile.meta.name = name;
+        let base = spec.base.unwrap_or_else(|| (*Self::bare_shared()).clone());
+        let source = base.source().ok_or_else(|| {
+            Error::new(Cause::Config).with_message("fingerprint base profile has no TOML source")
+        })?;
+        Self::from_toml(&format!("{source}{}", spec.layer.to_toml()))
+    }
+}
+
+impl FingerprintLayer {
+    fn to_toml(&self) -> String {
+        let mut out = String::from("\n[[fingerprint]]\n");
+        for (key, value) in [
+            ("name", &self.name),
+            ("ja4_r", &self.ja4_r),
+            ("ja3", &self.ja3),
+            ("akamai", &self.akamai),
+        ] {
+            if let Some(value) = value {
+                out += &format!("{key} = {}\n", quote(value));
+            }
         }
-        if spec.ja4_r.is_some() || spec.ja3.is_some() {
+        if let Some(order) = &self.header_order {
+            let names: Vec<String> = order.iter().map(|name| quote(name)).collect();
+            out += &format!("header_order = [{}]\n", names.join(", "));
+        }
+        out
+    }
+
+    pub(crate) fn apply(&self, profile: &mut BrowserProfile) -> crate::Result<()> {
+        if let Some(name) = &self.name {
+            profile.meta.name.clone_from(name);
+        }
+        if self.ja4_r.is_some() || self.ja3.is_some() {
             profile.tls.fingerprint = None;
         }
-        if let Some(raw) = spec.ja4_r.as_deref() {
+        if let Some(raw) = self.ja4_r.as_deref() {
             profile
                 .tls
                 .apply_ja4(raw)
                 .map_err(|why| config_error("JA4_r", why))?;
         }
-        if let Some(raw) = spec.ja3.as_deref() {
+        if let Some(raw) = self.ja3.as_deref() {
             profile
                 .tls
                 .apply_ja3(raw)
@@ -93,17 +126,31 @@ impl BrowserProfile {
             .tls
             .validate(false)
             .map_err(|why| config_error("TLS", why))?;
-        if let Some(raw) = spec.akamai.as_deref() {
+        if let Some(raw) = self.akamai.as_deref() {
             profile
                 .h2
                 .apply_akamai(raw)
                 .map_err(|why| config_error("Akamai", why))?;
         }
-        if spec.header_order.is_some() {
-            profile.meta.header_order = spec.header_order;
+        if self.header_order.is_some() {
+            profile.meta.header_order.clone_from(&self.header_order);
         }
-        Ok(profile)
+        Ok(())
     }
+}
+
+fn quote(text: &str) -> String {
+    let mut out = String::from("\"");
+    for c in text.chars() {
+        match c {
+            '"' => out += "\\\"",
+            '\\' => out += "\\\\",
+            c if c.is_control() => out += &format!("\\u{:04X}", u32::from(c)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
 
 fn parse_list(field: &str, radix: u32, what: &str) -> Result<Vec<u16>, String> {

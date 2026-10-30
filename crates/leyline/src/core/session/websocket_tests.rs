@@ -34,31 +34,17 @@ fn origin_rejects_plaintext_ws() {
     assert!(message.contains("wss://"), "unexpected error: {message}");
 }
 
-#[test]
-fn headers_append_every_value() {
-    let builder = Session::browser(crate::Browser::default())
-        .websocket("wss://example.com/socket")
-        .headers([("a", "1")])
-        .headers([("a", "2"), ("b", "3")]);
-    let headers = builder.headers.unwrap();
-    let sent: Vec<(&str, &str)> = headers
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.to_str().unwrap()))
-        .collect();
-    assert_eq!(sent, [("a", "1"), ("a", "2"), ("b", "3")]);
-}
-
 #[tokio::test]
 async fn an_invalid_header_fails_before_the_connection_opens() {
     let session = Session::builder()
-        .proxy(crate::ProxyConfig::new().env(false))
+        .proxy(crate::Proxy::new().env(false))
         .build()
         .unwrap();
     let err = session
-        .websocket("wss://127.0.0.1:9/socket")
+        .get("wss://127.0.0.1:9/socket")
         .header("bad name", "value")
-        .connect()
+        .websocket()
         .await
         .unwrap_err();
-    assert_eq!(err.kind(), crate::Kind::Request, "{err:?}");
+    assert_eq!(err.cause(), crate::Cause::Request, "{err:?}");
 }

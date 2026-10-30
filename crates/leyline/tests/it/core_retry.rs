@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::stream;
-use leyline::{Body, ProtocolPolicy, RetryPolicy, Session};
+use leyline::{Body, Protocol, Retry, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn read_one_request(sock: &mut tokio::net::TcpStream) {
@@ -55,15 +55,17 @@ async fn retries_503_then_succeeds() {
         }
     });
 
-    let policy = RetryPolicy::transient()
-        .initial_backoff(Duration::from_millis(1))
-        .max_backoff(Duration::from_millis(10));
+    let policy = Retry::new(3).backoff(Duration::from_millis(1), Duration::from_millis(10));
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .retry(policy)
         .build()
         .unwrap();
-    let resp = session.get(format!("http://{addr}/flaky")).await.unwrap();
+    let resp = session
+        .get(format!("http://{addr}/flaky"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.status(), 200);
     assert_eq!(resp.text().await.unwrap(), "ok");
     assert_eq!(counter.load(Ordering::Relaxed), 3);
@@ -90,10 +92,11 @@ async fn new_sessions_do_not_retry_503() {
     });
 
     let resp = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap()
         .get(format!("http://{addr}/flaky"))
+        .send()
         .await
         .unwrap();
     assert_eq!(resp.status(), 503);
@@ -121,12 +124,10 @@ async fn does_not_retry_on_400() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    let policy = RetryPolicy::transient()
-        .initial_backoff(Duration::from_millis(1))
-        .max_backoff(Duration::from_millis(5));
+    let policy = Retry::new(3).backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/bad"))
         .retry(policy)
@@ -169,12 +170,10 @@ async fn post_without_opt_in_does_not_retry() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    let policy = RetryPolicy::transient()
-        .initial_backoff(Duration::from_millis(1))
-        .max_backoff(Duration::from_millis(5));
+    let policy = Retry::new(3).backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
         .post(format!("http://{addr}/payment"))
         .body(vec![1u8, 2, 3])
@@ -190,7 +189,7 @@ async fn post_without_opt_in_does_not_retry() {
 #[tokio::test]
 async fn streaming_body_plus_retry_errors_clearly() {
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let chunks: Vec<std::io::Result<Bytes>> = vec![Ok(Bytes::from_static(b"abc"))];
@@ -203,10 +202,7 @@ async fn streaming_body_plus_retry_errors_clearly() {
         .unwrap()
         .port();
 
-    let policy = RetryPolicy::transient()
-        .max_retries(3)
-        .initial_backoff(Duration::from_millis(1))
-        .max_backoff(Duration::from_millis(5));
+    let policy = Retry::new(3).backoff(Duration::from_millis(1), Duration::from_millis(5));
     let err = session
         .put(format!("http://127.0.0.1:{dead_port}/upload"))
         .body(body)
@@ -221,7 +217,7 @@ async fn streaming_body_plus_retry_errors_clearly() {
         "unreplayable body must surface the real attempt error, got: {msg}"
     );
     assert!(
-        err.is_connect() || err.is_timeout(),
+        err.is_connect() || err.kind() == leyline::Kind::Timeout,
         "expected connect/timeout, got: {msg}"
     );
 }
@@ -248,13 +244,10 @@ async fn retries_exhausted_returns_last_response() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    let policy = RetryPolicy::transient()
-        .max_retries(3)
-        .initial_backoff(Duration::from_millis(1))
-        .max_backoff(Duration::from_millis(5));
+    let policy = Retry::new(3).backoff(Duration::from_millis(1), Duration::from_millis(5));
     let resp = session
         .request(http::Method::GET, format!("http://{addr}/bad"))
         .retry(policy)

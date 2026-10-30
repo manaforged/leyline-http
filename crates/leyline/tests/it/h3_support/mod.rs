@@ -8,9 +8,7 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use leyline::{
-    Browser, ProtocolPolicy, RetryPolicy, Session, SessionBuilder, TimeoutConfig, TlsTrustConfig,
-};
+use leyline::{Browser, Protocol, Session, SessionBuilder, Timeout, Tls};
 use leyline_bssl::pkey::{PKey, Private};
 use leyline_bssl::ssl::{SslContextBuilder, SslMethod};
 use leyline_bssl::x509::X509;
@@ -96,15 +94,15 @@ impl H3Server {
     pub fn session(&self) -> SessionBuilder {
         Session::builder()
             .browser(Browser::Chrome154)
-            .protocol(ProtocolPolicy::Http3)
-            .tls_trust(
-                TlsTrustConfig::new()
+            .protocol(Protocol::Http3)
+            .tls(
+                Tls::new()
                     .env_roots(false)
                     .system_roots(false)
-                    .add_ca_der(self.der.clone()),
+                    .ca_der(self.der.clone()),
             )
-            .retry(RetryPolicy::none())
-            .timeout(TimeoutConfig::new().total(Duration::from_secs(10)))
+            .retry(0)
+            .timeout(Timeout::new().total(Duration::from_secs(10)))
     }
 
     pub async fn stop_code(&self) -> Option<u64> {

@@ -32,7 +32,7 @@ async fn streamed_chunked_response_reassembles() {
         .unwrap();
     });
 
-    let resp = Session::browser(crate::Browser::default())
+    let resp = Session::from(crate::Browser::default())
         .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
@@ -40,7 +40,7 @@ async fn streamed_chunked_response_reassembles() {
         .unwrap();
     assert_eq!(resp.status(), 200);
     let mut body = Vec::new();
-    let mut stream = resp.into_stream().unwrap();
+    let mut stream = resp.bytes_stream().unwrap();
     while let Some(chunk) = stream.next().await {
         body.extend_from_slice(&chunk.unwrap());
     }
@@ -66,14 +66,14 @@ async fn streamed_fixed_length_response_reassembles() {
         sock.write_all(&payload_srv).await.unwrap();
     });
 
-    let resp = Session::browser(crate::Browser::default())
+    let resp = Session::from(crate::Browser::default())
         .request(http::Method::GET, format!("http://{addr}/x"))
         .stream()
         .send()
         .await
         .unwrap();
     let mut body = Vec::new();
-    let mut stream = resp.into_stream().unwrap();
+    let mut stream = resp.bytes_stream().unwrap();
     while let Some(chunk) = stream.next().await {
         body.extend_from_slice(&chunk.unwrap());
     }
@@ -99,7 +99,7 @@ async fn streamed_connection_is_reused_after_full_drain() {
         }
     });
 
-    let session = Session::browser(crate::Browser::default());
+    let session = Session::from(crate::Browser::default());
     let r1 = session
         .request(http::Method::GET, format!("http://{addr}/a"))
         .stream()
@@ -107,13 +107,17 @@ async fn streamed_connection_is_reused_after_full_drain() {
         .await
         .unwrap();
     let mut b1 = Vec::new();
-    let mut s1 = r1.into_stream().unwrap();
+    let mut s1 = r1.bytes_stream().unwrap();
     while let Some(chunk) = s1.next().await {
         b1.extend_from_slice(&chunk.unwrap());
     }
     assert_eq!(b1, b"first");
 
-    let r2 = session.get(format!("http://{addr}/b")).await.unwrap();
+    let r2 = session
+        .get(format!("http://{addr}/b"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r2.text().await.unwrap(), "second");
     server.await.unwrap();
 }
@@ -135,7 +139,7 @@ async fn streamed_read_timeout_fires_on_stall() {
     });
 
     let session = Session::builder()
-        .timeout(crate::TimeoutConfig::new().read(Duration::from_millis(200)))
+        .timeout(crate::Timeout::new().read(Duration::from_millis(200)))
         .build()
         .unwrap();
     let resp = session
@@ -144,10 +148,10 @@ async fn streamed_read_timeout_fires_on_stall() {
         .send()
         .await
         .unwrap();
-    let mut stream = resp.into_stream().unwrap();
+    let mut stream = resp.bytes_stream().unwrap();
     assert_eq!(&stream.next().await.unwrap().unwrap()[..], b"hello");
     let err = stream.next().await.unwrap().unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::TimedOut, "{err}");
+    assert_eq!(err.kind(), crate::Kind::Timeout, "{err}");
     server.abort();
 }
 
@@ -184,17 +188,21 @@ async fn streamed_connection_dropped_when_consumer_drops_early() {
         }
     });
 
-    let session = Session::browser(crate::Browser::default());
+    let session = Session::from(crate::Browser::default());
     let r1 = session
         .request(http::Method::GET, format!("http://{addr}/a"))
         .stream()
         .send()
         .await
         .unwrap();
-    let mut s1 = r1.into_stream().unwrap();
+    let mut s1 = r1.bytes_stream().unwrap();
     let _first = s1.next().await.unwrap().unwrap();
     drop(s1);
-    let r2 = session.get(format!("http://{addr}/b")).await.unwrap();
+    let r2 = session
+        .get(format!("http://{addr}/b"))
+        .send()
+        .await
+        .unwrap();
     assert_eq!(r2.status(), 200);
     assert_eq!(
         accepts.load(Ordering::SeqCst),

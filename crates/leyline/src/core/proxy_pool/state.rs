@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use super::ProxyPool;
 use crate::core::Result;
-use crate::core::config::{Origin, ProxyConfig};
+use crate::core::config::{Origin, Proxy};
 use crate::core::response::Response;
 use crate::core::session::Session;
 use crate::util::saturating_after;
@@ -140,26 +140,21 @@ impl ProxyPool {
     }
 }
 
-impl super::Settings {
-    fn is_block(&self, response: &Response) -> bool {
-        self.block_rules
-            .as_ref()
-            .is_some_and(|rules| rules.check(response).is_some())
-    }
-}
-
 impl Lease {
     pub(crate) fn index(&self) -> usize {
         self.index
     }
 
-    pub(crate) fn config(&self) -> &ProxyConfig {
+    pub(crate) fn config(&self) -> &Proxy {
         &self.pool.entries[self.index].config
     }
 
     pub(crate) fn session(&self, base: &Session) -> Result<Session> {
-        match self.pool.entries[self.index].identity {
-            Some(identity) => self.pool.sessions.session(base, self.index, identity),
+        match &self.pool.entries[self.index].identity {
+            Some(identity) => self
+                .pool
+                .sessions
+                .session(base, self.index, identity.clone()),
             None => Ok(base.clone()),
         }
     }
@@ -172,7 +167,7 @@ impl Lease {
     ) {
         let strike = match result {
             Err(err) if err.is_proxy() => true,
-            Ok(resp) => self.pool.settings.is_block(resp),
+            Ok(resp) => resp.block().is_some(),
             Err(_) => return,
         };
         let mut state = self.pool.lock();

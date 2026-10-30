@@ -8,8 +8,8 @@ use crate::tls::error::TlsError;
 
 const HEADER_PREFIX: [u8; 3] = [0x00, 0x00, 0x00];
 
-async fn udp_associate<C: crate::tls::TlsHandshake>(
-    connector: &C,
+async fn udp_associate(
+    connector: &crate::tls::FingerprintConnector,
     proxy: &url::Url,
 ) -> Result<(TcpStream, SocketAddr), TlsError> {
     let mut control = open_control(connector, proxy).await?;
@@ -58,8 +58,8 @@ pub(crate) struct Socks5Udp {
 }
 
 impl Socks5Udp {
-    pub(crate) async fn open<C: crate::tls::TlsHandshake>(
-        connector: &C,
+    pub(crate) async fn open(
+        connector: &crate::tls::FingerprintConnector,
         proxy: &url::Url,
         host: &str,
         port: u16,

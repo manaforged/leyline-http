@@ -11,7 +11,7 @@ Each section links to the chapter with the full detail.
 use std::time::Duration;
 
 use leyline::http::StatusCode;
-use leyline::{RetryPolicy, Session, TimeoutConfig, WaitFormat};
+use leyline::{Retry, Session, Timeout};
 
 const BASE_URL: &str = "https://api.example/v1/";
 const USER_AGENT: &str = "my-tool/1.0";
@@ -21,20 +21,16 @@ const MAX_RATE_WAIT: Duration = Duration::from_secs(120);
 
 # fn run() -> leyline::Result<()> {
 let token = std::env::var("API_TOKEN").unwrap_or_default();
-let policy = RetryPolicy::transient()
-    .retry_if(|resp| {
+let policy = Retry::new(3).wait_header(RATE_RESET).max_wait(MAX_RATE_WAIT).when(|attempt| attempt.is_transient() || attempt.response().is_some_and(|resp| {
         resp.status() == StatusCode::FORBIDDEN && resp.header(RATE_REMAINING) == Some("0")
-    })
-    .wait_header(RATE_RESET, WaitFormat::UnixSeconds)
-    .max_retry_after(MAX_RATE_WAIT)
-    .retry_unsent(true);
+    }));
 let api = Session::builder()
     .base_url(BASE_URL)
     .bearer_auth(&token)
-    .user_agent(USER_AGENT)
+    .headers([("user-agent", USER_AGENT)])
     .headers([("accept", "application/json")])
     .timeout(
-        TimeoutConfig::new()
+        Timeout::new()
             .connect(Duration::from_secs(5))
             .total(Duration::from_secs(180)),
     )
@@ -49,10 +45,9 @@ let api = Session::builder()
 | --- | --- |
 | `base_url` | Resolves a relative request URL. End it with `/` to keep the last path segment |
 | `bearer_auth` | Sends `authorization: Bearer <token>` to the `base_url` origin when a `base_url` is set, and to every host otherwise |
-| `user_agent` | Replaces `leyline/<version>` |
-| `headers` | Default headers for every request |
-| `timeout(TimeoutConfig)` | `connect` bounds each connection, `total` the whole send |
-| `retry` | The default `RetryPolicy` of every request |
+| `headers` | Default headers for every request; a `user-agent` pair replaces `leyline/<version>` |
+| `timeout(Timeout)` | `connect` bounds each connection, `total` the whole send |
+| `retry` | The default `Retry` of every request |
 
 [Sessions](sessions.md#set-a-token-and-a-base-url) has the URL resolution
 rules and the token scope.
@@ -62,19 +57,22 @@ jar, and every setting, so build the client once and clone it into each task.
 
 ## Retry transient failures and rate limits
 
-`RetryPolicy::transient()` retries idempotent methods up to 3 times on a
+`.retry(3)` retries idempotent methods up to 3 times on a
 connection error, a timeout, 429, 502, 503, and 504, with jittered
 exponential backoff. The setters in the example extend it:
 
 | Setter | Effect |
 | --- | --- |
-| `retry_if(predicate)` | Also retries a response for which the predicate returns `true` |
+| `when(rule)` | Replaces the default rule. `attempt.is_transient()` is the default, so `||` adds a case |
 | `wait_header(name, format)` | Reads the wait from a header. It wins over `Retry-After` |
-| `max_retry_after(d)` | A longer requested wait ends the retries. The default is 60 s |
-| `retry_unsent(true)` | Retries any method when the server did not process the request: a DNS, connect, TLS, or proxy error, a connect timeout, an HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request the server reports it did not process. Not after a redirect leg got a response |
+| `max_wait(d)` | A longer requested wait ends the retries. The default is 60 s |
+
+A request of any method that never reached the server is retried too: a DNS,
+connect, TLS, or proxy error, a connect timeout, an HTTP/2 `REFUSED_STREAM`
+reset, or an HTTP/3 request the server reports it did not process.
 
 `total` spans every attempt of one send, waits included. A wait that does not
-fit in the time left ends the retries, so set `total` above `max_retry_after`
+fit in the time left ends the retries, so set `total` above `max_wait`
 plus the time of the requests. See
 [Retries and timeouts](retries-and-timeouts.md).
 
@@ -90,21 +88,21 @@ did not make it; see
 [Status codes are not errors](errors.md#status-codes-are-not-errors).
 
 ```rust,no_run
-use leyline::{Error, ErrorCategory};
+use leyline::{Error, Kind};
 
 fn explain(err: &Error) -> String {
-    match err.category() {
-        ErrorCategory::Status => match err.retry_after() {
+    match err.kind() {
+        Kind::Status => match err.retry_after() {
             Some(wait) => format!("rate limited, retry in {wait:?}"),
             None => format!(
                 "api error {:?} request {:?}: {}",
                 err.status(),
-                err.header("x-request-id"),
-                err.body_text().unwrap_or_default()
+                err.headers().and_then(|h| h.get("x-request-id")),
+                err.body().map(String::from_utf8_lossy).unwrap_or_default()
             ),
         },
-        ErrorCategory::Decode => format!("unexpected body: {err}"),
-        ErrorCategory::Timeout => "the api timed out".to_owned(),
+        Kind::Decode => format!("unexpected body: {err}"),
+        Kind::Timeout => "the api timed out".to_owned(),
         other => format!("{other:?}: {err}"),
     }
 }
@@ -133,8 +131,10 @@ struct Repo {
 }
 
 # async fn run(api: leyline::Session) -> leyline::Result<()> {
+use futures_util::StreamExt;
+
 let mut repos = Vec::new();
-let mut pages = api.get("repos").error_for_status().pages().limit(100);
+let mut pages = api.get("repos").error_for_status().pages().take(100);
 while let Some(page) = pages.next().await {
     repos.extend(page?.json::<Vec<Repo>>().await?);
 }
@@ -159,12 +159,12 @@ use leyline::multipart::{Form, Part};
 api.post("issues")
     .json(&serde_json::json!({ "title": "hello" }))
     .error_for_status()
-    .await?;
+    .send().await?;
 
 let form = Form::new()
-    .text("title", "report")
+    .part("title", Part::text("report"))
     .part("file", Part::file("report.pdf")?.mime("application/pdf"));
-api.post("uploads").multipart(form).error_for_status().await?;
+api.post("uploads").multipart(form).error_for_status().send().await?;
 # Ok(())
 # }
 ```

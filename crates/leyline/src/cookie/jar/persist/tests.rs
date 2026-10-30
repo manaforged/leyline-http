@@ -33,15 +33,14 @@ fn changes_fire_on_writes_through_any_clone_and_not_on_reads() {
     let jar = Jar::new();
     let mut changes = jar.changes();
 
-    jar.clone()
-        .store_set_cookie("session-token=a; Path=/", &url());
+    jar.clone().store("session-token=a; Path=/", &url());
     assert!(changes.has_changed().unwrap());
     changes.mark_unchanged();
 
-    assert!(jar.cookie_header(&url()).is_some());
+    assert!(jar.header_for(&url()).is_some());
     assert!(!changes.has_changed().unwrap());
 
-    jar.remove_named("session-token");
+    jar.remove_everywhere("session-token");
     assert!(changes.has_changed().unwrap());
 }
 
@@ -54,7 +53,7 @@ fn load_drops_expired_cookies_and_keeps_the_newest_duplicate() {
         saved("token", "new", None, now - 1_000),
     ]);
     let jar: Jar = serde_json::from_value(saved).unwrap();
-    let cookies = jar.all_cookies();
+    let cookies = jar.all();
     assert_eq!(cookies.len(), 1);
     assert_eq!(cookies[0].name, "token");
     assert_eq!(cookies[0].value, "new");
@@ -63,8 +62,8 @@ fn load_drops_expired_cookies_and_keeps_the_newest_duplicate() {
 #[test]
 fn save_drops_cookies_that_expired_in_memory() {
     let jar = Jar::new();
-    jar.store_set_cookie("brief=1; Path=/; Max-Age=3600", &url());
-    jar.store_set_cookie("kept=1; Path=/; Max-Age=3600", &url());
+    jar.store("brief=1; Path=/; Max-Age=3600", &url());
+    jar.store("kept=1; Path=/; Max-Age=3600", &url());
     for cookie in lock(&jar.inner).cookies.values_mut().flatten() {
         if cookie.name == "brief" {
             cookie.expires = Some(SystemTime::now() - Duration::from_secs(1));
@@ -83,12 +82,12 @@ fn save_drops_cookies_that_expired_in_memory() {
 #[test]
 fn last_access_survives_a_round_trip() {
     let jar = Jar::new();
-    jar.store_set_cookie("token=a; Path=/", &url());
-    jar.cookie_header(&url());
-    let accessed = millis(jar.all_cookies()[0].last_access);
+    jar.store("token=a; Path=/", &url());
+    jar.header_for(&url());
+    let accessed = millis(jar.all()[0].last_access);
 
     let restored: Jar = serde_json::from_str(&serde_json::to_string(&jar).unwrap()).unwrap();
-    assert_eq!(millis(restored.all_cookies()[0].last_access), accessed);
+    assert_eq!(millis(restored.all()[0].last_access), accessed);
 }
 
 #[test]
@@ -98,5 +97,5 @@ fn jar_saved_without_last_access_still_loads() {
         "token", "a", None, now,
     )]))
     .unwrap();
-    assert_eq!(jar.get_cookie(&url(), "token").as_deref(), Some("a"));
+    assert_eq!(jar.get(&url(), "token").as_deref(), Some("a"));
 }

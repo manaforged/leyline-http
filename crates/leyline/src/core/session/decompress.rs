@@ -12,8 +12,9 @@ pub(crate) use limit::BodyLimit;
 use limit::{Cap, Overflow};
 use stage::Stage;
 
-use crate::core::CompressionConfig;
-use crate::core::error::{Error, Kind, Result};
+use super::helpers::header_values;
+use crate::core::BodyRules;
+use crate::core::error::{Cause, Error, Result};
 
 const MAX_CODINGS: usize = 4;
 
@@ -27,7 +28,7 @@ pub(crate) struct Decoder {
 }
 
 impl Decoder {
-    pub(crate) fn new(encoding: Option<&str>, config: &CompressionConfig) -> Result<Option<Self>> {
+    pub(crate) fn new(encoding: Option<&str>, config: &BodyRules) -> Result<Option<Self>> {
         Self::with_cap(
             encoding,
             config,
@@ -35,35 +36,27 @@ impl Decoder {
         )
     }
 
-    pub(crate) fn capped(
-        encoding: Option<&str>,
-        config: &CompressionConfig,
-        limit: Option<u64>,
-    ) -> Result<Self> {
-        let cap = Cap::fail(BodyLimit::session(config.max_body_size).tighter(limit));
+    pub(crate) fn capped(encoding: Option<&str>, config: &BodyRules) -> Result<Self> {
+        let cap = Cap::fail(BodyLimit::session(config.max_body_size));
         Ok(Self::with_cap(encoding, config, cap)?.unwrap_or_else(|| Self::over(Vec::new(), cap)))
     }
 
     pub(crate) fn truncated(
         encoding: Option<&str>,
-        config: &CompressionConfig,
+        config: &BodyRules,
         limit: usize,
     ) -> Result<Option<Self>> {
         let cap = Cap::truncate_at(BodyLimit::session(config.max_body_size), limit);
         Self::with_cap(encoding, config, cap)
     }
 
-    fn with_cap(
-        encoding: Option<&str>,
-        config: &CompressionConfig,
-        cap: Cap,
-    ) -> Result<Option<Self>> {
+    fn with_cap(encoding: Option<&str>, config: &BodyRules, cap: Cap) -> Result<Option<Self>> {
         let Some(encoding) = encoding else {
             return Ok(None);
         };
         let encodings: Vec<&str> = encoding.split(',').map(str::trim).collect();
         if encodings.len() > MAX_CODINGS {
-            return Err(Error::new(Kind::Decode).with_message(format!(
+            return Err(Error::new(Cause::Decode).with_message(format!(
                 "content-encoding lists {} codings; at most {MAX_CODINGS} are decoded",
                 encodings.len()
             )));
@@ -135,7 +128,7 @@ impl Decoder {
 pub(crate) fn decompress_body(
     body: Vec<u8>,
     encoding: Option<&str>,
-    config: &CompressionConfig,
+    config: &BodyRules,
 ) -> Result<(Vec<u8>, bool)> {
     let Some(mut decoder) = Decoder::new(encoding, config)? else {
         return Ok((body, false));
@@ -163,27 +156,64 @@ pub(crate) fn content_codings<'a>(
 pub(crate) fn decompress_and_strip(
     body: Vec<u8>,
     headers: HeaderPairs,
-    config: &CompressionConfig,
+    config: &BodyRules,
 ) -> Result<(Vec<u8>, HeaderPairs)> {
-    let content_encoding = content_codings(
-        headers
-            .iter()
-            .filter(|(k, _)| *k == "content-encoding")
-            .map(|(_, v)| v),
-    );
-    let (body, decoded) = decompress_body(body, content_encoding.as_deref(), config)?;
-    let headers = if decoded {
+    let (body, decoded) = decompress_body(body, pair_codings(&headers).as_deref(), config)?;
+    Ok((body, strip_decoded(headers, decoded)))
+}
+
+pub(crate) async fn buffer_and_strip(
+    bs: crate::core::body_stream::BodyStream,
+    headers: HeaderPairs,
+    config: &BodyRules,
+) -> Result<(Vec<u8>, HeaderPairs)> {
+    let (body, decoded) = buffer_decoded(bs, pair_codings(&headers).as_deref(), config).await?;
+    Ok((body, strip_decoded(headers, decoded)))
+}
+
+pub(crate) async fn buffer_decoded(
+    bs: crate::core::body_stream::BodyStream,
+    encoding: Option<&str>,
+    config: &BodyRules,
+) -> Result<(Vec<u8>, bool)> {
+    use futures_util::StreamExt;
+    let Some(mut decoder) = Decoder::new(encoding, config)? else {
+        return Ok((
+            drain_stream_into_vec(bs, config.max_body_size).await?,
+            false,
+        ));
+    };
+    let mut bs = bs;
+    let mut read = 0usize;
+    let mut out = Vec::new();
+    while let Some(chunk) = bs.next().await {
+        let chunk = chunk.map_err(body_read_error)?;
+        read += chunk.len();
+        if read > config.max_body_size {
+            return Err(BodyLimit::session(config.max_body_size).error());
+        }
+        decoder.feed(&chunk, &mut out)?;
+    }
+    decoder.finish(&mut out)?;
+    Ok((out, true))
+}
+
+fn pair_codings(headers: &[(http::HeaderName, http::HeaderValue)]) -> Option<String> {
+    content_codings(header_values(headers, "content-encoding"))
+}
+
+fn strip_decoded(headers: HeaderPairs, decoded: bool) -> HeaderPairs {
+    if decoded {
         headers
             .into_iter()
             .filter(|(k, _)| *k != "content-encoding" && *k != "content-length")
             .collect()
     } else {
         headers
-    };
-    Ok((body, headers))
+    }
 }
 
-pub(crate) async fn drain_stream_into_vec(
+async fn drain_stream_into_vec(
     mut bs: crate::core::body_stream::BodyStream,
     limit: usize,
 ) -> Result<Vec<u8>> {
@@ -209,10 +239,10 @@ pub(crate) fn body_read_error(e: std::io::Error) -> Error {
         {
             return *err;
         }
-        return Error::new(Kind::Body).with_message("response body stream failed");
+        return Error::new(Cause::Body).with_message("response body stream failed");
     }
     if e.kind() == std::io::ErrorKind::TimedOut {
-        Error::new(Kind::Timeout).with_source(e)
+        Error::new(Cause::Timeout).with_source(e)
     } else {
         Error::from(e)
     }

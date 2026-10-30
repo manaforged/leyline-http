@@ -7,8 +7,7 @@ use crate::tls::{Resolver, SystemResolver};
 use super::host::normalize_host;
 
 #[derive(Clone)]
-#[non_exhaustive]
-pub struct DnsConfig {
+pub(crate) struct DnsConfig {
     resolver: Arc<dyn Resolver>,
     overrides: HashMap<String, Vec<SocketAddr>>,
 }
@@ -31,16 +30,12 @@ impl Default for DnsConfig {
 }
 
 impl DnsConfig {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
+    pub(crate) fn resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
         self.resolver = resolver;
         self
     }
 
-    pub fn resolve_host(
+    pub(crate) fn resolve_host(
         mut self,
         host: impl AsRef<str>,
         addrs: impl IntoIterator<Item = SocketAddr>,
@@ -64,12 +59,6 @@ impl DnsConfig {
                 overrides: self.overrides,
             })
         }
-    }
-}
-
-impl From<Arc<dyn Resolver>> for DnsConfig {
-    fn from(resolver: Arc<dyn Resolver>) -> Self {
-        Self::new().resolver(resolver)
     }
 }
 

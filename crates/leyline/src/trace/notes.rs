@@ -2,16 +2,16 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 #[derive(Debug, Default)]
 pub(crate) struct Notes {
-    pub(crate) tag: Option<String>,
+    pub(crate) label: Option<String>,
     pub(crate) proxy: Option<String>,
     pub(crate) browser: Option<crate::profile::Browser>,
 }
 
 pub(crate) type SharedNotes = Arc<Mutex<Notes>>;
 
-pub(crate) fn note_tag(tag: Option<String>) {
-    if let Some(tag) = tag {
-        edit(|notes| notes.tag = Some(tag));
+pub(crate) fn note_label(label: Option<String>) {
+    if let Some(label) = label {
+        edit(|notes| notes.label = Some(label));
     }
 }
 

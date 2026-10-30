@@ -1,11 +1,13 @@
 use crate::audit::{hash12, non_grease_cipher_ids, non_grease_ext_ids};
 use crate::iana::sigalg_id;
+use crate::profile::{ALPN, SERVER_NAME};
+
+pub(crate) const JA4_TCP: char = 't';
 
 #[derive(Debug)]
 pub struct Ja4Input<'a> {
     pub ciphers: &'a [String],
     pub sigalgs: &'a [String],
-    pub curves: &'a [String],
     pub extension_ids: &'a [u16],
     pub tls_version: &'a str,
     pub has_sni: bool,
@@ -21,7 +23,7 @@ pub fn compute_ja4(input: &Ja4Input<'_>) -> String {
 
 impl Ja4Input<'_> {
     fn compute_section_a(&self) -> String {
-        let proto = "t";
+        let proto = JA4_TCP;
         let version = match self.tls_version {
             "1.3" => "13",
             "1.2" => "12",
@@ -65,7 +67,7 @@ impl Ja4Input<'_> {
     fn compute_section_c(&self) -> String {
         let mut ext_ids: Vec<u16> = non_grease_ext_ids(self.extension_ids)
             .into_iter()
-            .filter(|id| *id != 0x0000 && *id != 0x0010)
+            .filter(|id| *id != SERVER_NAME && *id != ALPN)
             .collect();
         ext_ids.sort();
 

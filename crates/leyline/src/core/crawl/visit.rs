@@ -5,7 +5,7 @@ use url::Url;
 
 use super::fetch::{CONTENT_USAGE, Loaded};
 use super::frontier::{Queued, page_key};
-use super::{ANY_AGENT, Crawl, CrawlPage, MIN_PRINT_WORDS, NOFOLLOW, SkipReason};
+use super::{ANY_AGENT, Crawl, MIN_PRINT_WORDS, NOFOLLOW, Page, SkipReason};
 use crate::core::robots::{Purpose, header_uses};
 use crate::html::{self, Directives};
 
@@ -64,7 +64,7 @@ impl Crawl {
             own,
             claimed,
             print,
-            page: CrawlPage::new(url, depth, status, html, text),
+            page: Page::new(url, depth, status, html, text),
         };
         if let (Some(key), Some(link)) = (held.claimed.clone(), canonical)
             && may_follow
@@ -178,7 +178,7 @@ pub(super) struct Held {
     own: String,
     claimed: Option<String>,
     print: Option<u64>,
-    page: CrawlPage,
+    page: Page,
 }
 
 fn uses_ai(purpose: Purpose) -> bool {

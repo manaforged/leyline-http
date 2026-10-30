@@ -69,7 +69,7 @@ fn examples_avoid_known_footguns() {
         "edge()?",
         "brave()?",
         "opera()?",
-        ".audit().unwrap()",
+        ".fingerprint().unwrap()",
     ];
     let mut hits = Vec::new();
     for path in public_claim_surfaces() {

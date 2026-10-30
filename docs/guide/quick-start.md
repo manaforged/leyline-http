@@ -10,7 +10,7 @@ the name you import. Leyline is async and runs on Tokio.
 
 ```toml
 [dependencies]
-leyline-http = "0.1"
+leyline-http = "0.2"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -28,7 +28,7 @@ jar.
 ```rust,no_run
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let resp = leyline::get("https://example.com/").await?;
+    let resp = leyline::Session::new().get("https://example.com/").send().await?;
     println!("{} {}", resp.status(), resp.url());
     Ok(())
 }
@@ -43,19 +43,19 @@ can hold in a variable.
 | Session | Build it with | Sends |
 | --- | --- | --- |
 | Plain | `Session::new()` or `Session::builder().build()` | `user-agent: leyline/<version>`, `accept: */*`, and no `sec-*` headers |
-| Browser | `Session::browser(Browser::default())` | The TLS, HTTP/2, and headers of the newest bundled Chrome on Windows |
+| Browser | `Session::from(Browser::default())` | The TLS, HTTP/2, and headers of the newest bundled Chrome on Windows |
 | Pinned browser | `Session::builder().browser(Browser::Chrome154).build()` | One fixed browser profile |
 
 Use a plain session for APIs. Use a browser session when the server checks
-that the client is a browser. `SessionBuilder::user_agent` replaces the
-default `user-agent` on either kind.
+that the client is a browser. A `user-agent` pair in `SessionBuilder::headers`
+replaces the default `user-agent` on either kind.
 
 ```rust,no_run
 use leyline::{Browser, Session};
 
 # fn run() -> leyline::Result<()> {
-let plain = Session::builder().user_agent("my-app/1.0").build()?;
-let chrome = Session::browser(Browser::default());
+let plain = Session::builder().headers([("user-agent", "my-app/1.0")]).build()?;
+let chrome = Session::from(Browser::default());
 let pinned = Session::builder().browser(Browser::Chrome154).build()?;
 # drop((plain, chrome, pinned));
 # Ok(())
@@ -68,7 +68,7 @@ let pinned = Session::builder().browser(Browser::Chrome154).build()?;
 
 `text()` decodes the body with the charset from `Content-Type`, and falls
 back to UTF-8. `json::<T>()` deserializes into any `DeserializeOwned` type. A
-body that does not parse is an `ErrorCategory::Decode` error. Each body call
+body that does not parse is an `Kind::Decode` error. Each body call
 consumes the response, so read `status()` and `headers()` first.
 
 ```rust,no_run
@@ -82,10 +82,10 @@ struct State {
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let page = session.get("https://example.com/").await?.text().await?;
+let page = session.get("https://example.com/").send().await?.text().await?;
 let state = session
     .get("https://api.example/state")
-    .await?
+    .send().await?
     .json::<State>()
     .await?;
 println!("{} {} {}", page.len(), state.name, state.ready);
@@ -100,7 +100,7 @@ sends `application/x-www-form-urlencoded`. `query` appends pairs to the URL.
 `query` and `form` take any iterator of `(key, value)` pairs where both sides
 are `AsRef<str>`. `timeout` with a `Duration` bounds the whole request,
 retries included; for a streamed body or a download, add
-`TimeoutConfig::body`.
+`Timeout::body`.
 
 ```rust,no_run
 use std::time::Duration;
@@ -111,15 +111,15 @@ let created = session
     .post("https://api.example/items")
     .json(&serde_json::json!({ "name": "leyline" }))
     .timeout(Duration::from_secs(10))
-    .await?;
+    .send().await?;
 let found = session
     .get("https://api.example/search")
     .query([("q", "leyline"), ("page", "2")])
-    .await?;
+    .send().await?;
 let login = session
     .post("https://api.example/login")
     .form([("user", "ada"), ("password", "secret")])
-    .await?;
+    .send().await?;
 println!("{} {} {}", created.status(), found.status(), login.status());
 # Ok(())
 # }
@@ -141,10 +141,10 @@ use leyline::http::StatusCode;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-match session.get("https://api.example/users/7").error_for_status().await {
+match session.get("https://api.example/users/7").error_for_status().send().await {
     Ok(resp) => println!("{}", resp.text().await?),
     Err(err) if err.status() == Some(StatusCode::NOT_FOUND) => {
-        println!("no such user: {}", err.body_text().unwrap_or_default());
+        println!("no such user: {}", err.body().map(String::from_utf8_lossy).unwrap_or_default());
     }
     Err(err) => return Err(err),
 }
@@ -152,7 +152,7 @@ match session.get("https://api.example/users/7").error_for_status().await {
 # }
 ```
 
-`Error::category()` sorts every failure into one `ErrorCategory`, such as
+`Error::kind()` sorts every failure into one `Kind`, such as
 `Timeout`, `Dns`, `Tls`, or `Status`, for a short message. See
 [Errors](errors.md).
 
@@ -170,7 +170,7 @@ let token = std::fs::read_to_string("token.txt")?;
 let session = leyline::Session::builder()
     .bearer_auth(token.trim())
     .build()?;
-let body = session.get("https://api.example/me").await?.text().await?;
+let body = session.get("https://api.example/me").send().await?.text().await?;
 std::fs::write("me.json", body)?;
 # Ok(())
 # }
@@ -178,11 +178,11 @@ std::fs::write("me.json", body)?;
 
 ## Download a file
 
-`RequestBuilder::download` streams the decoded body to a file in one atomic
-step and returns the number of bytes written. A status of 400 or more is an
-error. The limit caps the decoded size; `None` leaves only the session's
-`max_body_size` (100 MiB by default). See
-[Streaming](streaming.md#download-a-file).
+`Response::download_to` streams the decoded body to a file in one atomic
+step and returns the number of bytes written. With `error_for_status()`, a
+status of 400 or more is an error and nothing is written. The request's
+`max_body_size` caps the decoded size; without it, the session's (100 MiB by
+default) applies. See [Streaming](streaming.md#download-a-file).
 
 ```rust,no_run
 use std::time::Duration;
@@ -192,7 +192,12 @@ let session = leyline::Session::new();
 let bytes = session
     .get("https://example.com/archive.tar.gz")
     .timeout(Duration::from_secs(600))
-    .download("archive.tar.gz", Some(512 * 1024 * 1024))
+    .error_for_status()
+    .max_body_size(512 * 1024 * 1024)
+    .stream()
+    .send()
+    .await?
+    .download_to("archive.tar.gz")
     .await?;
 println!("{bytes} bytes");
 # Ok(())
@@ -212,7 +217,7 @@ println!("{bytes} bytes");
 | Retry failed requests | [Retries and timeouts](retries-and-timeouts.md) |
 | Map failures to my own errors or HTTP statuses | [Errors](errors.md) |
 | Keep a login between runs | [Cookies](cookies.md) |
-| Keep an account's device, tab, and cookies between runs | [Accounts](accounts.md) |
+| Keep an account's session, tab, and cookies between runs | [Accounts](accounts.md) |
 | Crawl many hosts with rate limits and proxy pools | [Crawling](crawling.md) |
 | Send traffic through a proxy | [Proxies](proxies.md) |
 | Stop a request early | [Cancellation](cancellation.md) |

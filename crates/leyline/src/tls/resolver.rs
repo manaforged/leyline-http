@@ -3,15 +3,21 @@ use std::io;
 use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 
-pub type ResolveFuture<'a> =
+pub(crate) type ResolveFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, io::Error>> + Send + 'a>>;
 
+/// Resolves a host name and port to socket addresses for new connections.
 pub trait Resolver: Send + Sync + 'static {
-    fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a>;
+    /// Returns the socket addresses for `host` and `port`.
+    fn resolve<'a>(
+        &'a self,
+        host: &'a str,
+        port: u16,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, io::Error>> + Send + 'a>>;
 }
 
 #[derive(Debug, Default, Clone, Copy)]
-pub struct SystemResolver;
+pub(crate) struct SystemResolver;
 
 impl Resolver for SystemResolver {
     fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {

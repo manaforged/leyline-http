@@ -18,7 +18,7 @@ fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
 #[cfg(windows)]
 pub(super) fn wire_system_trust_cached(
     builder: &mut SslContextBuilder,
-    config: &super::TlsTrustConfig,
+    config: &super::Tls,
     env_roots_loaded: bool,
 ) -> Result<(), TlsError> {
     if !env_roots_loaded && config.ca_files.is_empty() && config.ca_der.is_empty() {
@@ -31,7 +31,7 @@ pub(super) fn wire_system_trust_cached(
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub(super) fn wire_system_trust_cached(
     builder: &mut SslContextBuilder,
-    _config: &super::TlsTrustConfig,
+    _config: &super::Tls,
     _env_roots_loaded: bool,
 ) -> Result<(), TlsError> {
     wire_system_trust(builder)
@@ -48,19 +48,10 @@ fn cached_windows_system_store() -> Result<&'static leyline_bssl::x509::store::X
         return Ok(s);
     }
 
-    let roots = crate::tls::windows_trust::load_system_roots().map_err(|e| {
-        TlsError::TrustStore(format!("failed to open Windows system ROOT store: {e}"))
-    })?;
+    let roots = windows_roots()?;
     let mut store = X509StoreBuilder::new()
         .map_err(|e| TlsError::TrustStore(format!("X509 store allocation failed: {e}")))?;
-    let mut loaded = 0usize;
-    for der in &roots {
-        if let Ok(cert) = X509::from_der(der)
-            && store.add_cert(cert).is_ok()
-        {
-            loaded += 1;
-        }
-    }
+    let (loaded, _) = bridge_windows_roots(&mut store, &roots, |_, _| {});
     if loaded == 0 {
         return Err(TlsError::TrustStore(
             "Windows system ROOT store bridged zero certificates".into(),
@@ -96,44 +87,56 @@ fn wire_linux_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsErr
 }
 
 #[cfg(windows)]
-fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    use leyline_bssl::x509::X509;
+fn windows_roots() -> Result<Vec<Vec<u8>>, TlsError> {
+    crate::tls::windows_trust::load_system_roots()
+        .map_err(|e| TlsError::TrustStore(format!("failed to open Windows system ROOT store: {e}")))
+}
 
-    let roots = match crate::tls::windows_trust::load_system_roots() {
-        Ok(r) => r,
-        Err(e) => {
-            return Err(TlsError::TrustStore(format!(
-                "failed to open Windows system ROOT store: {e}"
-            )));
-        }
-    };
-
-    let store = builder.cert_store_mut();
+#[cfg(windows)]
+fn bridge_windows_roots(
+    store: &mut leyline_bssl::x509::store::X509StoreBuilderRef,
+    roots: &[Vec<u8>],
+    mut skip: impl FnMut(SkipReason, leyline_bssl::error::ErrorStack),
+) -> (usize, usize) {
     let mut loaded = 0usize;
     let mut skipped = 0usize;
-    for der in &roots {
-        match X509::from_der(der) {
-            Ok(cert) => match store.add_cert(cert) {
-                Ok(()) => loaded += 1,
-                Err(e) => {
-                    skipped += 1;
-                    tracing::debug!(
-                        target: "leyline::tls::trust",
-                        err = %e,
-                        "Windows ROOT cert rejected by BoringSSL store"
-                    );
-                }
-            },
-            Err(e) => {
+    for der in roots {
+        let added = X509::from_der(der)
+            .map_err(|e| (SkipReason::Parse, e))
+            .and_then(|cert| store.add_cert(cert).map_err(|e| (SkipReason::Store, e)));
+        match added {
+            Ok(()) => loaded += 1,
+            Err((reason, e)) => {
                 skipped += 1;
-                tracing::debug!(
-                    target: "leyline::tls::trust",
-                    err = %e,
-                    "Windows ROOT cert failed DER parse"
-                );
+                skip(reason, e);
             }
         }
     }
+    (loaded, skipped)
+}
+
+#[cfg(windows)]
+enum SkipReason {
+    Parse,
+    Store,
+}
+
+#[cfg(windows)]
+fn wire_windows_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
+    let roots = windows_roots()?;
+    let (loaded, skipped) =
+        bridge_windows_roots(builder.cert_store_mut(), &roots, |reason, e| match reason {
+            SkipReason::Store => tracing::debug!(
+                target: "leyline::tls::trust",
+                err = %e,
+                "Windows ROOT cert rejected by BoringSSL store"
+            ),
+            SkipReason::Parse => tracing::debug!(
+                target: "leyline::tls::trust",
+                err = %e,
+                "Windows ROOT cert failed DER parse"
+            ),
+        });
 
     if loaded == 0 {
         return Err(TlsError::TrustStore(format!(

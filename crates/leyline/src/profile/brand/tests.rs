@@ -107,3 +107,13 @@ fn error_display_uses_platform_display_not_debug() {
     );
     assert!(!msg.contains("MacOS"), "{msg}");
 }
+
+#[test]
+fn an_edge_profile_drops_the_chrome_trust_anchors_and_reference() {
+    let edge = crate::Browser::Edge152.branded_profile();
+    let chrome = crate::Browser::Chrome152.branded_profile();
+    assert!(chrome.tls.request_trust_anchors);
+    assert!(chrome.tls.fingerprint.is_some());
+    assert!(!edge.tls.request_trust_anchors);
+    assert!(edge.tls.fingerprint.is_none());
+}

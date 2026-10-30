@@ -3,13 +3,14 @@ use std::sync::{Arc, Mutex, PoisonError};
 use http::Method;
 use url::Url;
 
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::into_url::IntoUrl;
 use crate::core::request::{IntoParamPair, RequestBuilder};
 use crate::core::response::Response;
 use crate::core::session::Session;
-use crate::profile::Preset;
+use crate::profile::RequestKind;
 
+#[doc = include_str!("../../docs/tab.md")]
 #[derive(Clone)]
 pub struct Tab {
     session: Session,
@@ -32,10 +33,12 @@ impl Tab {
         }
     }
 
+    /// Returns the session the tab sends requests through.
     pub fn session(&self) -> &Session {
         &self.session
     }
 
+    /// Returns the URL of the page the tab has open.
     pub fn current(&self) -> Option<Url> {
         self.page
             .lock()
@@ -43,6 +46,7 @@ impl Tab {
             .clone()
     }
 
+    /// Sets the page URL the tab treats as open, or clears it with `None`.
     pub fn set_current(&self, page: Option<Url>) {
         *self.page.lock().unwrap_or_else(PoisonError::into_inner) = page;
     }
@@ -51,79 +55,72 @@ impl Tab {
         &self,
         method: Method,
         url: impl IntoUrl,
-        preset: Preset,
+        preset: RequestKind,
     ) -> RequestBuilder {
         let page = self.current();
-        let builder = self.build(method, url, page.as_ref()).preset(preset);
+        let builder = self.build(method, url, page.as_ref()).kind(preset);
         match page {
-            Some(page) => builder.initiator(page),
+            Some(page) => builder.from_page(page),
             None => builder,
         }
     }
 
+    /// Returns a script request from the open page, which fails when the tab has no page.
     pub fn fetch(&self, method: Method, url: impl IntoUrl) -> RequestBuilder {
-        self.script(method, url, Preset::Xhr)
+        self.script(method, url, RequestKind::Xhr)
     }
 
-    pub fn xhr(&self, url: impl IntoUrl) -> RequestBuilder {
-        self.fetch(Method::GET, url)
-    }
-
-    pub fn post_json(&self, url: impl IntoUrl, body: &impl serde::Serialize) -> RequestBuilder {
-        self.fetch(Method::POST, url).json(body)
-    }
-
-    pub fn subresource(&self, url: impl IntoUrl, preset: Preset) -> RequestBuilder {
-        self.script(Method::GET, url, preset)
-    }
-
-    fn script(&self, method: Method, url: impl IntoUrl, preset: Preset) -> RequestBuilder {
+    fn script(&self, method: Method, url: impl IntoUrl, preset: RequestKind) -> RequestBuilder {
         let mut builder = self.request(method, url, preset);
         if self.current().is_none() {
             builder.fail(
-                Error::new(Kind::Request).with_message("the tab has no page; open one first"),
+                Error::new(Cause::Request).with_message("the tab has no page; open one first"),
             );
         }
         builder
     }
 
+    /// Navigates the tab to `url` as if typed in the address bar.
     pub async fn open(&self, url: impl IntoUrl) -> Result<Response> {
         let page = self.current();
         let builder = self
             .build(Method::GET, url, page.as_ref())
-            .preset(Preset::Navigate);
+            .kind(RequestKind::Navigate);
         self.navigate(builder).await
     }
 
+    /// Navigates the tab to `url` as a link click from the open page.
     pub async fn follow(&self, url: impl IntoUrl) -> Result<Response> {
-        self.navigate(self.trusted(self.request(Method::GET, url, Preset::Navigate)))
+        self.navigate(self.trusted(self.request(Method::GET, url, RequestKind::Navigate)))
             .await
     }
 
+    /// Posts `fields` as a URL-encoded form to `url` and navigates the tab to the response.
     pub async fn submit<I, P>(&self, url: impl IntoUrl, fields: I) -> Result<Response>
     where
         I: IntoIterator<Item = P>,
         P: IntoParamPair,
     {
         let builder = self
-            .request(Method::POST, url, Preset::FormNavigate)
+            .request(Method::POST, url, RequestKind::FormNavigate)
             .form(fields);
         self.navigate(builder).await
     }
 
+    /// Submits a parsed HTML form with its method and encoding and navigates the tab to the response.
     #[cfg(feature = "html")]
     pub async fn submit_form(&self, form: &crate::html::Form) -> Result<Response> {
         let mut url = self.form_action(form)?;
         let fields = normalized_fields(form);
         let builder = match form.method() {
-            crate::html::FormMethod::Post => encode_form(
-                self.request(Method::POST, url, Preset::FormNavigate),
-                form.enctype(),
+            Method::POST => encode_form(
+                self.request(Method::POST, url, RequestKind::FormNavigate),
+                form.encoding(),
                 fields,
             ),
-            crate::html::FormMethod::Get => {
+            _ => {
                 url.query_pairs_mut().clear().extend_pairs(&fields);
-                self.request(Method::GET, url, Preset::Navigate)
+                self.request(Method::GET, url, RequestKind::Navigate)
             }
         };
         self.navigate(self.trusted(builder)).await
@@ -205,7 +202,7 @@ fn encode_form(
         }
         FormEnctype::Multipart => builder.multipart(fields.into_iter().fold(
             crate::core::multipart::Form::new(),
-            |body, (name, value)| body.text(name, value),
+            |body, (name, value)| body.part(name, crate::core::multipart::Part::text(value)),
         )),
     }
 }

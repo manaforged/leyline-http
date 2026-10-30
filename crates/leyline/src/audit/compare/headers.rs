@@ -3,10 +3,9 @@ use serde::Deserialize;
 use super::FieldOutcome;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct HeaderOutcome {
-    pub name: String,
-    pub outcome: FieldOutcome,
+pub(crate) struct HeaderOutcome {
+    pub(crate) name: String,
+    pub(crate) outcome: FieldOutcome,
 }
 
 #[derive(Deserialize, Default)]

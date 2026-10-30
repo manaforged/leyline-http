@@ -1,5 +1,5 @@
 use leyline::Session;
-use leyline::multipart::Form;
+use leyline::multipart::{Form, Part};
 
 const URL: &str = "https://httpbin.org/post";
 const NOTE_FIELD: &str = "note";
@@ -13,7 +13,9 @@ async fn main() -> leyline::Result<()> {
         .unwrap_or_else(|| "Cargo.toml".to_string());
 
     let session = Session::new();
-    let form = Form::new().text(NOTE_FIELD, NOTE).file(FILE_FIELD, &path)?;
+    let form = Form::new()
+        .part(NOTE_FIELD, Part::text(NOTE))
+        .part(FILE_FIELD, Part::file(&path)?);
 
     let resp = session
         .post(URL)

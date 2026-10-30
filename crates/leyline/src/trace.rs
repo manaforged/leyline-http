@@ -1,4 +1,3 @@
-use std::fmt;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -7,6 +6,7 @@ use std::time::{Duration, Instant};
 use crate::{Error, HttpVersion};
 
 mod body;
+mod event;
 mod fanout;
 mod headers;
 mod metrics;
@@ -14,115 +14,17 @@ mod notes;
 mod summary;
 
 pub(crate) use body::BodyWatch;
-pub use body::{BodyEnd, BodyOutcome};
-pub use fanout::Fanout;
+pub use event::Event;
+pub(crate) use fanout::Fanout;
 pub(crate) use headers::masked;
-pub use metrics::{Metrics, MetricsSnapshot};
-pub(crate) use notes::{note_browser, note_proxy, note_tag};
-pub use summary::Summary;
+pub use metrics::Metrics;
+pub(crate) use notes::{note_browser, note_label, note_proxy};
 pub(crate) use summary::{Finish, summary};
 
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct Dns<'a> {
-    pub id: u64,
-    pub host: &'a str,
-    pub port: u16,
-    pub addrs: usize,
-    pub elapsed: Duration,
-}
-
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct Connect<'a> {
-    pub id: u64,
-    pub host: &'a str,
-    pub port: u16,
-    pub reused: bool,
-    pub elapsed: Duration,
-}
-
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct Tls<'a> {
-    pub id: u64,
-    pub host: &'a str,
-    pub version: Option<&'a str>,
-    pub cipher: Option<&'a str>,
-    pub alpn: Option<&'a str>,
-    pub elapsed: Duration,
-}
-
-#[non_exhaustive]
-pub struct Sent<'a> {
-    pub id: u64,
-    pub host: &'a str,
-    pub method: &'a str,
-    pub path: &'a str,
-    pub protocol: HttpVersion,
-    pub elapsed: Duration,
-}
-
-impl std::fmt::Debug for Sent<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Sent")
-            .field("id", &self.id)
-            .field("host", &self.host)
-            .field("method", &self.method)
-            .field("path", &crate::util::redact_target(self.path))
-            .field("protocol", &self.protocol)
-            .field("elapsed", &self.elapsed)
-            .finish()
-    }
-}
-
-#[non_exhaustive]
-pub struct Head<'a> {
-    pub id: u64,
-    pub host: &'a str,
-    pub status: u16,
-    pub protocol: HttpVersion,
-    pub elapsed: Duration,
-    pub headers: &'a http::HeaderMap,
-}
-
-impl fmt::Debug for Head<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Head")
-            .field("id", &self.id)
-            .field("host", &self.host)
-            .field("status", &self.status)
-            .field("protocol", &self.protocol)
-            .field("elapsed", &self.elapsed)
-            .field(
-                "headers",
-                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
-            )
-            .finish()
-    }
-}
-
-#[derive(Debug)]
-#[non_exhaustive]
-pub struct Done<'a> {
-    pub id: u64,
-    pub elapsed: Duration,
-    pub outcome: Result<(), &'a Error>,
-}
-
-#[expect(
-    unused_variables,
-    reason = "no-op defaults keep the event name visible in the rendered signature"
-)]
+#[doc = include_str!("../docs/trace.md")]
 pub trait Trace: Send + Sync + 'static {
-    fn dns(&self, ev: &Dns<'_>) {}
-    fn connect(&self, ev: &Connect<'_>) {}
-    fn tls(&self, ev: &Tls<'_>) {}
-    fn sent(&self, ev: &Sent<'_>) {}
-    fn head(&self, ev: &Head<'_>) {}
-    fn done(&self, ev: &Done<'_>) {}
-    fn summary(&self, ev: &Summary<'_>) {}
-    fn body(&self, ev: &BodyEnd<'_>) {}
+    /// Receives one step of a traced request.
+    fn event(&self, event: &Event<'_>);
 }
 
 #[derive(Clone)]
@@ -185,7 +87,7 @@ fn with(emit: impl FnOnce(&Ctx)) {
 
 pub(crate) fn dns(host: &str, port: u16, addrs: usize, elapsed: Duration) {
     with(|ctx| {
-        ctx.hook.dns(&Dns {
+        ctx.hook.event(&Event::Dns {
             id: ctx.id,
             host,
             port,
@@ -197,7 +99,7 @@ pub(crate) fn dns(host: &str, port: u16, addrs: usize, elapsed: Duration) {
 
 pub(crate) fn connect(host: &str, port: u16, reused: bool, elapsed: Duration) {
     with(|ctx| {
-        ctx.hook.connect(&Connect {
+        ctx.hook.event(&Event::Connect {
             id: ctx.id,
             host,
             port,
@@ -215,7 +117,7 @@ pub(crate) fn tls(
     elapsed: Duration,
 ) {
     with(|ctx| {
-        ctx.hook.tls(&Tls {
+        ctx.hook.event(&Event::Tls {
             id: ctx.id,
             host,
             version,
@@ -228,12 +130,12 @@ pub(crate) fn tls(
 
 pub(crate) fn sent(host: &str, method: &str, path: &str, protocol: HttpVersion, elapsed: Duration) {
     with(|ctx| {
-        ctx.hook.sent(&Sent {
+        ctx.hook.event(&Event::Sent {
             id: ctx.id,
             host,
             method,
             path,
-            protocol,
+            protocol: protocol.into(),
             elapsed,
         });
     });
@@ -252,11 +154,11 @@ pub(crate) fn head<I, N, V>(
 {
     with(|ctx| {
         let headers = crate::core::header_map(headers);
-        ctx.hook.head(&Head {
+        ctx.hook.event(&Event::Head {
             id: ctx.id,
             host,
             status,
-            protocol,
+            protocol: protocol.into(),
             elapsed,
             headers: &headers,
         });
@@ -265,7 +167,7 @@ pub(crate) fn head<I, N, V>(
 
 pub(crate) fn done(outcome: Result<(), &Error>) {
     with(|ctx| {
-        ctx.hook.done(&Done {
+        ctx.hook.event(&Event::Done {
             id: ctx.id,
             elapsed: ctx.start.elapsed(),
             outcome,
@@ -273,47 +175,83 @@ pub(crate) fn done(outcome: Result<(), &Error>) {
     });
 }
 
+/// Writes every event to the `tracing` crate under the `leyline::trace` target.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct TracingTrace;
+pub struct Log;
 
-impl Trace for TracingTrace {
-    fn dns(&self, ev: &Dns<'_>) {
-        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, port = ev.port, addrs = ev.addrs, elapsed_ms = ms(ev.elapsed), "dns");
-    }
-
-    fn connect(&self, ev: &Connect<'_>) {
-        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, port = ev.port, reused = ev.reused, elapsed_ms = ms(ev.elapsed), "connect");
-    }
-
-    fn tls(&self, ev: &Tls<'_>) {
-        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, version = ev.version, cipher = ev.cipher, alpn = ev.alpn, elapsed_ms = ms(ev.elapsed), "tls");
-    }
-
-    fn sent(&self, ev: &Sent<'_>) {
-        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, method = ev.method, path = %crate::util::redact_target(ev.path), protocol = ?ev.protocol, elapsed_ms = ms(ev.elapsed), "sent");
-    }
-
-    fn head(&self, ev: &Head<'_>) {
-        tracing::debug!(target: "leyline::trace", id = ev.id, host = ev.host, status = ev.status, protocol = ?ev.protocol, elapsed_ms = ms(ev.elapsed), "head");
-    }
-
-    fn done(&self, ev: &Done<'_>) {
-        match ev.outcome {
-            Ok(()) => {
-                tracing::debug!(target: "leyline::trace", id = ev.id, elapsed_ms = ms(ev.elapsed), "done")
+impl Trace for Log {
+    fn event(&self, event: &Event<'_>) {
+        match *event {
+            Event::Dns {
+                id,
+                host,
+                port,
+                addrs,
+                elapsed,
+            } => {
+                tracing::debug!(target: "leyline::trace", id, host, port, addrs, elapsed_ms = ms(elapsed), "dns");
             }
-            Err(e) => {
-                tracing::debug!(target: "leyline::trace", id = ev.id, elapsed_ms = ms(ev.elapsed), kind = ?e.kind(), error = %e, "done")
+            Event::Connect {
+                id,
+                host,
+                port,
+                reused,
+                elapsed,
+            } => {
+                tracing::debug!(target: "leyline::trace", id, host, port, reused, elapsed_ms = ms(elapsed), "connect");
             }
+            Event::Tls {
+                id,
+                host,
+                version,
+                cipher,
+                alpn,
+                elapsed,
+            } => {
+                tracing::debug!(target: "leyline::trace", id, host, version, cipher, alpn, elapsed_ms = ms(elapsed), "tls");
+            }
+            Event::Sent {
+                id,
+                host,
+                method,
+                path,
+                protocol,
+                elapsed,
+            } => {
+                tracing::debug!(target: "leyline::trace", id, host, method, path = %crate::util::mask_query(path), protocol = ?protocol, elapsed_ms = ms(elapsed), "sent");
+            }
+            Event::Head {
+                id,
+                host,
+                status,
+                protocol,
+                elapsed,
+                ..
+            } => {
+                tracing::debug!(target: "leyline::trace", id, host, status, protocol = ?protocol, elapsed_ms = ms(elapsed), "head");
+            }
+            Event::Done {
+                id,
+                elapsed,
+                outcome: Ok(()),
+            } => {
+                tracing::debug!(target: "leyline::trace", id, elapsed_ms = ms(elapsed), "done");
+            }
+            Event::Done {
+                id,
+                elapsed,
+                outcome: Err(e),
+            } => {
+                tracing::debug!(target: "leyline::trace", id, elapsed_ms = ms(elapsed), kind = ?e.kind(), error = %e, "done");
+            }
+            Event::Summary { .. } => summary::render(event),
+            Event::Body {
+                id,
+                bytes,
+                elapsed,
+                outcome,
+            } => body::render(id, bytes, elapsed, outcome),
         }
-    }
-
-    fn summary(&self, ev: &Summary<'_>) {
-        summary::render(ev);
-    }
-
-    fn body(&self, ev: &BodyEnd<'_>) {
-        body::render(ev);
     }
 }
 
@@ -322,36 +260,8 @@ fn ms(d: Duration) -> u32 {
 }
 
 impl<T: Trace> Trace for Arc<T> {
-    fn dns(&self, ev: &Dns<'_>) {
-        T::dns(self, ev);
-    }
-
-    fn connect(&self, ev: &Connect<'_>) {
-        T::connect(self, ev);
-    }
-
-    fn tls(&self, ev: &Tls<'_>) {
-        T::tls(self, ev);
-    }
-
-    fn sent(&self, ev: &Sent<'_>) {
-        T::sent(self, ev);
-    }
-
-    fn head(&self, ev: &Head<'_>) {
-        T::head(self, ev);
-    }
-
-    fn done(&self, ev: &Done<'_>) {
-        T::done(self, ev);
-    }
-
-    fn summary(&self, ev: &Summary<'_>) {
-        T::summary(self, ev);
-    }
-
-    fn body(&self, ev: &BodyEnd<'_>) {
-        T::body(self, ev);
+    fn event(&self, event: &Event<'_>) {
+        T::event(self, event);
     }
 }
 

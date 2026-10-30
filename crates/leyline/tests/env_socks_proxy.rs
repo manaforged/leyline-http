@@ -1,7 +1,7 @@
 #![cfg(not(feature = "socks"))]
 
 use leyline::Session;
-use leyline::testing::{TestResponse, TestServer};
+use leyline::testing;
 
 #[tokio::test]
 async fn a_socks_environment_proxy_leaves_no_proxy_hosts_working() {
@@ -10,8 +10,10 @@ async fn a_socks_environment_proxy_leaves_no_proxy_hosts_working() {
         std::env::set_var("ALL_PROXY", "socks5://127.0.0.1:1");
         std::env::set_var("NO_PROXY", "127.0.0.1");
     }
-    let server = TestServer::http(|_| TestResponse::new(200)).await.unwrap();
+    let server = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
     let session = Session::builder().build().unwrap();
-    let resp = session.get(server.url("/")).await.unwrap();
+    let resp = session.get(server.url("/")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
 }

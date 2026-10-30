@@ -8,16 +8,12 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
 use std::net::IpAddr;
-use std::path::Path;
 use std::ptr;
 use std::str;
-use std::sync::LazyLock;
 
 use crate::asn1::{
-    Asn1BitStringRef, Asn1IntegerRef, Asn1Object, Asn1ObjectRef, Asn1StringRef, Asn1TimeRef,
-    Asn1Type,
+    Asn1BitStringRef, Asn1IntegerRef, Asn1ObjectRef, Asn1StringRef, Asn1TimeRef, Asn1Type,
 };
-use crate::bio::{MemBio, MemBioSlice};
 use crate::conf::ConfRef;
 use crate::error::ErrorStack;
 use crate::ex_data::Index;
@@ -26,10 +22,8 @@ use crate::nid::Nid;
 use crate::pkey::{HasPrivate, HasPublic, PKey, PKeyRef, Public};
 use crate::ssl::SslRef;
 use crate::stack::{Stack, StackRef, Stackable};
-use crate::string::OpensslString;
 use crate::try_int;
 use crate::util::ForeignTypeRefExt;
-use crate::x509::verify::{X509VerifyParam, X509VerifyParamRef};
 use crate::{cvt, cvt_n, cvt_p};
 use crate::{ffi, free_data_box};
 
@@ -39,15 +33,6 @@ pub mod store;
 pub mod verify;
 
 pub use purpose::X509Purpose;
-
-static STORE_INDEX: LazyLock<Index<X509StoreContext, store::X509Store>> =
-    LazyLock::new(|| X509StoreContext::new_ex_index().unwrap());
-
-static CERT_INDEX: LazyLock<Index<X509StoreContext, X509>> =
-    LazyLock::new(|| X509StoreContext::new_ex_index().unwrap());
-
-static CERT_CHAIN_INDEX: LazyLock<Index<X509StoreContext, Stack<X509>>> =
-    LazyLock::new(|| X509StoreContext::new_ex_index().unwrap());
 
 foreign_type_and_impl_send_sync! {
     type CType = ffi::X509_STORE_CTX;
@@ -162,83 +147,9 @@ impl X509StoreContextRef {
         }
     }
 
-    #[corresponds(X509_STORE_CTX_init)]
-    pub fn reset_with_context_data(
-        &mut self,
-        trust: store::X509Store,
-        cert: X509,
-        cert_chain: Stack<X509>,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            if let Err(e) = cvt(ffi::X509_STORE_CTX_init(
-                self.as_ptr(),
-                trust.as_ptr(),
-                cert.as_ptr(),
-                cert_chain.as_ptr(),
-            )) {
-                ffi::X509_STORE_CTX_cleanup(self.as_ptr());
-
-                return Err(e);
-            }
-        }
-
-        self.set_ex_data(*STORE_INDEX, trust);
-        self.set_ex_data(*CERT_INDEX, cert);
-        self.set_ex_data(*CERT_CHAIN_INDEX, cert_chain);
-
-        Ok(())
-    }
-
-    #[corresponds(X509_STORE_CTX_get0_param)]
-    pub fn verify_param(&mut self) -> &X509VerifyParamRef {
-        unsafe { X509VerifyParamRef::from_ptr(ffi::X509_STORE_CTX_get0_param(self.as_ptr())) }
-    }
-
-    #[corresponds(X509_STORE_CTX_get0_param)]
-    pub fn verify_param_mut(&mut self) -> &mut X509VerifyParamRef {
-        unsafe { X509VerifyParamRef::from_ptr_mut(ffi::X509_STORE_CTX_get0_param(self.as_ptr())) }
-    }
-
-    #[corresponds(X509_STORE_CTX_set0_param)]
-    pub fn set_verify_param(&mut self, param: X509VerifyParam) {
-        unsafe { ffi::X509_STORE_CTX_set0_param(self.as_ptr(), param.into_ptr()) }
-    }
-
     #[corresponds(X509_verify_cert)]
     pub fn verify_cert(&mut self) -> Result<bool, ErrorStack> {
         unsafe { cvt_n(ffi::X509_verify_cert(self.as_ptr())).map(|n| n != 0) }
-    }
-
-    #[corresponds(X509_STORE_CTX_set_error)]
-    pub fn set_error(&mut self, result: X509VerifyResult) {
-        unsafe {
-            ffi::X509_STORE_CTX_set_error(
-                self.as_ptr(),
-                result
-                    .err()
-                    .as_ref()
-                    .map_or(ffi::X509_V_OK, X509VerifyError::as_raw),
-            );
-        }
-    }
-
-    #[corresponds(X509_STORE_CTX_get_current_cert)]
-    #[must_use]
-    pub fn current_cert(&self) -> Option<&X509Ref> {
-        unsafe {
-            let ptr = ffi::X509_STORE_CTX_get_current_cert(self.as_ptr());
-            if ptr.is_null() {
-                None
-            } else {
-                Some(X509Ref::from_ptr(ptr))
-            }
-        }
-    }
-
-    #[corresponds(X509_STORE_CTX_get_error_depth)]
-    #[must_use]
-    pub fn error_depth(&self) -> u32 {
-        unsafe { ffi::X509_STORE_CTX_get_error_depth(self.as_ptr()) as u32 }
     }
 
     #[corresponds(X509_STORE_CTX_get0_chain)]
@@ -418,12 +329,6 @@ impl X509Ref {
         }
     }
 
-    #[corresponds(X509_subject_name_hash)]
-    #[must_use]
-    pub fn subject_name_hash(&self) -> u32 {
-        unsafe { ffi::X509_subject_name_hash(self.as_ptr()) as u32 }
-    }
-
     #[corresponds(X509_get_ext_d2i)]
     #[must_use]
     pub fn subject_alt_names(&self) -> Option<Stack<GeneralName>> {
@@ -448,42 +353,6 @@ impl X509Ref {
         unsafe {
             let name = ffi::X509_get_issuer_name(self.as_ptr());
             X509NameRef::from_const_ptr_opt(name).expect("issuer name must not be null")
-        }
-    }
-
-    #[corresponds(X509_get_ext_d2i)]
-    #[must_use]
-    pub fn issuer_alt_names(&self) -> Option<Stack<GeneralName>> {
-        unsafe {
-            let stack = ffi::X509_get_ext_d2i(
-                self.as_ptr(),
-                ffi::NID_issuer_alt_name,
-                ptr::null_mut(),
-                ptr::null_mut(),
-            );
-            if stack.is_null() {
-                None
-            } else {
-                Some(Stack::from_ptr(stack.cast()))
-            }
-        }
-    }
-
-    #[corresponds(X509_get0_subject_key_id)]
-    #[must_use]
-    pub fn subject_key_id(&self) -> Option<&Asn1StringRef> {
-        unsafe {
-            let data = ffi::X509_get0_subject_key_id(self.as_ptr());
-            Asn1StringRef::from_const_ptr_opt(data)
-        }
-    }
-
-    #[corresponds(X509_get0_authority_key_id)]
-    #[must_use]
-    pub fn authority_key_id(&self) -> Option<&Asn1StringRef> {
-        unsafe {
-            let data = ffi::X509_get0_authority_key_id(self.as_ptr());
-            Asn1StringRef::from_const_ptr_opt(data)
         }
     }
 
@@ -560,11 +429,6 @@ impl X509Ref {
             assert!(!algor.is_null());
             X509AlgorithmRef::from_ptr(algor.cast_mut())
         }
-    }
-
-    #[corresponds(X509_get1_ocsp)]
-    pub fn ocsp_responders(&self) -> Result<Stack<OpensslString>, ErrorStack> {
-        unsafe { cvt_p(ffi::X509_get1_ocsp(self.as_ptr())).map(|p| Stack::from_ptr(p)) }
     }
 
     #[corresponds(X509_check_issued)]
@@ -655,36 +519,6 @@ impl X509 {
         X509,
         ffi::d2i_X509,
         ::libc::c_long
-    }
-
-    #[corresponds(PEM_read_bio_X509)]
-    pub fn stack_from_pem(pem: &[u8]) -> Result<Vec<X509>, ErrorStack> {
-        unsafe {
-            ffi::init();
-            let bio = MemBioSlice::new(pem)?;
-
-            let mut certs = vec![];
-            loop {
-                let r =
-                    ffi::PEM_read_bio_X509(bio.as_ptr(), ptr::null_mut(), None, ptr::null_mut());
-                if r.is_null() {
-                    let err = ffi::ERR_peek_last_error();
-
-                    if ffi::ERR_GET_LIB(err) == ffi::ERR_LIB_PEM.0.try_into().unwrap()
-                        && ffi::ERR_GET_REASON(err) == ffi::PEM_R_NO_START_LINE
-                    {
-                        ErrorStack::clear();
-                        break;
-                    }
-
-                    return Err(ErrorStack::get());
-                } else {
-                    certs.push(X509::from_ptr(r));
-                }
-            }
-
-            Ok(certs)
-        }
     }
 }
 
@@ -870,62 +704,6 @@ impl X509NameBuilder {
         }
     }
 
-    #[corresponds(X509_NAME_add_entry_by_txt)]
-    pub fn append_entry_by_text_with_type(
-        &mut self,
-        field: &str,
-        value: &str,
-        ty: Asn1Type,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            let field = CString::new(field).map_err(ErrorStack::internal_error)?;
-            cvt(ffi::X509_NAME_add_entry_by_txt(
-                self.0.as_ptr(),
-                field.as_ptr().cast_mut(),
-                ty.as_raw(),
-                value.as_ptr(),
-                try_int(value.len())?,
-                -1,
-                0,
-            ))
-        }
-    }
-
-    #[corresponds(X509_NAME_add_entry_by_NID)]
-    pub fn append_entry_by_nid(&mut self, field: Nid, value: &str) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::X509_NAME_add_entry_by_NID(
-                self.0.as_ptr(),
-                field.as_raw(),
-                ffi::MBSTRING_UTF8,
-                value.as_ptr().cast_mut(),
-                try_int(value.len())?,
-                -1,
-                0,
-            ))
-        }
-    }
-
-    #[corresponds(X509_NAME_add_entry_by_NID)]
-    pub fn append_entry_by_nid_with_type(
-        &mut self,
-        field: Nid,
-        value: &str,
-        ty: Asn1Type,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::X509_NAME_add_entry_by_NID(
-                self.0.as_ptr(),
-                field.as_raw(),
-                ty.as_raw(),
-                value.as_ptr().cast_mut(),
-                try_int(value.len())?,
-                -1,
-                0,
-            ))
-        }
-    }
-
     #[must_use]
     pub fn build(self) -> X509Name {
         X509Name::from_der(&self.0.to_der().unwrap()).unwrap()
@@ -944,12 +722,6 @@ impl X509Name {
         X509NameBuilder::new()
     }
 
-    pub fn load_client_ca_file<P: AsRef<Path>>(file: P) -> Result<Stack<X509Name>, ErrorStack> {
-        let file = CString::new(file.as_ref().as_os_str().as_encoded_bytes())
-            .map_err(ErrorStack::internal_error)?;
-        unsafe { cvt_p(ffi::SSL_load_client_CA_file(file.as_ptr())).map(|p| Stack::from_ptr(p)) }
-    }
-
     from_der! {
         #[corresponds(d2i_X509_NAME)]
         from_der,
@@ -965,32 +737,11 @@ impl Stackable for X509Name {
 
 impl X509NameRef {
     #[must_use]
-    pub fn entries_by_nid(&self, nid: Nid) -> X509NameEntries<'_> {
-        X509NameEntries {
-            name: self,
-            nid: Some(nid),
-            loc: -1,
-        }
-    }
-
-    #[must_use]
     pub fn entries(&self) -> X509NameEntries<'_> {
         X509NameEntries {
             name: self,
             nid: None,
             loc: -1,
-        }
-    }
-
-    #[corresponds(X509_NAME_print_ex)]
-    #[must_use]
-    pub fn print_ex(&self, flags: i32) -> Option<String> {
-        unsafe {
-            let bio = MemBio::new().ok()?;
-            ffi::X509_NAME_print_ex(bio.as_ptr(), self.as_ptr(), 0, flags as _);
-            let buf = bio.get_buf().to_vec();
-            let res = String::from_utf8(buf);
-            res.ok()
         }
     }
 
@@ -1131,18 +882,6 @@ impl X509ReqBuilder {
         }
     }
 
-    pub fn add_extensions(
-        &mut self,
-        extensions: &StackRef<X509Extension>,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::X509_REQ_add_extensions(
-                self.0.as_ptr(),
-                extensions.as_ptr(),
-            ))
-        }
-    }
-
     #[corresponds(X509_REQ_sign)]
     pub fn sign<T>(&mut self, key: &PKeyRef<T>, hash: MessageDigest) -> Result<(), ErrorStack>
     where
@@ -1220,14 +959,6 @@ impl X509ReqRef {
         }
     }
 
-    #[corresponds(X509_REQ_get_pubkey)]
-    pub fn public_key(&self) -> Result<PKey<Public>, ErrorStack> {
-        unsafe {
-            let key = cvt_p(ffi::X509_REQ_get_pubkey(self.as_ptr()))?;
-            Ok(PKey::from_ptr(key))
-        }
-    }
-
     #[corresponds(X509_REQ_verify)]
     pub fn verify<T>(&self, key: &PKeyRef<T>) -> Result<bool, ErrorStack>
     where
@@ -1298,81 +1029,9 @@ impl X509VerifyError {
 #[allow(missing_docs)]
 impl X509VerifyError {
     pub const UNSPECIFIED: Self = Self(ffi::X509_V_ERR_UNSPECIFIED);
-    pub const UNABLE_TO_GET_ISSUER_CERT: Self = Self(ffi::X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT);
-    pub const UNABLE_TO_GET_CRL: Self = Self(ffi::X509_V_ERR_UNABLE_TO_GET_CRL);
-    pub const UNABLE_TO_DECRYPT_CERT_SIGNATURE: Self =
-        Self(ffi::X509_V_ERR_UNABLE_TO_DECRYPT_CERT_SIGNATURE);
-    pub const UNABLE_TO_DECRYPT_CRL_SIGNATURE: Self =
-        Self(ffi::X509_V_ERR_UNABLE_TO_DECRYPT_CRL_SIGNATURE);
-    pub const UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY: Self =
-        Self(ffi::X509_V_ERR_UNABLE_TO_DECODE_ISSUER_PUBLIC_KEY);
-    pub const CERT_SIGNATURE_FAILURE: Self = Self(ffi::X509_V_ERR_CERT_SIGNATURE_FAILURE);
-    pub const CRL_SIGNATURE_FAILURE: Self = Self(ffi::X509_V_ERR_CRL_SIGNATURE_FAILURE);
-    pub const CERT_NOT_YET_VALID: Self = Self(ffi::X509_V_ERR_CERT_NOT_YET_VALID);
-    pub const CERT_HAS_EXPIRED: Self = Self(ffi::X509_V_ERR_CERT_HAS_EXPIRED);
-    pub const CRL_NOT_YET_VALID: Self = Self(ffi::X509_V_ERR_CRL_NOT_YET_VALID);
-    pub const CRL_HAS_EXPIRED: Self = Self(ffi::X509_V_ERR_CRL_HAS_EXPIRED);
-    pub const ERROR_IN_CERT_NOT_BEFORE_FIELD: Self =
-        Self(ffi::X509_V_ERR_ERROR_IN_CERT_NOT_BEFORE_FIELD);
-    pub const ERROR_IN_CERT_NOT_AFTER_FIELD: Self =
-        Self(ffi::X509_V_ERR_ERROR_IN_CERT_NOT_AFTER_FIELD);
-    pub const ERROR_IN_CRL_LAST_UPDATE_FIELD: Self =
-        Self(ffi::X509_V_ERR_ERROR_IN_CRL_LAST_UPDATE_FIELD);
-    pub const ERROR_IN_CRL_NEXT_UPDATE_FIELD: Self =
-        Self(ffi::X509_V_ERR_ERROR_IN_CRL_NEXT_UPDATE_FIELD);
-    pub const OUT_OF_MEM: Self = Self(ffi::X509_V_ERR_OUT_OF_MEM);
-    pub const DEPTH_ZERO_SELF_SIGNED_CERT: Self = Self(ffi::X509_V_ERR_DEPTH_ZERO_SELF_SIGNED_CERT);
-    pub const SELF_SIGNED_CERT_IN_CHAIN: Self = Self(ffi::X509_V_ERR_SELF_SIGNED_CERT_IN_CHAIN);
-    pub const UNABLE_TO_GET_ISSUER_CERT_LOCALLY: Self =
-        Self(ffi::X509_V_ERR_UNABLE_TO_GET_ISSUER_CERT_LOCALLY);
-    pub const UNABLE_TO_VERIFY_LEAF_SIGNATURE: Self =
-        Self(ffi::X509_V_ERR_UNABLE_TO_VERIFY_LEAF_SIGNATURE);
-    pub const CERT_CHAIN_TOO_LONG: Self = Self(ffi::X509_V_ERR_CERT_CHAIN_TOO_LONG);
-    pub const CERT_REVOKED: Self = Self(ffi::X509_V_ERR_CERT_REVOKED);
-    pub const INVALID_CA: Self = Self(ffi::X509_V_ERR_INVALID_CA);
-    pub const PATH_LENGTH_EXCEEDED: Self = Self(ffi::X509_V_ERR_PATH_LENGTH_EXCEEDED);
-    pub const INVALID_PURPOSE: Self = Self(ffi::X509_V_ERR_INVALID_PURPOSE);
-    pub const CERT_UNTRUSTED: Self = Self(ffi::X509_V_ERR_CERT_UNTRUSTED);
-    pub const CERT_REJECTED: Self = Self(ffi::X509_V_ERR_CERT_REJECTED);
-    pub const SUBJECT_ISSUER_MISMATCH: Self = Self(ffi::X509_V_ERR_SUBJECT_ISSUER_MISMATCH);
-    pub const AKID_SKID_MISMATCH: Self = Self(ffi::X509_V_ERR_AKID_SKID_MISMATCH);
-    pub const AKID_ISSUER_SERIAL_MISMATCH: Self = Self(ffi::X509_V_ERR_AKID_ISSUER_SERIAL_MISMATCH);
-    pub const KEYUSAGE_NO_CERTSIGN: Self = Self(ffi::X509_V_ERR_KEYUSAGE_NO_CERTSIGN);
-    pub const UNABLE_TO_GET_CRL_ISSUER: Self = Self(ffi::X509_V_ERR_UNABLE_TO_GET_CRL_ISSUER);
-    pub const UNHANDLED_CRITICAL_EXTENSION: Self =
-        Self(ffi::X509_V_ERR_UNHANDLED_CRITICAL_EXTENSION);
-    pub const KEYUSAGE_NO_CRL_SIGN: Self = Self(ffi::X509_V_ERR_KEYUSAGE_NO_CRL_SIGN);
-    pub const UNHANDLED_CRITICAL_CRL_EXTENSION: Self =
-        Self(ffi::X509_V_ERR_UNHANDLED_CRITICAL_CRL_EXTENSION);
-    pub const INVALID_NON_CA: Self = Self(ffi::X509_V_ERR_INVALID_NON_CA);
-    pub const PROXY_PATH_LENGTH_EXCEEDED: Self = Self(ffi::X509_V_ERR_PROXY_PATH_LENGTH_EXCEEDED);
-    pub const KEYUSAGE_NO_DIGITAL_SIGNATURE: Self =
-        Self(ffi::X509_V_ERR_KEYUSAGE_NO_DIGITAL_SIGNATURE);
-    pub const PROXY_CERTIFICATES_NOT_ALLOWED: Self =
-        Self(ffi::X509_V_ERR_PROXY_CERTIFICATES_NOT_ALLOWED);
-    pub const INVALID_EXTENSION: Self = Self(ffi::X509_V_ERR_INVALID_EXTENSION);
-    pub const INVALID_POLICY_EXTENSION: Self = Self(ffi::X509_V_ERR_INVALID_POLICY_EXTENSION);
-    pub const NO_EXPLICIT_POLICY: Self = Self(ffi::X509_V_ERR_NO_EXPLICIT_POLICY);
-    pub const DIFFERENT_CRL_SCOPE: Self = Self(ffi::X509_V_ERR_DIFFERENT_CRL_SCOPE);
-    pub const UNSUPPORTED_EXTENSION_FEATURE: Self =
-        Self(ffi::X509_V_ERR_UNSUPPORTED_EXTENSION_FEATURE);
-    pub const UNNESTED_RESOURCE: Self = Self(ffi::X509_V_ERR_UNNESTED_RESOURCE);
-    pub const PERMITTED_VIOLATION: Self = Self(ffi::X509_V_ERR_PERMITTED_VIOLATION);
-    pub const EXCLUDED_VIOLATION: Self = Self(ffi::X509_V_ERR_EXCLUDED_VIOLATION);
-    pub const SUBTREE_MINMAX: Self = Self(ffi::X509_V_ERR_SUBTREE_MINMAX);
-    pub const APPLICATION_VERIFICATION: Self = Self(ffi::X509_V_ERR_APPLICATION_VERIFICATION);
-    pub const UNSUPPORTED_CONSTRAINT_TYPE: Self = Self(ffi::X509_V_ERR_UNSUPPORTED_CONSTRAINT_TYPE);
-    pub const UNSUPPORTED_CONSTRAINT_SYNTAX: Self =
-        Self(ffi::X509_V_ERR_UNSUPPORTED_CONSTRAINT_SYNTAX);
-    pub const UNSUPPORTED_NAME_SYNTAX: Self = Self(ffi::X509_V_ERR_UNSUPPORTED_NAME_SYNTAX);
-    pub const CRL_PATH_VALIDATION_ERROR: Self = Self(ffi::X509_V_ERR_CRL_PATH_VALIDATION_ERROR);
     pub const HOSTNAME_MISMATCH: Self = Self(ffi::X509_V_ERR_HOSTNAME_MISMATCH);
-    pub const EMAIL_MISMATCH: Self = Self(ffi::X509_V_ERR_EMAIL_MISMATCH);
     pub const IP_ADDRESS_MISMATCH: Self = Self(ffi::X509_V_ERR_IP_ADDRESS_MISMATCH);
     pub const INVALID_CALL: Self = Self(ffi::X509_V_ERR_INVALID_CALL);
-    pub const STORE_LOOKUP: Self = Self(ffi::X509_V_ERR_STORE_LOOKUP);
-    pub const NAME_CONSTRAINTS_WITHOUT_SANS: Self =
-        Self(ffi::X509_V_ERR_NAME_CONSTRAINTS_WITHOUT_SANS);
 }
 
 foreign_type_and_impl_send_sync! {
@@ -1421,17 +1080,6 @@ impl GeneralName {
             IpAddr::V6(addr) => unsafe {
                 GeneralName::new(ffi::GEN_IPADD, Asn1Type::OCTET_STRING, &addr.octets())
             },
-        }
-    }
-
-    pub(crate) fn new_rid(oid: Asn1Object) -> Result<GeneralName, ErrorStack> {
-        unsafe {
-            ffi::init();
-            let gn = cvt_p(ffi::GENERAL_NAME_new())?;
-            (*gn).type_ = ffi::GEN_RID;
-            (*gn).d.registeredID = oid.into_ptr();
-
-            Ok(GeneralName::from_ptr(gn))
         }
     }
 }

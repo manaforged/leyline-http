@@ -14,6 +14,7 @@ impl fmt::Display for ProfileChanged {
 impl std::error::Error for ProfileChanged {}
 
 impl Error {
+    /// Returns true when the session profile differs from the pinned profile.
     pub fn is_profile_changed(&self) -> bool {
         self.source_as::<ProfileChanged>().is_some()
     }

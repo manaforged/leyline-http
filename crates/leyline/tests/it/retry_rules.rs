@@ -1,9 +1,10 @@
+use futures_util::TryFutureExt;
 use std::io::Write;
 use std::time::Duration;
 
 use bytes::Bytes;
-use leyline::testing::{TestResponse, TestServer, queue};
-use leyline::{Body, CompressionConfig, RetryPolicy, Session, TimeoutConfig, WaitFormat};
+use leyline::testing::{self, queue};
+use leyline::{Body, Proxy, Retry, Session, Timeout};
 use tokio::net::TcpListener;
 
 async fn dead_port() -> u16 {
@@ -12,23 +13,22 @@ async fn dead_port() -> u16 {
 }
 
 fn plain() -> Session {
-    Session::builder()
-        .retry(RetryPolicy::none())
-        .build()
-        .unwrap()
+    Session::builder().retry(0).build().unwrap()
 }
 
 #[tokio::test]
 async fn transient_returns_a_long_server_wait_instead_of_sleeping() {
-    let server = TestServer::http(queue([
-        TestResponse::new(429).close().header("retry-after", "3600"),
-        TestResponse::new(200).close(),
+    let server = testing::Server::http(queue([
+        testing::Response::new(429)
+            .close()
+            .header("retry-after", "3600"),
+        testing::Response::new(200).close(),
     ]))
     .await
     .unwrap();
     let session = Session::builder()
-        .retry(RetryPolicy::transient())
-        .timeout(TimeoutConfig::new().total(None))
+        .retry(3)
+        .timeout(Timeout::new().total(None))
         .build()
         .unwrap();
     let resp = tokio::time::timeout(Duration::from_secs(5), session.get(server.url("/")).send())
@@ -39,49 +39,62 @@ async fn transient_returns_a_long_server_wait_instead_of_sleeping() {
     assert_eq!(server.requests().await.len(), 1);
 }
 
-#[test]
-fn backoff_saturates_instead_of_panicking() {
-    let policy = RetryPolicy::transient()
-        .initial_backoff(Duration::from_secs(1))
-        .max_backoff(Duration::MAX)
-        .backoff_factor(2.0)
-        .jitter(false);
-    assert_eq!(policy.backoff(2000), Duration::MAX);
-}
-
 #[tokio::test]
 async fn a_configured_wait_header_wins_over_retry_after() {
-    let server = TestServer::http(queue([
-        TestResponse::new(429)
+    let server = testing::Server::http(queue([
+        testing::Response::new(429)
             .close()
             .header("retry-after", "100")
             .header("x-wait", "0"),
-        TestResponse::new(200).close(),
+        testing::Response::new(200).close(),
     ]))
     .await
     .unwrap();
     let session = Session::builder()
         .retry(
-            RetryPolicy::transient()
-                .max_retry_after(Duration::from_secs(5))
-                .wait_header("x-wait", WaitFormat::Seconds),
+            Retry::new(3)
+                .max_wait(Duration::from_secs(5))
+                .wait_header("x-wait"),
         )
         .build()
         .unwrap();
-    let resp = session.get(server.url("/")).await.unwrap();
+    let resp = session.get(server.url("/")).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    assert_eq!(server.requests().await.len(), 2);
+}
+
+#[tokio::test]
+async fn a_millisecond_wait_header_waits_milliseconds() {
+    let server = testing::Server::http(queue([
+        testing::Response::new(429)
+            .close()
+            .header("x-wait-ms", "50"),
+        testing::Response::new(200).close(),
+    ]))
+    .await
+    .unwrap();
+    let session = Session::builder()
+        .retry(
+            Retry::new(3)
+                .max_wait(Duration::from_secs(1))
+                .wait_header_ms("x-wait-ms"),
+        )
+        .build()
+        .unwrap();
+    let resp = session.get(server.url("/")).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(server.requests().await.len(), 2);
 }
 
 #[tokio::test]
 async fn a_declined_retry_counts_as_exhausted() {
-    let server = TestServer::http(queue([TestResponse::new(503)
+    let server = testing::Server::http(queue([testing::Response::new(503)
         .close()
         .header("retry-after", "100")]))
     .await
     .unwrap();
     let err = Session::builder()
-        .retry(RetryPolicy::transient().max_retry_after(Duration::from_secs(1)))
+        .retry(Retry::new(3).max_wait(Duration::from_secs(1)))
         .build()
         .unwrap()
         .get(server.url("/"))
@@ -95,18 +108,15 @@ async fn a_declined_retry_counts_as_exhausted() {
 
 #[tokio::test]
 async fn an_unsent_streaming_body_is_retried() {
-    let proxy = TestServer::http(queue([TestResponse::new(200).close()]))
+    let proxy = testing::Server::http(queue([testing::Response::new(200).close()]))
         .await
         .unwrap();
     let session = Session::builder()
-        .proxy(format!("http://127.0.0.1:{}", dead_port().await))
-        .retry(
-            RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .jitter(false)
-                .retry_unsent(true)
-                .rotate_proxies([format!("http://{}", proxy.addr())]),
-        )
+        .proxy(Proxy::list([
+            format!("http://127.0.0.1:{}", dead_port().await),
+            format!("http://{}", proxy.addr()),
+        ]))
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap();
     let chunks = futures_util::stream::iter([
@@ -116,6 +126,7 @@ async fn an_unsent_streaming_body_is_retried() {
     let resp = session
         .post("http://origin.test/upload")
         .body(Body::stream(chunks, None))
+        .send()
         .await
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
@@ -127,14 +138,19 @@ async fn an_unsent_streaming_body_is_retried() {
 #[tokio::test]
 async fn download_keeps_the_same_error_body_as_send() {
     let body = vec![b'e'; 10 * 1024];
-    let server = TestServer::http(queue([TestResponse::new(503).close().body(body.clone())]))
-        .await
-        .unwrap();
+    let server = testing::Server::http(queue([testing::Response::new(503)
+        .close()
+        .body(body.clone())]))
+    .await
+    .unwrap();
     let dir = std::env::temp_dir().join(format!("leyline-errbody-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let err = plain()
         .get(server.url("/file"))
-        .download(dir.join("file.bin"), None)
+        .error_for_status()
+        .stream()
+        .send()
+        .and_then(|resp| resp.download_to(dir.join("file.bin")))
         .await
         .unwrap_err();
     assert_eq!(err.body(), Some(body.as_slice()));
@@ -146,7 +162,7 @@ async fn an_error_body_bomb_stops_at_the_error_body_cap() {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
     encoder.write_all(&vec![0u8; 4 << 20]).unwrap();
     let bomb = encoder.finish().unwrap();
-    let server = TestServer::http(queue([TestResponse::new(503)
+    let server = testing::Server::http(queue([testing::Response::new(503)
         .close()
         .header("content-encoding", "gzip")
         .body(bomb)]))
@@ -155,12 +171,15 @@ async fn an_error_body_bomb_stops_at_the_error_body_cap() {
     let dir = std::env::temp_dir().join(format!("leyline-bomb-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let err = Session::builder()
-        .retry(RetryPolicy::none())
-        .compression(CompressionConfig::new().max_body_size(1 << 20))
+        .retry(0)
+        .max_body_size(1 << 20)
         .build()
         .unwrap()
         .get(server.url("/"))
-        .download(dir.join("bomb.bin"), None)
+        .error_for_status()
+        .stream()
+        .send()
+        .and_then(|resp| resp.download_to(dir.join("bomb.bin")))
         .await
         .unwrap_err();
     drop(std::fs::remove_dir_all(&dir));
@@ -170,12 +189,12 @@ async fn an_error_body_bomb_stops_at_the_error_body_cap() {
 
 #[tokio::test]
 async fn the_body_timeout_starts_at_the_first_read() {
-    let server = TestServer::http(queue([TestResponse::new(200).close().body("fast")]))
+    let server = testing::Server::http(queue([testing::Response::new(200).close().body("fast")]))
         .await
         .unwrap();
     let resp = plain()
         .get(server.url("/"))
-        .timeout(TimeoutConfig::new().body(Duration::from_millis(300)))
+        .timeout(Timeout::new().body(Duration::from_millis(300)))
         .stream()
         .send()
         .await
@@ -186,23 +205,20 @@ async fn the_body_timeout_starts_at_the_first_read() {
 
 #[tokio::test]
 async fn a_hostile_retry_after_year_is_ignored() {
-    let server = TestServer::http(queue([
-        TestResponse::new(503)
+    let server = testing::Server::http(queue([
+        testing::Response::new(503)
             .close()
             .header("retry-after", "Mon, 01 Jan -2147483648 00:00:00 GMT"),
-        TestResponse::new(200).close(),
+        testing::Response::new(200).close(),
     ]))
     .await
     .unwrap();
     let resp = Session::builder()
-        .retry(
-            RetryPolicy::transient()
-                .initial_backoff(Duration::from_millis(1))
-                .jitter(false),
-        )
+        .retry(Retry::new(3).backoff(Duration::from_millis(1), Duration::from_secs(1)))
         .build()
         .unwrap()
         .get(server.url("/"))
+        .send()
         .await
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
@@ -210,7 +226,7 @@ async fn a_hostile_retry_after_year_is_ignored() {
 
 async fn error_body_len(gzip: bool) -> Option<usize> {
     let payload = vec![b'e'; 20 * 1024];
-    let mut response = TestResponse::new(500).close();
+    let mut response = testing::Response::new(500).close();
     response = if gzip {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
         encoder.write_all(&payload).unwrap();
@@ -220,10 +236,10 @@ async fn error_body_len(gzip: bool) -> Option<usize> {
     } else {
         response.body(payload)
     };
-    let server = TestServer::http(queue([response])).await.unwrap();
+    let server = testing::Server::http(queue([response])).await.unwrap();
     let err = Session::builder()
-        .retry(RetryPolicy::none())
-        .compression(CompressionConfig::new().max_body_size(16 * 1024))
+        .retry(0)
+        .max_body_size(16 * 1024)
         .build()
         .unwrap()
         .get(server.url("/"))
@@ -239,4 +255,18 @@ async fn error_body_len(gzip: bool) -> Option<usize> {
 async fn an_error_body_is_cut_at_the_session_cap_with_or_without_encoding() {
     assert_eq!(error_body_len(false).await, Some(16 * 1024));
     assert_eq!(error_body_len(true).await, Some(16 * 1024));
+}
+
+#[test]
+fn a_retry_gives_its_backoff_wait_for_an_outside_loop() {
+    let retry =
+        leyline::Retry::new(3).backoff(Duration::from_millis(100), Duration::from_millis(400));
+    for (attempt, ceiling) in [(0, 100), (1, 200), (2, 400), (5, 400)] {
+        let wait = retry.delay(attempt);
+        let ceiling = Duration::from_millis(ceiling);
+        assert!(
+            wait >= ceiling / 2 && wait <= ceiling,
+            "{attempt}: {wait:?}"
+        );
+    }
 }

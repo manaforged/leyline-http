@@ -13194,16 +13194,6 @@ unsafe extern "C" {
         size: usize,
         type_id: malloc_type_id_t,
     ) -> *mut ::std::os::raw::c_void;
-    pub fn malloc(__size: ::std::os::raw::c_ulong) -> *mut ::std::os::raw::c_void;
-    pub fn calloc(
-        __count: ::std::os::raw::c_ulong,
-        __size: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
-    pub fn free(arg1: *mut ::std::os::raw::c_void);
-    pub fn realloc(
-        __ptr: *mut ::std::os::raw::c_void,
-        __size: ::std::os::raw::c_ulong,
-    ) -> *mut ::std::os::raw::c_void;
     pub fn reallocf(
         __ptr: *mut ::std::os::raw::c_void,
         __size: usize,

@@ -108,6 +108,7 @@ pub(crate) fn generate_bindings(config: &Config) -> Result<PathBuf, Box<dyn std:
         .merge_extern_blocks(true)
         .prepend_enum_name(true)
         .blocklist_type("max_align_t")
+        .blocklist_function("malloc|calloc|realloc|free")
         .clang_args(get_extra_clang_args_for_bindgen(config))
         .clang_arg("-I")
         .clang_arg(include_path.display().to_string());

@@ -1,5 +1,4 @@
 use foreign_types::{ForeignType, ForeignTypeRef};
-use libc::c_int;
 use openssl_macros::corresponds;
 use std::fmt;
 use std::ptr;
@@ -14,26 +13,6 @@ use crate::{cvt, cvt_n, cvt_p, init};
 
 #[derive(Copy, Clone)]
 pub struct PointConversionForm(ffi::point_conversion_form_t);
-
-impl PointConversionForm {
-    pub const COMPRESSED: PointConversionForm =
-        PointConversionForm(ffi::point_conversion_form_t::POINT_CONVERSION_COMPRESSED);
-
-    pub const UNCOMPRESSED: PointConversionForm =
-        PointConversionForm(ffi::point_conversion_form_t::POINT_CONVERSION_UNCOMPRESSED);
-
-    pub const HYBRID: PointConversionForm =
-        PointConversionForm(ffi::point_conversion_form_t::POINT_CONVERSION_HYBRID);
-}
-
-#[derive(Copy, Clone)]
-pub struct Asn1Flag(c_int);
-
-impl Asn1Flag {
-    pub const EXPLICIT_CURVE: Asn1Flag = Asn1Flag(0);
-
-    pub const NAMED_CURVE: Asn1Flag = Asn1Flag(ffi::OPENSSL_EC_NAMED_CURVE);
-}
 
 foreign_type_and_impl_send_sync! {
     type CType = ffi::EC_GROUP;
@@ -53,59 +32,11 @@ impl EcGroup {
 }
 
 impl EcGroupRef {
-    pub fn components_gfp(
-        &self,
-        p: &mut BigNumRef,
-        a: &mut BigNumRef,
-        b: &mut BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::EC_GROUP_get_curve_GFp(
-                self.as_ptr(),
-                p.as_ptr(),
-                a.as_ptr(),
-                b.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    #[corresponds(EC_GROUP_get_cofactor)]
-    pub fn cofactor(
-        &self,
-        cofactor: &mut BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::EC_GROUP_get_cofactor(
-                self.as_ptr(),
-                cofactor.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
     #[corresponds(EC_GROUP_get_degree)]
     #[allow(clippy::unnecessary_cast)]
     #[must_use]
     pub fn degree(&self) -> u32 {
         unsafe { ffi::EC_GROUP_get_degree(self.as_ptr()) as u32 }
-    }
-
-    #[corresponds(EC_GROUP_order_bits)]
-    #[must_use]
-    pub fn order_bits(&self) -> u32 {
-        unsafe { ffi::EC_GROUP_order_bits(self.as_ptr()) as u32 }
-    }
-
-    #[corresponds(EC_GROUP_get0_generator)]
-    #[must_use]
-    pub fn generator(&self) -> &EcPointRef {
-        unsafe {
-            let ptr = ffi::EC_GROUP_get0_generator(self.as_ptr());
-            EcPointRef::from_ptr(ptr.cast_mut())
-        }
     }
 
     #[corresponds(EC_GROUP_get_order)]
@@ -120,12 +51,6 @@ impl EcGroupRef {
                 order.as_ptr(),
                 ctx.as_ptr(),
             ))
-        }
-    }
-
-    pub fn set_asn1_flag(&mut self, flag: Asn1Flag) {
-        unsafe {
-            ffi::EC_GROUP_set_asn1_flag(self.as_ptr(), flag.0);
         }
     }
 
@@ -183,55 +108,6 @@ impl EcPointRef {
                 ptr::null(),
                 q.as_ptr(),
                 m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    pub fn mul_generator(
-        &mut self,
-        group: &EcGroupRef,
-        n: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::EC_POINT_mul(
-                group.as_ptr(),
-                self.as_ptr(),
-                n.as_ptr(),
-                ptr::null(),
-                ptr::null(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    pub fn mul_full(
-        &mut self,
-        group: &EcGroupRef,
-        n: &BigNumRef,
-        q: &EcPointRef,
-        m: &BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::EC_POINT_mul(
-                group.as_ptr(),
-                self.as_ptr(),
-                n.as_ptr(),
-                q.as_ptr(),
-                m.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
-
-    #[corresponds(EC_POINT_invert)]
-    pub fn invert(&mut self, group: &EcGroupRef, ctx: &BigNumContextRef) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::EC_POINT_invert(
-                group.as_ptr(),
-                self.as_ptr(),
                 ctx.as_ptr(),
             ))
         }
@@ -296,25 +172,6 @@ impl EcPointRef {
             Ok(res == 0)
         }
     }
-
-    #[corresponds(EC_POINT_get_affine_coordinates_GFp)]
-    pub fn affine_coordinates_gfp(
-        &self,
-        group: &EcGroupRef,
-        x: &mut BigNumRef,
-        y: &mut BigNumRef,
-        ctx: &mut BigNumContextRef,
-    ) -> Result<(), ErrorStack> {
-        unsafe {
-            cvt(ffi::EC_POINT_get_affine_coordinates_GFp(
-                group.as_ptr(),
-                self.as_ptr(),
-                x.as_ptr(),
-                y.as_ptr(),
-                ctx.as_ptr(),
-            ))
-        }
-    }
 }
 
 impl EcPoint {
@@ -369,30 +226,12 @@ where
         private_key_to_der,
         ffi::i2d_ECPrivateKey
     }
-
-    #[corresponds(EC_KEY_get0_private_key)]
-    #[must_use]
-    pub fn private_key(&self) -> &BigNumRef {
-        unsafe {
-            let ptr = ffi::EC_KEY_get0_private_key(self.as_ptr());
-            BigNumRef::from_ptr(ptr.cast_mut())
-        }
-    }
 }
 
 impl<T> EcKeyRef<T>
 where
     T: HasPublic,
 {
-    #[corresponds(EC_KEY_get0_public_key)]
-    #[must_use]
-    pub fn public_key(&self) -> &EcPointRef {
-        unsafe {
-            let ptr = ffi::EC_KEY_get0_public_key(self.as_ptr());
-            EcPointRef::from_ptr(ptr.cast_mut())
-        }
-    }
-
     to_pem! {
         #[corresponds(PEM_write_bio_EC_PUBKEY)]
         public_key_to_pem,
@@ -418,11 +257,6 @@ where
             EcGroupRef::from_ptr(ptr.cast_mut())
         }
     }
-
-    #[corresponds(EC_KEY_check_key)]
-    pub fn check_key(&self) -> Result<(), ErrorStack> {
-        unsafe { cvt(ffi::EC_KEY_check_key(self.as_ptr())) }
-    }
 }
 
 impl<T> ToOwned for EcKeyRef<T> {
@@ -445,62 +279,9 @@ impl EcKey<Params> {
             cvt_p(ffi::EC_KEY_new_by_curve_name(nid.as_raw())).map(|p| EcKey::from_ptr(p))
         }
     }
-
-    #[corresponds(EC_KEY_set_group)]
-    pub fn from_group(group: &EcGroupRef) -> Result<EcKey<Params>, ErrorStack> {
-        unsafe {
-            cvt_p(ffi::EC_KEY_new())
-                .map(|p| EcKey::from_ptr(p))
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_group(key.as_ptr(), group.as_ptr())).map(|_| key)
-                })
-        }
-    }
 }
 
 impl EcKey<Public> {
-    pub fn from_public_key(
-        group: &EcGroupRef,
-        public_key: &EcPointRef,
-    ) -> Result<EcKey<Public>, ErrorStack> {
-        unsafe {
-            cvt_p(ffi::EC_KEY_new())
-                .map(|p| EcKey::from_ptr(p))
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_group(key.as_ptr(), group.as_ptr())).map(|_| key)
-                })
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_public_key(
-                        key.as_ptr(),
-                        public_key.as_ptr(),
-                    ))
-                    .map(|_| key)
-                })
-        }
-    }
-
-    pub fn from_public_key_affine_coordinates(
-        group: &EcGroupRef,
-        x: &BigNumRef,
-        y: &BigNumRef,
-    ) -> Result<EcKey<Public>, ErrorStack> {
-        unsafe {
-            cvt_p(ffi::EC_KEY_new())
-                .map(|p| EcKey::from_ptr(p))
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_group(key.as_ptr(), group.as_ptr())).map(|_| key)
-                })
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_public_key_affine_coordinates(
-                        key.as_ptr(),
-                        x.as_ptr(),
-                        y.as_ptr(),
-                    ))
-                    .map(|_| key)
-                })
-        }
-    }
-
     from_pem! {
         #[corresponds(PEM_read_bio_EC_PUBKEY)]
         public_key_from_pem,
@@ -526,34 +307,6 @@ impl EcKey<Private> {
                     cvt(ffi::EC_KEY_set_group(key.as_ptr(), group.as_ptr())).map(|_| key)
                 })
                 .and_then(|key| cvt(ffi::EC_KEY_generate_key(key.as_ptr())).map(|_| key))
-        }
-    }
-
-    pub fn from_private_components(
-        group: &EcGroupRef,
-        private_number: &BigNumRef,
-        public_key: &EcPointRef,
-    ) -> Result<EcKey<Private>, ErrorStack> {
-        unsafe {
-            cvt_p(ffi::EC_KEY_new())
-                .map(|p| EcKey::from_ptr(p))
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_group(key.as_ptr(), group.as_ptr())).map(|_| key)
-                })
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_private_key(
-                        key.as_ptr(),
-                        private_number.as_ptr(),
-                    ))
-                    .map(|_| key)
-                })
-                .and_then(|key| {
-                    cvt(ffi::EC_KEY_set_public_key(
-                        key.as_ptr(),
-                        public_key.as_ptr(),
-                    ))
-                    .map(|_| key)
-                })
         }
     }
 
@@ -593,10 +346,9 @@ impl<T> fmt::Debug for EcKey<T> {
 
 #[cfg(test)]
 mod test {
-    use hex::FromHex;
 
     use super::*;
-    use crate::bn::{BigNum, BigNumContext};
+
     use crate::nid::Nid;
 
     #[test]
@@ -611,16 +363,6 @@ mod test {
     }
 
     #[test]
-    fn cofactor() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let mut ctx = BigNumContext::new().unwrap();
-        let mut cofactor = BigNum::new().unwrap();
-        group.cofactor(&mut cofactor, &mut ctx).unwrap();
-        let one = BigNum::from_u32(1).unwrap();
-        assert_eq!(cofactor, one);
-    }
-
-    #[test]
     #[allow(clippy::redundant_clone)]
     fn dup() {
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
@@ -632,118 +374,5 @@ mod test {
     fn point_new() {
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
         EcPoint::new(&group).unwrap();
-    }
-
-    #[test]
-    fn point_bytes() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let key = EcKey::generate(&group).unwrap();
-        let point = key.public_key();
-        let mut ctx = BigNumContext::new().unwrap();
-        let bytes = point
-            .to_bytes(&group, PointConversionForm::COMPRESSED, &mut ctx)
-            .unwrap();
-        let point2 = EcPoint::from_bytes(&group, &bytes, &mut ctx).unwrap();
-        assert!(point.eq(&group, &point2, &mut ctx).unwrap());
-    }
-
-    #[test]
-    fn point_owned() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let key = EcKey::generate(&group).unwrap();
-        let point = key.public_key();
-        let owned = point.to_owned(&group).unwrap();
-        let mut ctx = BigNumContext::new().unwrap();
-        assert!(owned.eq(&group, point, &mut ctx).unwrap());
-    }
-
-    #[test]
-    fn mul_generator() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let key = EcKey::generate(&group).unwrap();
-        let mut ctx = BigNumContext::new().unwrap();
-        let mut public_key = EcPoint::new(&group).unwrap();
-        public_key
-            .mul_generator(&group, key.private_key(), &mut ctx)
-            .unwrap();
-        assert!(public_key.eq(&group, key.public_key(), &mut ctx).unwrap());
-    }
-
-    #[test]
-    fn generator() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let gen = group.generator();
-        let one = BigNum::from_u32(1).unwrap();
-        let mut ctx = BigNumContext::new().unwrap();
-        let mut ecp = EcPoint::new(&group).unwrap();
-        ecp.mul_generator(&group, &one, &mut ctx).unwrap();
-        assert!(ecp.eq(&group, gen, &mut ctx).unwrap());
-    }
-
-    #[test]
-    fn key_from_public_key() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let key = EcKey::generate(&group).unwrap();
-        let mut ctx = BigNumContext::new().unwrap();
-        let bytes = key
-            .public_key()
-            .to_bytes(&group, PointConversionForm::COMPRESSED, &mut ctx)
-            .unwrap();
-
-        drop(key);
-        let public_key = EcPoint::from_bytes(&group, &bytes, &mut ctx).unwrap();
-        let ec_key = EcKey::from_public_key(&group, &public_key).unwrap();
-        assert!(ec_key.check_key().is_ok());
-    }
-
-    #[test]
-    fn key_from_private_components() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let key = EcKey::generate(&group).unwrap();
-
-        let dup_key =
-            EcKey::from_private_components(&group, key.private_key(), key.public_key()).unwrap();
-        dup_key.check_key().unwrap();
-
-        assert!(key.private_key() == dup_key.private_key());
-    }
-
-    #[test]
-    fn key_from_affine_coordinates() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let x = Vec::from_hex("30a0424cd21c2944838a2d75c92b37e76ea20d9f00893a3b4eee8a3c0aafec3e")
-            .unwrap();
-        let y = Vec::from_hex("e04b65e92456d9888b52b379bdfbd51ee869ef1f0fc65b6659695b6cce081723")
-            .unwrap();
-
-        let xbn = BigNum::from_slice(&x).unwrap();
-        let ybn = BigNum::from_slice(&y).unwrap();
-
-        let ec_key = EcKey::from_public_key_affine_coordinates(&group, &xbn, &ybn).unwrap();
-        assert!(ec_key.check_key().is_ok());
-    }
-
-    #[test]
-    fn get_affine_coordinates() {
-        let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
-        let x = Vec::from_hex("30a0424cd21c2944838a2d75c92b37e76ea20d9f00893a3b4eee8a3c0aafec3e")
-            .unwrap();
-        let y = Vec::from_hex("e04b65e92456d9888b52b379bdfbd51ee869ef1f0fc65b6659695b6cce081723")
-            .unwrap();
-
-        let xbn = BigNum::from_slice(&x).unwrap();
-        let ybn = BigNum::from_slice(&y).unwrap();
-
-        let ec_key = EcKey::from_public_key_affine_coordinates(&group, &xbn, &ybn).unwrap();
-
-        let mut xbn2 = BigNum::new().unwrap();
-        let mut ybn2 = BigNum::new().unwrap();
-        let mut ctx = BigNumContext::new().unwrap();
-        let ec_key_pk = ec_key.public_key();
-        ec_key_pk
-            .affine_coordinates_gfp(&group, &mut xbn2, &mut ybn2, &mut ctx)
-            .unwrap();
-        assert_eq!(xbn2, xbn);
-        assert_eq!(ybn2, ybn);
     }
 }

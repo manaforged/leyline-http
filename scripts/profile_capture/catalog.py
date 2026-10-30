@@ -46,7 +46,7 @@ def edge_row(chrome_behind: bool) -> Row:
     newest = chrome_have[-1] if chrome_have else 0
     edge_major, edge_version = live_edge_major()
     gap = edge_major > newest
-    note = f"needs Chrome {edge_major}" if gap else "ChromiumBrand::Edge on current Chrome TLS"
+    note = f"needs Chrome {edge_major}" if gap else f"Browser::Edge{newest} on current Chrome TLS"
     return ("edge", f"overlay Chrome{newest}", edge_version, "fill" if chrome_behind or gap else "ok", note)
 
 
@@ -110,5 +110,5 @@ def fill_edge(dry: bool, pending_chrome: set[int]) -> list[tuple[str, int, str]]
     if edge_maj > newest:
         print(f"edge: Chrome {newest} behind Edge/Chromium {edge_ver}; fill chrome first")
         return fill_chromium("chrome", dry)
-    print(f"edge: overlay on Chrome {newest} (TLS/H2 Chrome, HTTP Edg/{newest})")
+    print(f"edge: Browser::Edge{newest} on Chrome {newest} (TLS/H2 Chrome, HTTP Edg/{newest})")
     return []

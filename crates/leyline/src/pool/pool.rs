@@ -9,13 +9,14 @@ use self::expiring::ExpiringSet;
 use crate::pool::connect::Inflight;
 use tokio::sync::Semaphore;
 
+use crate::core::PoolConfig;
 use crate::h2::client::H2Client;
 #[cfg(feature = "http3")]
 use crate::quic::H3Client;
 
+use crate::pool::types::{ConnectionStats, Counter, PoolCounters, PoolKey, PooledConn, Transport};
 #[cfg(feature = "bench-internals")]
-use crate::pool::types::TlsInfo;
-use crate::pool::types::{PoolCounters, PoolKey, PoolStats, PooledConn, Transport};
+use crate::pool::types::{MuxHandle, TlsInfo};
 use crate::util::lock;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -26,12 +27,33 @@ pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
 
 const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
-pub(crate) const H1_ONLY_TTL: Duration = Duration::from_secs(600);
+const H1_ONLY_TTL: Duration = Duration::from_secs(600);
+const H3_BROKEN_TTL: Duration = Duration::from_secs(300);
 
-#[cfg(feature = "http3")]
-pub(crate) const H3_BROKEN_TTL: Duration = Duration::from_secs(300);
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum OriginFlag {
+    H1Only,
+    #[cfg_attr(
+        not(feature = "http3"),
+        allow(dead_code, reason = "HTTP/3 failures exist only with http3")
+    )]
+    H3Broken,
+}
+
+impl OriginFlag {
+    const COUNT: usize = 2;
+
+    pub(crate) const fn ttl(self) -> Duration {
+        match self {
+            Self::H1Only => H1_ONLY_TTL,
+            Self::H3Broken => H3_BROKEN_TTL,
+        }
+    }
+}
 
 type OriginProxyKey = (String, u16, Option<String>);
+
+pub(crate) type OriginMemory = [ExpiringSet<OriginProxyKey>; OriginFlag::COUNT];
 
 pub struct Pool {
     pub(crate) inner: Arc<Mutex<HashMap<PoolKey, PooledConn>>>,
@@ -40,15 +62,9 @@ pub struct Pool {
     pub(crate) inflight_h3: Inflight<H3Client>,
     #[cfg(feature = "http3")]
     pub(crate) alt_svc: Arc<Mutex<AltSvcCache>>,
-    pub(crate) h1_only: Arc<Mutex<ExpiringSet<OriginProxyKey>>>,
+    pub(crate) origin_memory: Arc<Mutex<OriginMemory>>,
     pub(crate) hsts: Arc<Mutex<crate::core::hsts::HstsStore>>,
-    #[cfg(feature = "http3")]
-    pub(crate) h3_broken: Arc<Mutex<ExpiringSet<OriginProxyKey>>>,
-    pub(crate) idle_timeout: Duration,
-    pub(crate) max_connections: usize,
-    pub(crate) max_h1_conns_per_host: usize,
-    pub(crate) h2_ping_after_idle: Option<Duration>,
-    pub(crate) h2_ping_timeout: Duration,
+    pub(crate) config: PoolConfig,
     pub(crate) max_body_size: usize,
     pub(crate) h1_permits: Arc<Mutex<HashMap<PoolKey, Arc<Semaphore>>>>,
     pub(crate) counters: Arc<PoolCounters>,
@@ -58,13 +74,28 @@ pub struct Pool {
 }
 
 impl Pool {
-    pub(crate) fn note_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
+    pub(crate) fn remember(&self, flag: OriginFlag, host: &str, port: u16, proxy: Option<&str>) {
         let now = SystemTime::now();
-        lock(&self.h1_only).insert(origin_proxy_key(host, port, proxy), now + H1_ONLY_TTL, now);
+        lock(&self.origin_memory)[flag as usize].insert(
+            origin_proxy_key(host, port, proxy),
+            now + flag.ttl(),
+            now,
+        );
     }
 
-    pub(crate) fn is_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
-        lock(&self.h1_only).contains(&origin_proxy_key(host, port, proxy), SystemTime::now())
+    pub(crate) fn recalls(
+        &self,
+        flag: OriginFlag,
+        host: &str,
+        port: u16,
+        proxy: Option<&str>,
+    ) -> bool {
+        lock(&self.origin_memory)[flag as usize]
+            .contains(&origin_proxy_key(host, port, proxy), SystemTime::now())
+    }
+
+    pub(crate) fn forget(&self, flag: OriginFlag, host: &str, port: u16, proxy: Option<&str>) {
+        lock(&self.origin_memory)[flag as usize].remove(&origin_proxy_key(host, port, proxy));
     }
 
     #[cfg(feature = "http3")]
@@ -87,30 +118,6 @@ impl Pool {
         lock(&self.alt_svc).import(entries, SystemTime::now());
     }
 
-    #[cfg(feature = "http3")]
-    pub(crate) fn note_h3_broken(&self, host: &str, port: u16, proxy: Option<&str>) {
-        let now = SystemTime::now();
-        lock(&self.h3_broken).insert(
-            origin_proxy_key(host, port, proxy),
-            now + H3_BROKEN_TTL,
-            now,
-        );
-    }
-
-    #[cfg(feature = "http3")]
-    pub(crate) fn is_h3_broken(&self, host: &str, port: u16, proxy: Option<&str>) -> bool {
-        lock(&self.h3_broken).contains(&origin_proxy_key(host, port, proxy), SystemTime::now())
-    }
-
-    pub(crate) fn clear_h1_only(&self, host: &str, port: u16, proxy: Option<&str>) {
-        lock(&self.h1_only).remove(&origin_proxy_key(host, port, proxy));
-    }
-
-    #[cfg(feature = "http3")]
-    pub(crate) fn clear_h3_broken(&self, host: &str, port: u16, proxy: Option<&str>) {
-        lock(&self.h3_broken).remove(&origin_proxy_key(host, port, proxy));
-    }
-
     pub fn new() -> Self {
         Self::with_limits(
             DEFAULT_IDLE_TIMEOUT,
@@ -124,9 +131,24 @@ impl Pool {
         max_connections: usize,
         max_h1_conns_per_host: usize,
     ) -> Self {
-        assert!(max_connections > 0, "max_connections must be at least 1");
+        Self::from_config(
+            PoolConfig {
+                idle_timeout,
+                max_connections,
+                max_h1_conns_per_host,
+                ..PoolConfig::default()
+            },
+            crate::core::DEFAULT_MAX_BODY_SIZE,
+        )
+    }
+
+    pub(crate) fn from_config(config: PoolConfig, max_body_size: usize) -> Self {
         assert!(
-            max_h1_conns_per_host > 0,
+            config.max_connections > 0,
+            "max_connections must be at least 1"
+        );
+        assert!(
+            config.max_h1_conns_per_host > 0,
             "max_h1_conns_per_host must be at least 1"
         );
         Self {
@@ -136,16 +158,10 @@ impl Pool {
             inflight_h3: Inflight::default(),
             #[cfg(feature = "http3")]
             alt_svc: Arc::default(),
-            h1_only: Arc::default(),
+            origin_memory: Arc::default(),
             hsts: Arc::default(),
-            #[cfg(feature = "http3")]
-            h3_broken: Arc::default(),
-            idle_timeout,
-            max_connections,
-            max_h1_conns_per_host,
-            h2_ping_after_idle: super::liveness::DEFAULT_H2_PING_AFTER_IDLE,
-            h2_ping_timeout: super::liveness::DEFAULT_H2_PING_TIMEOUT,
-            max_body_size: crate::core::DEFAULT_MAX_BODY_SIZE,
+            config,
+            max_body_size,
             h1_permits: Arc::default(),
             counters: Arc::default(),
             partition: 0,
@@ -162,15 +178,9 @@ impl Pool {
             inflight_h3: self.inflight_h3.clone(),
             #[cfg(feature = "http3")]
             alt_svc: Arc::clone(&self.alt_svc),
-            h1_only: Arc::clone(&self.h1_only),
+            origin_memory: Arc::clone(&self.origin_memory),
             hsts: Arc::clone(&self.hsts),
-            #[cfg(feature = "http3")]
-            h3_broken: Arc::clone(&self.h3_broken),
-            idle_timeout: self.idle_timeout,
-            max_connections: self.max_connections,
-            max_h1_conns_per_host: self.max_h1_conns_per_host,
-            h2_ping_after_idle: self.h2_ping_after_idle,
-            h2_ping_timeout: self.h2_ping_timeout,
+            config: self.config,
             max_body_size: self.max_body_size,
             h1_permits: Arc::clone(&self.h1_permits),
             counters: Arc::clone(&self.counters),
@@ -189,31 +199,24 @@ impl Pool {
         transport: Transport,
     ) -> PoolKey {
         PoolKey {
+            scheme: scheme.to_string(),
+            host: host.to_string(),
+            port,
+            proxy: proxy.map(|s| s.to_string()),
+            transport,
             partition: self.partition,
-            ..super::make_key(scheme, host, port, proxy, transport)
         }
     }
 
-    pub fn stats(&self) -> PoolStats {
+    pub fn stats(&self) -> ConnectionStats {
         let entries = lock(&self.inner).len();
         let counts = self.connection_counts();
-        PoolStats {
+        ConnectionStats {
             entries,
             busy: counts.busy,
             idle: counts.idle,
-            max_connections: self.max_connections,
-            h2_hits: self.counters.h2_hits.load(Ordering::Relaxed),
-            h2_misses: self.counters.h2_misses.load(Ordering::Relaxed),
-            h1_hits: self.counters.h1_hits.load(Ordering::Relaxed),
-            h1_misses: self.counters.h1_misses.load(Ordering::Relaxed),
-            h3_hits: self.counters.h3_hits.load(Ordering::Relaxed),
-            h3_misses: self.counters.h3_misses.load(Ordering::Relaxed),
-            evictions_idle: self.counters.evictions_idle.load(Ordering::Relaxed),
-            evictions_lru: self.counters.evictions_lru.load(Ordering::Relaxed),
-            evictions_dead: self.counters.evictions_dead.load(Ordering::Relaxed),
-            stale_probed: self.counters.stale_probed.load(Ordering::Relaxed),
-            h2_ping_failures: self.counters.h2_ping_failures.load(Ordering::Relaxed),
-            installs: self.counters.installs.load(Ordering::Relaxed),
+            max_connections: self.config.max_connections,
+            ..self.counters.snapshot()
         }
     }
 
@@ -227,34 +230,21 @@ impl Pool {
             now_ms + POOL_REAP_INTERVAL.as_millis() as u64,
             Ordering::Relaxed,
         );
+        let idle_timeout = self.config.idle_timeout;
         let mut idle_evicted = 0u64;
         {
             let mut map = lock(&self.inner);
             map.retain(|_, entry| match entry {
                 PooledConn::H1 { idle, last_use, .. } => {
                     let before = idle.len();
-                    idle.retain(|(_, returned_at)| {
-                        now.duration_since(*returned_at) < self.idle_timeout
-                    });
+                    idle.retain(|(_, returned_at)| now.duration_since(*returned_at) < idle_timeout);
                     idle_evicted += (before - idle.len()) as u64;
-                    !idle.is_empty() || now.duration_since(*last_use) < self.idle_timeout
+                    !idle.is_empty() || now.duration_since(*last_use) < idle_timeout
                 }
-                PooledConn::H2 {
+                PooledConn::Mux {
                     handle, last_use, ..
                 } => {
-                    let keep =
-                        !handle.is_closed() && now.duration_since(*last_use) < self.idle_timeout;
-                    if !keep {
-                        idle_evicted += 1;
-                    }
-                    keep
-                }
-                #[cfg(feature = "http3")]
-                PooledConn::H3 {
-                    handle, last_use, ..
-                } => {
-                    let keep =
-                        !handle.is_closed() && now.duration_since(*last_use) < self.idle_timeout;
+                    let keep = !handle.is_closed() && now.duration_since(*last_use) < idle_timeout;
                     if !keep {
                         idle_evicted += 1;
                     }
@@ -267,9 +257,7 @@ impl Pool {
             permits.retain(|_, sem| Arc::strong_count(sem) > 1);
         }
         if idle_evicted > 0 {
-            self.counters
-                .evictions_idle
-                .fetch_add(idle_evicted, Ordering::Relaxed);
+            self.counters.add(Counter::EvictionsIdle, idle_evicted);
         }
     }
 
@@ -292,39 +280,21 @@ impl Pool {
     }
 
     pub(crate) fn note_h1_install(&self) {
-        self.counters.installs.fetch_add(1, Ordering::Relaxed);
+        self.counters.add(Counter::Installs, 1);
     }
 
     pub(crate) fn note_h1_dead(&self) {
-        self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
+        self.counters.add(Counter::EvictionsDead, 1);
     }
 
     pub(crate) fn note_h1_stale_probed(&self) {
-        self.counters.stale_probed.fetch_add(1, Ordering::Relaxed);
-    }
-
-    pub(crate) fn fresh(&self) -> Self {
-        let mut pool = Self::with_limits(
-            self.idle_timeout,
-            self.max_connections,
-            self.max_h1_conns_per_host,
-        )
-        .with_h2_ping(self.h2_ping_after_idle, self.h2_ping_timeout)
-        .with_max_body_size(self.max_body_size);
-        pool.partition = self.partition;
-        pool
-    }
-
-    #[must_use]
-    pub fn with_max_body_size(mut self, bytes: usize) -> Self {
-        self.max_body_size = bytes;
-        self
+        self.counters.add(Counter::StaleProbed, 1);
     }
 
     pub(crate) fn invalidate(&self, key: &PoolKey) {
         let mut map = lock(&self.inner);
         if map.remove(key).is_some() {
-            self.counters.evictions_dead.fetch_add(1, Ordering::Relaxed);
+            self.counters.add(Counter::EvictionsDead, 1);
         }
     }
 
@@ -334,16 +304,9 @@ impl Pool {
         map.clear();
         for i in 0..n {
             map.insert(
-                PoolKey {
-                    host: format!("h{i}.bench"),
-                    scheme: "https".to_string(),
-                    port: 443,
-                    proxy: None,
-                    transport: Transport::Tcp,
-                    partition: 0,
-                },
-                PooledConn::H2 {
-                    handle: handle.clone(),
+                self.key("https", &format!("h{i}.bench"), 443, None, Transport::Tcp),
+                PooledConn::Mux {
+                    handle: MuxHandle::H2(handle.clone()),
                     last_use: Instant::now(),
                     tls: TlsInfo::default(),
                 },
@@ -353,16 +316,9 @@ impl Pool {
 
     #[cfg(feature = "bench-internals")]
     pub fn bench_probe(&self) -> bool {
-        let key = PoolKey {
-            host: "h0.bench".to_string(),
-            scheme: "https".to_string(),
-            port: 443,
-            proxy: None,
-            transport: Transport::Tcp,
-            partition: 0,
-        };
+        let key = self.key("https", "h0.bench", 443, None, Transport::Tcp);
         self.evict_idle();
-        self.checkout_h2(&key).is_some()
+        self.checkout_mux::<H2Client>(&key).is_some()
     }
 }
 

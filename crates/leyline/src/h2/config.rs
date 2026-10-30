@@ -1,6 +1,11 @@
 use std::time::Duration;
 
-use crate::{Error, Kind};
+use crate::h2::frame::StreamDependency;
+use crate::{Cause, Error};
+
+pub(crate) const DEFAULT_WINDOW_SIZE: u32 = 65_535;
+pub(crate) const DEFAULT_MAX_FRAME_SIZE: u32 = 16_384;
+pub(crate) const DEFAULT_HEADER_TABLE_SIZE: u32 = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(u16)]
@@ -28,6 +33,10 @@ const SETTING_KEYS: [(SettingId, &str); 8] = [
 ];
 
 impl SettingId {
+    pub(crate) fn all() -> impl Iterator<Item = Self> {
+        SETTING_KEYS.iter().map(|&(id, _)| id)
+    }
+
     pub fn parse_key(s: &str) -> Option<Self> {
         SETTING_KEYS
             .iter()
@@ -89,20 +98,13 @@ impl PseudoOrder {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PriorityParams {
-    pub exclusive: bool,
-    pub stream_dependency: u32,
-    pub weight: u8,
-}
-
 #[derive(Debug, Clone)]
 pub struct H2Config {
     pub settings: Vec<(SettingId, u32)>,
     pub settings_order: Vec<SettingId>,
     pub pseudo_order: [PseudoOrder; 4],
     pub initial_connection_window_size: u32,
-    pub default_priority: Option<PriorityParams>,
+    pub default_priority: Option<StreamDependency>,
     pub rst_stream_flood_threshold: u32,
     pub rst_stream_flood_window: Duration,
     pub max_response_body_bytes: usize,
@@ -113,49 +115,25 @@ pub struct H2Config {
 }
 
 impl H2Config {
-    pub(crate) fn advertised_initial_window_size(&self) -> u32 {
+    pub(crate) fn setting(&self, id: SettingId) -> Option<u32> {
         self.settings
             .iter()
-            .find(|(id, _)| *id == SettingId::InitialWindowSize)
+            .find(|(sid, _)| *sid == id)
             .map(|(_, v)| *v)
-            .unwrap_or(65_535)
+    }
+
+    pub(crate) fn advertised_initial_window_size(&self) -> u32 {
+        self.setting(SettingId::InitialWindowSize)
+            .unwrap_or(DEFAULT_WINDOW_SIZE)
     }
 
     pub fn from_profile(h2: &crate::profile::H2Profile) -> Result<Self, Error> {
-        use std::collections::HashMap;
-
-        let mut available: HashMap<SettingId, u32> = HashMap::new();
-        if let Some(v) = h2.header_table_size {
-            available.insert(SettingId::HeaderTableSize, v);
-        }
-        if let Some(v) = h2.enable_push {
-            available.insert(SettingId::EnablePush, if v { 1 } else { 0 });
-        }
-        if let Some(v) = h2.max_concurrent_streams {
-            available.insert(SettingId::MaxConcurrentStreams, v);
-        }
-        if let Some(v) = h2.initial_stream_window_size {
-            available.insert(SettingId::InitialWindowSize, v);
-        }
-        if let Some(v) = h2.max_frame_size {
-            available.insert(SettingId::MaxFrameSize, v);
-        }
-        if let Some(v) = h2.max_header_list_size {
-            available.insert(SettingId::MaxHeaderListSize, v);
-        }
-        if let Some(v) = h2.unknown_setting8 {
-            available.insert(SettingId::Unknown8, v);
-        }
-        if let Some(v) = h2.unknown_setting9 {
-            available.insert(SettingId::Unknown9, v);
-        }
-
         let settings_order: Vec<SettingId> = h2
             .settings_order
             .iter()
             .map(|s| {
                 SettingId::parse_key(s).ok_or_else(|| {
-                    Error::new(Kind::Config)
+                    Error::new(Cause::Config)
                         .with_message(format!("unknown H2 settings_order key: {s:?}"))
                 })
             })
@@ -163,14 +141,14 @@ impl H2Config {
 
         let settings: Vec<(SettingId, u32)> = settings_order
             .iter()
-            .filter_map(|id| available.get(id).map(|v| (*id, *v)))
+            .filter_map(|&id| h2.setting(id).map(|v| (id, v)))
             .collect();
 
         let pseudo_order = parse_pseudo_order(&h2.pseudo_order, "H2")?;
 
         let initial_connection_window_size =
             h2.initial_connection_window_size.ok_or_else(|| {
-                Error::new(Kind::Config)
+                Error::new(Cause::Config)
                     .with_message("H2 profile missing initial_connection_window_size".to_string())
             })?;
 
@@ -179,9 +157,9 @@ impl H2Config {
             settings_order,
             pseudo_order,
             initial_connection_window_size,
-            default_priority: h2.default_priority.map(|p| PriorityParams {
+            default_priority: h2.default_priority.map(|p| StreamDependency {
                 exclusive: p.exclusive,
-                stream_dependency: p.stream_dependency,
+                dependency_id: p.stream_dependency,
                 weight: p.weight,
             }),
             rst_stream_flood_threshold: 100,
@@ -193,31 +171,6 @@ impl H2Config {
             header_block_reassembly_timeout: Duration::from_secs(10),
         })
     }
-
-    pub fn akamai_fingerprint(&self) -> String {
-        let settings_str: String = self
-            .settings_order
-            .iter()
-            .filter_map(|id| {
-                self.settings
-                    .iter()
-                    .find(|(sid, _)| sid == id)
-                    .map(|(sid, val)| format!("{}:{}", *sid as u16, val))
-            })
-            .collect::<Vec<_>>()
-            .join(";");
-
-        let window_update = self.initial_connection_window_size.saturating_sub(65535);
-
-        let pseudo_str: String = self
-            .pseudo_order
-            .iter()
-            .map(|p| p.label())
-            .collect::<Vec<_>>()
-            .join(",");
-
-        format!("{}|{}|0|{}", settings_str, window_update, pseudo_str)
-    }
 }
 
 pub(crate) fn parse_pseudo_order(
@@ -225,7 +178,7 @@ pub(crate) fn parse_pseudo_order(
     label: &str,
 ) -> Result<[PseudoOrder; 4], Error> {
     if tokens.len() != 4 {
-        return Err(Error::new(Kind::Config).with_message(format!(
+        return Err(Error::new(Cause::Config).with_message(format!(
             "{label} pseudo_order must have exactly 4 entries, got {}",
             tokens.len()
         )));
@@ -238,13 +191,13 @@ pub(crate) fn parse_pseudo_order(
     ];
     for (slot, s) in pseudo_order.iter_mut().zip(tokens.iter()) {
         *slot = PseudoOrder::parse_key(s).ok_or_else(|| {
-            Error::new(Kind::Config)
+            Error::new(Cause::Config)
                 .with_message(format!("unknown {label} pseudo_order token: {s:?}"))
         })?;
     }
     for i in 1..pseudo_order.len() {
         if pseudo_order[..i].contains(&pseudo_order[i]) {
-            return Err(Error::new(Kind::Config).with_message(format!(
+            return Err(Error::new(Cause::Config).with_message(format!(
                 "duplicate {label} pseudo_order token: {:?}",
                 tokens[i]
             )));

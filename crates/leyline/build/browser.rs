@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+use crate::brand::Variant;
 use crate::{BuildResult, is_ident};
 
 #[path = "../src/profile/browser/digest.rs"]
@@ -54,8 +55,8 @@ enum Capture {
 #[derive(Deserialize)]
 pub(crate) struct Meta {
     name: String,
-    browser: String,
-    version: u32,
+    pub(crate) browser: String,
+    pub(crate) version: u32,
     capture: Capture,
     pub(crate) variant: String,
     #[serde(default)]
@@ -63,7 +64,7 @@ pub(crate) struct Meta {
     #[serde(default)]
     platform_browser: BTreeMap<String, String>,
     #[serde(default)]
-    deprecated: Option<String>,
+    pub(crate) deprecated: Option<String>,
     #[serde(default)]
     pub(crate) header_style: Option<String>,
 }
@@ -232,18 +233,15 @@ fn hello<'a>(rows: &'a [Row], row: &Row) -> BuildResult<&'a Row> {
     )
 }
 
-fn variant_list<'a>(rows: impl IntoIterator<Item = &'a Row>) -> String {
-    rows.into_iter()
-        .map(|r| format!("Browser::{}", r.meta.variant))
-        .collect::<Vec<_>>()
-        .join(", ")
-}
-
-pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
+pub(crate) fn render(
+    rows: &[Row],
+    variants: &[Variant],
+    families: &Families,
+) -> BuildResult<String> {
     let mut out = String::new();
     writeln!(
         out,
-        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n#[non_exhaustive]\npub enum Family {{"
+        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\npub(crate) enum Family {{"
     )?;
     for family in &families.family {
         writeln!(out, "    {},", family.variant)?;
@@ -251,13 +249,34 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
     writeln!(out, "}}\n")?;
     writeln!(
         out,
-        "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n#[non_exhaustive]\npub enum Browser {{"
+        "#[doc = include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/docs/browser.md\"))]\n#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]\n#[non_exhaustive]\npub enum Browser {{"
     )?;
-    for row in crate::ids::by_id(rows) {
-        if let Some(note) = &row.meta.deprecated {
+    let mut names: Vec<(u32, &str, String, Option<&String>)> = rows
+        .iter()
+        .map(|r| {
+            (
+                r.id,
+                r.meta.variant.as_str(),
+                r.meta.name.clone(),
+                r.meta.deprecated.as_ref(),
+            )
+        })
+        .chain(variants.iter().map(|v| {
+            (
+                v.id,
+                v.name.as_str(),
+                format!("{} {}", v.brand, v.version),
+                v.deprecated.as_ref(),
+            )
+        }))
+        .collect();
+    names.sort_by_key(|(id, _, _, _)| *id);
+    for (_, name, label, deprecated) in &names {
+        writeln!(out, "    #[doc = \"{label}.\"]")?;
+        if let Some(note) = deprecated {
             writeln!(out, "    #[deprecated(note = {note:?})]")?;
         }
-        writeln!(out, "    {},", row.meta.variant)?;
+        writeln!(out, "    {name},")?;
     }
     writeln!(out, "}}\n")?;
 
@@ -271,18 +290,6 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         "const FAMILY_LABELS: &[&str] = &[{}];",
         labels.join(", ")
     )?;
-    let ids: Vec<String> = families
-        .family
-        .iter()
-        .map(|f| format!("{:?}", family_id(f)))
-        .collect();
-    writeln!(out, "const FAMILY_IDS: &[&str] = &[{}];", ids.join(", "))?;
-    let all: Vec<String> = families
-        .family
-        .iter()
-        .map(|f| format!("Family::{}", f.variant))
-        .collect();
-    writeln!(out, "const FAMILY_ALL: &[Family] = &[{}];", all.join(", "))?;
     let redirect_chain: Vec<String> = families
         .family
         .iter()
@@ -293,7 +300,7 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         "const FAMILY_SAMESITE_REDIRECT_CHAIN: &[bool] = &[{}];",
         redirect_chain.join(", ")
     )?;
-    let mut family_latest = Vec::new();
+    let mut newest = Vec::new();
     for (index, family) in families.family.iter().enumerate() {
         let row = latest(rows, |r| {
             r.family == index && family.latest_capture.contains(&r.meta.capture)
@@ -304,12 +311,44 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
                 family.variant
             )
         })?;
-        family_latest.push(row);
+        newest.push((
+            family_id(family).replace('-', "_"),
+            family.label.clone(),
+            row.meta.variant.clone(),
+        ));
     }
+    let mut brands: Vec<&str> = variants.iter().map(|v| v.brand.as_str()).collect();
+    brands.dedup();
+    for brand in brands {
+        let top = variants
+            .iter()
+            .filter(|v| v.brand == brand && v.deprecated.is_none())
+            .max_by_key(|v| v.version)
+            .ok_or_else(|| format!("brands.toml: {brand} has no current Chrome base"))?;
+        newest.push((
+            brand.to_ascii_lowercase(),
+            brand.to_string(),
+            top.name.clone(),
+        ));
+    }
+    writeln!(out, "impl Browser {{")?;
+    for (function, label, variant) in &newest {
+        writeln!(
+            out,
+            "    #[doc = \"The newest bundled {label} build.\"]\n    #[must_use]\n    pub fn {function}() -> Self {{\n        Browser::{variant}\n    }}\n"
+        )?;
+    }
+    writeln!(out, "}}\n")?;
+    let family_latest: Vec<String> = families
+        .family
+        .iter()
+        .zip(&newest)
+        .map(|(f, (_, _, variant))| format!("(Family::{}, Browser::{variant})", f.variant))
+        .collect();
     writeln!(
         out,
-        "#[allow(deprecated, reason = \"tables list every browser, including deprecated ones\")]\nconst FAMILY_LATEST: &[Browser] = &[{}];",
-        variant_list(family_latest.iter().copied())
+        "const FAMILY_LATEST: &[(Family, Browser)] = &[{}];",
+        family_latest.join(", ")
     )?;
     let default = families
         .family
@@ -321,17 +360,19 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
         "const DEFAULT_FAMILY: Family = Family::{};",
         default.variant
     )?;
+    let all: Vec<String> = rows
+        .iter()
+        .map(|r| format!("Browser::{}", r.meta.variant))
+        .chain(variants.iter().map(|v| format!("Browser::{}", v.name)))
+        .collect();
     writeln!(
         out,
         "#[allow(deprecated, reason = \"tables list every browser, including deprecated ones\")]\nconst ALL: &[Browser] = &[{}];",
-        variant_list(rows)
+        all.join(", ")
     )?;
 
-    writeln!(
-        out,
-        "#[allow(deprecated, reason = \"tables list every browser, including deprecated ones\")]\nconst ENTRIES: &[Entry] = &["
-    )?;
-    for row in crate::ids::by_id(rows) {
+    let mut entries: Vec<(u32, String)> = Vec::new();
+    for row in rows {
         let rep = hello(rows, row)?;
         let mut platforms = Vec::new();
         for (platform, browser) in &row.meta.platform_browser {
@@ -350,22 +391,62 @@ pub(crate) fn render(rows: &[Row], families: &Families) -> BuildResult<String> {
             })?;
             platforms.push(format!("({platform:?}, Browser::{})", target.meta.variant));
         }
-        writeln!(
-            out,
-            "    Entry {{ family: Family::{}, key: {:?}, version: {}, id: \"{}-{}\", name: {:?}, \
-             hello: Browser::{}, platforms: &[{}], digest: {:#018x}, \
-             source: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/profiles/{}\")) }},",
-            families.family[row.family].variant,
-            row.meta.browser,
-            row.meta.version,
-            row.meta.browser,
-            row.meta.version,
-            row.meta.name,
-            rep.meta.variant,
-            platforms.join(", "),
-            row.digest,
-            row.path,
-        )?;
+        entries.push((
+            row.id,
+            format!(
+                "    Entry {{ family: Family::{}, key: {:?}, version: {}, id: \"{}-{}\", name: {:?}, \
+                 hello: Browser::{}, platforms: &[{}], digest: {:#018x}, \
+                 source: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/profiles/{}\")), \
+                 base: Browser::{}, brand: None }},",
+                families.family[row.family].variant,
+                row.meta.browser,
+                row.meta.version,
+                row.meta.browser,
+                row.meta.version,
+                row.meta.name,
+                rep.meta.variant,
+                platforms.join(", "),
+                row.digest,
+                row.path,
+                row.meta.variant,
+            ),
+        ));
+    }
+    for variant in variants {
+        let base = rows
+            .iter()
+            .find(|r| r.meta.variant == variant.base)
+            .ok_or_else(|| format!("brand {} has no base {}", variant.name, variant.base))?;
+        let rep = hello(rows, base)?;
+        entries.push((
+            variant.id,
+            format!(
+                "    Entry {{ family: Family::{}, key: {:?}, version: {}, id: \"{}-{}\", name: \"{} {}\", \
+                 hello: Browser::{}, platforms: &[], digest: {:#018x}, \
+                 source: include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/profiles/{}\")), \
+                 base: Browser::{}, brand: Some(ChromiumBrand::{}) }},",
+                families.family[base.family].variant,
+                base.meta.browser,
+                variant.version,
+                variant.brand.to_ascii_lowercase(),
+                variant.version,
+                variant.brand,
+                variant.version,
+                rep.meta.variant,
+                base.digest,
+                base.path,
+                base.meta.variant,
+                variant.brand,
+            ),
+        ));
+    }
+    entries.sort_by_key(|(id, _)| *id);
+    writeln!(
+        out,
+        "#[allow(deprecated, reason = \"tables list every browser, including deprecated ones\")]\nconst ENTRIES: &[Entry] = &["
+    )?;
+    for (_, entry) in entries {
+        writeln!(out, "{entry}")?;
     }
     writeln!(out, "];")?;
     Ok(out)

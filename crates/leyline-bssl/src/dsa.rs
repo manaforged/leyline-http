@@ -9,10 +9,9 @@ use foreign_types::{ForeignType, ForeignTypeRef};
 use libc::c_uint;
 use openssl_macros::corresponds;
 use std::fmt;
-use std::mem;
 use std::ptr;
 
-use crate::bn::{BigNum, BigNumRef};
+use crate::bn::BigNumRef;
 use crate::error::ErrorStack;
 use crate::ffi;
 use crate::pkey::{HasParams, HasPrivate, HasPublic, Private, Public};
@@ -97,16 +96,6 @@ where
         public_key_to_der,
         ffi::i2d_DSA_PUBKEY
     }
-
-    /// Returns a reference to the public key component of `self`.
-    #[must_use]
-    pub fn pub_key(&self) -> &BigNumRef {
-        unsafe {
-            let mut pub_key = ptr::null();
-            DSA_get0_key(self.as_ptr(), &mut pub_key, ptr::null_mut());
-            BigNumRef::from_ptr(pub_key.cast_mut())
-        }
-    }
 }
 
 impl<T> DsaRef<T>
@@ -125,16 +114,6 @@ where
         #[corresponds(PEM_write_bio_DSAPrivateKey)]
         private_key_to_pem_passphrase,
         ffi::PEM_write_bio_DSAPrivateKey
-    }
-
-    /// Returns a reference to the private key component of `self`.
-    #[must_use]
-    pub fn priv_key(&self) -> &BigNumRef {
-        unsafe {
-            let mut priv_key = ptr::null();
-            DSA_get0_key(self.as_ptr(), ptr::null_mut(), &mut priv_key);
-            BigNumRef::from_ptr(priv_key.cast_mut())
-        }
     }
 }
 
@@ -207,29 +186,6 @@ impl Dsa<Private> {
             Ok(dsa)
         }
     }
-
-    /// Create a DSA key pair with the given parameters
-    ///
-    /// `p`, `q` and `g` are the common parameters.
-    /// `priv_key` is the private component of the key pair.
-    /// `pub_key` is the public component of the key. Can be computed via `g^(priv_key) mod p`
-    pub fn from_private_components(
-        p: BigNum,
-        q: BigNum,
-        g: BigNum,
-        priv_key: BigNum,
-        pub_key: BigNum,
-    ) -> Result<Dsa<Private>, ErrorStack> {
-        ffi::init();
-        unsafe {
-            let dsa = Dsa::from_ptr(cvt_p(ffi::DSA_new())?);
-            cvt(DSA_set0_pqg(dsa.0, p.as_ptr(), q.as_ptr(), g.as_ptr()))?;
-            mem::forget((p, q, g));
-            cvt(DSA_set0_key(dsa.0, pub_key.as_ptr(), priv_key.as_ptr()))?;
-            mem::forget((pub_key, priv_key));
-            Ok(dsa)
-        }
-    }
 }
 
 impl Dsa<Public> {
@@ -251,26 +207,6 @@ impl Dsa<Public> {
         ffi::d2i_DSA_PUBKEY,
         ::libc::c_long
     }
-
-    /// Create a new DSA key with only public components.
-    ///
-    /// `p`, `q` and `g` are the common parameters.
-    /// `pub_key` is the public component of the key.
-    pub fn from_public_components(
-        p: BigNum,
-        q: BigNum,
-        g: BigNum,
-        pub_key: BigNum,
-    ) -> Result<Dsa<Public>, ErrorStack> {
-        ffi::init();
-        unsafe {
-            let dsa = Dsa::from_ptr(cvt_p(ffi::DSA_new())?);
-            cvt(DSA_set0_pqg(dsa.0, p.as_ptr(), q.as_ptr(), g.as_ptr()))?;
-            mem::forget((p, q, g));
-            cvt(DSA_set0_key(dsa.0, pub_key.into_ptr(), ptr::null_mut()))?;
-            Ok(dsa)
-        }
-    }
 }
 
 impl<T> fmt::Debug for Dsa<T> {
@@ -279,59 +215,15 @@ impl<T> fmt::Debug for Dsa<T> {
     }
 }
 
-use crate::ffi::{DSA_get0_key, DSA_get0_pqg, DSA_set0_key, DSA_set0_pqg};
+use crate::ffi::DSA_get0_pqg;
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::bn::BigNumContext;
 
     #[test]
     pub fn test_generate() {
         Dsa::generate(1024).unwrap();
-    }
-
-    #[test]
-    fn test_pubkey_generation() {
-        let dsa = Dsa::generate(1024).unwrap();
-        let p = dsa.p();
-        let g = dsa.g();
-        let priv_key = dsa.priv_key();
-        let pub_key = dsa.pub_key();
-        let mut ctx = BigNumContext::new().unwrap();
-        let mut calc = BigNum::new().unwrap();
-        calc.mod_exp(g, priv_key, p, &mut ctx).unwrap();
-        assert_eq!(&calc, pub_key);
-    }
-
-    #[test]
-    fn test_priv_key_from_parts() {
-        let p = BigNum::from_u32(283).unwrap();
-        let q = BigNum::from_u32(47).unwrap();
-        let g = BigNum::from_u32(60).unwrap();
-        let priv_key = BigNum::from_u32(15).unwrap();
-        let pub_key = BigNum::from_u32(207).unwrap();
-
-        let dsa = Dsa::from_private_components(p, q, g, priv_key, pub_key).unwrap();
-        assert_eq!(dsa.pub_key(), &BigNum::from_u32(207).unwrap());
-        assert_eq!(dsa.priv_key(), &BigNum::from_u32(15).unwrap());
-        assert_eq!(dsa.p(), &BigNum::from_u32(283).unwrap());
-        assert_eq!(dsa.q(), &BigNum::from_u32(47).unwrap());
-        assert_eq!(dsa.g(), &BigNum::from_u32(60).unwrap());
-    }
-
-    #[test]
-    fn test_pub_key_from_parts() {
-        let p = BigNum::from_u32(283).unwrap();
-        let q = BigNum::from_u32(47).unwrap();
-        let g = BigNum::from_u32(60).unwrap();
-        let pub_key = BigNum::from_u32(207).unwrap();
-
-        let dsa = Dsa::from_public_components(p, q, g, pub_key).unwrap();
-        assert_eq!(dsa.pub_key(), &BigNum::from_u32(207).unwrap());
-        assert_eq!(dsa.p(), &BigNum::from_u32(283).unwrap());
-        assert_eq!(dsa.q(), &BigNum::from_u32(47).unwrap());
-        assert_eq!(dsa.g(), &BigNum::from_u32(60).unwrap());
     }
 
     #[test]

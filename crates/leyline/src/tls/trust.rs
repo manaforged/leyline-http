@@ -21,7 +21,7 @@ use env::wire_env_trust;
 #[cfg(not(target_os = "macos"))]
 use system::wire_system_trust_cached;
 
-pub use config::TlsTrustConfig;
+pub use config::Tls;
 use identity::LoadedTrust;
 pub(crate) use identity::TrustIdentity;
 
@@ -123,7 +123,7 @@ fn record_verification_failure(failure: &VerificationFailure, reason: TrustFailu
 
 pub(crate) fn wire_configured_trust(
     builder: &mut SslContextBuilder,
-    config: &TlsTrustConfig,
+    config: &Tls,
 ) -> Result<TrustIdentity, TlsError> {
     let mut loaded = LoadedTrust::default();
     #[cfg(target_os = "macos")]

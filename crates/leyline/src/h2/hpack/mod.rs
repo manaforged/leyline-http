@@ -7,3 +7,4 @@ mod table;
 
 pub use decoder::Decoder;
 pub use encoder::Encoder;
+pub(crate) use table::ENTRY_OVERHEAD;

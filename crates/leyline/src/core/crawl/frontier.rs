@@ -10,12 +10,16 @@ use crate::html::WEB_SCHEMES;
 const MAX_URL_BYTES: usize = 2048;
 pub(super) const MAX_DEPTH: usize = 64;
 
+/// Which URLs a crawl follows, relative to the seed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum Scope {
+    /// Follows URLs on the seed's exact host; the default.
     #[default]
     Host,
+    /// Follows URLs on the seed's registrable domain and its subdomains, or the exact host for an IP address.
     Domain,
+    /// Follows URLs on the seed's host under the seed's directory path.
     Prefix,
 }
 

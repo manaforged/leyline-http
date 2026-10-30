@@ -1,8 +1,7 @@
 use std::time::Duration;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct PoolConfig {
+pub(crate) struct PoolConfig {
     pub(crate) idle_timeout: Duration,
     pub(crate) max_connections: usize,
     pub(crate) max_h1_conns_per_host: usize,
@@ -25,37 +24,17 @@ impl Default for PoolConfig {
 }
 
 impl PoolConfig {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn idle_timeout(mut self, d: Duration) -> Self {
-        self.idle_timeout = d;
-        self
-    }
-
-    pub fn max_connections(mut self, n: usize) -> Self {
-        self.max_connections = n;
-        self
-    }
-
-    pub fn max_h1_conns_per_host(mut self, n: usize) -> Self {
-        self.max_h1_conns_per_host = n;
-        self
-    }
-
-    pub fn keepalive(mut self, on: bool) -> Self {
-        self.keepalive = on;
-        self
-    }
-
-    pub fn h2_ping_after_idle(mut self, d: impl Into<Option<Duration>>) -> Self {
-        self.h2_ping_after_idle = d.into();
-        self
-    }
-
-    pub fn h2_ping_timeout(mut self, d: Duration) -> Self {
-        self.h2_ping_timeout = d;
-        self
+    pub(crate) fn resolved(self) -> Self {
+        let (idle_timeout, max_connections) = if self.keepalive {
+            (self.idle_timeout, self.max_connections.max(1))
+        } else {
+            (Duration::ZERO, 1)
+        };
+        Self {
+            idle_timeout,
+            max_connections,
+            max_h1_conns_per_host: self.max_h1_conns_per_host.max(1),
+            ..self
+        }
     }
 }

@@ -1,6 +1,6 @@
 use std::io;
 
-use super::{Error, ErrorCategory, Kind};
+use super::{Cause, Error, Kind};
 use crate::core::retry::is_gateway_status;
 use crate::core::session::decompress::BodyLimit;
 use crate::h2::H2Error;
@@ -9,19 +9,20 @@ use crate::tls::TlsError;
 use crate::tls::error::ProxyReply;
 
 impl Error {
-    pub fn is_timeout(&self) -> bool {
-        self.inner.kind == Kind::Timeout
+    pub(crate) fn is_timeout(&self) -> bool {
+        self.inner.kind == Cause::Timeout
             || self
                 .io_cause()
                 .is_some_and(|e| e.kind() == io::ErrorKind::TimedOut)
     }
 
+    /// Returns true for a DNS or connect failure, a TLS failure while connecting, or a timeout while connecting.
     pub fn is_connect(&self) -> bool {
-        match self.category() {
-            ErrorCategory::Connect | ErrorCategory::Dns => true,
-            ErrorCategory::Tls => self.tls().is_some_and(TlsError::is_connect_phase),
-            ErrorCategory::Timeout => {
-                self.inner.kind == Kind::Connect
+        match self.kind() {
+            Kind::Connect | Kind::Dns => true,
+            Kind::Tls => self.tls().is_some_and(TlsError::is_connect_phase),
+            Kind::Timeout => {
+                self.inner.kind == Cause::Connect
                     || self.tls().is_some_and(TlsError::is_connect_phase)
             }
             _ => false,
@@ -40,10 +41,11 @@ impl Error {
         })
     }
 
-    pub fn is_status(&self) -> bool {
-        self.inner.kind == Kind::Status
+    pub(crate) fn is_status(&self) -> bool {
+        self.inner.kind == Cause::Status
     }
 
+    /// Returns true for a timeout, a connect failure, a closed connection, or a transient proxy failure.
     pub fn is_retryable(&self) -> bool {
         self.is_timeout()
             || self.is_connect()
@@ -102,7 +104,7 @@ impl Error {
         ) || self.not_processed()
     }
 
-    pub fn is_body_limit(&self) -> bool {
+    pub(crate) fn is_body_limit(&self) -> bool {
         self.body_limit().is_some()
     }
 
@@ -112,8 +114,38 @@ impl Error {
             .or_else(|| self.io().and_then(BodyLimit::of_io))
     }
 
+    /// Returns true when the proxy itself failed.
     pub fn is_proxy(&self) -> bool {
         matches!(self.tls(), Some(TlsError::Proxy { .. }))
+    }
+
+    /// Returns the proxy's HTTP status or SOCKS5 reply code.
+    #[must_use]
+    pub fn proxy_status(&self) -> Option<u16> {
+        match self.tls()? {
+            TlsError::Proxy { status, .. } => *status,
+            TlsError::ProxyTargetUnreachable { reply, .. } => Some(match reply {
+                ProxyReply::HttpStatus(code) => *code,
+                ProxyReply::Socks5(code) => u16::from(*code),
+            }),
+            _ => None,
+        }
+    }
+
+    /// Returns the HTTP/2 error code of a connection or stream error.
+    #[must_use]
+    pub fn h2_code(&self) -> Option<u32> {
+        match self.h2()? {
+            H2Error::Connection { code, .. } | H2Error::Stream { code, .. } => Some(*code as u32),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn is_unsent(&self) -> bool {
+        !self.follows_response()
+            && (self.is_connect()
+                || matches!(self.kind(), Kind::Proxy | Kind::ProxyTarget)
+                || self.is_refused_stream())
     }
 
     fn io_cause(&self) -> Option<&io::Error> {

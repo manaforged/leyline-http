@@ -90,14 +90,15 @@ impl Ja4hInput<'_> {
         hash12(&s)
     }
 
-    fn section_c(&self) -> String {
-        let cookie_val = self
-            .headers
+    fn cookie(&self) -> Option<&str> {
+        self.headers
             .iter()
             .find(|(n, _)| n == "cookie")
-            .map(|(_, v)| v.as_str());
+            .map(|(_, v)| v.as_str())
+    }
 
-        match cookie_val {
+    fn section_c(&self) -> String {
+        match self.cookie() {
             Some(val) => {
                 let mut names: Vec<&str> = val
                     .split(';')
@@ -110,18 +111,12 @@ impl Ja4hInput<'_> {
                 names.sort();
                 hash12(&names.join(","))
             }
-            None => "000000000000".to_string(),
+            None => hash12(""),
         }
     }
 
     fn section_d(&self) -> String {
-        let cookie_val = self
-            .headers
-            .iter()
-            .find(|(n, _)| n == "cookie")
-            .map(|(_, v)| v.as_str());
-
-        match cookie_val {
+        match self.cookie() {
             Some(val) => {
                 let mut pairs: Vec<&str> = val
                     .split(';')
@@ -131,7 +126,7 @@ impl Ja4hInput<'_> {
                 pairs.sort_by_key(|p| p.split('=').next().unwrap_or(""));
                 hash12(&pairs.join(","))
             }
-            None => "000000000000".to_string(),
+            None => hash12(""),
         }
     }
 }

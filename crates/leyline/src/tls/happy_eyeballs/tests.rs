@@ -43,13 +43,12 @@ async fn spawn_listener() -> SocketAddr {
 #[tokio::test]
 async fn single_address_succeeds() {
     let addr = spawn_listener().await;
-    let (_stream, winner) = happy_eyeballs_connect(
-        vec![addr],
-        HappyEyeballsConfig::default(),
-        |sa| async move { TcpStream::connect(sa).await },
-    )
-    .await
-    .expect("connect should succeed");
+    let (_stream, winner) =
+        happy_eyeballs_connect(vec![addr], HappyEyeballs::default(), |sa| async move {
+            TcpStream::connect(sa).await
+        })
+        .await
+        .expect("connect should succeed");
     assert_eq!(winner, addr);
 }
 
@@ -64,7 +63,7 @@ async fn v6_failure_falls_through_to_v4() {
     let attempts = Arc::new(AtomicUsize::new(0));
     let attempts_c = attempts.clone();
 
-    let config = HappyEyeballsConfig {
+    let config = HappyEyeballs {
         resolve_delay: Duration::from_millis(50),
         attempt_limit: 8,
     };
@@ -109,7 +108,7 @@ async fn all_failures_surface_last_error() {
 
     let err = happy_eyeballs_connect(
         vec![a, b],
-        HappyEyeballsConfig {
+        HappyEyeballs {
             resolve_delay: Duration::from_millis(10),
             attempt_limit: 8,
         },
@@ -128,11 +127,9 @@ async fn all_failures_surface_last_error() {
 
 #[tokio::test]
 async fn empty_input_errs() {
-    let err = happy_eyeballs_connect(
-        Vec::new(),
-        HappyEyeballsConfig::default(),
-        |sa| async move { TcpStream::connect(sa).await },
-    )
+    let err = happy_eyeballs_connect(Vec::new(), HappyEyeballs::default(), |sa| async move {
+        TcpStream::connect(sa).await
+    })
     .await
     .expect_err("empty addr list must error");
     assert_eq!(err.kind(), io::ErrorKind::NotFound);

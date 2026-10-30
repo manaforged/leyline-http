@@ -11,8 +11,8 @@ const CMD_CONNECT: u8 = 0x01;
 const CMD_UDP_ASSOCIATE: u8 = 0x03;
 const TARGET_UNREACHABLE_REPLIES: [u8; 4] = [0x03, 0x04, 0x05, 0x06];
 
-pub(crate) async fn tunnel<C: crate::tls::TlsHandshake>(
-    connector: &C,
+pub(crate) async fn tunnel(
+    connector: &crate::tls::FingerprintConnector,
     host: &str,
     port: u16,
     proxy: &url::Url,
@@ -28,8 +28,8 @@ async fn send_connect(tcp_stream: &mut TcpStream, host: &str, port: u16) -> Resu
         .map(drop)
 }
 
-async fn open_control<C: crate::tls::TlsHandshake>(
-    connector: &C,
+async fn open_control(
+    connector: &crate::tls::FingerprintConnector,
     proxy: &url::Url,
 ) -> Result<TcpStream, TlsError> {
     let auth = auth_request(proxy)?;

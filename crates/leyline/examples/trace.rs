@@ -1,4 +1,4 @@
-use leyline::trace::{Connect, Dns, Done, Head, Sent, Tls, Trace};
+use leyline::trace::{Event, Trace};
 use leyline::{Browser, Session};
 
 const URL: &str = "https://example.com";
@@ -6,54 +6,60 @@ const URL: &str = "https://example.com";
 struct Printer;
 
 impl Trace for Printer {
-    fn dns(&self, ev: &Dns<'_>) {
-        println!(
-            "[{}] dns      {}:{} -> {} addrs in {:?}",
-            ev.id, ev.host, ev.port, ev.addrs, ev.elapsed
-        );
-    }
-
-    fn connect(&self, ev: &Connect<'_>) {
-        println!(
-            "[{}] connect  {}:{} reused={} in {:?}",
-            ev.id, ev.host, ev.port, ev.reused, ev.elapsed
-        );
-    }
-
-    fn tls(&self, ev: &Tls<'_>) {
-        println!(
-            "[{}] tls      {} {} alpn={} in {:?}",
-            ev.id,
-            ev.version.unwrap_or("?"),
-            ev.cipher.unwrap_or("?"),
-            ev.alpn.unwrap_or("?"),
-            ev.elapsed
-        );
-    }
-
-    fn sent(&self, ev: &Sent<'_>) {
-        println!(
-            "[{}] sent     {} in {:?}",
-            ev.id,
-            ev.protocol.as_str(),
-            ev.elapsed
-        );
-    }
-
-    fn head(&self, ev: &Head<'_>) {
-        println!(
-            "[{}] head     {} {} in {:?}",
-            ev.id,
-            ev.status,
-            ev.protocol.as_str(),
-            ev.elapsed
-        );
-    }
-
-    fn done(&self, ev: &Done<'_>) {
-        match ev.outcome {
-            Ok(()) => println!("[{}] done     ok in {:?}", ev.id, ev.elapsed),
-            Err(e) => println!("[{}] done     {:?}: {e}", ev.id, e.kind()),
+    fn event(&self, event: &Event<'_>) {
+        match event {
+            Event::Dns {
+                id,
+                host,
+                port,
+                addrs,
+                elapsed,
+                ..
+            } => println!("[{id}] dns      {host}:{port} -> {addrs} addrs in {elapsed:?}"),
+            Event::Connect {
+                id,
+                host,
+                port,
+                reused,
+                elapsed,
+                ..
+            } => println!("[{id}] connect  {host}:{port} reused={reused} in {elapsed:?}"),
+            Event::Tls {
+                id,
+                version,
+                cipher,
+                alpn,
+                elapsed,
+                ..
+            } => println!(
+                "[{id}] tls      {} {} alpn={} in {elapsed:?}",
+                version.unwrap_or("?"),
+                cipher.unwrap_or("?"),
+                alpn.unwrap_or("?"),
+            ),
+            Event::Sent {
+                id,
+                protocol,
+                elapsed,
+                ..
+            } => println!("[{id}] sent     {protocol:?} in {elapsed:?}"),
+            Event::Head {
+                id,
+                status,
+                protocol,
+                elapsed,
+                ..
+            } => println!("[{id}] head     {status} {protocol:?} in {elapsed:?}"),
+            Event::Done {
+                id,
+                elapsed,
+                outcome,
+                ..
+            } => match outcome {
+                Ok(()) => println!("[{id}] done     ok in {elapsed:?}"),
+                Err(e) => println!("[{id}] done     {:?}: {e}", e.kind()),
+            },
+            _ => {}
         }
     }
 }
@@ -65,9 +71,9 @@ async fn main() -> leyline::Result<()> {
         .trace(Printer)
         .build()?;
 
-    drop(session.get(URL).await?);
+    drop(session.get(URL).send().await?);
     println!("--- second request, pooled ---");
-    drop(session.get(URL).await?);
+    drop(session.get(URL).send().await?);
 
     Ok(())
 }

@@ -1,16 +1,16 @@
 use std::sync::Arc;
 
-use url::Url;
+use crate::core::attempt::Attempt;
 
-use crate::util::redact;
-
+#[doc = include_str!("../../../docs/redirect.md")]
 #[derive(Clone)]
 #[non_exhaustive]
-pub struct RedirectPolicy {
+#[must_use]
+pub struct Redirect {
     kind: RedirectKind,
 }
 
-type RedirectFn = Arc<dyn Fn(RedirectAttempt<'_>) -> RedirectAction + Send + Sync>;
+type RedirectFn = Arc<dyn Fn(&Attempt<'_>) -> bool + Send + Sync>;
 
 #[derive(Clone)]
 enum RedirectKind {
@@ -19,38 +19,47 @@ enum RedirectKind {
     Custom(RedirectFn),
 }
 
-impl std::fmt::Debug for RedirectPolicy {
+impl std::fmt::Debug for Redirect {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.kind {
-            RedirectKind::Limited(n) => f.debug_tuple("RedirectPolicy::Limited").field(n).finish(),
-            RedirectKind::None => f.write_str("RedirectPolicy::None"),
-            RedirectKind::Custom(_) => f.write_str("RedirectPolicy::Custom(..)"),
+            RedirectKind::Limited(n) => f.debug_tuple("Redirect::Limited").field(n).finish(),
+            RedirectKind::None => f.write_str("Redirect::None"),
+            RedirectKind::Custom(_) => f.write_str("Redirect::Custom(..)"),
         }
     }
 }
 
-impl Default for RedirectPolicy {
-    fn default() -> Self {
-        Self::limited(10)
+impl From<usize> for Redirect {
+    fn from(max: usize) -> Self {
+        Self::limit(max)
     }
 }
 
-impl RedirectPolicy {
-    pub fn limited(max: usize) -> Self {
+impl Default for Redirect {
+    fn default() -> Self {
+        Self::limit(10)
+    }
+}
+
+impl Redirect {
+    /// Follows at most `max` redirects; the default is 10.
+    pub fn limit(max: usize) -> Self {
         Self {
             kind: RedirectKind::Limited(max),
         }
     }
 
+    /// Follows no redirects.
     pub fn none() -> Self {
         Self {
             kind: RedirectKind::None,
         }
     }
 
+    /// Follows a redirect when the closure returns true for its `Attempt`.
     pub fn custom<F>(f: F) -> Self
     where
-        F: Fn(RedirectAttempt<'_>) -> RedirectAction + Send + Sync + 'static,
+        F: Fn(&Attempt<'_>) -> bool + Send + Sync + 'static,
     {
         Self {
             kind: RedirectKind::Custom(Arc::new(f)),
@@ -65,45 +74,11 @@ impl RedirectPolicy {
         }
     }
 
-    pub(crate) fn action(&self, attempt: RedirectAttempt<'_>) -> RedirectAction {
+    pub(crate) fn follows(&self, attempt: &Attempt<'_>) -> bool {
         match &self.kind {
-            RedirectKind::Limited(max) => {
-                if attempt.previous.len() < *max {
-                    RedirectAction::Follow
-                } else {
-                    RedirectAction::Stop
-                }
-            }
-            RedirectKind::None => RedirectAction::Stop,
+            RedirectKind::Limited(max) => attempt.previous().len() < *max,
+            RedirectKind::None => false,
             RedirectKind::Custom(f) => f(attempt),
         }
     }
-}
-
-#[derive(Clone, Copy)]
-#[non_exhaustive]
-pub struct RedirectAttempt<'a> {
-    pub status: u16,
-    pub url: &'a Url,
-    pub location: Option<&'a str>,
-    pub previous: &'a [Url],
-}
-
-impl std::fmt::Debug for RedirectAttempt<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let previous: Vec<String> = self.previous.iter().map(Url::as_str).map(redact).collect();
-        f.debug_struct("RedirectAttempt")
-            .field("status", &self.status)
-            .field("url", &redact(self.url.as_str()))
-            .field("location", &self.location.map(redact))
-            .field("previous", &previous)
-            .finish()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum RedirectAction {
-    Follow,
-    Stop,
 }

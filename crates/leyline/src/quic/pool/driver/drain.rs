@@ -108,9 +108,9 @@ impl Drain<'_> {
                     stream,
                     quiche::h3::WireErrorCode::RequestCancelled,
                 );
-                stream.deliver_body_limit(BodyLimit::session(
+                stream.reply(Err(H3SendError::BodyLimit(BodyLimit::session(
                     usize::try_from(max).unwrap_or(usize::MAX),
-                ));
+                ))));
                 self.streams.remove(&id);
                 break;
             }
@@ -164,7 +164,7 @@ impl Drain<'_> {
                         body: std::mem::take(&mut stream.body),
                         trailers: std::mem::take(&mut stream.trailers),
                     };
-                    stream.deliver(Ok(resp));
+                    stream.reply(Ok(resp));
                 }
             }
             None => {}
@@ -191,7 +191,7 @@ impl Drain<'_> {
             quiche::h3::WireErrorCode::RequestCancelled,
         );
         if rejected
-            && stream.response == H3ResponseState::Initial
+            && matches!(stream.response, H3ResponseState::Initial(_))
             && let Some((headers, body)) = stream.retry.take()
             && let Some(resp_tx) = stream.resp_tx.take()
         {
@@ -212,8 +212,8 @@ impl Drain<'_> {
             }
             return;
         }
-        if rejected && stream.response == H3ResponseState::Initial {
-            stream.deliver_rejected(stream_reset_message(e));
+        if rejected && matches!(stream.response, H3ResponseState::Initial(_)) {
+            stream.reply(Err(H3SendError::Rejected(stream_reset_message(e))));
             return;
         }
         stream.deliver_error(stream_reset_message(e));
@@ -238,7 +238,9 @@ impl Drain<'_> {
                 if stream.head_sent {
                     stream.deliver_error("server sent GOAWAY: stream rejected".into());
                 } else {
-                    stream.deliver_unsent("server sent GOAWAY: request not processed".into());
+                    stream.reply(Err(H3SendError::NotSent(
+                        "server sent GOAWAY: request not processed".into(),
+                    )));
                 }
             }
         }

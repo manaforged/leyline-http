@@ -5,7 +5,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use url::Url;
 
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Error, Kind};
+use crate::core::error::{Cause, Error};
 use crate::trace::masked;
 use crate::util::redact;
 
@@ -18,8 +18,8 @@ mod relay;
 pub use link::Link;
 #[cfg(feature = "bench-internals")]
 pub(crate) use link::parse_links;
-pub use prefix::{PrefixRead, StopReason};
-pub use relay::{RelayBody, relay_headers};
+pub(crate) use prefix::StopReason;
+pub use relay::relay_headers;
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
@@ -28,11 +28,22 @@ pub(crate) enum ResponseBody {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum HttpVersion {
+pub(crate) enum HttpVersion {
     Http1_1,
     Http2,
+    #[cfg(feature = "http3")]
     Http3,
+}
+
+impl From<HttpVersion> for http::Version {
+    fn from(version: HttpVersion) -> Self {
+        match version {
+            HttpVersion::Http1_1 => Self::HTTP_11,
+            HttpVersion::Http2 => Self::HTTP_2,
+            #[cfg(feature = "http3")]
+            HttpVersion::Http3 => Self::HTTP_3,
+        }
+    }
 }
 
 impl HttpVersion {
@@ -40,26 +51,18 @@ impl HttpVersion {
         match self {
             Self::Http1_1 => "1",
             Self::Http2 => "2",
+            #[cfg(feature = "http3")]
             Self::Http3 => "3",
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Http1_1 => "HTTP/1.1",
-            Self::Http2 => "HTTP/2",
-            Self::Http3 => "HTTP/3",
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct ResponseTiming {
-    pub reused: bool,
-    pub connect_ms: Option<u32>,
-    pub send_ms: u32,
-    pub total_ms: u32,
+    pub(crate) reused: bool,
+    pub(crate) connect_ms: Option<u32>,
+    pub(crate) send_ms: u32,
+    pub(crate) total_ms: u32,
 }
 
 impl ResponseTiming {
@@ -96,6 +99,7 @@ impl ResponseTiming {
     }
 }
 
+#[doc = include_str!("../../docs/response.md")]
 pub struct Response {
     pub(crate) status: StatusCode,
     pub(crate) version: HttpVersion,
@@ -109,25 +113,47 @@ pub struct Response {
     pub(crate) request_method: String,
     pub(crate) timing: ResponseTiming,
     pub(crate) audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
-    pub(crate) audit_cache: OnceLock<crate::audit::AuditData>,
-    pub(crate) compression: crate::core::CompressionConfig,
+    pub(crate) audit_cache: OnceLock<crate::audit::Fingerprint>,
+    pub(crate) compression: crate::core::BodyRules,
     pub(crate) attempts: u32,
     pub(crate) proxy: Option<String>,
+    pub(crate) block: Option<crate::core::block::Block>,
 }
 
 impl Response {
+    /// Returns the response status.
     pub fn status(&self) -> StatusCode {
         self.status
     }
 
-    pub fn version(&self) -> HttpVersion {
-        self.version
+    /// Returns the HTTP version of the response.
+    pub fn version(&self) -> http::Version {
+        self.version.into()
     }
 
-    pub fn timing(&self) -> &ResponseTiming {
-        &self.timing
+    /// Returns whether every attempt reused a pooled connection.
+    pub fn reused(&self) -> bool {
+        self.timing.reused
     }
 
+    /// Returns the time spent opening new connections, or `None` when every attempt reused one.
+    pub fn connect_time(&self) -> Option<std::time::Duration> {
+        self.timing
+            .connect_ms
+            .map(|ms| std::time::Duration::from_millis(u64::from(ms)))
+    }
+
+    /// Returns the time spent sending the request and waiting for the response.
+    pub fn send_time(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(u64::from(self.timing.send_ms))
+    }
+
+    /// Returns the total time from the start of the request to the response headers.
+    pub fn elapsed(&self) -> std::time::Duration {
+        std::time::Duration::from_millis(u64::from(self.timing.total_ms))
+    }
+
+    /// Returns the number of attempts made, including retries.
     pub fn attempts(&self) -> u32 {
         self.attempts
     }
@@ -136,6 +162,7 @@ impl Response {
         self.attempts = attempts.max(1);
     }
 
+    /// Returns the redacted proxy address the response came through.
     pub fn proxy(&self) -> Option<&str> {
         self.proxy.as_deref()
     }
@@ -144,26 +171,32 @@ impl Response {
         self.proxy = proxy.map(redact);
     }
 
-    pub fn block(&self) -> Option<crate::core::block::BlockSignal> {
-        crate::core::block::BlockRules::builtin().check(self)
+    /// Returns the block detected in the response, if any.
+    pub fn block(&self) -> Option<&crate::core::block::Block> {
+        self.block.as_ref()
     }
 
+    /// Returns the final URL after redirects.
     pub fn url(&self) -> &Url {
         &self.url
     }
 
+    /// Returns the URLs of each redirect followed, in order.
     pub fn redirect_chain(&self) -> &[Url] {
         &self.redirect_chain
     }
 
+    /// Returns the response headers.
     pub fn headers(&self) -> &HeaderMap {
         &self.headers
     }
 
+    /// Returns the response trailers.
     pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
         self.trailers.iter().map(|(k, v)| (k, v))
     }
 
+    /// Parses each `Set-Cookie` header of the response into a cookie.
     pub fn cookies(&self) -> impl Iterator<Item = crate::cookie::Cookie> + '_ {
         let url = &self.url;
         self.headers
@@ -174,28 +207,40 @@ impl Response {
             })
     }
 
-    pub fn tls(&self) -> Option<&crate::pool::TlsInfo> {
-        self.tls.as_ref()
+    /// Returns the negotiated TLS version.
+    #[must_use]
+    pub fn tls_version(&self) -> Option<&str> {
+        self.tls.as_ref().and_then(|tls| tls.version.as_deref())
     }
 
+    /// Returns the negotiated TLS cipher suite.
+    #[must_use]
+    pub fn tls_cipher(&self) -> Option<&str> {
+        self.tls.as_ref().and_then(|tls| tls.cipher.as_deref())
+    }
+
+    /// Returns the DER bytes of the server certificate.
+    #[must_use]
+    pub fn peer_certificate(&self) -> Option<&[u8]> {
+        self.tls
+            .as_ref()
+            .and_then(|tls| tls.peer_cert_der.as_deref())
+    }
+
+    /// Returns the headers that were sent with the request.
     pub fn request_headers(&self) -> impl Iterator<Item = (&str, &str)> {
         self.request_headers
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 
+    /// Returns the `content-length` header value as a number.
     pub fn content_length(&self) -> Option<u64> {
         self.header("content-length").and_then(|v| v.parse().ok())
     }
 
-    pub fn error_for_status(self) -> crate::core::Result<Self> {
-        match self.status_error() {
-            Some(err) => Err(err),
-            None => Ok(self),
-        }
-    }
-
-    pub fn error_for_status_ref(&self) -> crate::core::Result<&Self> {
+    /// Returns the response, or an error of kind `Kind::Status` when the status is an error.
+    pub fn error_for_status(&self) -> crate::core::Result<&Self> {
         match self.status_error() {
             Some(err) => Err(err),
             None => Ok(self),
@@ -207,7 +252,7 @@ impl Response {
             return None;
         }
         Some(
-            Error::new(Kind::Status)
+            Error::new(Cause::Status)
                 .with_status(self.status)
                 .with_url(self.url.clone())
                 .with_headers(self.headers.clone())
@@ -215,7 +260,8 @@ impl Response {
         )
     }
 
-    pub fn audit(&self) -> Option<&crate::audit::AuditData> {
+    /// Returns the request fingerprints, or `None` when auditing is off.
+    pub fn fingerprint(&self) -> Option<&crate::audit::Fingerprint> {
         let tls = self.audit_tls.as_ref()?;
         Some(self.audit_cache.get_or_init(|| {
             let ja4h = crate::audit::compute_ja4h(&crate::audit::Ja4hInput {
@@ -223,7 +269,7 @@ impl Response {
                 http_version: self.version.ja4h_token(),
                 headers: &self.request_headers,
             });
-            crate::audit::AuditData {
+            crate::audit::Fingerprint {
                 ja4: tls.ja4.clone(),
                 ja3: tls.ja3.clone(),
                 h2_fingerprint: tls.h2_fingerprint.clone(),
@@ -235,6 +281,7 @@ impl Response {
         }))
     }
 
+    /// Returns the named header value as text, or `None` when it is absent or not visible ASCII.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.get(name).and_then(|v| v.to_str().ok())
     }

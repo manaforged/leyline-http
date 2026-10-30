@@ -4,14 +4,13 @@ use std::time::Duration;
 
 use http::StatusCode;
 
-use crate::core::block::BlockRules;
-use crate::core::config::ProxyConfig;
-use crate::core::error::{Error, ErrorCategory, Kind, Result};
+use crate::core::attempt::Attempt;
+use crate::core::error::Result;
 use crate::core::response::Response;
 
 mod wait;
 
-pub use wait::WaitFormat;
+pub(crate) use wait::WaitFormat;
 pub(crate) use wait::parse_retry_after;
 use wait::{RETRY_AFTER, WaitHeader};
 
@@ -21,6 +20,10 @@ pub(crate) enum RetryPlan {
     Declined,
     Backoff(Duration),
 }
+
+const DEFAULT_MIN_BACKOFF: Duration = Duration::from_millis(100);
+const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(1);
+const DEFAULT_MAX_WAIT: Duration = Duration::from_secs(60);
 
 const GATEWAY_STATUSES: [StatusCode; 3] = [
     StatusCode::BAD_GATEWAY,
@@ -34,308 +37,203 @@ pub(crate) fn is_gateway_status(code: u16) -> bool {
         .any(|status| status.as_u16() == code)
 }
 
-#[derive(Debug, Clone, Copy)]
-#[non_exhaustive]
-pub enum RetryTrigger {
-    ConnectionError,
-    Status(u16),
-    ServerError,
-    Timeout,
-}
+type RetryPredicate = dyn Fn(&Attempt<'_>) -> bool + Send + Sync;
 
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct RetryPolicy {
-    pub(crate) max_retries: u32,
-    pub(crate) initial_backoff: Duration,
-    pub(crate) max_backoff: Duration,
-    pub(crate) max_retry_after: Duration,
-    pub(crate) backoff_factor: f64,
-    pub(crate) jitter: bool,
-    pub(crate) retry_on: Vec<RetryTrigger>,
-    pub(crate) allow_non_idempotent: bool,
-    pub(crate) proxies: Vec<ProxyConfig>,
-    pub(crate) retry_if: Vec<RetryIf>,
-    pub(crate) wait_headers: Vec<WaitHeader>,
-    pub(crate) skip_blocks: Option<BlockRules>,
-    pub(crate) retry_unsent: bool,
-}
-
-type ResponsePredicate = dyn Fn(&Response) -> bool + Send + Sync + std::panic::RefUnwindSafe;
-
+#[doc = include_str!("../../docs/retry.md")]
 #[derive(Clone)]
-pub(crate) struct RetryIf(Arc<ResponsePredicate>);
+#[must_use]
+pub struct Retry {
+    count: u32,
+    when: Option<Arc<RetryPredicate>>,
+    backoff: Backoff,
+    max_wait: Duration,
+    wait_headers: Vec<WaitHeader>,
+    any_method: bool,
+}
 
-impl fmt::Debug for RetryIf {
+impl fmt::Debug for Retry {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("RetryIf(..)")
+        f.debug_struct("Retry")
+            .field("count", &self.count)
+            .field("when", &self.when.as_ref().map(|_| ".."))
+            .field("backoff", &self.backoff)
+            .field("max_wait", &self.max_wait)
+            .field("wait_headers", &self.wait_headers)
+            .field("any_method", &self.any_method)
+            .finish()
     }
 }
 
-impl Default for RetryPolicy {
+impl Default for Retry {
     fn default() -> Self {
-        Self::none()
+        Self::new(0)
     }
 }
 
-impl RetryPolicy {
-    pub fn none() -> Self {
+impl From<u32> for Retry {
+    fn from(count: u32) -> Self {
+        Self::new(count)
+    }
+}
+
+impl Retry {
+    /// Returns a policy with `count` retries, exponential backoff from 100 ms to 1 s, and a 60 s maximum server wait.
+    pub fn new(count: u32) -> Self {
         Self {
-            max_retries: 0,
-            initial_backoff: Duration::from_millis(0),
-            max_backoff: Duration::from_millis(0),
-            max_retry_after: Duration::MAX,
-            backoff_factor: 1.0,
-            jitter: false,
-            retry_on: Vec::new(),
-            allow_non_idempotent: false,
-            proxies: Vec::new(),
-            retry_if: Vec::new(),
+            count,
+            when: None,
+            backoff: Backoff::exponential(DEFAULT_MIN_BACKOFF, DEFAULT_MAX_BACKOFF),
+            max_wait: DEFAULT_MAX_WAIT,
             wait_headers: Vec::new(),
-            skip_blocks: None,
-            retry_unsent: false,
+            any_method: false,
         }
     }
 
-    pub fn transient() -> Self {
-        Self {
-            max_retries: 3,
-            initial_backoff: Duration::from_millis(100),
-            max_backoff: Duration::from_secs(1),
-            max_retry_after: Duration::from_secs(60),
-            backoff_factor: 2.0,
-            jitter: true,
-            retry_on: [
-                RetryTrigger::ConnectionError,
-                RetryTrigger::Status(StatusCode::TOO_MANY_REQUESTS.as_u16()),
-            ]
-            .into_iter()
-            .chain(GATEWAY_STATUSES.map(|status| RetryTrigger::Status(status.as_u16())))
-            .chain([RetryTrigger::Timeout])
-            .collect(),
-            allow_non_idempotent: false,
-            proxies: Vec::new(),
-            retry_if: Vec::new(),
-            wait_headers: Vec::new(),
-            skip_blocks: None,
-            retry_unsent: false,
-        }
-    }
-
-    pub fn max_retries(mut self, n: u32) -> Self {
-        self.max_retries = n;
-        self
-    }
-
-    pub fn initial_backoff(mut self, d: Duration) -> Self {
-        self.initial_backoff = d;
-        self
-    }
-
-    pub fn max_backoff(mut self, d: Duration) -> Self {
-        self.max_backoff = d;
-        self
-    }
-
-    pub fn backoff_factor(mut self, factor: f64) -> Self {
-        self.backoff_factor = factor;
-        self
-    }
-
-    pub fn jitter(mut self, on: bool) -> Self {
-        self.jitter = on;
-        self
-    }
-
-    pub fn max_retry_after(mut self, d: Duration) -> Self {
-        self.max_retry_after = d;
-        self
-    }
-
-    pub fn on_status(mut self, code: u16) -> Self {
-        self.retry_on.push(RetryTrigger::Status(code));
-        self
-    }
-
-    pub fn retry_on(mut self, triggers: impl IntoIterator<Item = RetryTrigger>) -> Self {
-        self.retry_on = triggers.into_iter().collect();
-        self
-    }
-
-    pub fn allow_non_idempotent(mut self, allow: bool) -> Self {
-        self.allow_non_idempotent = allow;
-        self
-    }
-
-    pub fn rotate_proxies<P: Into<ProxyConfig>>(
-        mut self,
-        proxies: impl IntoIterator<Item = P>,
-    ) -> Self {
-        self.proxies = proxies.into_iter().map(Into::into).collect();
-        self
-    }
-
-    pub fn retry_if<F>(mut self, f: F) -> Self
+    /// Sets the predicate that decides whether to retry, replacing the default `Attempt::is_transient` check.
+    pub fn when<F>(mut self, f: F) -> Self
     where
-        F: Fn(&Response) -> bool + Send + Sync + std::panic::RefUnwindSafe + 'static,
+        F: Fn(&Attempt<'_>) -> bool + Send + Sync + 'static,
     {
-        self.retry_if.push(RetryIf(Arc::new(f)));
+        self.when = Some(Arc::new(f));
         self
     }
 
-    pub fn wait_header(mut self, name: impl Into<String>, format: WaitFormat) -> Self {
-        self.wait_headers.push(WaitHeader {
-            name: name.into(),
-            format,
-        });
+    /// Sets a jittered delay between retries that doubles from `min` and caps at `max`, 100 ms to 1 s by default.
+    pub fn backoff(mut self, min: Duration, max: Duration) -> Self {
+        self.backoff = Backoff::exponential(min, max);
         self
     }
 
-    pub fn skip_blocks(mut self, rules: BlockRules) -> Self {
-        match &mut self.skip_blocks {
-            Some(held) => held.extend(rules),
-            None => self.skip_blocks = Some(rules),
-        }
+    /// Returns the backoff wait before retry `attempt`, between half of and all of the exponential delay, for loops that retry outside a request.
+    #[must_use]
+    pub fn delay(&self, attempt: u32) -> Duration {
+        self.backoff.delay(attempt)
+    }
+
+    /// Sets the longest server-requested wait to honor, 60 seconds by default; a longer wait stops retrying.
+    pub fn max_wait(mut self, wait: Duration) -> Self {
+        self.max_wait = wait;
         self
     }
 
-    pub fn retry_unsent(mut self, enabled: bool) -> Self {
-        self.retry_unsent = enabled;
+    /// Adds a header, checked before `Retry-After`, whose value is delay-seconds, a Unix timestamp in seconds, or an HTTP date.
+    pub fn wait_header(self, name: impl Into<String>) -> Self {
+        self.push_wait_header(name.into(), WaitFormat::Delay)
+    }
+
+    /// Adds a header, checked before `Retry-After`, whose value is a delay in milliseconds.
+    pub fn wait_header_ms(self, name: impl Into<String>) -> Self {
+        self.push_wait_header(name.into(), WaitFormat::Millis)
+    }
+
+    fn push_wait_header(mut self, name: String, format: WaitFormat) -> Self {
+        self.wait_headers.push(WaitHeader { name, format });
         self
     }
 
-    pub(crate) fn matches_response(&self, response: &Response) -> bool {
-        if self.is_block(response) {
-            return false;
-        }
-        self.matches_status(response.status().as_u16())
-            || self.retry_if.iter().any(|RetryIf(f)| f(response))
-    }
-
-    fn is_block(&self, response: &Response) -> bool {
-        self.skip_blocks
-            .as_ref()
-            .is_some_and(|rules| rules.check(response).is_some())
-    }
-
-    pub(crate) fn retries_unsent(&self, result: &Result<Response>) -> bool {
-        self.retry_unsent && result.as_ref().err().is_some_and(unsent)
-    }
-
-    pub(crate) fn server_wait(&self, response: &Response) -> Option<Duration> {
-        self.wait_in(|name| response.header(name))
-    }
-
-    fn wait_in<'a>(&self, header: impl Fn(&str) -> Option<&'a str>) -> Option<Duration> {
-        self.wait_headers
-            .iter()
-            .find_map(|wait| header(&wait.name).and_then(|value| wait.format.parse(value)))
-            .or_else(|| header(RETRY_AFTER).and_then(parse_retry_after))
-    }
-
-    pub(crate) fn proxy_for_retry(&self, retry: u32) -> Option<&ProxyConfig> {
-        let index = usize::try_from(retry.checked_sub(1)?).ok()?;
-        self.proxies.get(index.checked_rem(self.proxies.len())?)
-    }
-
-    pub(crate) fn plan(
-        &self,
-        result: &Result<Response>,
-        attempt: u32,
-        retryable_method: bool,
-        body_retryable: impl FnOnce() -> bool,
-    ) -> RetryPlan {
-        if self.is_none() {
-            return RetryPlan::Stop;
-        }
-        if attempt >= self.max_retries {
-            return match result {
-                Ok(response) if self.matches_response(response) => RetryPlan::Exhausted,
-                _ => RetryPlan::Stop,
-            };
-        }
-        if !self.wanted(result)
-            || !(retryable_method || self.retries_unsent(result))
-            || !body_retryable()
-        {
-            return RetryPlan::Stop;
-        }
-        match result.as_ref().ok().and_then(|r| self.server_wait(r)) {
-            Some(wait) if wait > self.max_retry_after => RetryPlan::Declined,
-            Some(wait) => RetryPlan::Backoff(wait),
-            None => RetryPlan::Backoff(self.backoff(attempt)),
-        }
-    }
-
-    fn wanted(&self, result: &Result<Response>) -> bool {
-        match result {
-            Ok(resp) => self.matches_response(resp),
-            Err(err) if err.is_timeout() => self.matches_timeout(),
-            Err(err) if err.is_retryable() => self.matches_connection_error(),
-            Err(_) => false,
-        }
+    /// Sets whether non-idempotent methods retry too, off by default.
+    pub fn any_method(mut self, any: bool) -> Self {
+        self.any_method = any;
+        self
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn or(self, fallback: RetryPolicy) -> RetryPolicy {
+    pub(crate) fn once(&self) -> Retry {
+        Retry {
+            count: 0,
+            ..self.clone()
+        }
+    }
+
+    pub(crate) fn count(&self) -> u32 {
+        self.count
+    }
+
+    pub(crate) fn is_none(&self) -> bool {
+        self.count() == 0
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn or(self, fallback: Retry) -> Retry {
         match self.is_none() {
             true => fallback,
             false => self,
         }
     }
 
-    pub(crate) fn is_none(&self) -> bool {
-        self.max_retries == 0
+    pub(crate) fn allows(&self, method: &str) -> bool {
+        self.any_method || crate::util::is_idempotent(method)
     }
 
-    pub(crate) fn matches_status(&self, status: u16) -> bool {
-        for t in &self.retry_on {
-            match *t {
-                RetryTrigger::Status(s) if s == status => return true,
-                RetryTrigger::ServerError if (500..600).contains(&status) => return true,
-                _ => {}
-            }
+    fn wants(&self, attempt: &Attempt<'_>) -> bool {
+        self.when
+            .as_ref()
+            .map_or_else(|| attempt.is_transient(), |when| when(attempt))
+    }
+
+    pub(crate) fn server_wait(&self, response: &Response) -> Option<Duration> {
+        self.wait_headers
+            .iter()
+            .find_map(|wait| {
+                response
+                    .header(&wait.name)
+                    .and_then(|value| wait.format.parse(value))
+            })
+            .or_else(|| response.header(RETRY_AFTER).and_then(parse_retry_after))
+    }
+
+    pub(crate) fn plan(
+        &self,
+        result: &Result<Response>,
+        attempt: u32,
+        method_allowed: bool,
+        body_retryable: impl FnOnce() -> bool,
+    ) -> RetryPlan {
+        if self.is_none() {
+            return RetryPlan::Stop;
         }
-        false
-    }
-
-    pub(crate) fn matches_connection_error(&self) -> bool {
-        self.retry_on
-            .iter()
-            .any(|t| matches!(t, RetryTrigger::ConnectionError))
-    }
-
-    pub(crate) fn matches_timeout(&self) -> bool {
-        self.retry_on
-            .iter()
-            .any(|t| matches!(t, RetryTrigger::Timeout))
-    }
-
-    #[must_use]
-    pub fn backoff(&self, attempt: u32) -> Duration {
-        let base = self.initial_backoff.as_secs_f64();
-        let raw = base * self.backoff_factor.powi(attempt as i32);
-        let capped = raw.min(self.max_backoff.as_secs_f64());
-        let jittered = if self.jitter {
-            capped * cheap_jitter()
-        } else {
-            capped
-        };
-        Duration::try_from_secs_f64(jittered.max(0.0)).unwrap_or(self.max_backoff)
+        let view = Attempt::sent(result);
+        if attempt >= self.count {
+            return match result {
+                Ok(_) if self.wants(&view) => RetryPlan::Exhausted,
+                _ => RetryPlan::Stop,
+            };
+        }
+        if !self.wants(&view) || !(method_allowed || view.is_unsent()) || !body_retryable() {
+            return RetryPlan::Stop;
+        }
+        match result.as_ref().ok().and_then(|r| self.server_wait(r)) {
+            Some(wait) if wait > self.max_wait => RetryPlan::Declined,
+            Some(wait) => RetryPlan::Backoff(wait),
+            None => RetryPlan::Backoff(self.backoff.delay(attempt)),
+        }
     }
 }
 
-fn unsent(err: &Error) -> bool {
-    if err.follows_response() {
-        return false;
-    }
-    match err.category() {
-        ErrorCategory::Dns | ErrorCategory::Connect | ErrorCategory::Tls | ErrorCategory::Proxy => {
-            true
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct Backoff {
+    min: Duration,
+    max: Duration,
+}
+
+impl Backoff {
+    pub(crate) fn exponential(min: Duration, max: Duration) -> Self {
+        Self {
+            min,
+            max: max.max(min),
         }
-        ErrorCategory::Timeout => err.kind() == Kind::Connect,
-        ErrorCategory::Protocol => err.is_refused_stream(),
-        _ => false,
+    }
+
+    #[must_use]
+    pub(crate) fn delay(&self, attempt: u32) -> Duration {
+        let ceiling = self.ceiling(attempt);
+        ceiling / 2 + (ceiling / 2).mul_f64(cheap_jitter())
+    }
+
+    fn ceiling(&self, attempt: u32) -> Duration {
+        self.min
+            .checked_mul(1u32.checked_shl(attempt).unwrap_or(u32::MAX))
+            .map_or(self.max, |delay| delay.min(self.max))
     }
 }
 

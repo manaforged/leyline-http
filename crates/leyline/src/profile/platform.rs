@@ -15,16 +15,23 @@ static PLATFORMS: LazyLock<HashMap<String, PlatformData>> = LazyLock::new(|| {
         .expect("built-in platform table is statically valid")
 });
 
+#[doc = include_str!("../../docs/platform.md")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[derive(Default)]
 pub enum Platform {
+    /// Microsoft Windows, the default platform.
     #[default]
     Windows,
+    /// Apple macOS.
     MacOS,
+    /// Desktop Linux.
     Linux,
+    /// Google Android.
     Android,
+    /// Apple iOS.
     IOS,
+    /// The operating system this program runs on, detected at use.
     Host,
 }
 
@@ -38,11 +45,13 @@ const PLATFORM_ALL: &[Platform] = &[
 ];
 
 impl Platform {
+    /// Returns every platform, including `Host`.
     #[must_use]
     pub fn all() -> &'static [Platform] {
         PLATFORM_ALL
     }
 
+    /// Returns the platform's stable id, such as `"host"` for `Host`.
     #[must_use]
     pub fn id(&self) -> &'static str {
         match self {
@@ -111,6 +120,7 @@ impl Platform {
         }
     }
 
+    /// Returns the platform's TCP fingerprint, or the default profile when the table has none.
     #[must_use]
     pub fn tcp_profile(&self) -> TcpProfile {
         PLATFORMS

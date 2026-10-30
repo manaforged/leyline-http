@@ -3,8 +3,8 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
-use crate::core::config::TimeoutConfig;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::config::Timeout;
+use crate::core::error::{Cause, Error, Result};
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Deadline {
@@ -25,7 +25,7 @@ impl From<tokio::time::error::Elapsed> for Elapsed {
 }
 
 impl Deadline {
-    pub(crate) fn new(session: &TimeoutConfig, request: Option<&TimeoutConfig>) -> Self {
+    pub(crate) fn new(session: &Timeout, request: Option<&Timeout>) -> Self {
         let merged = request.map_or(*session, |request| request.over(session));
         Self {
             at: merged
@@ -46,7 +46,7 @@ impl Deadline {
 
     pub(crate) fn check(&self) -> Result<()> {
         if self.remaining().is_zero() {
-            return Err(Error::new(Kind::Timeout));
+            return Err(Error::new(Cause::Timeout));
         }
         Ok(())
     }
@@ -82,7 +82,7 @@ impl Deadline {
         match self.at {
             Some(at) => tokio::time::timeout_at(at, fut)
                 .await
-                .map_err(|e| Error::new(Kind::Timeout).with_source(e))?,
+                .map_err(|e| Error::new(Cause::Timeout).with_source(e))?,
             None => fut.await,
         }
     }
@@ -93,7 +93,7 @@ impl Deadline {
     ) -> Result<T> {
         within(self.response_header, fut)
             .await
-            .map_err(|Elapsed| Error::new(Kind::Timeout))?
+            .map_err(|Elapsed| Error::new(Cause::Timeout))?
     }
 }
 

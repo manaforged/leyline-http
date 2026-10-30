@@ -4,9 +4,9 @@ mod state;
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
-use crate::core::block::BlockRules;
-use crate::core::config::ProxyConfig;
+use crate::core::config::Proxy;
 use crate::core::session::Identity;
+use crate::profile::{Browser, Platform};
 
 use sessions::IdentitySessions;
 pub(crate) use state::Lease;
@@ -17,7 +17,7 @@ const DEFAULT_BAN_FOR: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 struct Entry {
-    config: ProxyConfig,
+    config: Proxy,
     label: String,
     identity: Option<Identity>,
 }
@@ -27,11 +27,10 @@ struct Settings {
     sticky_for: Duration,
     ban_after: u32,
     ban_for: Duration,
-    block_rules: Option<BlockRules>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ProxyPool {
+pub(crate) struct ProxyPool {
     entries: Arc<[Entry]>,
     settings: Settings,
     state: Arc<Mutex<PoolState>>,
@@ -39,34 +38,49 @@ pub struct ProxyPool {
 }
 
 #[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct ProxyHealth {
-    pub proxy: String,
-    pub in_use: u32,
-    pub failures: u32,
-    pub banned_until: Option<Instant>,
+pub(crate) struct ProxyHealth {
+    proxy: String,
+    in_use: u32,
+    failures: u32,
+    banned_until: Option<Instant>,
+}
+
+impl ProxyHealth {
+    pub(crate) fn proxy(&self) -> &str {
+        &self.proxy
+    }
+
+    pub(crate) fn in_use(&self) -> u32 {
+        self.in_use
+    }
+
+    pub(crate) fn failures(&self) -> u32 {
+        self.failures
+    }
+
+    pub(crate) fn banned_until(&self) -> Option<Instant> {
+        self.banned_until
+    }
 }
 
 impl ProxyPool {
-    pub fn new<P: Into<ProxyConfig>>(proxies: impl IntoIterator<Item = P>) -> Self {
+    pub(crate) fn new<P: Into<Proxy>>(proxies: impl IntoIterator<Item = P>) -> Self {
         Self::from_entries(proxies.into_iter().map(|proxy| entry(proxy.into(), None)))
     }
 
-    pub fn identified<P: Into<ProxyConfig>>(
-        proxies: impl IntoIterator<Item = (P, Identity)>,
+    pub(crate) fn identified<P: Into<Proxy>>(
+        proxies: impl IntoIterator<Item = (P, Browser, Platform)>,
     ) -> Self {
-        Self::from_entries(
-            proxies
-                .into_iter()
-                .map(|(proxy, identity)| entry(proxy.into(), Some(identity))),
-        )
+        Self::from_entries(proxies.into_iter().map(|(proxy, browser, platform)| {
+            entry(proxy.into(), Some(Identity::new(browser, platform)))
+        }))
     }
 
     pub(crate) fn needs_impersonation(&self) -> bool {
         self.entries.iter().any(|entry| entry.identity.is_some())
     }
 
-    pub(crate) fn configs(&self) -> impl Iterator<Item = &ProxyConfig> {
+    pub(crate) fn configs(&self) -> impl Iterator<Item = &Proxy> {
         self.entries.iter().map(|entry| &entry.config)
     }
 
@@ -79,38 +93,29 @@ impl ProxyPool {
                 sticky_for: Duration::ZERO,
                 ban_after: DEFAULT_BAN_AFTER,
                 ban_for: DEFAULT_BAN_FOR,
-                block_rules: None,
             },
             state: Arc::new(Mutex::new(state)),
             sessions: Arc::default(),
         }
     }
 
-    pub fn sticky_for(mut self, duration: Duration) -> Self {
+    pub(crate) fn sticky_for(mut self, duration: Duration) -> Self {
         self.settings.sticky_for = duration;
         self
     }
 
-    pub fn ban_after(mut self, failures: u32) -> Self {
+    pub(crate) fn ban_after(mut self, failures: u32) -> Self {
         self.settings.ban_after = failures.max(1);
         self
     }
 
-    pub fn ban_for(mut self, duration: Duration) -> Self {
+    pub(crate) fn ban_for(mut self, duration: Duration) -> Self {
         self.settings.ban_for = duration;
         self
     }
 
-    pub fn rotate_on_block(mut self, rules: BlockRules) -> Self {
-        match &mut self.settings.block_rules {
-            Some(held) => held.extend(rules),
-            None => self.settings.block_rules = Some(rules),
-        }
-        self
-    }
-
     #[must_use]
-    pub fn stats(&self) -> Vec<ProxyHealth> {
+    pub(crate) fn stats(&self) -> Vec<ProxyHealth> {
         let state = self.lock();
         self.entries
             .iter()
@@ -129,7 +134,7 @@ impl ProxyPool {
     }
 }
 
-fn entry(config: ProxyConfig, identity: Option<Identity>) -> Entry {
+fn entry(config: Proxy, identity: Option<Identity>) -> Entry {
     let label = config
         .primary()
         .map(crate::util::redact)

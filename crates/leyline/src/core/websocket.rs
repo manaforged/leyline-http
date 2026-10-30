@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::Message as WireMessage;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame as WireClose, Role};
 
 use crate::core::headers::reorder;
@@ -14,8 +14,8 @@ use crate::pool::Pool;
 use crate::profile::preset::HeaderPair;
 use crate::tls::{FingerprintConnector, TlsIo};
 
-use crate::core::WebSocketConfig;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::config::WebSocketOptions;
+use crate::core::error::{Cause, Error, Result};
 
 mod debug;
 mod handshake;
@@ -27,59 +27,47 @@ use handshake::{
     wire_error, ws_header_pair,
 };
 use http::header::SEC_WEBSOCKET_PROTOCOL;
-pub use split::{WsSink, WsStream};
-use split::{WsSinkInner, WsStreamInner};
+use split::{WsSink, WsSinkInner, WsStream, WsStreamInner};
 
+/// A WebSocket message that a connection sends or receives.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum WsMessage {
+pub enum Message {
+    /// A UTF-8 text message.
     Text(String),
+    /// A binary message.
     Binary(Vec<u8>),
+    /// A ping control frame.
     Ping,
+    /// A pong control frame.
     Pong,
-    Close(Option<CloseFrame>),
+    /// A close frame with an optional status code and reason.
+    Close(Option<(u16, String)>),
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct CloseFrame {
-    pub code: u16,
-    pub reason: String,
-}
-
-impl CloseFrame {
-    pub fn new(code: u16, reason: impl Into<String>) -> Self {
-        Self {
-            code,
-            reason: reason.into(),
-        }
-    }
-}
-
-impl WsMessage {
-    fn wire(msg: Message) -> Self {
+impl Message {
+    fn wire(msg: WireMessage) -> Self {
         match msg {
-            Message::Text(s) => Self::Text(s.as_str().to_owned()),
-            Message::Binary(b) => Self::Binary(b.to_vec()),
-            Message::Ping(_) => Self::Ping,
-            Message::Pong(_) => Self::Pong,
-            Message::Close(frame) => Self::Close(frame.map(|f| CloseFrame {
-                code: f.code.into(),
-                reason: f.reason.as_str().to_owned(),
-            })),
-            Message::Frame(f) => Self::Binary(f.into_payload().to_vec()),
+            WireMessage::Text(s) => Self::Text(s.as_str().to_owned()),
+            WireMessage::Binary(b) => Self::Binary(b.to_vec()),
+            WireMessage::Ping(_) => Self::Ping,
+            WireMessage::Pong(_) => Self::Pong,
+            WireMessage::Close(frame) => {
+                Self::Close(frame.map(|f| (f.code.into(), f.reason.as_str().to_owned())))
+            }
+            WireMessage::Frame(f) => Self::Binary(f.into_payload().to_vec()),
         }
     }
 
-    fn into_wire(self) -> Message {
+    fn into_wire(self) -> WireMessage {
         match self {
-            Self::Text(s) => Message::Text(s.into()),
-            Self::Binary(b) => Message::Binary(b.into()),
-            Self::Ping => Message::Ping(Vec::new().into()),
-            Self::Pong => Message::Pong(Vec::new().into()),
-            Self::Close(frame) => Message::Close(frame.map(|f| WireClose {
-                code: f.code.into(),
-                reason: f.reason.into(),
+            Self::Text(s) => WireMessage::Text(s.into()),
+            Self::Binary(b) => WireMessage::Binary(b.into()),
+            Self::Ping => WireMessage::Ping(Vec::new().into()),
+            Self::Pong => WireMessage::Pong(Vec::new().into()),
+            Self::Close(frame) => WireMessage::Close(frame.map(|(code, reason)| WireClose {
+                code: code.into(),
+                reason: reason.into(),
             })),
         }
     }
@@ -90,13 +78,14 @@ enum WsInner {
     H2(WebSocketStream<H2ConnectStream>),
 }
 
-pub struct WsConnection {
+/// An open WebSocket connection.
+pub struct WebSocket {
     inner: WsInner,
     protocol: Option<String>,
     headers: Vec<(String, String)>,
 }
 
-impl WsConnection {
+impl WebSocket {
     #[expect(
         clippy::too_many_arguments,
         reason = "flat per-request wire fields across one internal call path"
@@ -109,7 +98,7 @@ impl WsConnection {
         origin: &str,
         extra_headers: &[(String, String)],
         header_order: Option<&[String]>,
-        ws_config: &WebSocketConfig,
+        ws_config: &WebSocketOptions,
     ) -> Result<Self> {
         let (parsed, host, port) = handshake_target(url)?;
 
@@ -173,7 +162,7 @@ impl WsConnection {
         user_agent: &str,
         origin: &str,
         extra_headers: &[(String, String)],
-        ws_config: &WebSocketConfig,
+        ws_config: &WebSocketOptions,
     ) -> Result<Self> {
         let (parsed, host, port) = handshake_target(url)?;
         let path = crate::util::request_target(&parsed);
@@ -183,7 +172,7 @@ impl WsConnection {
             crate::pool::checkout_handle(pool, connector, h2_config, &host, port, proxy).await?;
 
         if !h2_client.peer_enables_connect_protocol() {
-            return Err(Error::new(Kind::Request).with_message(H2_NO_CONNECT_PROTOCOL));
+            return Err(Error::new(Cause::Request).with_message(H2_NO_CONNECT_PROTOCOL));
         }
 
         for (name, value) in extra_headers
@@ -220,10 +209,10 @@ impl WsConnection {
                     .collect(),
             )
             .await
-            .map_err(|e| Error::new(Kind::Request).with_message(format!("h2 ws: {e}")))?;
+            .map_err(|e| Error::new(Cause::Request).with_message(format!("h2 ws: {e}")))?;
 
         if stream.status() != 200 {
-            return Err(Error::new(Kind::Request).with_message(format!(
+            return Err(Error::new(Cause::Request).with_message(format!(
                 "ws handshake: h2 extended CONNECT returned :status {}",
                 stream.status()
             )));
@@ -250,13 +239,14 @@ impl WsConnection {
 
     pub(crate) fn is_h2_fallback_trigger(err: &Error) -> bool {
         crate::core::transport::is_h2_alpn_mismatch(err)
-            || err.kind() == Kind::Request
+            || err.cause() == Cause::Request
                 && err
                     .message()
                     .is_some_and(|s| s.contains(H2_NO_CONNECT_PROTOCOL))
     }
 
-    pub async fn send(&mut self, msg: WsMessage) -> Result<()> {
+    /// Sends one message.
+    pub async fn send(&mut self, msg: Message) -> Result<()> {
         let msg = msg.into_wire();
         match &mut self.inner {
             WsInner::H1(s) => s.send(msg).await,
@@ -265,18 +255,20 @@ impl WsConnection {
         .map_err(|e| wire_error("ws send", e))
     }
 
-    pub async fn recv(&mut self) -> Result<Option<WsMessage>> {
+    /// Receives the next message, or returns `None` once the connection has ended.
+    pub async fn recv(&mut self) -> Result<Option<Message>> {
         let next = match &mut self.inner {
             WsInner::H1(s) => s.next().await,
             WsInner::H2(s) => s.next().await,
         };
         match next {
-            Some(Ok(msg)) => Ok(Some(WsMessage::wire(msg))),
+            Some(Ok(msg)) => Ok(Some(Message::wire(msg))),
             Some(Err(e)) => Err(wire_error("ws recv", e)),
             None => Ok(None),
         }
     }
 
+    /// Sends a close frame and closes the connection.
     pub async fn close(&mut self) -> Result<()> {
         match &mut self.inner {
             WsInner::H1(s) => s.close(None).await.map_err(|e| wire_error("ws close", e)),
@@ -284,10 +276,12 @@ impl WsConnection {
         }
     }
 
+    /// Returns the subprotocol that the server selected.
     pub fn protocol(&self) -> Option<&str> {
         self.protocol.as_deref()
     }
 
+    /// Returns the first handshake response header with the given name.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.headers
             .iter()
@@ -295,7 +289,30 @@ impl WsConnection {
             .map(|(_, v)| v.as_str())
     }
 
-    pub fn split(self) -> (WsSink, WsStream) {
+    /// Splits the connection into a message sink and a message stream.
+    pub fn split(
+        self,
+    ) -> (
+        impl futures_util::Sink<Message, Error = Error> + Send,
+        impl futures_util::Stream<Item = Result<Message>> + Send,
+    ) {
+        let (sink, stream) = self.halves();
+        let sink = futures_util::sink::unfold(sink, |mut sink, msg: Message| async move {
+            sink.send(msg).await?;
+            Ok::<_, Error>(sink)
+        });
+        let stream = futures_util::stream::unfold(Some(stream), |state| async move {
+            let mut stream = state?;
+            match stream.recv().await {
+                Ok(Some(msg)) => Some((Ok(msg), Some(stream))),
+                Ok(None) => None,
+                Err(e) => Some((Err(e), None)),
+            }
+        });
+        (sink, stream)
+    }
+
+    fn halves(self) -> (WsSink, WsStream) {
         match self.inner {
             WsInner::H1(s) => {
                 let (tx, rx) = s.split();

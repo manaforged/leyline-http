@@ -3,11 +3,11 @@ use std::sync::Arc;
 use http::header::USER_AGENT;
 
 use crate::audit::AuditTlsCache;
-use crate::core::error::{Error, Kind, Result};
-use crate::core::{CompressionConfig, Identity};
+use crate::core::error::{Cause, Error, Result};
+use crate::core::{BodyRules, Identity};
 use crate::h2::H2Config;
 use crate::profile::{
-    Browser, BrowserProfile, ChromiumBrand, HeaderStyle, Platform, PlatformIdentity,
+    Browser, BrowserHeaders, BrowserProfile, ChromiumBrand, HeaderStyle, Platform,
 };
 use crate::tcp::TcpProfile;
 
@@ -21,7 +21,7 @@ pub(in crate::core::session) struct IdentityInputs<'a> {
     pub source: IdentitySource,
     pub platform: Platform,
     pub brand: ChromiumBrand,
-    pub compression: CompressionConfig,
+    pub compression: BodyRules,
     #[cfg(feature = "http3")]
     pub h3_required: bool,
     pub tcp: &'a TcpProfile,
@@ -76,7 +76,7 @@ impl Selected {
         let http = http.for_platform(platform);
         Ok(Self {
             browser: Some(tls),
-            identity: Some(Identity::locked(http, platform).rotate_tls(tls)?),
+            identity: Some(Identity::new(http, platform).rotate_tls(tls)?),
             http_profile: Some(http.profile()),
             base: tls.shared_profile(),
         })
@@ -88,9 +88,9 @@ impl BrowserProfile {
         &self,
         platform: Platform,
         brand: ChromiumBrand,
-    ) -> Result<PlatformIdentity> {
+    ) -> Result<BrowserHeaders> {
         self.resolve_identity(platform, brand)
-            .map_err(|e| Error::new(Kind::Config).with_message(e.to_string()))
+            .map_err(|e| Error::new(Cause::Config).with_message(e))
     }
 }
 

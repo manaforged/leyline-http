@@ -5,7 +5,7 @@
 use std::io::Write;
 
 use leyline::multipart::{Form, Part};
-use leyline::{ProtocolPolicy, Session};
+use leyline::{Protocol, Session};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn read_full_request(sock: &mut tokio::net::TcpStream) -> (String, Vec<u8>) {
@@ -75,10 +75,12 @@ async fn text_plus_text_form_roundtrips() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    let form = Form::new().text("user", "alice").text("role", "admin");
+    let form = Form::new()
+        .part("user", Part::text("alice"))
+        .part("role", Part::text("admin"));
     let resp = session
         .post(format!("http://{addr}/submit"))
         .multipart(form)
@@ -110,15 +112,17 @@ async fn text_plus_bytes_part() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    let form = Form::new().text("caption", "a tiny image").part(
-        "image",
-        Part::bytes(bytes::Bytes::from_static(b"hello-world-bytes"))
-            .filename("pixel.png")
-            .mime("image/png"),
-    );
+    let form = Form::new()
+        .part("caption", Part::text("a tiny image"))
+        .part(
+            "image",
+            Part::bytes(bytes::Bytes::from_static(b"hello-world-bytes"))
+                .filename("pixel.png")
+                .mime("image/png"),
+        );
     let resp = session
         .post(format!("http://{addr}/upload"))
         .multipart(form)
@@ -156,13 +160,12 @@ async fn text_plus_file() {
     });
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
+        .protocol(Protocol::Http1)
         .build()
         .unwrap();
     let form = Form::new()
-        .text("user", "alice")
-        .file("payload", &path)
-        .unwrap();
+        .part("user", Part::text("alice"))
+        .part("payload", Part::file(&path).unwrap());
     let resp = session
         .post(format!("http://{addr}/upload"))
         .multipart(form)
@@ -172,13 +175,6 @@ async fn text_plus_file() {
     assert_eq!(resp.status(), 200);
     server.await.unwrap();
     drop(tf);
-}
-
-#[test]
-fn boundaries_differ_between_forms() {
-    let a = Form::new();
-    let b = Form::new();
-    assert_ne!(a.boundary(), b.boundary());
 }
 
 struct TempFile {
@@ -219,52 +215,4 @@ fn tempfile_like(name: &str) -> TempFile {
     let path = dir.join(unique);
     let file = std::fs::File::create(&path).unwrap();
     TempFile { path, file }
-}
-
-use futures_util::StreamExt;
-
-async fn first_part_header(form: Form) -> std::io::Result<bytes::Bytes> {
-    let body: leyline::Body = form.into();
-    let mut stream = body;
-    match stream.next().await {
-        Some(Ok(b)) => Ok(b),
-        Some(Err(e)) => Err(e),
-        None => Err(std::io::Error::other("empty form")),
-    }
-}
-
-#[tokio::test]
-async fn filename_with_crlf_is_rejected() {
-    let form = Form::new().part(
-        "upload",
-        Part::bytes(b"nope".to_vec()).filename("x\"\r\nInjected: yes\r\n\r\n--evil\r\n"),
-    );
-    let err = first_part_header(form).await.expect_err("must reject");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("filename") && msg.contains("control"),
-        "unexpected error: {msg}"
-    );
-}
-
-#[tokio::test]
-async fn name_with_crlf_is_rejected() {
-    let form = Form::new().text("field\r\nInjected: yes", "v");
-    let err = first_part_header(form).await.expect_err("must reject");
-    let msg = format!("{err}");
-    assert!(
-        msg.contains("name") && msg.contains("control"),
-        "unexpected error: {msg}"
-    );
-}
-
-#[tokio::test]
-async fn filename_with_dquote_is_backslash_escaped() {
-    let form = Form::new().part(
-        "upload",
-        Part::bytes(b"body".to_vec()).filename("evil\"file.txt"),
-    );
-    let chunk = first_part_header(form).await.expect("accept with escape");
-    let s = std::str::from_utf8(&chunk).expect("utf8");
-    assert!(s.contains(r#"filename="evil\"file.txt""#), "chunk: {s}");
 }

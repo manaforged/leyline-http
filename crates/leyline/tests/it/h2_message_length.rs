@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
 use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
-use leyline::{Body, Session, TlsTrustConfig};
+use leyline::{Body, Session, Tls};
 use support::{
     read_preface, write_data, write_raw_headers, write_server_settings, write_settings_ack,
 };
@@ -73,12 +73,7 @@ async fn counting_upload<S: AsyncRead + AsyncWrite + Unpin>(
 
 fn session_for(der: Vec<u8>) -> Session {
     Session::builder()
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
         .build()
         .unwrap()
 }
@@ -97,11 +92,11 @@ where
 #[tokio::test]
 async fn trailers_end_a_response_only_when_its_length_matches() {
     let (short_url, session) = h2_server(|stream| trailers_after(stream, DECLARED / 2)).await;
-    let short = async { session.get(&short_url).await?.bytes().await }.await;
+    let short = async { session.get(&short_url).send().await?.bytes().await }.await;
     assert!(short.is_err(), "{short:?}");
 
     let (full_url, session) = h2_server(|stream| trailers_after(stream, DECLARED)).await;
-    let full = session.get(&full_url).await.unwrap();
+    let full = session.get(&full_url).send().await.unwrap();
     assert_eq!(full.bytes().await.unwrap().len(), DECLARED);
 }
 
@@ -165,21 +160,17 @@ async fn a_failed_decoded_h2_stream_that_is_kept_releases_its_stream_and_host_sl
     })
     .await;
     let session = Session::builder()
-        .tls_trust(
-            TlsTrustConfig::new()
-                .env_roots(false)
-                .system_roots(false)
-                .add_ca_der(der),
-        )
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
         .host_limits(leyline::HostLimits::new().max_in_flight(1))
         .build()
         .unwrap();
     let mut body = session
         .get(format!("https://127.0.0.1:{port}/"))
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_decoded_stream(None)
+        .bytes_stream()
         .unwrap();
     let mut failed = false;
     while let Some(chunk) = body.next().await {
@@ -189,7 +180,10 @@ async fn a_failed_decoded_h2_stream_that_is_kept_releases_its_stream_and_host_sl
         }
     }
     assert!(failed, "a body that is not gzip must fail to decode");
-    assert!(session.host_stats().iter().all(|s| s.in_flight() == 0));
+    assert!({
+        let stats = session.stats();
+        stats.hosts().all(|h| stats.in_flight(h) == 0)
+    });
     tokio::time::timeout(std::time::Duration::from_secs(2), async {
         while resets.load(Ordering::SeqCst) == 0 {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;

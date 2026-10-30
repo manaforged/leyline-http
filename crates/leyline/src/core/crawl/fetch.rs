@@ -5,11 +5,11 @@ use http::{HeaderMap, HeaderName, StatusCode};
 use url::Url;
 
 use super::SkipReason;
-use crate::core::config::RedirectPolicy;
+use crate::core::config::Redirect;
 use crate::core::error::Result;
 use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
-use crate::core::retry::{RetryPlan, RetryPolicy};
+use crate::core::retry::{Retry, RetryPlan};
 use crate::core::session::Session;
 
 const HTML_TYPES: [&str; 2] = ["text/html", "application/xhtml+xml"];
@@ -77,12 +77,12 @@ fn sniffs_html(body: &[u8]) -> bool {
 pub(super) fn request(
     session: &Session,
     url: &Url,
-    retry: RetryPolicy,
+    retry: Retry,
     trusted: Option<Url>,
 ) -> RequestBuilder {
     let mut builder = session
         .get(url.as_str())
-        .redirect(RedirectPolicy::none())
+        .redirect(Redirect::none())
         .retry(retry);
     builder.trusted_origin = trusted;
     builder
@@ -101,11 +101,11 @@ fn kept_headers(all: &HeaderMap) -> HeaderMap {
 pub(super) async fn fetch(
     session: Session,
     url: Url,
-    retry: RetryPolicy,
+    retry: Retry,
     attempt: u32,
     trusted: Option<Url>,
 ) -> Result<Fetched> {
-    let result = request(&session, &url, retry.clone().max_retries(0), trusted)
+    let result = request(&session, &url, retry.once(), trusted)
         .stream()
         .send()
         .await;
@@ -157,6 +157,7 @@ async fn body(response: Response, declared: Option<bool>) -> Result<Option<Strin
         .read_until(MAX_UNTYPED_BYTES, |body, _| {
             body.len() >= SNIFF_BYTES && !sniffs_html(body)
         })
-        .await?;
+        .await?
+        .0;
     Ok(sniffs_html(&body).then(|| String::from_utf8_lossy(&body).into_owned()))
 }

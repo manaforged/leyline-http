@@ -1,77 +1,71 @@
 use http::Method;
 
 use crate::cookie::Jar;
-use crate::profile::{Browser, Preset};
+use crate::pool::OriginFlag;
+use crate::profile::{Browser, RequestKind};
 
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
-use crate::core::retry::RetryPolicy;
-use crate::core::{
-    Body, IntoUrl, ProxyConfig, ProxyUrl, RedirectPolicy, Response, Result, TimeoutConfig,
-};
+use crate::core::retry::Retry;
+use crate::core::{Body, IntoUrl, Proxy, ProxyUrl, Redirect, Response, Result, Timeout};
 
 impl Session {
+    /// Returns a `SessionBuilder` with default settings.
     pub fn builder() -> SessionBuilder {
         SessionBuilder::new()
     }
 
+    /// Returns a session built with default settings.
     pub fn new() -> Self {
         Self::builder().into_builtin()
     }
 
-    pub fn browser(browser: Browser) -> Self {
-        Self::builder().browser(browser).into_builtin()
+    pub(crate) fn from_browser(browser: Browser) -> Self {
+        Self::builder().identity(browser).into_builtin()
     }
 
+    /// Returns a new `Tab` on this session with no page open.
     pub fn tab(&self) -> crate::core::Tab {
         crate::core::Tab::new(self.clone())
     }
 
+    /// Returns the session cookie jar.
     pub fn cookies(&self) -> &Jar {
         &self.inner.cookie_jar
     }
 
-    pub fn with_proxy(&self, config: impl Into<ProxyConfig>) -> Self {
-        let config = config.into();
-        self.derive(|inner| inner.proxy_config = config)
-    }
-
-    pub fn proxy_url(&self) -> Option<ProxyUrl> {
+    pub(crate) fn proxy_url(&self) -> Option<ProxyUrl> {
         self.inner.proxy_config.primary().map(ProxyUrl::configured)
     }
 
-    pub fn fresh_pool(&self) -> Self {
-        self.derive(|inner| {
-            inner.pool = std::sync::Arc::new(inner.pool.fresh());
-            inner.connector = inner.connector.with_fresh_session_cache();
-        })
-    }
-
-    pub fn with_cookie_jar(&self, jar: Jar) -> Self {
-        self.derive(|inner| inner.cookie_jar = jar)
-    }
-
-    pub fn with_redirect(&self, policy: RedirectPolicy) -> Self {
-        self.derive(|inner| inner.redirect_policy = policy)
-    }
-
-    pub fn with_base_url(&self, url: impl IntoUrl) -> Result<Self> {
-        let url = base_url(url)?;
-        Ok(self.derive(|inner| inner.base_url = Some(url)))
+    /// Returns the primary proxy URL with its credentials masked.
+    #[must_use]
+    pub fn proxy(&self) -> Option<&str> {
+        self.inner.proxy_shown.as_deref()
     }
 
     pub(crate) fn base_url(&self) -> Option<&url::Url> {
         self.inner.base_url.as_ref()
     }
 
-    fn derive(&self, change: impl FnOnce(&mut super::SessionInner)) -> Self {
+    pub(super) fn changed(&self, change: impl FnOnce(&mut super::SessionInner)) -> Self {
         let mut s = self.clone();
         change(std::sync::Arc::make_mut(&mut s.inner));
         s
     }
 
-    pub fn host_stats(&self) -> Vec<crate::core::config::HostStats> {
-        self.inner.host_limits.stats()
+    /// Returns the session's current pool, per-host, and per-proxy counters.
+    #[must_use]
+    pub fn stats(&self) -> crate::core::Stats {
+        crate::core::Stats::new(
+            self.inner.pool.stats(),
+            self.inner.host_limits.stats(),
+            self.inner
+                .proxy_pool
+                .as_ref()
+                .map(crate::core::proxy_pool::ProxyPool::stats)
+                .unwrap_or_default(),
+        )
     }
 
     #[cfg(feature = "html")]
@@ -86,7 +80,7 @@ impl Session {
 
     #[cfg(feature = "html")]
     pub(crate) fn with_crawl_pace(&self, pace: crate::core::config::HostLimits) -> Self {
-        self.derive(|inner| inner.crawl_pace = Some(pace))
+        self.changed(|inner| inner.crawl_pace = Some(pace))
     }
 
     pub(crate) async fn admit_host(&self, url: &url::Url) -> Option<crate::core::config::HostPass> {
@@ -131,11 +125,15 @@ impl Session {
     }
 
     pub(crate) fn without_proxy_pool(&self) -> Self {
-        self.derive(|inner| inner.proxy_pool = None)
+        self.changed(|inner| inner.proxy_pool = None)
     }
 
     pub(crate) fn downgrade(&self) -> std::sync::Weak<super::SessionInner> {
         std::sync::Arc::downgrade(&self.inner)
+    }
+
+    pub(crate) fn upgrade(weak: &std::sync::Weak<super::SessionInner>) -> Option<Self> {
+        weak.upgrade().map(|inner| Self { inner })
     }
 
     pub(crate) fn is_inner(&self, weak: &std::sync::Weak<super::SessionInner>) -> bool {
@@ -146,21 +144,22 @@ impl Session {
         self.inner.impersonates
     }
 
-    pub(crate) fn default_retry(&self) -> &crate::core::retry::RetryPolicy {
+    pub(crate) fn default_retry(&self) -> &crate::core::retry::Retry {
         &self.inner.default_retry
     }
 
-    pub fn pool_stats(&self) -> crate::PoolStats {
-        self.inner.pool.stats()
+    pub(crate) fn body_rules(&self) -> crate::core::BodyRules {
+        self.inner.compression
     }
 
+    /// Opens a pooled connection to an HTTPS `url` ahead of the first request.
     pub async fn preconnect(&self, url: impl IntoUrl) -> Result<()> {
         let url = url.into_url()?;
         self.unless_shut_down(self.warm(url)).await
     }
 
     async fn warm(&self, url: url::Url) -> Result<()> {
-        if url.scheme() != "https" || self.inner.protocol_policy == super::ProtocolPolicy::Http1 {
+        if url.scheme() != "https" || self.inner.protocol_policy == super::Protocol::Http1 {
             return Ok(());
         }
         let host = url.host_str().unwrap_or("");
@@ -178,17 +177,21 @@ impl Session {
         match opened {
             Ok(_) => Ok(()),
             Err(error) if error.alpn().is_some() => {
-                self.inner.pool.note_h1_only(host, port, proxy);
+                self.inner
+                    .pool
+                    .remember(OriginFlag::H1Only, host, port, proxy);
                 Ok(())
             }
             Err(error) => Err(error),
         }
     }
 
+    /// Returns a request builder for `method` and `url`.
     pub fn request(&self, method: Method, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, method, url)
     }
 
+    /// Sends an `http::Request` and applies the request options found in its extensions.
     pub async fn execute(&self, req: http::Request<Body>) -> Result<Response> {
         self.http_request(req).send().await
     }
@@ -200,44 +203,50 @@ impl Session {
             builder = builder.header(name.clone(), value.clone());
         }
         builder = builder.body(body);
-        if let Some(preset) = parts.extensions.remove::<Preset>() {
-            builder = builder.preset(preset);
+        if let Some(preset) = parts.extensions.remove::<RequestKind>() {
+            builder = builder.kind(preset);
         }
-        if let Some(timeouts) = parts.extensions.remove::<TimeoutConfig>() {
+        if let Some(timeouts) = parts.extensions.remove::<Timeout>() {
             builder = builder.timeout(timeouts);
         }
-        if let Some(policy) = parts.extensions.remove::<RetryPolicy>() {
+        if let Some(policy) = parts.extensions.remove::<Retry>() {
             builder = builder.retry(policy);
         }
-        if let Some(policy) = parts.extensions.remove::<RedirectPolicy>() {
+        if let Some(policy) = parts.extensions.remove::<Redirect>() {
             builder = builder.redirect(policy);
         }
-        if let Some(proxy) = parts.extensions.remove::<ProxyConfig>() {
+        if let Some(proxy) = parts.extensions.remove::<Proxy>() {
             builder = builder.proxy(proxy);
         }
         builder
     }
 
+    /// Returns a `GET` request builder for `url`.
     pub fn get(&self, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, Method::GET, url)
     }
 
+    /// Returns a `POST` request builder for `url`.
     pub fn post(&self, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, Method::POST, url)
     }
 
+    /// Returns a `PUT` request builder for `url`.
     pub fn put(&self, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, Method::PUT, url)
     }
 
+    /// Returns a `PATCH` request builder for `url`.
     pub fn patch(&self, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, Method::PATCH, url)
     }
 
+    /// Returns a `DELETE` request builder for `url`.
     pub fn delete(&self, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, Method::DELETE, url)
     }
 
+    /// Returns a `HEAD` request builder for `url`.
     pub fn head(&self, url: impl IntoUrl) -> RequestBuilder {
         RequestBuilder::from_url(self, Method::HEAD, url)
     }
@@ -247,11 +256,21 @@ pub(super) fn base_url(url: impl IntoUrl) -> Result<url::Url> {
     let url = url.into_url()?;
     if url.cannot_be_a_base() {
         return Err(
-            crate::core::error::Error::new(crate::core::error::Kind::Config)
+            crate::core::error::Error::new(crate::core::error::Cause::Config)
                 .with_message(format!("base URL {url} cannot be a base")),
         );
     }
     Ok(url)
+}
+
+pub(in crate::core::session) fn header_values<'a>(
+    headers: &'a [(http::HeaderName, http::HeaderValue)],
+    name: &'a str,
+) -> impl Iterator<Item = &'a http::HeaderValue> {
+    headers
+        .iter()
+        .filter(move |(k, _)| *k == name)
+        .map(|(_, v)| v)
 }
 
 impl Default for Session {
@@ -264,7 +283,10 @@ impl std::fmt::Debug for Session {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut debug = f.debug_struct("Session");
         debug
-            .field("browser", &self.inner.browser)
+            .field(
+                "browser",
+                &self.inner.browser.map(|b| b.branded(self.inner.brand)),
+            )
             .field("platform", &self.inner.platform)
             .field(
                 "proxy",
@@ -297,5 +319,11 @@ impl std::fmt::Display for Session {
             "Session({label}, {}, proxy={proxy})",
             self.inner.platform
         )
+    }
+}
+
+impl From<Browser> for Session {
+    fn from(browser: Browser) -> Self {
+        Self::from_browser(browser)
     }
 }

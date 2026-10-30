@@ -3,6 +3,7 @@ use bytes::Bytes;
 use super::huffman;
 use super::integer;
 use super::table::{self, DynamicTable};
+use crate::h2::config::DEFAULT_HEADER_TABLE_SIZE;
 
 const MAX_HEADER_LIST_SIZE: usize = 64 * 1024;
 const MAX_TABLE_SIZE_UPDATES: u8 = 2;
@@ -23,7 +24,7 @@ impl Decoder {
     pub fn new() -> Self {
         Self {
             dynamic: DynamicTable::new(),
-            max_table_size: 4096,
+            max_table_size: DEFAULT_HEADER_TABLE_SIZE as usize,
             max_header_list_size: MAX_HEADER_LIST_SIZE,
         }
     }
@@ -75,7 +76,7 @@ impl Decoder {
 
             if let Some(header) = decoded {
                 size_updates_left = 0;
-                total_size += header.name.len() + header.value.len() + 32;
+                total_size += header.name.len() + header.value.len() + table::ENTRY_OVERHEAD;
                 if total_size > self.max_header_list_size {
                     return Err(format!(
                         "decoded header list size {} exceeds max {}",

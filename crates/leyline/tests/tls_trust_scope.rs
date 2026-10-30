@@ -3,10 +3,11 @@
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 
-use leyline::tls::{FingerprintConnector, ResolveFuture, Resolver};
-use leyline::{BrowserProfile, Platform, TlsTrustConfig};
+use leyline::tls::{FingerprintConnector, Resolver};
+use leyline::{BrowserProfile, Platform, Tls};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
@@ -20,7 +21,11 @@ use tokio::sync::Mutex;
 struct LoopbackResolver(SocketAddr);
 
 impl Resolver for LoopbackResolver {
-    fn resolve<'a>(&'a self, _host: &'a str, _port: u16) -> ResolveFuture<'a> {
+    fn resolve<'a>(
+        &'a self,
+        _host: &'a str,
+        _port: u16,
+    ) -> Pin<Box<dyn Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + 'a>> {
         let addr = self.0;
         Box::pin(async move { Ok(vec![addr]) })
     }
@@ -152,7 +157,7 @@ async fn without_env_roots_excludes_environment_roots() {
 
     let addr = spawn_tls_server(&chain).await;
 
-    let control = TlsTrustConfig::new();
+    let control = Tls::new();
     let res = FingerprintConnector::new_with_trust(
         &load_profile(),
         Platform::Linux.tcp_profile(),
@@ -168,7 +173,7 @@ async fn without_env_roots_excludes_environment_roots() {
         res.err().map(|e| e.to_string())
     );
 
-    let restricted = TlsTrustConfig::new().env_roots(false);
+    let restricted = Tls::new().env_roots(false);
     let res = FingerprintConnector::new_with_trust(
         &load_profile(),
         Platform::Linux.tcp_profile(),
@@ -183,7 +188,7 @@ async fn without_env_roots_excludes_environment_roots() {
         "env_roots(false) must not trust a CA that only SSL_CERT_FILE provides"
     );
 
-    let explicit = TlsTrustConfig::new().env_roots(false).add_ca_file(&ca_path);
+    let explicit = Tls::new().env_roots(false).ca_file(&ca_path);
     let res = FingerprintConnector::new_with_trust(
         &load_profile(),
         Platform::Linux.tcp_profile(),

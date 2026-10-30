@@ -162,3 +162,68 @@ async fn early_hints_103_is_skipped_final_status_wins() {
 
     server.await.expect("mock server panicked");
 }
+
+#[tokio::test]
+async fn endless_early_hints_fail_the_request() {
+    let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
+
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        read_frame(&mut server_io).await;
+        write_server_settings(&mut server_io).await;
+        write_settings_ack(&mut server_io).await;
+        let stream_id = loop {
+            let (h, _) = read_frame(&mut server_io).await;
+            if h.frame_type == FrameType::Headers as u8 {
+                break h.stream_id;
+            }
+        };
+        let mut enc = hpack::Encoder::new();
+        for _ in 0..64 {
+            write_headers_block(
+                &mut server_io,
+                &mut enc,
+                stream_id,
+                &[(":status", "103")],
+                false,
+            )
+            .await;
+        }
+        write_headers_block(
+            &mut server_io,
+            &mut enc,
+            stream_id,
+            &[(":status", "200")],
+            true,
+        )
+        .await;
+        server_io
+    });
+
+    let handle = leyline::h2::start(client_io, config())
+        .await
+        .expect("handshake");
+    let result = tokio::time::timeout(
+        Duration::from_secs(5),
+        handle.send_shared(
+            Arc::new(Head {
+                pseudo: PseudoHeaders {
+                    method: "GET".into(),
+                    scheme: "https".into(),
+                    authority: "example.com".into(),
+                    path: "/".into(),
+                    protocol: None,
+                },
+                headers: vec![],
+            }),
+            RequestBody::None,
+            false,
+        ),
+    )
+    .await
+    .expect("request timed out");
+    let Err(_) = result else {
+        panic!("64 informational responses must fail the stream");
+    };
+    drop(server.await.expect("mock server panicked"));
+}

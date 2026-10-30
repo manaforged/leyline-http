@@ -1,6 +1,10 @@
 use crate::iana::is_grease;
 use crate::profile::TlsProfile;
 
+pub(crate) const SERVER_NAME: u16 = 0x0000;
+
+pub(crate) const ALPN: u16 = 0x0010;
+
 pub(crate) const PADDING: u16 = 0x0015;
 
 pub(crate) const PRE_SHARED_KEY: u16 = 0x0029;
@@ -39,12 +43,12 @@ const fn ext(id: u16, name: &'static str, switch: Switch) -> Extension {
 }
 
 const EXTENSIONS: &[Extension] = &[
-    ext(0x0000, "server_name", Switch::Always),
+    ext(SERVER_NAME, "server_name", Switch::Always),
     ext(0x0017, "extended_master_secret", Switch::Tls12),
     ext(0xff01, "renegotiation_info", Switch::Tls12),
     ext(0x000b, "ec_point_formats", Switch::TcpOnly),
     ext(0x0023, "session_ticket", Switch::SessionTickets),
-    ext(0x0010, "alpn", Switch::Always),
+    ext(ALPN, "alpn", Switch::Always),
     ext(0x0033, "key_share", Switch::Always),
     ext(0x002b, "supported_versions", Switch::Always),
     ext(0x002d, "psk_key_exchange_modes", Switch::Always),

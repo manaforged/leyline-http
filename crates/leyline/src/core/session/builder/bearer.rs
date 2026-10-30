@@ -7,9 +7,12 @@ pub(crate) struct BearerToken {
 }
 
 impl SessionBuilder {
+    /// Sets the `Authorization: Bearer` header sent on every request.
     pub fn bearer_auth(mut self, token: &str) -> Self {
         let value = format!("Bearer {token}");
-        self.check_header(AUTHORIZATION, &value);
+        if crate::core::headers::value(value.as_str()).is_err() {
+            self.invalid_header(AUTHORIZATION);
+        }
         self.remove_default(AUTHORIZATION);
         self.bearer = Some(BearerToken {
             value,

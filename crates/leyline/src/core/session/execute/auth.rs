@@ -1,9 +1,10 @@
 use http::{HeaderName, HeaderValue};
 
+use super::super::helpers::header_values;
 use super::journey::Journey;
 use super::url_origin;
 use crate::core::digest::{self, Challenge, DigestAuth};
-use crate::core::error::{Error, Kind, Result};
+use crate::core::error::{Cause, Error, Result};
 use crate::core::headers::HeaderList;
 use crate::util::request_target;
 
@@ -42,10 +43,8 @@ impl DigestLeg {
         if !in_scope(journey) {
             return Ok(None);
         }
-        let challenges: Vec<Challenge> = headers
-            .iter()
-            .filter(|(k, _)| *k == "www-authenticate")
-            .filter_map(|(_, v)| v.to_str().ok())
+        let challenges: Vec<Challenge> = header_values(headers, "www-authenticate")
+            .filter_map(|v| v.to_str().ok())
             .filter_map(|v| digest::parse_challenge(v).ok())
             .collect();
         let Some(challenge) = challenges
@@ -84,7 +83,7 @@ impl DigestLeg {
                 &cnonce,
             )
             .ok_or_else(|| {
-                Error::new(Kind::Request).with_message(
+                Error::new(Cause::Request).with_message(
                     "digest auth: server offered only qop=auth-int, \
                  which Leyline does not implement (RFC 7616 §3.4.3 \
                  requires the entity-body hash in HA2). Pass through \
@@ -110,7 +109,7 @@ impl Challenge {
 }
 
 pub(super) fn unreplayable_body() -> Error {
-    Error::new(Kind::Request).with_message(
+    Error::new(Cause::Request).with_message(
         "digest auth: cannot replay streaming request body. \
          Buffer the body into bytes before sending.",
     )

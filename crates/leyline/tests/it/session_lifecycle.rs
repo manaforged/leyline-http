@@ -2,7 +2,7 @@ use crate::tls_support;
 
 use std::time::Duration;
 
-use leyline::testing::{TestResponse, TestServer};
+use leyline::testing;
 use leyline::{HostLimits, Session};
 
 #[tokio::test]
@@ -34,11 +34,12 @@ async fn a_failed_body_stream_that_is_kept_releases_its_connection_and_host_slot
         .unwrap();
     let mut body = session
         .get(format!("http://{addr}/"))
-        .timeout(leyline::TimeoutConfig::new().body(Duration::from_millis(200)))
+        .timeout(leyline::Timeout::new().body(Duration::from_millis(200)))
         .stream()
+        .send()
         .await
         .unwrap()
-        .into_stream()
+        .bytes_stream()
         .unwrap();
     futures_util::StreamExt::next(&mut body)
         .await
@@ -49,22 +50,24 @@ async fn a_failed_body_stream_that_is_kept_releases_its_connection_and_host_slot
         matches!(closed, Ok(Ok(true))),
         "the connection stayed open behind a failed stream: {closed:?}"
     );
-    assert!(session.host_stats().iter().all(|s| s.in_flight() == 0));
+    assert!({
+        let stats = session.stats();
+        stats.hosts().all(|h| stats.in_flight(h) == 0)
+    });
     drop(body);
 }
 
 #[tokio::test]
 async fn a_shut_down_session_opens_no_websocket_and_no_preconnect() {
-    let server = TestServer::https(|_| TestResponse::new(200)).await.unwrap();
-    let session = Session::builder()
-        .tls_trust(server.trust())
-        .build()
+    let server = testing::Server::https(|_| testing::Response::new(200))
+        .await
         .unwrap();
+    let session = Session::builder().tls(server.tls()).build().unwrap();
     session.shutdown();
     let port = server.addr().port();
     let ws = session
-        .websocket(format!("wss://localhost:{port}/feed"))
-        .connect()
+        .get(format!("wss://localhost:{port}/feed"))
+        .websocket()
         .await
         .err()
         .unwrap();
@@ -109,11 +112,11 @@ async fn shutdown_ends_a_websocket_handshake_in_flight() {
     )
     .await;
     let session = Session::builder()
-        .tls_trust(
-            leyline::TlsTrustConfig::new()
+        .tls(
+            leyline::Tls::new()
                 .env_roots(false)
                 .system_roots(false)
-                .add_ca_der(der),
+                .ca_der(der),
         )
         .build()
         .unwrap();
@@ -121,8 +124,8 @@ async fn shutdown_ends_a_websocket_handshake_in_flight() {
         let session = session.clone();
         async move {
             session
-                .websocket(format!("wss://127.0.0.1:{port}/feed"))
-                .connect()
+                .get(format!("wss://127.0.0.1:{port}/feed"))
+                .websocket()
                 .await
         }
     });

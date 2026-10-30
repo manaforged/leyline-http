@@ -2,7 +2,7 @@ use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use leyline::http::Method;
-use leyline::{ProtocolPolicy, ProxyConfig, RetryPolicy, Session, TimeoutConfig};
+use leyline::{Protocol, Proxy, Session, Timeout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -25,9 +25,9 @@ where
 #[tokio::test]
 async fn connect_timeout_fires_on_a_black_hole_address() {
     let session = Session::builder()
-        .proxy(ProxyConfig::new().env(false))
+        .proxy(Proxy::new().env(false))
         .timeout(
-            TimeoutConfig::new()
+            Timeout::new()
                 .total(Duration::from_secs(10))
                 .connect(Duration::from_millis(300)),
         )
@@ -37,13 +37,16 @@ async fn connect_timeout_fires_on_a_black_hole_address() {
     let start = Instant::now();
     let err = session
         .request(Method::GET, "https://192.0.2.1:81/")
-        .retry(RetryPolicy::none())
+        .retry(0)
         .send()
         .await
         .expect_err("a black-hole address must not connect");
     let elapsed = start.elapsed();
 
-    assert!(err.is_timeout(), "expected a timeout, got {err:?}");
+    assert!(
+        err.kind() == leyline::Kind::Timeout,
+        "expected a timeout, got {err:?}"
+    );
     assert!(
         elapsed < Duration::from_secs(2),
         "connect cap should fire near 300ms, took {elapsed:?}"
@@ -59,8 +62,8 @@ async fn response_header_timeout_fires_when_the_server_never_writes() {
     .await;
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .build()
         .expect("session builds");
 
@@ -68,7 +71,7 @@ async fn response_header_timeout_fires_when_the_server_never_writes() {
     let err = session
         .request(Method::GET, format!("http://{addr}/"))
         .timeout(
-            TimeoutConfig::default()
+            Timeout::default()
                 .total(Duration::from_secs(10))
                 .response_header(Duration::from_millis(300)),
         )
@@ -77,7 +80,10 @@ async fn response_header_timeout_fires_when_the_server_never_writes() {
         .expect_err("a silent server must not resolve");
     let elapsed = start.elapsed();
 
-    assert!(err.is_timeout(), "expected a timeout, got {err:?}");
+    assert!(
+        err.kind() == leyline::Kind::Timeout,
+        "expected a timeout, got {err:?}"
+    );
     assert!(
         elapsed < Duration::from_secs(2),
         "per-request TTFB cap should fire near 300ms, took {elapsed:?}"
@@ -99,15 +105,15 @@ async fn read_timeout_fires_between_chunks_of_a_streamed_body() {
     let addr = serve(half_chunked).await;
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .build()
         .expect("session builds");
 
     let resp = session
         .request(Method::GET, format!("http://{addr}/"))
         .timeout(
-            TimeoutConfig::default()
+            Timeout::default()
                 .total(Duration::from_secs(10))
                 .read(Duration::from_millis(300)),
         )
@@ -118,7 +124,7 @@ async fn read_timeout_fires_between_chunks_of_a_streamed_body() {
     assert_eq!(resp.status(), 200);
 
     let start = Instant::now();
-    let mut body = resp.into_stream().expect("streaming body");
+    let mut body = resp.bytes_stream().expect("streaming body");
     let first = body
         .next()
         .await
@@ -128,8 +134,11 @@ async fn read_timeout_fires_between_chunks_of_a_streamed_body() {
     let stalled = body.next().await.expect("a stalled stream yields an error");
     let elapsed = start.elapsed();
 
-    let err = leyline::Error::from(stalled.expect_err("second chunk must time out"));
-    assert!(err.is_timeout(), "expected a timeout, got {err:?}");
+    let err = stalled.expect_err("second chunk must time out");
+    assert!(
+        err.kind() == leyline::Kind::Timeout,
+        "expected a timeout, got {err:?}"
+    );
     assert!(
         elapsed < Duration::from_secs(2),
         "read cap should fire near 300ms, took {elapsed:?}"
@@ -141,8 +150,8 @@ async fn read_timeout_does_not_cover_a_buffered_body() {
     let addr = serve(half_chunked).await;
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .build()
         .expect("session builds");
 
@@ -150,7 +159,7 @@ async fn read_timeout_does_not_cover_a_buffered_body() {
     let err = session
         .request(Method::GET, format!("http://{addr}/"))
         .timeout(
-            TimeoutConfig::default()
+            Timeout::default()
                 .total(Duration::from_secs(10))
                 .read(Duration::from_millis(200))
                 .response_header(Duration::from_millis(700)),
@@ -160,7 +169,10 @@ async fn read_timeout_does_not_cover_a_buffered_body() {
         .expect_err("a half-written buffered body must not resolve");
     let elapsed = start.elapsed();
 
-    assert!(err.is_timeout(), "expected a timeout, got {err:?}");
+    assert!(
+        err.kind() == leyline::Kind::Timeout,
+        "expected a timeout, got {err:?}"
+    );
     assert!(
         elapsed >= Duration::from_millis(600),
         "a buffered body is read inside the TTFB window, so `read` must not clip it at 200ms; bailed at {elapsed:?}"
@@ -183,21 +195,24 @@ async fn total_timeout_bounds_a_slow_server() {
     .await;
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
         .build()
         .expect("session builds");
 
     let start = Instant::now();
     let err = session
         .request(Method::GET, format!("http://{addr}/"))
-        .timeout(TimeoutConfig::default().total(Duration::from_millis(400)))
+        .timeout(Timeout::default().total(Duration::from_millis(400)))
         .send()
         .await
         .expect_err("a 30s server must not beat a 400ms total");
     let elapsed = start.elapsed();
 
-    assert!(err.is_timeout(), "expected a timeout, got {err:?}");
+    assert!(
+        err.kind() == leyline::Kind::Timeout,
+        "expected a timeout, got {err:?}"
+    );
     assert!(
         elapsed >= Duration::from_millis(350) && elapsed < Duration::from_secs(2),
         "total cap should fire near 400ms, took {elapsed:?}"
@@ -215,9 +230,9 @@ async fn a_total_timeout_of_duration_max_sets_no_deadline() {
     .await;
 
     let session = Session::builder()
-        .protocol(ProtocolPolicy::Http1)
-        .proxy(ProxyConfig::new().env(false))
-        .timeout(TimeoutConfig::default().total(Duration::MAX))
+        .protocol(Protocol::Http1)
+        .proxy(Proxy::new().env(false))
+        .timeout(Timeout::default().total(Duration::MAX))
         .build()
         .expect("session builds");
 
