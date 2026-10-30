@@ -54,7 +54,5 @@ let again = Session::load("session.json")?.build()?;
 
 ## Read next
 
-Each link is plain markdown.
-
 - [API reference](https://docs.rs/leyline-http): every public item
-- [Guides](https://raw.githubusercontent.com/manaforged/leyline-http/main/docs/SUMMARY.md): one page per task, each at `docs/guide/<name>.md`
+- [User guide](https://manaforged.github.io/leyline-http/): one page per task

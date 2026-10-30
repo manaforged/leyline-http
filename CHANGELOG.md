@@ -149,9 +149,12 @@ version and publish as separate crates.
 - A reference page on docs.rs for each core type: `Session`, `SessionBuilder`, `RequestBuilder`, `Response`, `Error`, `Browser`, `Platform`, `Proxy`, `Tab`, `Retry`, `Timeout`, `Redirect`, `cookie::Jar`, `Crawl`, and `trace::Trace`. The crate root is an overview with the job map.
 - `AGENTS.md`, for coding agents that write code with Leyline.
 - `docs/guide/bundled-profiles.md` lists every bundled profile and brand overlay, generated from the profile files.
+- `Crawl::agent(name)` obeys the robots.txt group and meta robots name of a named crawler, and `Crawl::max_body_size(n)` reads pages larger than the session's cap without a new session.
 
 ### Changed
 
+- `Session::shutdown()` returns a future. It still cancels at once; `.await` it to wait until every autosave writer has made its last save. A call without `.await` warns.
+- Brave, Firefox, Safari, and Safari on iOS 18 and later race HTTP/3 by default, as Chrome does, from their captured HTTP/3 hellos. Their profile ids change.
 - Every session applies the built-in block rules. A Cloudflare or AWS WAF challenge counts against its proxy in a proxy list, and `Attempt::is_block()` sees it, without a `block_rules` call.
 - `Error::kind()` is the one error classification. `Kind` gains `BodyLimit`, `Dns`, and `ProxyTarget`, and `Kind::gateway_status()`. A connect timeout is `Kind::Timeout`, and `is_connect()` stays true. `Display` and `Debug` of an `Error` print the kind. The variants are in a new order, so a `Kind` cast to an integer gives a different value; match on the variant instead.
 - Every way to read a body decodes it: `bytes()`, `text()`, `bytes_stream()`, `write_to(writer)`, and `download_to(path)`. `RequestBuilder::decode(false)` gives every sink the bytes as sent and keeps the same `accept-encoding` on the wire.

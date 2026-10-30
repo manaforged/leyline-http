@@ -36,7 +36,7 @@ async fn a_shut_down_session_ends_the_crawl() {
     let session = Session::new();
     let mut crawl = session.crawl(server.url("/"));
     crawl.next().await.unwrap().unwrap();
-    session.shutdown();
+    session.shutdown().await;
     let drained = tokio::time::timeout(Duration::from_secs(2), async {
         while let Some(item) = crawl.next().await {
             assert!(item.unwrap_err().is_shut_down());

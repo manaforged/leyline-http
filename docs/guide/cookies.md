@@ -147,7 +147,7 @@ session.autosave("session.json", Duration::from_secs(2));
 
 session.get("https://shop.example/account").send().await?;
 
-session.shutdown();
+session.shutdown().await;
 # Ok(())
 # }
 ```

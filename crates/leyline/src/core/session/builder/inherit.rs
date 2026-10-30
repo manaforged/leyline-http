@@ -39,6 +39,7 @@ impl Parent {
         let parent = &self.session.inner;
         let inner = Arc::make_mut(&mut child.inner);
         inner.shutdown = parent.shutdown.clone();
+        inner.writers = Arc::clone(&parent.writers);
         if !self.own_limits {
             inner.host_limits = parent.host_limits.clone();
             #[cfg(feature = "html")]

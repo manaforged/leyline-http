@@ -45,6 +45,7 @@ impl SessionBuilder {
                 h2_config: derived.h2_config,
                 pool,
                 shutdown: tokio_util::sync::CancellationToken::new(),
+                writers: Arc::default(),
                 audit_tls: derived.audit_tls,
                 protocol_policy: self.protocol_policy,
                 default_retry: self.default_retry,

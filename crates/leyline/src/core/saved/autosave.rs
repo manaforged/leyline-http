@@ -31,7 +31,7 @@ impl Session {
             label: "session",
         };
         let writer = Writer::spawn(target, self.cookies().changes(), schedule);
-        tokio::spawn(writer.until(self.stopped()));
+        self.track_writer(tokio::spawn(writer.until(self.stopped())));
     }
 }
 

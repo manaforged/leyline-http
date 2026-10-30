@@ -91,7 +91,7 @@ async fn shutdown_interrupts_a_retry_backoff() {
         async move { session.get(url).send().await }
     });
     server.next_request().await.unwrap();
-    session.shutdown();
+    session.shutdown().await;
     let err = tokio::time::timeout(Duration::from_secs(2), pending)
         .await
         .expect("shutdown ends the backoff")

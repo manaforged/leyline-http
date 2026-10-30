@@ -89,6 +89,7 @@ pub(crate) struct SessionInner {
     h2_config: H2Config,
     pool: Arc<Pool>,
     shutdown: tokio_util::sync::CancellationToken,
+    writers: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     protocol_policy: Protocol,
     default_retry: Retry,

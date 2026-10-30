@@ -320,7 +320,7 @@ The session holds nothing to flush, and the pooled connections stay open.
 # async fn run(session: leyline::Session) {
 let worker = session.clone();
 let task = tokio::spawn(async move { worker.get("https://api.example/jobs").send().await });
-session.shutdown();
+session.shutdown().await;
 match task.await {
     Ok(Err(err)) if err.is_shut_down() => println!("stopped"),
     Ok(result) => println!("finished: {}", result.is_ok()),
@@ -330,7 +330,7 @@ drop(session);
 # }
 ```
 
-`Session::shutdown()` is a plain call. It also stops the session's autosave writer, which makes its last save as a task on the runtime. Stop the server first so that the open requests finish, then stop the sessions:
+`Session::shutdown()` cancels at once and returns a future; awaiting it waits until every autosave writer of the session and its derived sessions has made its last save. Stop the server first so that the open requests finish, then stop the sessions:
 
 ```rust,no_run
 use std::time::Duration;
@@ -345,7 +345,7 @@ let worker = session.clone();
 let jobs = tokio::spawn(async move { worker.get("https://api.example/jobs").send().await });
 
 tokio::signal::ctrl_c().await?;
-session.shutdown();
+session.shutdown().await;
 drop(jobs.await);
 # Ok(())
 # }

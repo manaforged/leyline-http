@@ -104,9 +104,25 @@ fn autosave_after_shutdown_and_runtime_drop_keeps_the_last_change() {
     session
         .cookies()
         .set(&"https://shop.example/".parse().unwrap(), "sid", "1");
-    session.shutdown();
+    drop(session.shutdown());
     drop(runtime);
     assert_eq!(saved_cookie(&path).as_deref(), Some("1"));
+    drop(std::fs::remove_dir_all(&dir));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn awaiting_shutdown_waits_for_the_last_autosave() {
+    let dir = scratch("awaitshutdown");
+    let path = dir.join("device.json");
+    let session = Session::new();
+    session.autosave(&path, Duration::from_secs(3600));
+    let child = session.to_builder().build().unwrap();
+    child
+        .cookies()
+        .set(&"https://shop.example/".parse().unwrap(), "sid", "7");
+    child.shutdown().await;
+    assert!(session.is_shut_down());
+    assert_eq!(saved_cookie(&path).as_deref(), Some("7"));
     drop(std::fs::remove_dir_all(&dir));
 }
 

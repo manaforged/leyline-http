@@ -30,10 +30,10 @@ impl RequestBuilder {
         let deadline = session.deadline(self.timeouts.as_ref());
         let label = self.label.take();
         let status_errors = self.status_errors;
+        let streamed = self.stream_response;
         let attempt = self.into_attempt(deadline);
         let method = attempt.method.clone();
         let url = attempt.url.clone();
-        let streamed = attempt.response == ResponseMode::Streamed;
         let mut exhausted = false;
         let response = session
             .traced(
@@ -77,7 +77,8 @@ impl RequestBuilder {
             headers,
             deadline,
             response: ResponseMode::new(
-                self.stream_response,
+                self.stream_response
+                    || self.body_rules.max_body_size > self.session.body_rules().max_body_size,
                 self.status_errors
                     .then(|| Session::error_budget(&deadline, &self.body_rules)),
             ),

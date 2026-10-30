@@ -18,8 +18,7 @@ QUIC fingerprint keys of a profile, and HTTP/3 through a proxy.
 | `Race` | Race QUIC against TCP and TLS for origins known to speak HTTP/3. Needs the `http3` feature |
 
 Without a `protocol` call, a session selects `Race` when its profile sets
-`race = true` in `[h3]`, as the bundled Chrome profiles do, and `Auto`
-otherwise. `Session::from(Browser::default())` selects `Race`;
+`race = true` in `[h3]`, and `Auto` otherwise. Every bundled profile with a captured HTTP/3 hello races: Chrome, Edge, Opera, Brave, Firefox, Safari, and Safari on iOS 18 and later, as the real browsers use HTTP/3 once a site advertises it. Safari on iOS 17, CFNetwork, and OkHttp have no `[h3]` table and use `Auto`. `Session::from(Browser::default())` selects `Race`;
 `Session::new()` and a build without the `http3` feature select `Auto`.
 
 Keep that default for a browser session: `Race` uses HTTP/3 where a browser

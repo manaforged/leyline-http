@@ -6,7 +6,7 @@ use url::Url;
 
 use super::frontier::{Queued, page_key, same_site};
 use super::sitemap::SitemapRead;
-use super::{ANY_AGENT, Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
+use super::{Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
 use crate::core::config::{Origin, normalize_host};
 use crate::core::retry::Retry;
 use crate::core::robots::{Robots, RobotsSource};
@@ -109,6 +109,7 @@ impl Crawl {
     fn robots_task(&self, origin: Origin, url: Url) -> Task {
         let session = self.session.clone();
         let trusted = self.trusted.clone();
+        let agent = self.agent.clone();
         let retry = Retry::new(ROBOTS_RETRIES)
             .when(|attempt| {
                 attempt.is_transient() || attempt.status().is_some_and(|s| s.is_server_error())
@@ -116,7 +117,7 @@ impl Crawl {
             .backoff(ROBOTS_BACKOFF, ROBOTS_MAX_BACKOFF);
         Box::pin(async move {
             let robots = match session
-                .robots_with(url.as_str(), ANY_AGENT, retry, trusted)
+                .robots_with(url.as_str(), &agent, retry, trusted)
                 .await
             {
                 Ok(robots) => robots,

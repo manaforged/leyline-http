@@ -326,7 +326,7 @@ use leyline::Kind;
 # async fn run() {
 let session = leyline::Session::new();
 let worker = session.clone();
-session.shutdown();
+session.shutdown().await;
 assert!(worker.is_shut_down());
 let err = worker.get("https://example.com/").send().await.unwrap_err();
 assert_eq!(err.kind(), Kind::Request);

@@ -82,6 +82,7 @@ user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.
 sec_ch_ua = ""
 
 [h3]
+race = true
 initial_max_data = 16777216
 initial_max_stream_data_bidi_local = 2097152
 initial_max_stream_data_bidi_remote = 2097152

@@ -1,6 +1,7 @@
 #![doc = include_str!("../docs/overview.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![deny(missing_docs)]
+#![cfg_attr(not(feature = "bench-internals"), deny(missing_debug_implementations))]
 
 #[cfg(doctest)]
 #[doc = include_str!("../../../README.md")]

@@ -327,3 +327,33 @@ async fn live_websocket_echo() {
     ws.close().await.expect("ws close failed");
     println!("✓ WebSocket echo: sent=recv=leyline-ping");
 }
+
+#[tokio::test]
+#[ignore = "live: needs network"]
+async fn live_firefox_and_safari_reach_http3_by_default() {
+    for browser in [Browser::firefox(), Browser::safari(), Browser::safari_ios()] {
+        let session = leyline::Session::from(browser);
+        let mut versions = Vec::new();
+        for _ in 0..10 {
+            let resp = session
+                .get("https://cloudflare-quic.com/")
+                .send()
+                .await
+                .expect("request failed");
+            versions.push(resp.version());
+            drop(resp.bytes().await);
+            if versions.last() == Some(&leyline::http::Version::HTTP_3) {
+                break;
+            }
+        }
+        assert_eq!(
+            versions.last(),
+            Some(&leyline::http::Version::HTTP_3),
+            "{browser}: {versions:?}"
+        );
+        println!(
+            "✓ {browser} reached HTTP/3 after {} requests",
+            versions.len()
+        );
+    }
+}

@@ -37,7 +37,7 @@ async fn a_session_saves_loads_and_autosaves_its_cookies() {
     reopened
         .cookies()
         .store("session-token=b; Path=/; Max-Age=3600", &url());
-    reopened.shutdown();
+    reopened.shutdown().await;
     let deadline = Instant::now() + Duration::from_secs(5);
     while token(&path).as_deref() != Some("b") && Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(10)).await;

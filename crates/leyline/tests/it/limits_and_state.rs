@@ -61,7 +61,7 @@ async fn shutdown_stops_a_body_being_streamed() {
     let server = slow_body().await;
     let session = Session::new();
     let resp = session.get(server.url("/")).stream().send().await.unwrap();
-    session.shutdown();
+    session.shutdown().await;
     let err = resp.bytes().await.unwrap_err();
     assert!(err.is_shut_down(), "{err:?}");
 }

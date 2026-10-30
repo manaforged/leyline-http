@@ -72,11 +72,16 @@ fn bare() {
     assert_eq!(session.protocol_policy(), Protocol::Auto);
 }
 
+#[cfg(feature = "http3")]
 #[test]
-fn firefox_auto() {
-    let session = Session::builder()
-        .identity(Browser::firefox())
-        .build()
-        .unwrap();
-    assert_eq!(session.protocol_policy(), Protocol::Auto);
+fn brave_firefox_and_safari_race_http3() {
+    for browser in [
+        Browser::brave(),
+        Browser::firefox(),
+        Browser::safari(),
+        Browser::safari_ios(),
+    ] {
+        let session = Session::builder().identity(browser).build().unwrap();
+        assert_eq!(session.protocol_policy(), Protocol::Race, "{browser}");
+    }
 }
