@@ -64,7 +64,7 @@ exponential backoff. The setters in the example extend it:
 | Setter | Effect |
 | --- | --- |
 | `when(rule)` | Replaces the default rule. `attempt.is_transient()` is the default, so `||` adds a case |
-| `wait_header(name, format)` | Reads the wait from a header. It wins over `Retry-After` |
+| `wait_header(name)`, `wait_header_ms(name)` | Reads the wait from a header, in seconds or in milliseconds. It wins over `Retry-After` |
 | `max_wait(d)` | A longer requested wait ends the retries. The default is 60 s |
 
 A request of any method that never reached the server is retried too: a DNS,

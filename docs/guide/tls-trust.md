@@ -11,7 +11,7 @@ certificates the session accepts.
 By default a session trusts the system trust store and the files named by
 `SSL_CERT_FILE` and `SSL_CERT_DIR` when they are set. `ca_file` adds a
 PEM file and `ca_der` adds the DER bytes of one certificate; both add to
-the default roots. Turn a default source off with `system_roots(false)` or
+the default roots. `build()` reads each file and fails when one is missing or not valid PEM. Turn a default source off with `system_roots(false)` or
 `env_roots(false)`. With both off, the session trusts only the roots you add.
 
 ```rust,no_run
