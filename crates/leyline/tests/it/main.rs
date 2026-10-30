@@ -154,6 +154,7 @@ mod retry_rules;
 mod retry_unsent_redirect;
 mod robots;
 mod samesite_cookies;
+mod send_sync;
 mod server_chosen_urls;
 mod session_clone;
 mod session_lifecycle;
