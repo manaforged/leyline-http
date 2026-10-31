@@ -23,6 +23,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         flush_tick: &mut tokio::time::Interval,
     ) -> Result<Option<bool>, H2Error> {
         let event = self.next_event(sweep_tick, flush_tick).await;
+        if !self.pending.is_empty()
+            && self.writer.has_output()
+            && !matches!(event, Event::Written(_))
+        {
+            self.output.defer();
+        }
         self.on_event(event).await
     }
 
@@ -36,15 +42,28 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let accepting = self.accepting_commands();
         let taking_body = !self.writer.congested();
         let stalled = self.has_stalled();
-        tokio::select! {
-            biased;
-            _ = sweep_tick.tick() => Event::Sweep,
-            written = self.writer.write_some(), if writing => Event::Written(written),
-            frame = self.reader.next(), if reading => Event::Read(frame),
-            cmd = self.command_rx.recv(), if accepting => Event::Command(cmd),
-            Some(chunk) = self.body_chunk_rx.recv(), if taking_body => Event::BodyChunk(chunk),
-            Some(ack_tx) = self.ping_rx.recv() => Event::Ping(ack_tx),
-            _ = flush_tick.tick(), if stalled => Event::FlushStalled,
+        if self.pending.is_empty() || self.output.batch_full() {
+            tokio::select! {
+                biased;
+                _ = sweep_tick.tick() => Event::Sweep,
+                written = self.writer.write_some(), if writing => Event::Written(written),
+                frame = self.reader.next(), if reading => Event::Read(frame),
+                cmd = self.command_rx.recv(), if accepting => Event::Command(cmd),
+                Some(chunk) = self.body_chunk_rx.recv(), if taking_body => Event::BodyChunk(chunk),
+                Some(ack_tx) = self.ping_rx.recv() => Event::Ping(ack_tx),
+                _ = flush_tick.tick(), if stalled => Event::FlushStalled,
+            }
+        } else {
+            tokio::select! {
+                biased;
+                _ = sweep_tick.tick() => Event::Sweep,
+                frame = self.reader.next(), if reading => Event::Read(frame),
+                cmd = self.command_rx.recv(), if accepting => Event::Command(cmd),
+                Some(chunk) = self.body_chunk_rx.recv(), if taking_body => Event::BodyChunk(chunk),
+                Some(ack_tx) = self.ping_rx.recv() => Event::Ping(ack_tx),
+                written = self.writer.write_some(), if writing => Event::Written(written),
+                _ = flush_tick.tick(), if stalled => Event::FlushStalled,
+            }
         }
     }
 

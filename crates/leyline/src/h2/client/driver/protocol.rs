@@ -34,6 +34,7 @@ pub(crate) enum DriverCommand {
         head: Arc<Head>,
         body: RequestBody,
         sink: ResponseSink,
+        slot: Option<super::super::handle::Slot>,
     },
     #[cfg(feature = "websocket")]
     OpenConnect {

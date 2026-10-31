@@ -21,7 +21,7 @@ impl Counts {
 impl Pool {
     pub(super) fn connection_counts(&self) -> Counts {
         let mut counts = Counts::default();
-        for conn in lock(&self.inner).values() {
+        for conn in crate::util::read(&self.inner).values() {
             match conn {
                 PooledConn::H1 { idle, .. } => counts.idle += idle.len(),
                 PooledConn::Mux { handle, .. } => counts.add(handle.open_streams() > 0),

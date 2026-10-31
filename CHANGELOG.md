@@ -10,6 +10,18 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Changed
+
+- A request uses less CPU: its futures are a quarter of their former size, its URL is parsed once, and TLS reads the socket in 16 KiB batches. At 8 connections and 256 requests in flight, a session serves 20 to 23% more requests per second than before on the same machine.
+- HTTP/2 writes the requests that callers queue together in one write, and while requests wait for a stream slot it reads up to four frames before it writes. On loopback, 8 connections with 256 requests in flight serve 14.5% more requests per second, and one connection with 256 in flight against a 200-stream server serves 49.9% more.
+- A session without a browser profile opens another HTTP/2 connection to a host when every open one is at the server's stream limit, up to `max_connections_per_host`. Before the server announces its limit, a connection takes 100 requests, as Chrome and Go assume. With 1,024 requests in flight, one session serves 54% more requests per second on loopback and 4.8 times as many over a 10 ms round trip. A browser profile keeps one connection per host unless `max_connections_per_host` is set, and `max_connections_per_host(1)` keeps any session on one.
+- Sessions without a browser profile, client certificate, or custom CA files share one TLS context per trust setting. Each session keeps its own TLS session cache.
+- Tracing has one `session.execute` span per request, and `pool.hit` is recorded on it. The `transport.*` and `pool.send_request*` spans are gone.
+
+### Fixed
+
+- `Session::stats()` counts one HTTP/2 or HTTP/3 checkout per request. It counted again when a request opened a connection.
+
 ## 0.2.0 - 2026-10-30
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The table maps every 0.1.6 name that changed. The sections after it list new features, behavior changes, removals without a replacement, and fixes.

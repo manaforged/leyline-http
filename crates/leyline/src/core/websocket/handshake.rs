@@ -9,6 +9,7 @@ use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
 use crate::core::config::WebSocketOptions;
 use crate::core::error::{Cause, Error, Result};
+use crate::header_str::HeaderStr;
 use crate::profile::preset::HeaderPair;
 
 pub(super) const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
@@ -37,8 +38,8 @@ pub(super) fn overlay_headers(request: &mut Vec<HeaderPair>, extra: &[(String, S
             .take(defaults)
             .find(|(default, _)| default.eq_ignore_ascii_case(name))
         {
-            Some(slot) => slot.1 = Cow::Owned(value.clone()),
-            None => request.push((Cow::Owned(name.clone()), Cow::Owned(value.clone()))),
+            Some(slot) => slot.1 = HeaderStr::from(value.as_str()),
+            None => request.push((Cow::Owned(name.clone()), HeaderStr::from(value.as_str()))),
         }
     }
 }

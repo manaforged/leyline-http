@@ -16,7 +16,7 @@ mod tests;
 pub use builder::SessionBuilder;
 pub(crate) use identity::Identity;
 
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use url::Url;
 
@@ -26,6 +26,7 @@ use crate::core::WebSocketOptions;
 use crate::core::retry::Retry;
 use crate::core::{BodyRules, Proxy, Redirect, Timeout};
 use crate::h2::H2Config;
+use crate::header_str::HeaderStr;
 use crate::pool::Pool;
 use crate::profile::{Browser, ChromiumBrand, HeaderStyle, Platform};
 use crate::tls::FingerprintConnector;
@@ -70,9 +71,9 @@ pub(crate) struct SessionInner {
     identity: Option<Identity>,
     platform: Platform,
     brand: ChromiumBrand,
-    user_agent: String,
-    sec_ch_ua: String,
-    accept_language: String,
+    user_agent: HeaderStr,
+    sec_ch_ua: HeaderStr,
+    accept_language: HeaderStr,
     header_order: Option<Vec<String>>,
     default_headers: Vec<(String, String)>,
     bearer: Option<builder::BearerToken>,
@@ -108,9 +109,4 @@ pub(crate) struct SessionInner {
     block_rules: crate::core::block::Rules,
     inputs: Arc<SessionBuilder>,
     trace: Option<Arc<dyn crate::trace::Trace>>,
-    #[expect(
-        clippy::type_complexity,
-        reason = "The shared cache retains raw input and a parsed URL shared by active requests"
-    )]
-    url_cache: Arc<Mutex<Option<(String, Arc<Url>)>>>,
 }

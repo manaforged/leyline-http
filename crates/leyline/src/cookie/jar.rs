@@ -157,6 +157,10 @@ impl Jar {
         self.cookie_header_for(url, false, true)
     }
 
+    pub(crate) fn is_empty(&self) -> bool {
+        lock(&self.inner).total == 0
+    }
+
     pub(crate) fn cookie_header_for(
         &self,
         url: &Url,
@@ -169,6 +173,9 @@ impl Jar {
         let is_secure = url.scheme() == "https";
 
         let mut jar = lock(&self.inner);
+        if jar.total == 0 {
+            return None;
+        }
         let now = SystemTime::now();
 
         let mut matching: Vec<&mut Cookie> = Vec::with_capacity(8);

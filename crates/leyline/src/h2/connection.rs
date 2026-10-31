@@ -167,10 +167,7 @@ impl RstFloodDetector {
     }
 }
 
-pub(crate) type HeaderPair = (
-    std::borrow::Cow<'static, str>,
-    std::borrow::Cow<'static, str>,
-);
+pub(crate) type HeaderPair = crate::profile::preset::HeaderPair;
 
 pub type PseudoList<'a> = ([(&'a str, &'a str); 5], usize);
 

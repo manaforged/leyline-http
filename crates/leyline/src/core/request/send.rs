@@ -14,64 +14,68 @@ use crate::core::error::{Cause, Error};
 use crate::core::response::Response;
 use crate::core::retry::RetryPlan;
 use crate::core::session::Session;
-use crate::core::session::execute::Attempt;
+use crate::core::session::execute::{Attempt, Parts};
 use crate::core::transport::ResponseMode;
 
 impl RequestBuilder {
     /// Sends the request with retries and waits for the response headers.
     pub async fn send(self) -> Result<Response> {
-        Box::pin(self.run()).await
+        self.run().await
     }
 
-    async fn run(mut self) -> Result<Response> {
-        self.prepare()?;
+    fn run(mut self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
+        let url = match self.prepare() {
+            Ok(url) => url,
+            Err(error) => return Box::pin(std::future::ready(Err(error))),
+        };
         let retry_policy = self.retry_policy.clone();
         let session = self.session.clone();
         let deadline = session.deadline(self.timeouts.as_ref());
         let label = self.label.take();
         let status_errors = self.status_errors;
         let streamed = self.stream_response;
-        let attempt = self.into_attempt(deadline);
-        let method = attempt.method.clone();
-        let url = attempt.url.clone();
-        let mut exhausted = false;
-        let response = session
-            .traced(
-                method.as_str(),
-                &url,
-                streamed,
-                run_attempts(
-                    &session,
-                    attempt,
-                    &retry_policy,
-                    deadline,
-                    label,
-                    &mut exhausted,
-                ),
-            )
-            .await?;
-        if !status_errors {
-            return Ok(response);
-        }
-        let policy_wait = retry_policy.server_wait(&response);
-        response
-            .error_for_status_with_body(&deadline)
-            .await
-            .map_err(|mut error| {
-                error.set_retry_outcome(policy_wait, exhausted);
-                error
-            })
+        let attempt = self.into_attempt(deadline, Arc::clone(&url));
+        Box::pin(async move {
+            let method = attempt.method.clone();
+            let mut exhausted = false;
+            let response = session
+                .traced(
+                    method.as_str(),
+                    url.as_str(),
+                    streamed,
+                    run_attempts(
+                        &session,
+                        attempt,
+                        &retry_policy,
+                        deadline,
+                        label,
+                        &mut exhausted,
+                    ),
+                )
+                .await?;
+            if !status_errors {
+                return Ok(response);
+            }
+            let policy_wait = retry_policy.server_wait(&response);
+            response
+                .error_for_status_with_body(&deadline)
+                .await
+                .map_err(|mut error| {
+                    error.set_retry_outcome(policy_wait, exhausted);
+                    error
+                })
+        })
     }
 
-    fn into_attempt(mut self, deadline: Deadline) -> Attempt {
+    fn into_attempt(mut self, deadline: Deadline, url: Arc<url::Url>) -> Attempt {
         let headers = if self.headers.is_empty() {
             None
         } else {
             Some(std::mem::take(&mut self.headers))
         };
-        Attempt {
+        Attempt::from(Parts {
             method: std::mem::take(&mut self.method),
-            url: std::mem::take(&mut self.url),
+            url,
             preset: self.preset,
             body: std::mem::take(&mut self.body),
             headers,
@@ -89,24 +93,23 @@ impl RequestBuilder {
             digest: self.digest_auth.take(),
             initiator: self.initiator.take(),
             trusted_origin: self.trusted_origin.take(),
-        }
+        })
     }
 
-    pub(crate) fn prepare(&mut self) -> Result<()> {
+    pub(crate) fn prepare(&mut self) -> Result<Arc<url::Url>> {
         if let Some(err) = self.builder_error.take() {
             return Err(err);
         }
+        let Some(mut url) = self.url.take() else {
+            return Err(Error::from_url_parse(url::ParseError::EmptyHost));
+        };
         self.infer_from_content_type();
 
         if !self.query_params.is_empty() {
-            let mut url = url::Url::parse(&self.url).map_err(crate::core::Error::from_url_parse)?;
-            {
-                let mut pairs = url.query_pairs_mut();
-                for (k, v) in &self.query_params {
-                    pairs.append_pair(k, v);
-                }
+            let mut pairs = url.query_pairs_mut();
+            for (k, v) in &self.query_params {
+                pairs.append_pair(k, v);
             }
-            self.url = url.to_string();
         }
 
         if let Some(encoding) = self.compress {
@@ -126,7 +129,7 @@ impl RequestBuilder {
                 }
             }
         }
-        Ok(())
+        Ok(Arc::new(url))
     }
 }
 

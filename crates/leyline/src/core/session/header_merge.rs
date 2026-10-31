@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::header_str::HeaderStr;
 use crate::profile::preset::HeaderPair;
 use crate::profile::{HeaderPosition, infer_anchor};
 
@@ -70,8 +71,8 @@ pub(crate) fn apply_extra_headers(
     }
 }
 
-fn text(v: &http::HeaderValue) -> Cow<'static, str> {
-    Cow::Owned(String::from_utf8_lossy(v.as_bytes()).into_owned())
+fn text(v: &http::HeaderValue) -> HeaderStr {
+    HeaderStr::from(String::from_utf8_lossy(v.as_bytes()).into_owned())
 }
 
 fn anchor_target_index(headers: &[HeaderPair], anchor: Option<HeaderPosition>) -> usize {

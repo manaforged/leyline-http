@@ -141,7 +141,7 @@ impl Session {
         let audited = self.inner.audit_tls.is_some();
         let mut audit_headers = audit_headers;
         audit_headers.retain(|(name, value)| crate::core::transport::sent_on(version, name, value));
-        let mut response = Response {
+        let mut response = Response::from_parts(crate::core::response::Parts {
             status,
             headers: headers.into_iter().collect(),
             body,
@@ -163,8 +163,8 @@ impl Session {
             attempts: 1,
             proxy: None,
             block: None,
-        };
-        response.block = self.inner.block_rules.check(&response);
+        });
+        response.parts.block = self.inner.block_rules.check(&response);
         Ok(response)
     }
 

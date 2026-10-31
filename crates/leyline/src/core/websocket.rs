@@ -123,7 +123,7 @@ impl WebSocket {
         }
         let request = request
             .into_iter()
-            .map(|(n, v)| (n.into_owned(), v.into_owned()))
+            .map(|(n, v)| (n.into_owned(), v.to_string()))
             .collect();
 
         let ((status, headers, _), leftover) =

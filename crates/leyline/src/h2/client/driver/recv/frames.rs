@@ -2,6 +2,8 @@ use std::time::Instant;
 
 use super::*;
 
+const UNSET_MAX_CONCURRENT_STREAMS: usize = 1000;
+
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_settings(&mut self, s: SettingsFrame) -> Result<(), H2Error> {
         if s.ack {
@@ -25,6 +27,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
         self.peer_greeted = true;
+        self.load.capacity.store(
+            self.peer_settings
+                .max_concurrent_streams
+                .map_or(UNSET_MAX_CONCURRENT_STREAMS, |limit| limit as usize),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         self.peer_snapshot
             .set_enable_connect_protocol(self.peer_settings.enable_connect_protocol);
         self.writer.write_frame(&SettingsFrame::ack()).await?;

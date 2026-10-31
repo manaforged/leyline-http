@@ -1,6 +1,8 @@
 use std::future::Future;
+use std::pin::Pin;
 use std::time::Duration;
 
+use futures_util::future::{Either, FutureExt};
 use tokio::time::Instant;
 
 use crate::core::config::Timeout;
@@ -78,33 +80,40 @@ impl Deadline {
         tokio::time::sleep(wait.min(self.remaining())).await;
     }
 
-    pub(crate) async fn total<T>(&self, fut: impl Future<Output = Result<T>>) -> Result<T> {
+    pub(crate) fn total<T, F>(&self, fut: F) -> impl Future<Output = Result<T>> + use<T, F>
+    where
+        F: Future<Output = Result<T>>,
+    {
         match self.at {
-            Some(at) => tokio::time::timeout_at(at, fut)
-                .await
-                .map_err(|e| Error::new(Cause::Timeout).with_source(e))?,
-            None => fut.await,
+            Some(at) => Either::Left(tokio::time::timeout_at(at, fut).map(|out| match out {
+                Ok(out) => out,
+                Err(e) => Err(Error::new(Cause::Timeout).with_source(e)),
+            })),
+            None => Either::Right(fut),
         }
     }
 
-    pub(crate) async fn response_header<T>(
-        &self,
-        fut: impl Future<Output = Result<T>>,
-    ) -> Result<T> {
-        within(self.response_header, fut)
-            .await
-            .map_err(|Elapsed| Error::new(Cause::Timeout))?
+    pub(crate) async fn response_header<T, F>(&self, fut: Pin<&mut F>) -> Result<T>
+    where
+        F: Future<Output = Result<T>>,
+    {
+        match self.response_header {
+            Some(limit) => tokio::time::timeout(limit, fut)
+                .await
+                .unwrap_or_else(|_| Err(Error::new(Cause::Timeout))),
+            None => fut.await,
+        }
     }
 }
 
-pub(crate) async fn within<F: Future>(
+pub(crate) fn within<F: Future>(
     limit: Option<Duration>,
     fut: F,
-) -> std::result::Result<F::Output, Elapsed> {
+) -> impl Future<Output = std::result::Result<F::Output, Elapsed>> {
     match limit {
-        Some(limit) => tokio::time::timeout(limit, fut)
-            .await
-            .map_err(Elapsed::from),
-        None => Ok(fut.await),
+        Some(limit) => {
+            Either::Left(tokio::time::timeout(limit, fut).map(|out| out.map_err(Elapsed::from)))
+        }
+        None => Either::Right(fut.map(Ok)),
     }
 }

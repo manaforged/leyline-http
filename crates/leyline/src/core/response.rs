@@ -101,6 +101,10 @@ impl ResponseTiming {
 
 #[doc = include_str!("../../docs/response.md")]
 pub struct Response {
+    pub(crate) parts: Box<Parts>,
+}
+
+pub(crate) struct Parts {
     pub(crate) status: StatusCode,
     pub(crate) version: HttpVersion,
     pub(crate) headers: HeaderMap,
@@ -121,85 +125,93 @@ pub struct Response {
 }
 
 impl Response {
+    pub(crate) fn from_parts(parts: Parts) -> Self {
+        Self {
+            parts: Box::new(parts),
+        }
+    }
+
     /// Returns the response status.
     pub fn status(&self) -> StatusCode {
-        self.status
+        self.parts.status
     }
 
     /// Returns the HTTP version of the response.
     pub fn version(&self) -> http::Version {
-        self.version.into()
+        self.parts.version.into()
     }
 
     /// Returns whether every attempt reused a pooled connection.
     pub fn reused(&self) -> bool {
-        self.timing.reused
+        self.parts.timing.reused
     }
 
     /// Returns the time spent opening new connections, or `None` when every attempt reused one.
     pub fn connect_time(&self) -> Option<std::time::Duration> {
-        self.timing
+        self.parts
+            .timing
             .connect_ms
             .map(|ms| std::time::Duration::from_millis(u64::from(ms)))
     }
 
     /// Returns the time spent sending the request and waiting for the response.
     pub fn send_time(&self) -> std::time::Duration {
-        std::time::Duration::from_millis(u64::from(self.timing.send_ms))
+        std::time::Duration::from_millis(u64::from(self.parts.timing.send_ms))
     }
 
     /// Returns the total time from the start of the request to the response headers.
     pub fn elapsed(&self) -> std::time::Duration {
-        std::time::Duration::from_millis(u64::from(self.timing.total_ms))
+        std::time::Duration::from_millis(u64::from(self.parts.timing.total_ms))
     }
 
     /// Returns the number of attempts made, including retries.
     pub fn attempts(&self) -> u32 {
-        self.attempts
+        self.parts.attempts
     }
 
     pub(crate) fn set_attempts(&mut self, attempts: u32) {
-        self.attempts = attempts.max(1);
+        self.parts.attempts = attempts.max(1);
     }
 
     /// Returns the redacted proxy address the response came through.
     pub fn proxy(&self) -> Option<&str> {
-        self.proxy.as_deref()
+        self.parts.proxy.as_deref()
     }
 
     pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
-        self.proxy = proxy.map(redact);
+        self.parts.proxy = proxy.map(redact);
     }
 
     /// Returns the block detected in the response, if any.
     pub fn block(&self) -> Option<&crate::core::block::Block> {
-        self.block.as_ref()
+        self.parts.block.as_ref()
     }
 
     /// Returns the final URL after redirects.
     pub fn url(&self) -> &Url {
-        &self.url
+        &self.parts.url
     }
 
     /// Returns the URLs of each redirect followed, in order.
     pub fn redirect_chain(&self) -> &[Url] {
-        &self.redirect_chain
+        &self.parts.redirect_chain
     }
 
     /// Returns the response headers.
     pub fn headers(&self) -> &HeaderMap {
-        &self.headers
+        &self.parts.headers
     }
 
     /// Returns the response trailers.
     pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
-        self.trailers.iter().map(|(k, v)| (k, v))
+        self.parts.trailers.iter().map(|(k, v)| (k, v))
     }
 
     /// Parses each `Set-Cookie` header of the response into a cookie.
     pub fn cookies(&self) -> impl Iterator<Item = crate::cookie::Cookie> + '_ {
-        let url = &self.url;
-        self.headers
+        let url = &self.parts.url;
+        self.parts
+            .headers
             .get_all(http::header::SET_COOKIE)
             .iter()
             .filter_map(move |value| {
@@ -210,26 +222,34 @@ impl Response {
     /// Returns the negotiated TLS version.
     #[must_use]
     pub fn tls_version(&self) -> Option<&str> {
-        self.tls.as_ref().and_then(|tls| tls.version.as_deref())
+        self.parts
+            .tls
+            .as_ref()
+            .and_then(|tls| tls.version.as_deref())
     }
 
     /// Returns the negotiated TLS cipher suite.
     #[must_use]
     pub fn tls_cipher(&self) -> Option<&str> {
-        self.tls.as_ref().and_then(|tls| tls.cipher.as_deref())
+        self.parts
+            .tls
+            .as_ref()
+            .and_then(|tls| tls.cipher.as_deref())
     }
 
     /// Returns the DER bytes of the server certificate.
     #[must_use]
     pub fn peer_certificate(&self) -> Option<&[u8]> {
-        self.tls
+        self.parts
+            .tls
             .as_ref()
             .and_then(|tls| tls.peer_cert_der.as_deref())
     }
 
     /// Returns the headers that were sent with the request.
     pub fn request_headers(&self) -> impl Iterator<Item = (&str, &str)> {
-        self.request_headers
+        self.parts
+            .request_headers
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
     }
@@ -248,26 +268,26 @@ impl Response {
     }
 
     fn status_error(&self) -> Option<Error> {
-        if !is_error_status(self.status.as_u16()) {
+        if !is_error_status(self.parts.status.as_u16()) {
             return None;
         }
         Some(
             Error::new(Cause::Status)
-                .with_status(self.status)
-                .with_url(self.url.clone())
-                .with_headers(self.headers.clone())
-                .with_trail(self.attempts, self.proxy.clone()),
+                .with_status(self.parts.status)
+                .with_url(self.parts.url.clone())
+                .with_headers(self.parts.headers.clone())
+                .with_trail(self.parts.attempts, self.parts.proxy.clone()),
         )
     }
 
     /// Returns the request fingerprints, or `None` when auditing is off.
     pub fn fingerprint(&self) -> Option<&crate::audit::Fingerprint> {
-        let tls = self.audit_tls.as_ref()?;
-        Some(self.audit_cache.get_or_init(|| {
+        let tls = self.parts.audit_tls.as_ref()?;
+        Some(self.parts.audit_cache.get_or_init(|| {
             let ja4h = crate::audit::compute_ja4h(&crate::audit::Ja4hInput {
-                method: &self.request_method,
-                http_version: self.version.ja4h_token(),
-                headers: &self.request_headers,
+                method: &self.parts.request_method,
+                http_version: self.parts.version.ja4h_token(),
+                headers: &self.parts.request_headers,
             });
             crate::audit::Fingerprint {
                 ja4: tls.ja4.clone(),
@@ -276,37 +296,44 @@ impl Response {
                 ja4t: tls.ja4t.clone(),
                 ja4h,
                 permutes_extensions: tls.permutes_extensions,
-                request_headers: self.request_headers.clone(),
+                request_headers: self.parts.request_headers.clone(),
             }
         }))
     }
 
     /// Returns the named header value as text, or `None` when it is absent or not visible ASCII.
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.get(name).and_then(|v| v.to_str().ok())
+        self.parts.headers.get(name).and_then(|v| v.to_str().ok())
     }
 }
 
 impl fmt::Debug for Response {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let chain: Vec<String> = self
+            .parts
             .redirect_chain
             .iter()
             .map(|url| redact(url.as_str()))
             .collect();
         f.debug_struct("Response")
-            .field("status", &self.status)
-            .field("version", &self.version)
-            .field("url", &redact(self.url.as_str()))
+            .field("status", &self.parts.status)
+            .field("version", &self.parts.version)
+            .field("url", &redact(self.parts.url.as_str()))
             .field("redirect_chain", &chain)
             .field(
                 "headers",
-                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
+                &masked(
+                    self.parts
+                        .headers
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), v.as_bytes())),
+                ),
             )
             .field(
                 "trailers",
                 &masked(
-                    self.trailers
+                    self.parts
+                        .trailers
                         .iter()
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
@@ -314,14 +341,15 @@ impl fmt::Debug for Response {
             .field(
                 "request_headers",
                 &masked(
-                    self.request_headers
+                    self.parts
+                        .request_headers
                         .iter()
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
             )
-            .field("timing", &self.timing)
-            .field("attempts", &self.attempts)
-            .field("proxy", &self.proxy)
+            .field("timing", &self.parts.timing)
+            .field("attempts", &self.parts.attempts)
+            .field("proxy", &self.parts.proxy)
             .finish_non_exhaustive()
     }
 }

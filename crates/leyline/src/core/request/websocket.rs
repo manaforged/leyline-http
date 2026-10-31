@@ -8,7 +8,9 @@ impl RequestBuilder {
         if let Some(err) = self.builder_error {
             return Err(err);
         }
-        let mut url = url::Url::parse(&self.url).map_err(Error::from_url_parse)?;
+        let Some(mut url) = self.url else {
+            return Err(Error::from_url_parse(url::ParseError::EmptyHost));
+        };
         if !self.query_params.is_empty() {
             url.query_pairs_mut().extend_pairs(&self.query_params);
         }

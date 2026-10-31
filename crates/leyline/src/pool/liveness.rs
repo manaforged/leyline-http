@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::h2::client::H2Client;
 
@@ -10,24 +10,15 @@ pub const DEFAULT_H2_PING_AFTER_IDLE: Option<Duration> = Some(Duration::from_sec
 
 pub const DEFAULT_H2_PING_TIMEOUT: Duration = Duration::from_secs(2);
 
-impl Pool {
-    fn idle_for(&self, key: &PoolKey) -> Option<Duration> {
-        let map = crate::util::lock(&self.inner);
-        map.get(key)
-            .map(|entry| Instant::now().saturating_duration_since(entry.last_use()))
-    }
-}
-
 pub(crate) async fn checkout_live_h2(
     pool: &Arc<Pool>,
     key: &PoolKey,
 ) -> Option<(H2Client, TlsInfo)> {
-    let idle = pool.idle_for(key);
-    let (handle, tls) = pool.checkout_mux::<H2Client>(key)?;
+    let (handle, tls, idle) = pool.checkout_mux_idle::<H2Client>(key)?;
     let Some(after_idle) = pool.config.h2_ping_after_idle else {
         return Some((handle, tls));
     };
-    if !handle.take_unanswered_timeout() && idle.is_none_or(|idle| idle < after_idle) {
+    if !handle.take_unanswered_timeout() && idle < after_idle {
         return Some((handle, tls));
     }
     match tokio::time::timeout(pool.config.h2_ping_timeout, handle.ping()).await {

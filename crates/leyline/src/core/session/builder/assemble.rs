@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use crate::tls::FingerprintConnector;
 
@@ -25,9 +25,9 @@ impl SessionBuilder {
                 identity: derived.identity,
                 platform: derived.platform,
                 brand: self.brand,
-                user_agent: derived.user_agent,
-                sec_ch_ua: derived.sec_ch_ua,
-                accept_language: derived.accept_language,
+                user_agent: derived.user_agent.into(),
+                sec_ch_ua: derived.sec_ch_ua.into(),
+                accept_language: derived.accept_language.into(),
                 header_order: derived.header_order,
                 default_headers: self.default_headers,
                 bearer: self.bearer,
@@ -40,7 +40,6 @@ impl SessionBuilder {
                 websocket_config: self.websocket_config,
                 https_only: self.https_only,
                 cookie_jar,
-                url_cache: Arc::new(Mutex::new(None)),
                 connector,
                 h2_config: derived.h2_config,
                 pool,

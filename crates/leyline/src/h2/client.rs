@@ -6,7 +6,7 @@ mod types;
 
 #[cfg(feature = "websocket")]
 pub use connect_stream::H2ConnectStream;
-pub use handle::H2Client;
+pub use handle::{H2Client, Slot};
 pub use types::{H2ResponseEx, RequestBody, ResponseBody};
 
 pub use driver::{Head, start};

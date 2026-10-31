@@ -10,6 +10,7 @@ use crate::FetchSite;
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
+use crate::header_str::HeaderStr;
 use crate::profile::RequestKind;
 use crate::profile::preset::HeaderPair;
 use crate::util::sensitive_header;
@@ -123,7 +124,7 @@ impl Session {
             .is_some_and(|origin| origin.starts_with("https:") && journey.url.scheme() != "https");
         let request_origin = match (&initiator_origin, journey.tainted) {
             (_, true) => "null",
-            (Some(origin), false) => origin.as_str(),
+            (Some(origin), false) => origin.as_ref(),
             (None, false) => journey.original_origin.as_str(),
         };
         self.attempt_headers(
@@ -173,8 +174,8 @@ impl Session {
                 .iter()
                 .position(|(hk, _)| hk.eq_ignore_ascii_case(k))
             {
-                Some(pos) => headers[pos].1 = Cow::Owned(v.to_owned()),
-                None => headers.push((Cow::Owned(k.to_owned()), Cow::Owned(v.to_owned()))),
+                Some(pos) => headers[pos].1 = HeaderStr::from(v),
+                None => headers.push((Cow::Owned(k.to_owned()), HeaderStr::from(v))),
             }
         }
     }
@@ -212,9 +213,10 @@ impl Session {
         site: &SiteContext<'_>,
         method: &str,
     ) {
-        if headers
-            .iter()
-            .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
+        if self.inner.cookie_jar.is_empty()
+            || headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
         {
             return;
         }
@@ -247,7 +249,7 @@ impl Session {
                 .cookie_jar
                 .cookie_header_for(url, cross_site, safe_method && top_level)
         {
-            headers.push(("cookie".into(), Cow::Owned(cookie_val)));
+            headers.push(("cookie".into(), HeaderStr::from(cookie_val)));
         }
     }
 
@@ -283,7 +285,7 @@ fn advertise_codecs(headers: &mut Vec<HeaderPair>, codecs: Option<String>) {
         Some(list) => {
             for (name, value) in headers.iter_mut() {
                 if name.eq_ignore_ascii_case("accept-encoding") {
-                    *value = Cow::Owned(list.clone());
+                    *value = HeaderStr::from(list.as_str());
                 }
             }
         }
@@ -293,7 +295,7 @@ fn advertise_codecs(headers: &mut Vec<HeaderPair>, codecs: Option<String>) {
 
 fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
     if !referer.is_empty() && header_value(headers, "referer").is_none() {
-        headers.push(("referer".into(), Cow::Owned(referer.to_owned())));
+        headers.push(("referer".into(), HeaderStr::from(referer)));
     }
 }
 
@@ -302,7 +304,10 @@ fn set_content_length(headers: &mut Vec<HeaderPair>, body: &Body) {
         && (!matches!(body.0, BodyKind::Empty) || len > 0)
     {
         headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
-        headers.insert(0, ("content-length".into(), Cow::Owned(len.to_string())));
+        headers.insert(
+            0,
+            ("content-length".into(), HeaderStr::from(len.to_string())),
+        );
     }
 }
 
@@ -329,7 +334,7 @@ fn shape_origin(headers: &mut Vec<HeaderPair>, method: &str, downgrade: bool) {
     } else if downgrade && !cors_mode(headers) {
         for (k, v) in headers.iter_mut() {
             if k.eq_ignore_ascii_case("origin") {
-                *v = Cow::Borrowed("null");
+                *v = HeaderStr::from_static("null");
             }
         }
     }

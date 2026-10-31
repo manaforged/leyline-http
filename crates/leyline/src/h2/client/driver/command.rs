@@ -64,18 +64,30 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 self.start_extended_connect(&pseudo, &headers, write_rx, sink)
                     .await
             }
-            DriverCommand::SendRequest { head, body, sink } => {
+            DriverCommand::SendRequest {
+                head,
+                body,
+                sink,
+                slot,
+            } => {
                 if let Err(e) = self.admit_new_stream() {
                     if Self::deferrable_capacity_error(&e) {
-                        self.pending
-                            .push_back(DriverCommand::SendRequest { head, body, sink });
+                        self.pending.push_back(DriverCommand::SendRequest {
+                            head,
+                            body,
+                            sink,
+                            slot,
+                        });
                         return Ok(());
                     }
                     send_err_to_sink(sink, e);
                     return Ok(());
                 }
-                self.start_request_ex(&head.pseudo, &head.headers, body, sink)
-                    .await
+                let started = self
+                    .start_request_ex(&head.pseudo, &head.headers, body, sink)
+                    .await;
+                drop(slot);
+                started
             }
         }
     }

@@ -10,6 +10,9 @@ use wreq_util::Emulation;
 
 fn build(ca: Option<&[u8]>) -> Client {
     let mut b = Client::builder().emulation(Emulation::Chrome149);
+    if env::var_os("CMP_RECONNECT").is_some() {
+        b = b.pool_max_idle_per_host(0);
+    }
     if let Some(path) = env::var_os("CMP_HEADERS") {
         let contents = fs::read_to_string(path).expect("read request headers");
         let mut headers = HeaderMap::new();
@@ -254,8 +257,17 @@ async fn main() {
     );
 
     let start = Instant::now();
+    let reconnect = env::var_os("CMP_RECONNECT").map(|_| build(ca.as_deref()));
     for _ in 0..cold_n {
-        let resp = build(ca.as_deref())
+        let fresh;
+        let client = match &reconnect {
+            Some(client) => client,
+            None => {
+                fresh = build(ca.as_deref());
+                &fresh
+            }
+        };
+        let resp = client
             .get(url.as_str())
             .send()
             .await

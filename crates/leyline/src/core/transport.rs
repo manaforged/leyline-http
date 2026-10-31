@@ -145,17 +145,6 @@ impl<'a> Replay<'a> {
     }
 }
 
-#[tracing::instrument(
-    name = "transport.auto",
-    level = "debug",
-    skip_all,
-    fields(
-        http.method = req.method,
-        http.scheme = req.url.scheme(),
-        http.host = req.url.host_str().unwrap_or(""),
-        proxied = req.proxy.is_some(),
-    )
-)]
 pub(crate) async fn send_request_auto(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
@@ -244,12 +233,6 @@ pub(crate) async fn send_request_h2(
     send_h2_on(pool, connector, h2_config, req, None).await
 }
 
-#[tracing::instrument(
-    name = "transport.h2",
-    level = "debug",
-    skip_all,
-    fields(http.method = req.method, http.host = req.url.host_str().unwrap_or(""))
-)]
 async fn send_h2_on(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,

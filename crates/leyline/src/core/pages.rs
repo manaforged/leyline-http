@@ -64,7 +64,7 @@ impl Template {
     fn of(first: &RequestBuilder) -> Self {
         Self {
             session: first.session.clone(),
-            first: Url::parse(&first.url).ok(),
+            first: first.url.clone(),
             preset: first.preset,
             preset_user: first.preset_user,
             headers: first.headers.clone(),
@@ -94,7 +94,7 @@ impl Template {
     }
 
     fn follow(&self, url: &Url) -> RequestBuilder {
-        let mut next = RequestBuilder::new(&self.session, Method::GET, url.as_str());
+        let mut next = RequestBuilder::new(&self.session, Method::GET, Some(url.clone()));
         if self.preset_user {
             next.preset = self.preset;
             next.preset_user = true;

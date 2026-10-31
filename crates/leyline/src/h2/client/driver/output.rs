@@ -7,6 +7,7 @@ use crate::h2::error::{ErrorCode, H2Error};
 use super::*;
 
 const WRITE_STALL_TICKS: u32 = 10;
+const QUEUED_WRITE_BATCH: u32 = 4;
 
 #[derive(Default)]
 pub(super) struct OutputState {
@@ -14,6 +15,8 @@ pub(super) struct OutputState {
     progressed: bool,
     stall_ticks: u32,
     stalled: bool,
+    deferred: u32,
+    yielded: bool,
 }
 
 impl OutputState {
@@ -24,7 +27,23 @@ impl OutputState {
     pub(super) fn wrote(&mut self, written: Result<(), H2Error>) -> Result<(), H2Error> {
         written?;
         self.progressed = true;
+        self.deferred = 0;
+        self.yielded = false;
         Ok(())
+    }
+
+    pub(super) fn coalesce(&mut self, has_output: bool) -> bool {
+        let first = has_output && !self.yielded;
+        self.yielded |= first;
+        first
+    }
+
+    pub(super) fn defer(&mut self) {
+        self.deferred = self.deferred.saturating_add(1);
+    }
+
+    pub(super) fn batch_full(&self) -> bool {
+        self.deferred >= QUEUED_WRITE_BATCH
     }
 }
 

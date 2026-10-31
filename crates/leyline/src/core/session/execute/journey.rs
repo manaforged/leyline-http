@@ -59,7 +59,7 @@ impl Journey {
         page: Option<Url>,
         session_referer: Option<&str>,
     ) -> Self {
-        let original_origin = url_origin(&url);
+        let original_origin = url_origin(&url).into_owned();
         let caller_referrer = extra
             .as_ref()
             .and_then(|h| h.get("referer"))
@@ -81,7 +81,7 @@ impl Journey {
             .unwrap_or_else(|| format!("{original_origin}/"));
         let initiator = page
             .or(referred)
-            .or_else(|| Url::parse(&format!("{original_origin}/")).ok());
+            .or_else(|| origin_root(&url, &original_origin));
         Self {
             original_origin,
             referrer,
@@ -101,7 +101,7 @@ impl Journey {
     }
 
     pub(super) fn trusting(mut self, trusted: Option<&Url>) -> Self {
-        self.trusted_origin = trusted.map(url_origin);
+        self.trusted_origin = trusted.map(|url| url_origin(url).into_owned());
         self
     }
 
@@ -136,9 +136,9 @@ impl Journey {
         replay: Option<Body>,
     ) -> Result<()> {
         self.chain.push(hop);
-        let from = url_origin(&self.url);
+        let from = url_origin(&self.url).into_owned();
         self.url = Arc::new(self.url.join(location).map_err(Error::from_url_parse)?);
-        let to = url_origin(&self.url);
+        let to = url_origin(&self.url).into_owned();
         self.tainted |= from != to && self.original_origin != to;
         self.retarget_referer(&to)?;
         if !matches!(self.url.scheme(), "http" | "https") {
@@ -156,7 +156,7 @@ impl Journey {
             extra.remove_all("referer");
             let hop_referer = referer_for(Some(caller), to_origin);
             if !hop_referer.is_empty() {
-                extra.set("referer", hop_referer)?;
+                extra.set("referer", hop_referer.into_owned())?;
             }
         }
         Ok(())
@@ -183,4 +183,17 @@ impl Journey {
         }
         Ok(())
     }
+}
+
+fn origin_root(url: &Url, origin: &str) -> Option<Url> {
+    if !matches!(url.scheme(), "http" | "https" | "ws" | "wss") {
+        return Url::parse(&format!("{origin}/")).ok();
+    }
+    let mut root = url.clone();
+    root.set_path("/");
+    root.set_query(None);
+    root.set_fragment(None);
+    root.set_username("").ok()?;
+    root.set_password(None).ok()?;
+    Some(root)
 }

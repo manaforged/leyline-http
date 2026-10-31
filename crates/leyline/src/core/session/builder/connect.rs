@@ -46,7 +46,10 @@ impl SessionBuilder {
     }
 
     pub(super) fn build_pool(&self) -> Pool {
-        Pool::from_config(self.pool_config.resolved(), self.compression.max_body_size)
+        Pool::from_config(
+            self.pool_config.resolved(self.impersonates()),
+            self.compression.max_body_size,
+        )
     }
 }
 

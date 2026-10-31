@@ -64,6 +64,7 @@ base64 = "0.22"
 leyline-quiche = { path = "crates/leyline-quiche", version = "=0.2.0", default-features = false, features = ["boringssl-bssl-crate"] }
 tokio-util = { version = "0.7.5", features = ["io"] }
 futures-util = "0.3"
+pin-project-lite = "0.2.17"
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 brotli = "8.0.2"
 zstd = "0.14"

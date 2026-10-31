@@ -1,9 +1,10 @@
 use crate::core::headers::reorder as reorder_headers;
+use crate::header_str::HeaderStr;
 use crate::profile::preset::HeaderPair;
 use std::borrow::Cow;
 
 fn h(name: &str, value: &str) -> HeaderPair {
-    (Cow::Owned(name.to_string()), Cow::Owned(value.to_string()))
+    (Cow::Owned(name.to_string()), HeaderStr::from(value))
 }
 
 #[test]
@@ -12,11 +13,13 @@ fn firefox_navigate_order_matches_the_live_capture() {
     use crate::profile::RequestKind;
     use crate::profile::preset::HeaderContext;
     let ctx = HeaderContext {
-        user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
-        sec_ch_ua: "",
+        user_agent: &HeaderStr::from_static(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:153.0) Gecko/20100101 Firefox/153.0",
+        ),
+        sec_ch_ua: &HeaderStr::default(),
         sec_ch_ua_mobile: "?0",
         sec_ch_ua_platform: "Windows",
-        accept_language: "en-US,en;q=0.9",
+        accept_language: &HeaderStr::from_static("en-US,en;q=0.9"),
         origin: "https://tls.peet.ws",
         referer: "",
         fetch_site: "same-origin",

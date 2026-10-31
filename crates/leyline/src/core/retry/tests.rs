@@ -7,7 +7,7 @@ fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
     if let Some(value) = retry_after {
         headers.insert("retry-after", value.parse().unwrap());
     }
-    Response {
+    Response::from_parts(crate::core::response::Parts {
         status: StatusCode::from_u16(status).unwrap(),
         version: crate::core::HttpVersion::Http2,
         headers,
@@ -25,7 +25,7 @@ fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
         attempts: 1,
         proxy: None,
         block: None,
-    }
+    })
 }
 
 fn grid() -> Vec<(&'static str, Result<Response>)> {
@@ -96,7 +96,7 @@ fn backoff_doubles_from_min_and_stops_at_max() {
 fn when_replaces_the_default_rule() {
     let conflict = Ok(grid_response(409, None));
     let mut blocked = grid_response(429, None);
-    blocked.block = Some(crate::core::Block::Denied("status".into()));
+    blocked.parts.block = Some(crate::core::Block::Denied("status".into()));
     let limited = Ok(blocked);
     let on_conflict = Retry::new(3).when(|attempt| attempt.status() == Some(StatusCode::CONFLICT));
     let skip_blocks = Retry::new(3).when(|attempt| attempt.is_transient() && !attempt.is_block());

@@ -55,10 +55,7 @@ fn small_stream_window_config() -> H2Config {
     cfg
 }
 
-type CowHeaders = Vec<(
-    std::borrow::Cow<'static, str>,
-    std::borrow::Cow<'static, str>,
-)>;
+type CowHeaders = Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>;
 
 fn get_req(path: &str) -> (PseudoHeaders, CowHeaders) {
     (

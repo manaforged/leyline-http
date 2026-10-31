@@ -21,7 +21,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .sum();
         let header_size: usize = headers
             .iter()
-            .map(|(name, value)| name.as_ref().len() + value.as_ref().len() + HPACK_ENTRY_OVERHEAD)
+            .map(|(name, value)| name.len() + value.len() + HPACK_ENTRY_OVERHEAD)
             .sum();
         let size = pseudo_size + header_size;
         let limit = self

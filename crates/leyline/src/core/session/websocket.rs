@@ -108,7 +108,7 @@ impl Session {
         self.add_jar_cookie(&mut headers, lookup, &site, "GET");
         headers
             .into_iter()
-            .map(|(k, v)| (k.into_owned(), v.into_owned()))
+            .map(|(k, v)| (k.into_owned(), v.to_string()))
             .collect()
     }
 }

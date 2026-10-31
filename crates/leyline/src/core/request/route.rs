@@ -8,7 +8,7 @@ use crate::core::session::execute::Attempt;
 
 pub(super) struct Route<'a> {
     session: &'a Session,
-    url: Option<url::Url>,
+    url: std::sync::Arc<url::Url>,
     origin: Option<Origin>,
     pool: Option<&'a ProxyPool>,
     policy: &'a Retry,
@@ -17,9 +17,9 @@ pub(super) struct Route<'a> {
 
 impl<'a> Route<'a> {
     pub(super) fn new(session: &'a Session, attempt: &Attempt, policy: &'a Retry) -> Self {
-        let url = url::Url::parse(&attempt.url).ok();
-        let origin = url.as_ref().and_then(Origin::of);
+        let url = std::sync::Arc::clone(&attempt.url);
         let pool = session.proxy_pool().filter(|_| attempt.proxy.is_none());
+        let origin = pool.and_then(|_| Origin::of(&url));
         Self {
             session,
             url,
@@ -40,18 +40,15 @@ impl<'a> Route<'a> {
         };
         crate::trace::note_browser(session.http_browser());
         let mut result = session.attempt(this).await;
-        let answered = match result.as_mut() {
+        match result.as_mut() {
             Ok(response) => {
                 response.set_proxy(used.as_deref());
                 self.observe(response);
-                Origin::of(response.url())
             }
-            Err(error) => {
-                error.set_proxy(used.as_deref());
-                None
-            }
-        };
+            Err(error) => error.set_proxy(used.as_deref()),
+        }
         if let Some(lease) = lease {
+            let answered = result.as_ref().ok().and_then(|r| Origin::of(r.url()));
             lease.record(&result, self.origin.as_ref(), answered.as_ref());
             self.last = Some(lease.index());
         }
@@ -73,11 +70,9 @@ impl<'a> Route<'a> {
     }
 
     fn used_proxy(&self, proxy: Option<&Proxy>) -> Option<String> {
-        let used = match (proxy, &self.url) {
-            (Some(proxy), Some(url)) => proxy.proxy_for(url).ok().flatten(),
-            (Some(proxy), None) => proxy.primary(),
-            (None, Some(url)) => self.session.proxy_for(url, None).ok().flatten(),
-            (None, None) => None,
+        let used = match proxy {
+            Some(proxy) => proxy.proxy_for(&self.url).ok().flatten(),
+            None => self.session.proxy_for(&self.url, None).ok().flatten(),
         };
         used.map(str::to_owned)
     }

@@ -20,6 +20,7 @@ use leyline::h2::{Head, RequestBody, ResponseBody};
 struct Counted {
     inner: DuplexStream,
     writes: Arc<AtomicUsize>,
+    read_chunk: usize,
 }
 
 impl AsyncRead for Counted {
@@ -28,7 +29,11 @@ impl AsyncRead for Counted {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
+        let mut chunk = vec![0; buf.remaining().min(self.read_chunk)];
+        let mut part = ReadBuf::new(&mut chunk);
+        let read = Pin::new(&mut self.inner).poll_read(cx, &mut part);
+        buf.put_slice(part.filled());
+        read
     }
 }
 
@@ -86,18 +91,11 @@ fn test_config() -> H2Config {
     }
 }
 
-#[expect(
-    clippy::type_complexity,
-    reason = "test fixture returns the raw frame parts as a tuple"
-)]
 fn get_req(
     path: &str,
 ) -> (
     PseudoHeaders,
-    Vec<(
-        std::borrow::Cow<'static, str>,
-        std::borrow::Cow<'static, str>,
-    )>,
+    Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
 ) {
     (
         PseudoHeaders {
@@ -118,6 +116,7 @@ async fn eight_concurrent_requests_share_one_write() {
     let counted = Counted {
         inner: client_io,
         writes: writes.clone(),
+        read_chunk: usize::MAX,
     };
 
     let (greeted_tx, greeted_rx) = oneshot::channel::<()>();
@@ -200,6 +199,171 @@ async fn eight_concurrent_requests_share_one_write() {
     drop(server.await);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn follow_up_requests_share_one_write() {
+    let (client_io, mut server_io) = tokio::io::duplex(256 * 1024);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let counted = Counted {
+        inner: client_io,
+        writes: Arc::clone(&writes),
+        read_chunk: usize::MAX,
+    };
+    let seen = Arc::clone(&writes);
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        write_server_settings(&mut server_io).await;
+        write_settings_ack(&mut server_io).await;
+        let mut ids = Vec::new();
+        while ids.len() < 8 {
+            let (h, _) = read_frame(&mut server_io).await;
+            if h.frame_type == FrameType::Headers as u8 {
+                ids.push(h.stream_id);
+            }
+        }
+        let mut answers = Vec::new();
+        for id in ids.drain(..) {
+            write_response(&mut answers, id, b"ok").await;
+        }
+        let before = seen.load(Ordering::Relaxed);
+        server_io
+            .write_all(&answers)
+            .await
+            .expect("write responses");
+        while ids.len() < 8 {
+            let (h, _) = read_frame(&mut server_io).await;
+            if h.frame_type == FrameType::Headers as u8 {
+                ids.push(h.stream_id);
+            }
+        }
+        let follow_ups = seen.load(Ordering::Relaxed) - before;
+        answers.clear();
+        for id in ids {
+            write_response(&mut answers, id, b"ok").await;
+        }
+        server_io
+            .write_all(&answers)
+            .await
+            .expect("write responses");
+        (follow_ups, server_io)
+    });
+
+    let handle = leyline::h2::start(counted, test_config())
+        .await
+        .expect("handshake");
+    let callers: Vec<_> = (0..8)
+        .map(|i| {
+            let handle = handle.clone();
+            tokio::spawn(async move {
+                for round in 0..2 {
+                    let (pseudo, headers) = get_req(&format!("/{i}/{round}"));
+                    let response = handle
+                        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+                        .await
+                        .expect("response");
+                    assert_eq!(response.status, 200);
+                }
+            })
+        })
+        .collect();
+    timeout(Duration::from_secs(5), async {
+        for caller in callers {
+            caller.await.expect("caller");
+        }
+    })
+    .await
+    .expect("request deadline");
+    let (follow_ups, server_io) = server.await.expect("server");
+    assert!(
+        follow_ups <= 2,
+        "eight follow-up requests took {follow_ups} transport writes"
+    );
+    drop(handle);
+    drop(server_io);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+async fn requests_queued_at_the_stream_limit_share_writes() {
+    let (client_io, mut server_io) = tokio::io::duplex(256 * 1024);
+    let writes = Arc::new(AtomicUsize::new(0));
+    let counted = Counted {
+        inner: client_io,
+        writes: Arc::clone(&writes),
+        read_chunk: 16,
+    };
+    let seen = Arc::clone(&writes);
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        write_server_settings_with(&mut server_io, vec![(0x3, 4)]).await;
+        write_settings_ack(&mut server_io).await;
+        let mut ids = Vec::new();
+        while ids.len() < 4 {
+            let (h, _) = read_frame(&mut server_io).await;
+            if h.frame_type == FrameType::Headers as u8 {
+                ids.push(h.stream_id);
+            }
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let mut costs = Vec::new();
+        for round in 0..4 {
+            let mut answers = Vec::new();
+            for id in ids.drain(..) {
+                write_response(&mut answers, id, b"ok").await;
+            }
+            let before = seen.load(Ordering::Relaxed);
+            server_io
+                .write_all(&answers)
+                .await
+                .expect("write responses");
+            if round == 3 {
+                break;
+            }
+            while ids.len() < 4 {
+                let (h, _) = read_frame(&mut server_io).await;
+                if h.frame_type == FrameType::Headers as u8 {
+                    ids.push(h.stream_id);
+                }
+            }
+            costs.push(seen.load(Ordering::Relaxed) - before);
+        }
+        (costs, server_io)
+    });
+
+    let handle = leyline::h2::start(counted, test_config())
+        .await
+        .expect("handshake");
+    let callers: Vec<_> = (0..16)
+        .map(|i| {
+            let handle = handle.clone();
+            tokio::spawn(async move {
+                let (pseudo, headers) = get_req(&format!("/{i}"));
+                let response = handle
+                    .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+                    .await
+                    .expect("response");
+                assert_eq!(response.status, 200);
+            })
+        })
+        .collect();
+    timeout(Duration::from_secs(5), async {
+        for caller in callers {
+            caller.await.expect("caller");
+        }
+    })
+    .await
+    .expect("request deadline");
+    let (costs, server_io) = server.await.expect("server");
+    assert!(
+        costs.iter().all(|&writes| writes <= 2),
+        "each batch of four admitted requests took {costs:?} transport writes"
+    );
+    drop(handle);
+    drop(server_io);
+}
+
 #[tokio::test]
 async fn buffered_pings_share_one_write() {
     let (client, mut peer) = tokio::io::duplex(65_536);
@@ -207,6 +371,7 @@ async fn buffered_pings_share_one_write() {
     let counted = Counted {
         inner: client,
         writes: Arc::clone(&writes),
+        read_chunk: usize::MAX,
     };
     let handle = leyline::h2::start(counted, test_config())
         .await

@@ -18,6 +18,9 @@ fn build(ca: Option<&[u8]>, stages: Option<Arc<Stages>>) -> Session {
         _ => Some(Browser::Chrome152),
     };
     let mut b = Session::builder().protocol(Protocol::Http2);
+    if env::var_os("CMP_RECONNECT").is_some() {
+        b = b.keep_alive(false);
+    }
     if let Some(ca) = ca {
         b = b.tls(Tls::new().system_roots(false).env_roots(false).ca_der(ca));
     } else {
@@ -25,6 +28,9 @@ fn build(ca: Option<&[u8]>, stages: Option<Arc<Stages>>) -> Session {
     }
     if let Some(browser) = browser {
         b = b.browser(browser);
+    }
+    if let Some(n) = env::var("CMP_HOST_CONNS").ok().and_then(|v| v.parse().ok()) {
+        b = b.max_connections_per_host(n);
     }
     if let Some(path) = env::var_os("CMP_HEADERS") {
         let headers = fs::read_to_string(path).expect("read request headers");
@@ -312,8 +318,17 @@ async fn main() {
     );
 
     let start = Instant::now();
+    let reconnect = env::var_os("CMP_RECONNECT").map(|_| build(ca.as_deref(), None));
     for _ in 0..cold_n {
-        let resp = build(ca.as_deref(), None)
+        let fresh;
+        let client = match &reconnect {
+            Some(client) => client,
+            None => {
+                fresh = build(ca.as_deref(), None);
+                &fresh
+            }
+        };
+        let resp = client
             .get(url.as_str())
             .send()
             .await

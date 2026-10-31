@@ -5,6 +5,7 @@ use std::ops::Deref;
 
 use bytes::Bytes;
 
+/// A header name or value as shared, validated UTF-8 bytes.
 #[derive(Clone, Default, PartialEq, Eq)]
 pub struct HeaderStr(Bytes);
 
@@ -15,6 +16,7 @@ impl Hash for HeaderStr {
 }
 
 impl HeaderStr {
+    /// Wraps a static string without copying it.
     pub fn from_static(s: &'static str) -> Self {
         Self(Bytes::from_static(s.as_bytes()))
     }
@@ -26,16 +28,19 @@ impl HeaderStr {
         }
     }
 
+    /// Wraps bytes after checking they are UTF-8.
     pub fn from_utf8(bytes: Bytes) -> Result<Self, std::str::Utf8Error> {
         std::str::from_utf8(&bytes)?;
         Ok(Self(bytes))
     }
 
+    /// Returns the text.
     pub fn as_str(&self) -> &str {
         // SAFETY: every constructor validates (or is given pre-validated) UTF-8, so the bytes are always a valid `str`.
         unsafe { std::str::from_utf8_unchecked(&self.0) }
     }
 
+    /// Returns the raw bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
