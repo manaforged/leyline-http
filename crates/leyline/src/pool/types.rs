@@ -21,6 +21,8 @@ pub(crate) struct Opened<C> {
     pub(crate) tls: TlsInfo,
     pub(crate) started: Instant,
     pub(crate) connect_ms: Option<u32>,
+    pub(crate) lane: u8,
+    pub(crate) slot: Option<crate::h2::client::Slot>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -36,6 +38,8 @@ impl<C> Opened<C> {
             tls,
             started: Instant::now(),
             connect_ms: None,
+            lane: 0,
+            slot: None,
         }
     }
 
@@ -45,7 +49,19 @@ impl<C> Opened<C> {
             tls,
             started,
             connect_ms: Some(crate::ResponseTiming::millis(started)),
+            lane: 0,
+            slot: None,
         }
+    }
+
+    pub(crate) fn on_lane(mut self, lane: u8) -> Self {
+        self.lane = lane;
+        self
+    }
+
+    pub(crate) fn with_slot(mut self, slot: Option<crate::h2::client::Slot>) -> Self {
+        self.slot = slot;
+        self
     }
 
     pub(crate) fn leg(&self) -> LegKind {
@@ -74,6 +90,7 @@ pub(crate) struct PoolKey {
     pub(crate) proxy: Option<String>,
     pub(crate) transport: Transport,
     pub(crate) partition: u64,
+    pub(crate) lane: u8,
 }
 
 pub struct H1Slot {
@@ -113,14 +130,11 @@ impl MuxHandle {
 }
 
 pub(crate) trait MuxClient: Clone {
-    const PROTO: Proto;
     fn into_handle(self) -> MuxHandle;
     fn in_handle(handle: &MuxHandle) -> Option<&Self>;
 }
 
 impl MuxClient for H2Client {
-    const PROTO: Proto = Proto::H2;
-
     fn into_handle(self) -> MuxHandle {
         MuxHandle::H2(self)
     }
@@ -136,8 +150,6 @@ impl MuxClient for H2Client {
 
 #[cfg(feature = "http3")]
 impl MuxClient for H3Client {
-    const PROTO: Proto = Proto::H3;
-
     fn into_handle(self) -> MuxHandle {
         MuxHandle::H3(self)
     }
@@ -150,14 +162,61 @@ impl MuxClient for H3Client {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct H1Idle(std::sync::Mutex<VecDeque<(H1Slot, Instant)>>);
+
+impl H1Idle {
+    pub(crate) fn queue(&mut self) -> &mut VecDeque<(H1Slot, Instant)> {
+        self.0
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        crate::util::lock(&self.0).len()
+    }
+}
+
+pub(crate) struct Stamp(std::sync::atomic::AtomicU64);
+
+const STAMP_RESOLUTION_NANOS: u64 = 1_000_000;
+
+static EPOCH: std::sync::LazyLock<Instant> = std::sync::LazyLock::new(Instant::now);
+
+impl Stamp {
+    pub(crate) fn now() -> Self {
+        Self(std::sync::atomic::AtomicU64::new(Self::nanos(
+            Instant::now(),
+        )))
+    }
+
+    pub(crate) fn get(&self) -> Instant {
+        *EPOCH + std::time::Duration::from_nanos(self.0.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    pub(crate) fn touch(&self, now: Instant) -> std::time::Duration {
+        let now = Self::nanos(now);
+        let before = self.0.load(std::sync::atomic::Ordering::Relaxed);
+        let idle = now.saturating_sub(before);
+        if idle >= STAMP_RESOLUTION_NANOS {
+            self.0.store(now, std::sync::atomic::Ordering::Relaxed);
+        }
+        std::time::Duration::from_nanos(idle)
+    }
+
+    fn nanos(at: Instant) -> u64 {
+        u64::try_from(at.saturating_duration_since(*EPOCH).as_nanos()).unwrap_or(u64::MAX)
+    }
+}
+
 pub(crate) enum PooledConn {
     Mux {
         handle: MuxHandle,
-        last_use: Instant,
+        last_use: Stamp,
         tls: TlsInfo,
     },
     H1 {
-        idle: VecDeque<(H1Slot, Instant)>,
+        idle: H1Idle,
         last_use: Instant,
         tls: TlsInfo,
     },
@@ -166,14 +225,15 @@ pub(crate) enum PooledConn {
 impl PooledConn {
     pub(crate) fn last_use(&self) -> Instant {
         match self {
-            PooledConn::Mux { last_use, .. } | PooledConn::H1 { last_use, .. } => *last_use,
+            PooledConn::Mux { last_use, .. } => last_use.get(),
+            PooledConn::H1 { last_use, .. } => *last_use,
         }
     }
 
     pub(crate) fn is_dead(&self) -> bool {
         match self {
             PooledConn::Mux { handle, .. } => handle.is_closed(),
-            PooledConn::H1 { idle, .. } => idle.is_empty(),
+            PooledConn::H1 { idle, .. } => idle.len() == 0,
         }
     }
 }

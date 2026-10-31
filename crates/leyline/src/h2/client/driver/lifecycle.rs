@@ -52,6 +52,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 return Ok(());
             }
             self.run_ready_work().await?;
+            if self
+                .output
+                .coalesce(self.writer.has_output() && self.streams.len() > 1)
+            {
+                tokio::task::yield_now().await;
+                continue;
+            }
             let Some(tick_fired) = self.wait_event(&mut sweep_tick, &mut flush_tick).await? else {
                 return Ok(());
             };

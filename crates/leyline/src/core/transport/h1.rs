@@ -58,16 +58,6 @@ fn h1_to_body(body: H1Body) -> Body {
     })
 }
 
-#[tracing::instrument(
-    name = "transport.h1",
-    level = "debug",
-    skip_all,
-    fields(
-        http.method = req.method,
-        http.scheme = req.url.scheme(),
-        http.host = req.url.host_str().unwrap_or(""),
-    )
-)]
 pub(super) async fn send_h1_on(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
@@ -108,7 +98,7 @@ pub(super) async fn send_h1_on(
             url,
             headers: headers
                 .into_iter()
-                .map(|(k, v)| (k.into_owned(), v.into_owned()))
+                .map(|(k, v)| (k.into_owned(), v.to_string()))
                 .collect(),
             proxy,
             target,
@@ -175,7 +165,7 @@ fn h1_target(
     if let Some(credentials) = crate::util::proxy_basic_auth(&parsed) {
         headers.push((
             "Proxy-Authorization".into(),
-            std::borrow::Cow::Owned(credentials),
+            crate::header_str::HeaderStr::from(credentials),
         ));
     }
     Ok((H1Target::AbsoluteForm, headers))

@@ -10,7 +10,10 @@ impl fmt::Debug for RequestBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestBuilder")
             .field("method", &self.method)
-            .field("url", &redact(&self.url))
+            .field(
+                "url",
+                &redact(self.url.as_ref().map_or("", url::Url::as_str)),
+            )
             .field("query", &masked_query(&self.query_params))
             .field(
                 "headers",

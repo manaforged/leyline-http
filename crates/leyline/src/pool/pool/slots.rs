@@ -1,35 +1,45 @@
-use std::collections::VecDeque;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use super::Pool;
-use crate::pool::types::{Counter, H1Slot, MuxClient, PoolKey, PooledConn, Proto, TlsInfo};
-use crate::util::lock;
+use crate::pool::types::{
+    Counter, H1Idle, H1Slot, MuxClient, PoolKey, PooledConn, Proto, Stamp, TlsInfo,
+};
+use crate::util::{read, write};
 
 impl Pool {
     pub(crate) fn checkout_mux<C: MuxClient>(&self, key: &PoolKey) -> Option<(C, TlsInfo)> {
-        let mut map = lock(&self.inner);
-        let dead = map.get(key).is_some_and(PooledConn::is_dead);
-        if dead {
-            map.remove(key);
-            self.counters.add(Counter::EvictionsDead, 1);
-            self.counters.checkout(C::PROTO, false);
-            return None;
-        }
-        let hit = match map.get_mut(key) {
+        self.checkout_mux_idle(key)
+            .map(|(conn, tls, _)| (conn, tls))
+    }
+
+    pub(crate) fn checkout_mux_idle<C: MuxClient>(
+        &self,
+        key: &PoolKey,
+    ) -> Option<(C, TlsInfo, Duration)> {
+        let mut dead = false;
+        let hit = match read(&self.inner).get(key) {
+            Some(entry) if entry.is_dead() => {
+                dead = true;
+                None
+            }
             Some(PooledConn::Mux {
                 handle,
                 last_use,
                 tls,
-            }) => C::in_handle(handle).map(|conn| {
-                *last_use = Instant::now();
-                (conn.clone(), tls.clone())
-            }),
+            }) => C::in_handle(handle)
+                .map(|conn| (conn.clone(), tls.clone(), last_use.touch(Instant::now()))),
             _ => None,
         };
-        self.counters.checkout(C::PROTO, hit.is_some());
+        if dead {
+            let mut map = write(&self.inner);
+            if map.get(key).is_some_and(PooledConn::is_dead) {
+                map.remove(key);
+                self.counters.add(Counter::EvictionsDead, 1);
+            }
+        }
         hit
     }
 
@@ -39,7 +49,7 @@ impl Pool {
         handle: C,
         tls: TlsInfo,
     ) -> (C, TlsInfo) {
-        let mut map = lock(&self.inner);
+        let mut map = write(&self.inner);
         if let Some(PooledConn::Mux {
             handle: existing,
             tls: existing_tls,
@@ -48,7 +58,6 @@ impl Pool {
             && !existing.is_closed()
             && let Some(existing) = C::in_handle(existing)
         {
-            self.counters.checkout(C::PROTO, true);
             return (existing.clone(), existing_tls.clone());
         }
         if !map.contains_key(&key) {
@@ -62,7 +71,7 @@ impl Pool {
             key,
             PooledConn::Mux {
                 handle: handle.into_handle(),
-                last_use: Instant::now(),
+                last_use: Stamp::now(),
                 tls,
             },
         );
@@ -71,13 +80,13 @@ impl Pool {
     }
 
     pub(crate) fn checkout_h1(&self, key: &PoolKey) -> Option<(H1Slot, TlsInfo)> {
-        let mut map = lock(&self.inner);
+        let mut map = write(&self.inner);
         let hit = match map.get_mut(key) {
             Some(PooledConn::H1 {
                 idle,
                 last_use,
                 tls,
-            }) => idle.pop_back().map(|(slot, _returned_at)| {
+            }) => idle.queue().pop_back().map(|(slot, _returned_at)| {
                 *last_use = Instant::now();
                 (slot, tls.clone())
             }),
@@ -88,10 +97,10 @@ impl Pool {
     }
 
     pub(crate) fn return_h1(&self, key: PoolKey, slot: H1Slot, tls: TlsInfo) {
-        let mut map = lock(&self.inner);
+        let mut map = write(&self.inner);
         match map.get_mut(&key) {
             Some(PooledConn::H1 { idle, last_use, .. }) => {
-                idle.push_back((slot, Instant::now()));
+                idle.queue().push_back((slot, Instant::now()));
                 *last_use = Instant::now();
                 return;
             }
@@ -102,8 +111,8 @@ impl Pool {
         if evicted > 0 {
             self.counters.add(Counter::EvictionsLru, evicted);
         }
-        let mut idle = VecDeque::new();
-        idle.push_back((slot, Instant::now()));
+        let mut idle = H1Idle::default();
+        idle.queue().push_back((slot, Instant::now()));
         map.insert(
             key,
             PooledConn::H1 {
@@ -117,7 +126,7 @@ impl Pool {
     pub(crate) async fn acquire_h1_permit(&self, key: &PoolKey) -> OwnedSemaphorePermit {
         let max_per_host = self.config.max_h1_conns_per_host;
         let sem = {
-            let mut permits = lock(&self.h1_permits);
+            let mut permits = crate::util::lock(&self.h1_permits);
             permits
                 .entry(PoolKey {
                     partition: 0,

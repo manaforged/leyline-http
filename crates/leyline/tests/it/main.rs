@@ -71,6 +71,8 @@ mod h2_hostile_server;
 #[cfg(feature = "bench-internals")]
 mod h2_informational_e2e;
 #[cfg(feature = "bench-internals")]
+mod h2_lanes;
+#[cfg(feature = "bench-internals")]
 mod h2_message_length;
 #[cfg(feature = "bench-internals")]
 mod h2_multiplex;

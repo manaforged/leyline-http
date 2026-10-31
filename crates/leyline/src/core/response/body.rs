@@ -62,7 +62,7 @@ impl Response {
     /// Reads the whole decoded body and fails when it exceeds the size limit.
     pub async fn bytes(self) -> crate::core::Result<Bytes> {
         let encoding = self.content_coding();
-        let stream = match self.body {
+        let stream = match self.parts.body {
             ResponseBody::Buffered(b) => return Ok(Bytes::from(b)),
             ResponseBody::Taken => {
                 return Err(Error::new(Cause::Body).with_message(
@@ -71,7 +71,7 @@ impl Response {
             }
             ResponseBody::Streaming(s) => s,
         };
-        let (buf, _) = buffer_decoded(stream, encoding.as_deref(), &self.compression).await?;
+        let (buf, _) = buffer_decoded(stream, encoding.as_deref(), &self.parts.compression).await?;
         Ok(Bytes::from(buf))
     }
 
@@ -81,7 +81,7 @@ impl Response {
     }
 
     fn take_stream(mut self) -> Result<BodyStream> {
-        match std::mem::replace(&mut self.body, ResponseBody::Taken) {
+        match std::mem::replace(&mut self.parts.body, ResponseBody::Taken) {
             ResponseBody::Streaming(s) => Ok(s),
             ResponseBody::Buffered(b) => Ok(BodyStream::from_bytes(bytes::Bytes::from(b))),
             ResponseBody::Taken => Err(Error::new(Cause::Body)
@@ -90,7 +90,7 @@ impl Response {
     }
 
     pub(super) fn content_coding(&self) -> Option<String> {
-        content_codings(self.headers.get_all(http::header::CONTENT_ENCODING))
+        content_codings(self.parts.headers.get_all(http::header::CONTENT_ENCODING))
     }
 
     /// Returns the decoded body as a stream and fails when the declared length exceeds the size limit.
@@ -104,15 +104,15 @@ impl Response {
 
     pub(crate) fn body_stream(self) -> Result<BodyStream> {
         let encoding = self.content_coding();
-        if encoding.is_none() || !self.compression.decode {
+        if encoding.is_none() || !self.parts.compression.decode {
             self.refuse_declared_overflow()?;
         }
-        let decoder = Decoder::capped(encoding.as_deref(), &self.compression)?;
+        let decoder = Decoder::capped(encoding.as_deref(), &self.parts.compression)?;
         Ok(BodyStream::decoded(self.take_stream()?, decoder))
     }
 
     fn refuse_declared_overflow(&self) -> Result<()> {
-        let cap = BodyLimit::session(self.compression.max_body_size);
+        let cap = BodyLimit::session(self.parts.compression.max_body_size);
         match self.content_length() {
             Some(declared) if declared > u64::try_from(cap.bytes).unwrap_or(u64::MAX) => {
                 Err(cap.error())
@@ -133,7 +133,7 @@ impl Response {
         let Some(err) = self.status_error() else {
             return Ok(self);
         };
-        let limit = self.compression.max_error_body;
+        let limit = self.parts.compression.max_error_body;
         let declared = self.content_length();
         let mut body = Vec::new();
         let mut decodes = false;
@@ -176,12 +176,12 @@ impl Response {
     where
         F: FnMut(&[u8], usize) -> bool,
     {
-        let limit = limit.min(self.compression.max_body_size);
+        let limit = limit.min(self.parts.compression.max_body_size);
         if limit == 0 {
             return Ok(StopReason::LimitReached);
         }
         let encoding = self.content_coding();
-        let mut decoder = Decoder::truncated(encoding.as_deref(), &self.compression, limit)?;
+        let mut decoder = Decoder::truncated(encoding.as_deref(), &self.parts.compression, limit)?;
         *decodes = decoder.is_some();
         let mut stream = self.take_stream()?;
         while let Some(chunk) = stream.next().await {

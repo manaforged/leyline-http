@@ -121,6 +121,7 @@ encoding_rs = { version = "0.8", optional = true }
 # compiles unconditionally and the list cannot be hand-rolled.
 psl = "2.1"
 futures-util = { workspace = true }
+pin-project-lite = { workspace = true }
 # Non-optional: h2::client::H2ConnectStream needs PollSender for
 # cancel-safe AsyncWrite backpressure (waker survives across polls).
 tokio-util = { workspace = true }
@@ -196,6 +197,7 @@ base64 = { workspace = true }
 flate2 = { workspace = true }
 brotli = { workspace = true }
 zstd = { workspace = true }
+tracing-core = "0.1.36"
 
 [package.metadata.cargo-machete]
 # imported as `md5` (crate `md-5`); used by the digest-auth MD5 algorithm

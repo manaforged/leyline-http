@@ -1,5 +1,3 @@
-use super::host::normalize_host;
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct Origin {
     scheme: String,
@@ -20,7 +18,11 @@ impl Origin {
     pub(crate) fn of(url: &url::Url) -> Option<Self> {
         Some(Self {
             scheme: url.scheme().to_ascii_lowercase(),
-            host: normalize_host(url.host_str()?),
+            host: match url.host()? {
+                url::Host::Domain(domain) => domain.trim_end_matches('.').to_ascii_lowercase(),
+                url::Host::Ipv4(addr) => addr.to_string(),
+                url::Host::Ipv6(addr) => addr.to_string(),
+            },
             port: url.port_or_known_default()?,
         })
     }

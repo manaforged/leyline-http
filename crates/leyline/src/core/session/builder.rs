@@ -151,10 +151,11 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the maximum number of HTTP/1.1 connections per host.
+    /// Sets the most connections per host; HTTP/2 adds one when all are full, and browser profiles stay on one unless set.
     pub fn max_connections_per_host(mut self, n: usize) -> Self {
         self.own_pool();
         self.pool_config.max_h1_conns_per_host = n;
+        self.pool_config.max_h2_conns_per_host = Some(n);
         self
     }
 
@@ -333,7 +334,7 @@ impl SessionBuilder {
         self.profile.as_ref()
     }
 
-    fn impersonates(&self) -> bool {
+    pub(super) fn impersonates(&self) -> bool {
         self.browser.is_some() || self.profile.is_some()
     }
 

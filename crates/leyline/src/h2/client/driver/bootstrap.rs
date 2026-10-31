@@ -17,6 +17,8 @@ use super::super::handle::H2Client;
 
 use super::*;
 
+const INITIAL_MAX_CONCURRENT_STREAMS: usize = 100;
+
 pub async fn start<T>(io: T, config: H2Config) -> Result<H2Client, H2Error>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -73,7 +75,7 @@ where
     let (ping_tx, ping_rx) = mpsc::channel(PING_CHANNEL_CAPACITY);
     let closed = Arc::new(AtomicBool::new(false));
     let unanswered_timeout = Arc::new(AtomicBool::new(false));
-    let open_streams = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let streams = crate::h2::client::handle::Streams::new(INITIAL_MAX_CONCURRENT_STREAMS);
 
     let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4);
 
@@ -87,7 +89,7 @@ where
         peer_snapshot: snapshot.clone(),
         conn_send_window: initial_send_window,
         conn_recv_window: config.initial_connection_window_size as i64,
-        streams: super::stream_map::StreamMap::new(Arc::clone(&open_streams)),
+        streams: super::stream_map::StreamMap::new(Arc::clone(&streams)),
         next_stream_id: 1,
         buffered_pending: VecDeque::new(),
         rst_flood: RstFloodDetector::new(
@@ -111,6 +113,7 @@ where
         ping_rx,
         closed: closed.clone(),
         unanswered_timeout: Arc::clone(&unanswered_timeout),
+        load: Arc::clone(&streams),
         peer_goaway_last_stream: None,
         pending: VecDeque::new(),
         shutdown_started: false,
@@ -129,7 +132,7 @@ where
         ping_tx,
         closed,
         unanswered_timeout,
-        open_streams,
+        streams,
         #[cfg(feature = "websocket")]
         peer_settings: snapshot,
     })

@@ -104,7 +104,7 @@ impl Session {
     #[cfg(feature = "http3")]
     async fn send_race_policy(&self, req: Prepared<'_>) -> Result<TransportResponse> {
         match (self.race_wanted(&req), self.inner.h3_config.as_ref()) {
-            (true, Some(h3_config)) => self.send_raced(h3_config, req).await,
+            (true, Some(h3_config)) => Box::pin(self.send_raced(h3_config, req)).await,
             _ => self.send_auto(req).await,
         }
     }

@@ -1,6 +1,5 @@
 use super::{OriginFlag, Pool};
 use crate::pool::types::{PoolKey, PooledConn, TlsInfo, Transport};
-use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 fn h1_key(host: &str) -> PoolKey {
@@ -11,14 +10,15 @@ fn h1_key(host: &str) -> PoolKey {
         proxy: None,
         transport: Transport::Tcp,
         partition: 0,
+        lane: 0,
     }
 }
 
 fn insert_empty_h1(pool: &Pool, host: &str, last_use: Instant) {
-    crate::util::lock(&pool.inner).insert(
+    crate::util::write(&pool.inner).insert(
         h1_key(host),
         PooledConn::H1 {
-            idle: VecDeque::new(),
+            idle: crate::pool::types::H1Idle::default(),
             last_use,
             tls: TlsInfo::default(),
         },

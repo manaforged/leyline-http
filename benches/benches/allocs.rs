@@ -244,7 +244,7 @@ fn req() -> (
     PseudoHeaders,
     Vec<(
         std::borrow::Cow<'static, str>,
-        std::borrow::Cow<'static, str>,
+        leyline::h2::HeaderStr,
     )>,
 ) {
     (
@@ -472,7 +472,7 @@ async fn send(
     pseudo: PseudoHeaders,
     headers: Vec<(
         std::borrow::Cow<'static, str>,
-        std::borrow::Cow<'static, str>,
+        leyline::h2::HeaderStr,
     )>,
 ) -> H2ResponseEx {
     handle

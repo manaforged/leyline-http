@@ -49,10 +49,7 @@ fn test_config() -> H2Config {
 
 fn head(
     pseudo: PseudoHeaders,
-    headers: Vec<(
-        std::borrow::Cow<'static, str>,
-        std::borrow::Cow<'static, str>,
-    )>,
+    headers: Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
 ) -> Arc<Head> {
     Arc::new(Head { pseudo, headers })
 }
@@ -64,18 +61,11 @@ fn buffered(body: ResponseBody) -> Vec<u8> {
     body
 }
 
-#[expect(
-    clippy::type_complexity,
-    reason = "test fixture returns the raw frame parts as a tuple"
-)]
 fn get_req(
     path: &str,
 ) -> (
     PseudoHeaders,
-    Vec<(
-        std::borrow::Cow<'static, str>,
-        std::borrow::Cow<'static, str>,
-    )>,
+    Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
 ) {
     (
         PseudoHeaders {

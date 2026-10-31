@@ -89,6 +89,15 @@ pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, 
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+pub(crate) fn read<T>(rw: &std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
+    rw.read().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+pub(crate) fn write<T>(rw: &std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard<'_, T> {
+    rw.write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(100 * 365 * 24 * 3600);
 
 pub(crate) fn saturating_after(

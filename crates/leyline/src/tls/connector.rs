@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use leyline_bssl::ssl::SslConnector;
@@ -18,10 +18,13 @@ use crate::tls::hello::HelloOptions;
 use crate::tls::nonblocking::connect_one;
 use crate::tls::resolver::{Resolver, SystemResolver};
 use crate::tls::session_cache::SessionCache;
-use crate::tls::trust::Tls;
+use crate::tls::trust::{Tls, TrustIdentity};
 use crate::trace;
+use crate::util::lock;
 
 mod handshake;
+#[cfg(test)]
+mod shared_tests;
 
 #[derive(Clone)]
 pub struct FingerprintConnector {
@@ -36,6 +39,51 @@ pub struct FingerprintConnector {
     socket_config: SocketOptions,
 }
 
+const SHARED_CONTEXTS: usize = 8;
+
+static PLAIN_CONTEXTS: Mutex<Vec<(Tls, Context)>> = Mutex::new(Vec::new());
+
+#[derive(Clone)]
+struct Context {
+    ssl_connector: SslConnector,
+    identity: TrustIdentity,
+    hello: HelloOptions,
+}
+
+impl Context {
+    fn build(profile: &BrowserProfile, trust: &Tls) -> Result<Self, TlsError> {
+        let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())
+            .map_err(TlsError::from_stack)?;
+        let identity =
+            apply_tls_with_trust(&mut builder, &profile.tls, TlsMinVersion::Tls12, trust)?;
+        let hello = HelloOptions::from_tls(&profile.tls)?;
+        builder
+            .set_alpn_protos(crate::tls::alpn::BROWSER_WIRE)
+            .map_err(TlsError::from_stack)?;
+        SessionCache::register(&mut builder)?;
+        Ok(Self {
+            ssl_connector: builder.build(),
+            identity,
+            hello,
+        })
+    }
+
+    fn find(trust: &Tls) -> Option<Self> {
+        lock(&PLAIN_CONTEXTS)
+            .iter()
+            .find(|(kept, _)| kept.same_roots(trust))
+            .map(|(_, context)| context.clone())
+    }
+
+    fn keep(&self, trust: &Tls) {
+        let mut kept = lock(&PLAIN_CONTEXTS);
+        if kept.len() >= SHARED_CONTEXTS {
+            drop(kept.remove(0));
+        }
+        kept.push((trust.clone(), self.clone()));
+    }
+}
+
 impl FingerprintConnector {
     #[cfg(any(test, feature = "bench-internals"))]
     pub fn new(profile: &BrowserProfile, tcp: TcpProfile) -> Result<Self, TlsError> {
@@ -48,25 +96,23 @@ impl FingerprintConnector {
         trust: &Tls,
     ) -> Result<Self, TlsError> {
         let trust = trust.clone();
-        let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())
-            .map_err(TlsError::from_stack)?;
-
-        let identity =
-            apply_tls_with_trust(&mut builder, &profile.tls, TlsMinVersion::Tls12, &trust)?;
-
-        let hello = HelloOptions::from_tls(&profile.tls)?;
-
-        builder
-            .set_alpn_protos(crate::tls::alpn::BROWSER_WIRE)
-            .map_err(TlsError::from_stack)?;
-
-        SessionCache::register(&mut builder)?;
+        let shared = std::ptr::eq(profile, &*BrowserProfile::bare_shared()) && trust.shareable();
+        let context = match shared.then(|| Context::find(&trust)).flatten() {
+            Some(context) => context,
+            None => {
+                let context = Context::build(profile, &trust)?;
+                if shared {
+                    context.keep(&trust);
+                }
+                context
+            }
+        };
 
         Ok(Self {
-            ssl_connector: builder.build(),
+            ssl_connector: context.ssl_connector,
             tcp_profile: tcp,
-            hello,
-            session_cache: SessionCache::new(identity),
+            hello: context.hello,
+            session_cache: SessionCache::new(context.identity),
             resolver: Arc::new(SystemResolver),
             happy_eyeballs: HappyEyeballs::default(),
             connect_timeout: None,

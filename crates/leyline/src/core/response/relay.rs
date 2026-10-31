@@ -13,7 +13,7 @@ const PROXY_CONNECTION: &str = "proxy-connection";
 impl Response {
     /// Returns the headers to forward to a client, without hop-by-hop headers and encoding headers for a decoded body.
     pub fn relay_headers(&self) -> HeaderMap {
-        let mut out = relay_headers(&self.headers);
+        let mut out = relay_headers(&self.parts.headers);
         if self.decodes_body() && out.contains_key(CONTENT_ENCODING) {
             out.remove(CONTENT_ENCODING);
             out.remove(CONTENT_LENGTH);
@@ -23,7 +23,8 @@ impl Response {
 
     pub(crate) fn decodes_body(&self) -> bool {
         let encoding = self.content_coding();
-        Decoder::new(encoding.as_deref(), &self.compression).is_ok_and(|decoder| decoder.is_some())
+        Decoder::new(encoding.as_deref(), &self.parts.compression)
+            .is_ok_and(|decoder| decoder.is_some())
     }
 }
 

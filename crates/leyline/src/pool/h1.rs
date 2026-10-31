@@ -165,18 +165,6 @@ pub(crate) struct H1Request<'a> {
     pub(crate) opened: Option<Opened<H1Slot>>,
 }
 
-#[tracing::instrument(
-    name = "pool.send_request_h1",
-    level = "debug",
-    skip_all,
-    fields(
-        http.method = req.method,
-        http.host = req.host,
-        http.port = req.port,
-        proxied = req.proxy.is_some(),
-        pool.hit = tracing::field::Empty,
-    )
-)]
 pub(crate) async fn send_h1_pooled(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,

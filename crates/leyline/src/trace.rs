@@ -3,6 +3,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use futures_util::future::Either;
+
 use crate::{Error, HttpVersion};
 
 mod body;
@@ -42,7 +44,10 @@ tokio::task_local! {
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
-pub(crate) async fn scope<F>(hook: Option<&Arc<dyn Trace>>, fut: F) -> F::Output
+pub(crate) fn scope<F>(
+    hook: Option<&Arc<dyn Trace>>,
+    fut: F,
+) -> impl Future<Output = F::Output> + use<F>
 where
     F: Future,
 {
@@ -58,9 +63,9 @@ where
                 root,
                 notes: notes::SharedNotes::default(),
             };
-            CURRENT.scope(ctx, fut).await
+            Either::Left(CURRENT.scope(ctx, fut))
         }
-        None => fut.await,
+        None => Either::Right(fut),
     }
 }
 

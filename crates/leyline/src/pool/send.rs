@@ -27,16 +27,6 @@ enum Sent<R> {
     Retry(Body),
 }
 
-#[tracing::instrument(
-    name = "pool.send_request",
-    level = "debug",
-    skip_all,
-    fields(
-        http.authority = pseudo.authority.as_str(),
-        http.method = pseudo.method.as_str(),
-        pool.hit = tracing::field::Empty,
-    )
-)]
 #[expect(
     clippy::too_many_arguments,
     reason = "flat per-request wire fields across one internal call path"
@@ -60,7 +50,7 @@ pub(crate) async fn send_request(
         80
     };
     let (host, port) = parse_authority(&head.pseudo.authority, default_port);
-    let key = pool.key(&head.pseudo.scheme, host, port, proxy, Transport::Tcp);
+    let mut key = pool.key(&head.pseudo.scheme, host, port, proxy, Transport::Tcp);
 
     let mut opened = match opened {
         Some(opened) => {
@@ -71,6 +61,7 @@ pub(crate) async fn send_request(
             .await
             .map_err(|(e, _)| e)?,
     };
+    key.lane = opened.lane;
     let ctx = H2Send {
         pool,
         head: &head,
@@ -131,7 +122,7 @@ async fn send_on(
     );
     let resp = match opened
         .conn
-        .send_shared(Arc::clone(ctx.head), body.into_h2(), ctx.mode)
+        .send_reserved(Arc::clone(ctx.head), body.into_h2(), ctx.mode, opened.slot)
         .await
     {
         Ok(resp) => resp,

@@ -19,7 +19,7 @@ use crate::{Cause, Error};
 
 use super::checkout_live_h2;
 use super::pool::{OriginFlag, Pool};
-use super::types::{H1Slot, Opened, PoolKey, TlsInfo, Transport};
+use super::types::{H1Slot, Opened, PoolKey, Proto, TlsInfo, Transport};
 
 type SharedConnect<C> = Shared<BoxFuture<'static, Result<(C, TlsInfo), Arc<Error>>>>;
 
@@ -184,15 +184,92 @@ pub(crate) async fn checkout_h2_opened(
     h2_config: &H2Config,
     key: PoolKey,
 ) -> Result<Opened<H2Client>, (Error, Instant)> {
+    let opened = pick_h2_lane(pool, connector, h2_config, key).await;
+    let reused = matches!(&opened, Ok(opened) if opened.connect_ms.is_none());
+    pool.counters.checkout(Proto::H2, reused);
+    opened
+}
+
+async fn pick_h2_lane(
+    pool: &Arc<Pool>,
+    connector: &FingerprintConnector,
+    h2_config: &H2Config,
+    key: PoolKey,
+) -> Result<Opened<H2Client>, (Error, Instant)> {
     pool.evict_idle();
-    if let Some(hit) = checkout_live_h2(pool, &key).await {
-        return Ok(Opened::pooled(hit));
+    let lanes = pool.config.h2_lanes();
+    let mut key = key;
+    loop {
+        let mut least: Option<((H2Client, TlsInfo), u8)> = None;
+        let mut missing = None;
+        for lane in 0..lanes {
+            key.lane = lane;
+            match checkout_live_h2(pool, &key).await {
+                Some(hit) => {
+                    if let Some(slot) = hit.0.reserve() {
+                        return Ok(Opened::pooled(hit).on_lane(lane).with_slot(Some(slot)));
+                    }
+                    if least
+                        .as_ref()
+                        .is_none_or(|(l, _)| hit.0.load() < l.0.load())
+                    {
+                        least = Some((hit, lane));
+                    }
+                }
+                None => {
+                    missing.get_or_insert(lane);
+                }
+            }
+            if missing.is_some() && least.is_some() {
+                break;
+            }
+        }
+        let paused = pool.recalls(
+            OriginFlag::H2SpillFailed,
+            &key.host,
+            key.port,
+            key.proxy.as_deref(),
+        );
+        let (least, lane) = match (least, missing) {
+            (None, missing) => (None, missing.unwrap_or(0)),
+            (Some(full), Some(lane)) if !paused => (Some(full), lane),
+            (Some((hit, used)), _) => return Ok(Opened::pooled(hit).on_lane(used)),
+        };
+        key.lane = lane;
+        let started = Instant::now();
+        match open_h2(pool, connector, h2_config, key.clone()).await {
+            Ok(opened) => {
+                if let Some(slot) = opened.0.reserve() {
+                    return Ok(Opened::fresh(opened, started)
+                        .on_lane(lane)
+                        .with_slot(Some(slot)));
+                }
+            }
+            Err(e) => match least {
+                Some((hit, used)) => {
+                    spill_failed(pool, &key, &e);
+                    return Ok(Opened::pooled(hit).on_lane(used));
+                }
+                None => return Err((e, started)),
+            },
+        }
     }
-    let started = Instant::now();
-    match open_h2(pool, connector, h2_config, key).await {
-        Ok(opened) => Ok(Opened::fresh(opened, started)),
-        Err(e) => Err((e, started)),
-    }
+}
+
+fn spill_failed(pool: &Pool, key: &PoolKey, e: &Error) {
+    tracing::debug!(
+        target: "leyline::pool",
+        host = %key.host,
+        port = key.port,
+        error = %e,
+        "extra h2 connection failed -- queueing on a full one"
+    );
+    pool.remember(
+        OriginFlag::H2SpillFailed,
+        &key.host,
+        key.port,
+        key.proxy.as_deref(),
+    );
 }
 
 pub(crate) async fn open_h2(
@@ -322,7 +399,9 @@ pub(crate) async fn checkout_h3_opened(
     key: PoolKey,
 ) -> Result<Opened<H3Client>, Error> {
     pool.evict_idle();
-    if let Some(hit) = pool.checkout_mux::<H3Client>(&key) {
+    let hit = pool.checkout_mux::<H3Client>(&key);
+    pool.counters.checkout(Proto::H3, hit.is_some());
+    if let Some(hit) = hit {
         return Ok(Opened::pooled(hit));
     }
     let started = Instant::now();

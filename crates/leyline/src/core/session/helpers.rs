@@ -7,7 +7,7 @@ use crate::profile::{Browser, RequestKind};
 use super::{Session, SessionBuilder};
 use crate::core::request::RequestBuilder;
 use crate::core::retry::Retry;
-use crate::core::{Body, IntoUrl, Proxy, ProxyUrl, Redirect, Response, Result, Timeout};
+use crate::core::{Body, Error, IntoUrl, Proxy, ProxyUrl, Redirect, Response, Result, Timeout};
 
 impl Session {
     /// Returns a `SessionBuilder` with default settings.
@@ -198,7 +198,11 @@ impl Session {
 
     pub(crate) fn http_request(&self, req: http::Request<Body>) -> RequestBuilder {
         let (mut parts, body) = req.into_parts();
-        let mut builder = RequestBuilder::new(self, parts.method, &parts.uri.to_string());
+        let url = url::Url::parse(&parts.uri.to_string());
+        let mut builder = RequestBuilder::new(self, parts.method, url.as_ref().ok().cloned());
+        if let Err(err) = url {
+            builder.fail(Error::from_url_parse(err));
+        }
         for (name, value) in &parts.headers {
             builder = builder.header(name.clone(), value.clone());
         }

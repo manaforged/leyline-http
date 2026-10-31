@@ -1,4 +1,6 @@
 use std::borrow::Cow;
+
+use crate::header_str::HeaderStr;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
@@ -10,19 +12,19 @@ mod kind;
 pub use kind::RequestKind;
 
 pub struct HeaderContext<'a> {
-    pub user_agent: &'a str,
-    pub sec_ch_ua: &'a str,
-    pub sec_ch_ua_mobile: &'a str,
+    pub user_agent: &'a HeaderStr,
+    pub sec_ch_ua: &'a HeaderStr,
+    pub sec_ch_ua_mobile: &'static str,
     pub sec_ch_ua_platform: &'a str,
-    pub accept_language: &'a str,
+    pub accept_language: &'a HeaderStr,
     pub origin: &'a str,
     pub referer: &'a str,
-    pub fetch_site: &'a str,
-    pub navigation_site: &'a str,
+    pub fetch_site: &'static str,
+    pub navigation_site: &'static str,
     pub navigation_referer: &'a str,
 }
 
-pub type HeaderPair = (Cow<'static, str>, Cow<'static, str>);
+pub type HeaderPair = (Cow<'static, str>, HeaderStr);
 
 type HeaderTemplate = Vec<(String, String)>;
 
@@ -44,6 +46,8 @@ struct HeaderShape {
     append: HeaderTemplate,
     order: Option<Vec<String>>,
 }
+
+const EXTRA_HEADERS: usize = 8;
 
 static SHAPES: LazyLock<HashMap<HeaderStyle, HeaderShape>> = LazyLock::new(|| {
     let rows: HashMap<HeaderStyle, ShapeRow> =
@@ -80,11 +84,11 @@ fn resolve_shape(rows: &HashMap<HeaderStyle, ShapeRow>, style: HeaderStyle) -> H
 impl HeaderContext<'_> {
     fn placeholders(&self) -> [(&'static str, &str); 10] {
         [
-            ("{user_agent}", self.user_agent),
-            ("{sec_ch_ua}", self.sec_ch_ua),
+            ("{user_agent}", self.user_agent.as_str()),
+            ("{sec_ch_ua}", self.sec_ch_ua.as_str()),
             ("{sec_ch_ua_mobile}", self.sec_ch_ua_mobile),
             ("{sec_ch_ua_platform}", self.sec_ch_ua_platform),
-            ("{accept_language}", self.accept_language),
+            ("{accept_language}", self.accept_language.as_str()),
             ("{origin}", self.origin),
             ("{referer}", self.referer),
             ("{fetch_site}", self.fetch_site),
@@ -93,9 +97,31 @@ impl HeaderContext<'_> {
         ]
     }
 
-    fn expand(&self, template: &'static str) -> Option<Cow<'static, str>> {
+    fn shared(&self) -> [(&'static str, &HeaderStr); 3] {
+        [
+            ("{user_agent}", self.user_agent),
+            ("{sec_ch_ua}", self.sec_ch_ua),
+            ("{accept_language}", self.accept_language),
+        ]
+    }
+
+    fn statics(&self) -> [(&'static str, &'static str); 3] {
+        [
+            ("{sec_ch_ua_mobile}", self.sec_ch_ua_mobile),
+            ("{fetch_site}", self.fetch_site),
+            ("{navigation_site}", self.navigation_site),
+        ]
+    }
+
+    fn expand(&self, template: &'static str) -> Option<HeaderStr> {
         if !template.contains('{') {
-            return Some(Cow::Borrowed(template));
+            return Some(HeaderStr::from_static(template));
+        }
+        if let Some((_, value)) = self.shared().into_iter().find(|(key, _)| *key == template) {
+            return (!value.is_empty()).then(|| value.clone());
+        }
+        if let Some((_, value)) = self.statics().into_iter().find(|(key, _)| *key == template) {
+            return (!value.is_empty()).then(|| HeaderStr::from_static(value));
         }
         let placeholders = self.placeholders();
         let mut value = String::with_capacity(template.len());
@@ -109,6 +135,7 @@ impl HeaderContext<'_> {
                 Some((key, replacement)) => {
                     seen = true;
                     filled |= !replacement.is_empty();
+                    value.reserve(replacement.len() + rest.len());
                     value.push_str(replacement);
                     rest = &rest[key.len()..];
                 }
@@ -119,7 +146,7 @@ impl HeaderContext<'_> {
             }
         }
         value.push_str(rest);
-        (filled || !seen).then_some(Cow::Owned(value))
+        (filled || !seen).then(|| HeaderStr::from(value))
     }
 }
 
@@ -147,13 +174,12 @@ impl HeaderStyle {
         let template = preset
             .and_then(|preset| shape.presets.get(&preset))
             .unwrap_or(&shape.fallback);
-        template
-            .iter()
-            .filter_map(|(name, value)| {
-                ctx.expand(value.as_str())
-                    .map(|rendered| (Cow::Borrowed(name.as_str()), rendered))
-            })
-            .collect()
+        let mut headers = Vec::with_capacity(template.len() + EXTRA_HEADERS);
+        headers.extend(template.iter().filter_map(|(name, value)| {
+            ctx.expand(value.as_str())
+                .map(|rendered| (Cow::Borrowed(name.as_str()), rendered))
+        }));
+        headers
     }
 }
 

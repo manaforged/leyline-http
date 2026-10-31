@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use tokio::sync::{mpsc, oneshot};
 
@@ -17,23 +17,54 @@ pub struct H2Client {
     pub(super) ping_tx: mpsc::Sender<oneshot::Sender<()>>,
     pub(super) closed: Arc<AtomicBool>,
     pub(super) unanswered_timeout: Arc<AtomicBool>,
-    pub(super) open_streams: Arc<std::sync::atomic::AtomicUsize>,
+    pub(super) streams: Arc<Streams>,
     #[cfg(feature = "websocket")]
     pub(super) peer_settings: Arc<PeerSettingsSnapshot>,
 }
 
 impl H2Client {
-    pub fn open_streams(&self) -> usize {
-        self.open_streams.load(Ordering::Relaxed)
+    /// Returns the streams open or reserved on this connection.
+    pub fn load(&self) -> usize {
+        self.streams.open.load(Ordering::Relaxed) + self.streams.reserved.load(Ordering::Relaxed)
     }
 
+    /// Reserves a stream slot while the connection is under its capacity.
+    pub fn reserve(&self) -> Option<Slot> {
+        let capacity = self.streams.capacity.load(Ordering::Relaxed);
+        let open = self.streams.open.load(Ordering::Relaxed);
+        self.streams
+            .reserved
+            .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |reserved| {
+                (open + reserved < capacity).then_some(reserved + 1)
+            })
+            .ok()
+            .map(|_| Slot(Arc::clone(&self.streams)))
+    }
+
+    pub fn open_streams(&self) -> usize {
+        self.streams.open.load(Ordering::Relaxed)
+    }
+
+    #[cfg_attr(
+        not(feature = "bench-internals"),
+        expect(dead_code, reason = "integration tests drive the client directly")
+    )]
     pub async fn send_shared(
         &self,
         head: Arc<Head>,
         body: RequestBody,
         mode: impl Into<ResponseMode>,
     ) -> Result<H2ResponseEx, H2Error> {
-        let mode = mode.into();
+        self.send_reserved(head, body, mode.into(), None).await
+    }
+
+    pub(crate) async fn send_reserved(
+        &self,
+        head: Arc<Head>,
+        body: RequestBody,
+        mode: ResponseMode,
+        slot: Option<Slot>,
+    ) -> Result<H2ResponseEx, H2Error> {
         if self.closed.load(Ordering::Acquire) {
             return Err(H2Error::Stream {
                 stream_id: 0,
@@ -54,7 +85,12 @@ impl H2Client {
             }
         };
 
-        let cmd = DriverCommand::SendRequest { head, body, sink };
+        let cmd = DriverCommand::SendRequest {
+            head,
+            body,
+            sink,
+            slot,
+        };
         self.tx.send(cmd).await.map_err(|e| {
             tracing::debug!(error = %e, "h2 driver command channel closed");
             H2Error::Stream {
@@ -107,5 +143,30 @@ impl H2Client {
 
     pub(crate) fn take_unanswered_timeout(&self) -> bool {
         self.unanswered_timeout.swap(false, Ordering::AcqRel)
+    }
+}
+
+/// A stream slot reserved on an [`H2Client`] until its request opens a stream.
+pub struct Slot(Arc<Streams>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.reserved.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+pub(crate) struct Streams {
+    pub(super) open: AtomicUsize,
+    pub(super) reserved: AtomicUsize,
+    pub(super) capacity: AtomicUsize,
+}
+
+impl Streams {
+    pub(super) fn new(capacity: usize) -> Arc<Self> {
+        Arc::new(Self {
+            open: AtomicUsize::new(0),
+            reserved: AtomicUsize::new(0),
+            capacity: AtomicUsize::new(capacity),
+        })
     }
 }

@@ -17,7 +17,7 @@ mod system;
 
 #[cfg(test)]
 use env::collect_ca_dir_candidates;
-use env::wire_env_trust;
+use env::{env_roots_set, wire_env_trust};
 #[cfg(not(target_os = "macos"))]
 use system::wire_system_trust_cached;
 

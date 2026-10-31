@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use url::Url;
 
 use crate::FetchSite;
@@ -18,16 +20,19 @@ use crate::core::headers::HeaderList;
 use crate::core::response::{Response, ResponseBody};
 use crate::core::{BodyRules, Proxy, Redirect};
 use crate::trace;
-use crate::util::{lock, redact, without_userinfo};
+use crate::util::{redact, without_userinfo};
+use tracing::Instrument as _;
 
 mod auth;
 mod headers;
 mod journey;
 mod response;
 
-pub(crate) struct Attempt {
+pub(crate) struct Attempt(Box<Parts>);
+
+pub(crate) struct Parts {
     pub(crate) method: http::Method,
-    pub(crate) url: String,
+    pub(crate) url: Arc<Url>,
     pub(crate) preset: Option<RequestKind>,
     pub(crate) body: Body,
     pub(crate) headers: Option<HeaderList>,
@@ -42,11 +47,31 @@ pub(crate) struct Attempt {
     pub(crate) trusted_origin: Option<Url>,
 }
 
+impl std::ops::Deref for Attempt {
+    type Target = Parts;
+
+    fn deref(&self) -> &Parts {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for Attempt {
+    fn deref_mut(&mut self) -> &mut Parts {
+        &mut self.0
+    }
+}
+
+impl From<Parts> for Attempt {
+    fn from(parts: Parts) -> Self {
+        Self(Box::new(parts))
+    }
+}
+
 impl Attempt {
     pub(crate) fn again(&self, body: Body, headers: Option<HeaderList>) -> Attempt {
-        Attempt {
+        Attempt::from(Parts {
             method: self.method.clone(),
-            url: self.url.clone(),
+            url: Arc::clone(&self.url),
             preset: self.preset,
             body,
             headers,
@@ -59,7 +84,7 @@ impl Attempt {
             digest: self.digest.clone(),
             initiator: self.initiator.clone(),
             trusted_origin: self.trusted_origin.clone(),
-        }
+        })
     }
 }
 
@@ -77,9 +102,16 @@ impl Session {
 
     pub(crate) async fn attempt(&self, attempt: Attempt) -> Result<Response> {
         let deadline = attempt.deadline;
+        let span = tracing::debug_span!(
+            "session.execute",
+            http.method = attempt.method.as_str(),
+            http.url = redact(attempt.url.as_str()),
+            pool.hit = tracing::field::Empty,
+        );
         let inner: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
         > = Box::pin(self.execute_inner(attempt));
+        let inner = inner.instrument(span);
         trace::scope(self.inner.trace.as_ref(), async move {
             let out = self.unless_shut_down(deadline.total(inner)).await;
             trace::done(match &out {
@@ -91,14 +123,13 @@ impl Session {
         .await
     }
 
-    pub(crate) async fn unless_shut_down<T>(
-        &self,
-        fut: impl std::future::Future<Output = Result<T>>,
-    ) -> Result<T> {
-        tokio::select! {
-            biased;
-            () = self.inner.shutdown.cancelled() => Err(Error::shut_down()),
-            out = fut => out,
+    pub(crate) fn unless_shut_down<T, F>(&self, fut: F) -> UnlessShutDown<'_, F>
+    where
+        F: std::future::Future<Output = Result<T>>,
+    {
+        UnlessShutDown {
+            stop: self.inner.shutdown.cancelled(),
+            fut,
         }
     }
 
@@ -136,43 +167,39 @@ impl Session {
         self.inner.shutdown.is_cancelled()
     }
 
-    pub(crate) async fn traced<F>(
-        &self,
-        method: &str,
-        original_url: &str,
+    pub(crate) fn traced<'a, F>(
+        &'a self,
+        method: &'a str,
+        original_url: &'a str,
         streamed: bool,
         request: F,
-    ) -> Result<Response>
+    ) -> impl std::future::Future<Output = Result<Response>> + 'a
     where
-        F: std::future::Future<Output = (Result<Response>, u32)>,
+        F: std::future::Future<Output = (Result<Response>, u32)> + 'a,
     {
+        use futures_util::FutureExt;
         let hook = self.inner.trace.as_ref();
-        trace::scope(hook, async move {
-            let (out, attempts) = request.await;
-            if hook.is_some() {
-                let finish = trace::Finish {
-                    method,
-                    original_url,
-                    attempts,
-                    streamed,
-                };
-                trace::summary(&finish, out.as_ref());
-            }
-            out
-        })
-        .await
+        trace::scope(
+            hook,
+            request.map(move |(out, attempts)| {
+                if hook.is_some() {
+                    let finish = trace::Finish {
+                        method,
+                        original_url,
+                        attempts,
+                        streamed,
+                    };
+                    trace::summary(&finish, out.as_ref());
+                }
+                out
+            }),
+        )
     }
 
-    #[tracing::instrument(
-        name = "session.execute",
-        level = "debug",
-        skip_all,
-        fields(http.method = attempt.method.as_str(), http.url = redact(&attempt.url))
-    )]
     async fn execute_inner(&self, attempt: Attempt) -> Result<Response> {
-        let Attempt {
+        let Parts {
             method,
-            url: raw_url,
+            url,
             preset,
             body,
             headers: extra_headers,
@@ -185,12 +212,12 @@ impl Session {
             digest,
             initiator,
             trusted_origin,
-        } = attempt;
+        } = *attempt.0;
         let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
         let request_proxy = request_proxy.as_ref();
         let header_order = header_order.as_deref();
         let mut journey = Journey::begin(
-            self.hsts_upgrade(&self.resolve_url(&raw_url)?),
+            self.hsts_upgrade(&url),
             method.to_string(),
             body,
             extra_headers,
@@ -204,7 +231,6 @@ impl Session {
         let mut pass = None;
         let mut answered = false;
         loop {
-            journey.url = self.hsts_upgrade(&journey.url);
             drop(pass.take());
             pass = self.admit_host(&journey.url).await;
             let headers = self.leg_headers(&journey, preset, header_order);
@@ -217,18 +243,18 @@ impl Session {
             let proxy = self
                 .proxy_for(&journey.url, request_proxy)
                 .map_err(leg_error(answered))?;
-            let send = self.send_with_policy(Prepared {
-                method: &journey.method,
-                url: &journey.url,
-                headers,
-                body: step_body,
-                proxy,
-                response,
-            });
-            let leg = deadline
-                .response_header(send)
-                .await
-                .map_err(leg_error(answered))?;
+            let leg = {
+                let send = std::pin::pin!(self.send_with_policy(Prepared {
+                    method: &journey.method,
+                    url: &journey.url,
+                    headers,
+                    body: step_body,
+                    proxy,
+                    response,
+                }));
+                deadline.response_header(send).await
+            }
+            .map_err(leg_error(answered))?;
             answered |= leg.status != http::StatusCode::UNAUTHORIZED;
             journey.timing.add_leg(&leg.timing);
 
@@ -245,13 +271,14 @@ impl Session {
             };
             if next.take(&mut journey, digest.as_mut(), replay_body)? {
                 drop(leg.body);
+                journey.url = self.hsts_upgrade(&journey.url);
                 continue;
             }
 
             let mut response = self
                 .assemble_response(leg, journey, audit_headers, response, body_rules, &deadline)
                 .await?;
-            if let ResponseBody::Streaming(body) = &mut response.body {
+            if let ResponseBody::Streaming(body) = &mut response.parts.body {
                 body.hold(pass.take());
             }
             return Ok(response);
@@ -265,18 +292,6 @@ impl Session {
             .rfind(|(k, _)| k.eq_ignore_ascii_case("referer"))
             .map(|(_, v)| v.as_str())
             .filter(|v| !v.is_empty())
-    }
-
-    fn resolve_url(&self, raw_url: &str) -> Result<Arc<Url>> {
-        let mut cache = lock(&self.inner.url_cache);
-        match cache.as_mut() {
-            Some((raw, parsed)) if raw == raw_url => Ok(Arc::clone(parsed)),
-            _ => {
-                let parsed = Arc::new(Url::parse(raw_url).map_err(Error::from_url_parse)?);
-                *cache = Some((raw_url.to_string(), Arc::clone(&parsed)));
-                Ok(parsed)
-            }
-        }
     }
 }
 
@@ -305,31 +320,37 @@ fn leg_error(answered: bool) -> impl Fn(Error) -> Error {
     move |err| if answered { err.after_response() } else { err }
 }
 
-pub(crate) fn url_origin(url: &Url) -> String {
+pub(crate) fn url_origin(url: &Url) -> Cow<'_, str> {
+    if url.has_authority() && url.username().is_empty() && url.password().is_none() {
+        return Cow::Borrowed(&url[..url::Position::BeforePath]);
+    }
     let host = url.host_str().unwrap_or("");
-    match url.port() {
+    Cow::Owned(match url.port() {
         Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
         None => format!("{}://{}", url.scheme(), host),
-    }
+    })
 }
 
-pub(crate) fn referer_for(prev: Option<&str>, current_origin: &str) -> String {
+pub(crate) fn referer_for<'a>(prev: Option<&'a str>, current_origin: &str) -> Cow<'a, str> {
     let Some(prev) = prev else {
-        return format!("{current_origin}/");
+        return Cow::Owned(format!("{current_origin}/"));
     };
+    if prev.strip_suffix('/') == Some(current_origin) {
+        return Cow::Borrowed(prev);
+    }
     let Ok(parsed) = Url::parse(prev) else {
-        return format!("{current_origin}/");
+        return Cow::Owned(format!("{current_origin}/"));
     };
     if parsed.scheme() == "https" && !current_origin.starts_with("https:") {
-        return String::new();
+        return Cow::Borrowed("");
     }
-    if url_origin(&parsed) != current_origin {
-        let origin = url_origin(&parsed);
-        return format!("{origin}/");
+    let origin = url_origin(&parsed);
+    if origin != current_origin {
+        return Cow::Owned(format!("{origin}/"));
     }
     let mut parsed = without_userinfo(parsed);
     parsed.set_fragment(None);
-    parsed.to_string()
+    Cow::Owned(parsed.to_string())
 }
 
 #[cfg(all(test, feature = "http3"))]
@@ -340,6 +361,8 @@ mod redact_tests;
 mod referer_tests;
 #[cfg(test)]
 mod reorder_tests;
+#[cfg(test)]
+mod wrap_tests;
 
 struct Turn<'a> {
     code: u16,
@@ -377,5 +400,32 @@ impl Turn<'_> {
             return Ok(true);
         }
         Ok(false)
+    }
+}
+
+pin_project_lite::pin_project! {
+    pub(crate) struct UnlessShutDown<'a, F> {
+        #[pin]
+        stop: tokio_util::sync::WaitForCancellationFuture<'a>,
+        #[pin]
+        fut: F,
+    }
+}
+
+impl<T, F> std::future::Future for UnlessShutDown<'_, F>
+where
+    F: std::future::Future<Output = Result<T>>,
+{
+    type Output = Result<T>;
+
+    fn poll(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<T>> {
+        let this = self.project();
+        if this.stop.poll(cx).is_ready() {
+            return std::task::Poll::Ready(Err(Error::shut_down()));
+        }
+        this.fut.poll(cx)
     }
 }

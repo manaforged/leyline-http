@@ -22,23 +22,21 @@ pub trait IntoUrl: sealed::Sealed {
 }
 
 fn parse_with_base(raw: &str, base: Option<&Url>) -> Result<Url> {
+    if raw.chars().any(|c| c.is_ascii_control()) {
+        return Err(Error::new(Cause::Url).with_message("URL contains a control character"));
+    }
     match (Url::parse(raw), base) {
-        (Err(url::ParseError::RelativeUrlWithoutBase), Some(base))
-            if !raw.chars().any(|c| c.is_ascii_control()) =>
-        {
+        (Err(url::ParseError::RelativeUrlWithoutBase), Some(base)) => {
             base.join(raw).map_err(Error::from_url_parse)
         }
-        _ => raw.into_url(),
+        (parsed, _) => parsed.map_err(Error::from_url_parse),
     }
 }
 
 impl sealed::Sealed for &str {}
 impl IntoUrl for &str {
     fn into_url(self) -> Result<Url> {
-        if self.chars().any(|c| c.is_ascii_control()) {
-            return Err(Error::new(Cause::Url).with_message("URL contains a control character"));
-        }
-        Url::parse(self).map_err(Error::from_url_parse)
+        parse_with_base(self, None)
     }
 
     fn into_url_with_base(self, base: Option<&Url>) -> Result<Url> {

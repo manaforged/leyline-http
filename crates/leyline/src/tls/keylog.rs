@@ -10,14 +10,28 @@ use leyline_bssl::ssl::SslContextBuilder;
 #[cfg(not(debug_assertions))]
 pub(crate) fn install_from_env(_builder: &mut SslContextBuilder) {}
 
+#[cfg(not(debug_assertions))]
+pub(crate) fn requested() -> bool {
+    false
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn requested() -> bool {
+    path().is_some()
+}
+
+#[cfg(debug_assertions)]
+fn path() -> Option<String> {
+    std::env::var("SSLKEYLOGFILE")
+        .ok()
+        .filter(|path| !path.trim().is_empty())
+}
+
 #[cfg(debug_assertions)]
 pub(crate) fn install_from_env(builder: &mut SslContextBuilder) {
-    let Ok(path) = std::env::var("SSLKEYLOGFILE") else {
+    let Some(path) = path() else {
         return;
     };
-    if path.trim().is_empty() {
-        return;
-    }
     match keylog_writer(&path) {
         Ok(writer) => {
             builder.set_keylog_callback(move |_ssl, line| writer(line));

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(feature = "http3")]
@@ -17,7 +17,7 @@ use crate::quic::H3Client;
 use crate::pool::types::{ConnectionStats, Counter, PoolCounters, PoolKey, PooledConn, Transport};
 #[cfg(feature = "bench-internals")]
 use crate::pool::types::{MuxHandle, TlsInfo};
-use crate::util::lock;
+use crate::util::{lock, write};
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
@@ -30,6 +30,8 @@ const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 const H1_ONLY_TTL: Duration = Duration::from_secs(600);
 const H3_BROKEN_TTL: Duration = Duration::from_secs(300);
 
+const H2_SPILL_PAUSE: Duration = Duration::from_secs(1);
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum OriginFlag {
     H1Only,
@@ -38,15 +40,17 @@ pub(crate) enum OriginFlag {
         allow(dead_code, reason = "HTTP/3 failures exist only with http3")
     )]
     H3Broken,
+    H2SpillFailed,
 }
 
 impl OriginFlag {
-    const COUNT: usize = 2;
+    const COUNT: usize = 3;
 
     pub(crate) const fn ttl(self) -> Duration {
         match self {
             Self::H1Only => H1_ONLY_TTL,
             Self::H3Broken => H3_BROKEN_TTL,
+            Self::H2SpillFailed => H2_SPILL_PAUSE,
         }
     }
 }
@@ -56,7 +60,7 @@ type OriginProxyKey = (String, u16, Option<String>);
 pub(crate) type OriginMemory = [ExpiringSet<OriginProxyKey>; OriginFlag::COUNT];
 
 pub struct Pool {
-    pub(crate) inner: Arc<Mutex<HashMap<PoolKey, PooledConn>>>,
+    pub(crate) inner: Arc<RwLock<HashMap<PoolKey, PooledConn>>>,
     pub(crate) inflight_h2: Inflight<H2Client>,
     #[cfg(feature = "http3")]
     pub(crate) inflight_h3: Inflight<H3Client>,
@@ -205,11 +209,12 @@ impl Pool {
             proxy: proxy.map(|s| s.to_string()),
             transport,
             partition: self.partition,
+            lane: 0,
         }
     }
 
     pub fn stats(&self) -> ConnectionStats {
-        let entries = lock(&self.inner).len();
+        let entries = write(&self.inner).len();
         let counts = self.connection_counts();
         ConnectionStats {
             entries,
@@ -233,9 +238,10 @@ impl Pool {
         let idle_timeout = self.config.idle_timeout;
         let mut idle_evicted = 0u64;
         {
-            let mut map = lock(&self.inner);
+            let mut map = write(&self.inner);
             map.retain(|_, entry| match entry {
                 PooledConn::H1 { idle, last_use, .. } => {
+                    let idle = idle.queue();
                     let before = idle.len();
                     idle.retain(|(_, returned_at)| now.duration_since(*returned_at) < idle_timeout);
                     idle_evicted += (before - idle.len()) as u64;
@@ -244,7 +250,8 @@ impl Pool {
                 PooledConn::Mux {
                     handle, last_use, ..
                 } => {
-                    let keep = !handle.is_closed() && now.duration_since(*last_use) < idle_timeout;
+                    let keep =
+                        !handle.is_closed() && now.duration_since(last_use.get()) < idle_timeout;
                     if !keep {
                         idle_evicted += 1;
                     }
@@ -292,7 +299,7 @@ impl Pool {
     }
 
     pub(crate) fn invalidate(&self, key: &PoolKey) {
-        let mut map = lock(&self.inner);
+        let mut map = write(&self.inner);
         if map.remove(key).is_some() {
             self.counters.add(Counter::EvictionsDead, 1);
         }
@@ -300,14 +307,14 @@ impl Pool {
 
     #[cfg(feature = "bench-internals")]
     pub fn bench_populate_h2(&self, n: usize, handle: &H2Client) {
-        let mut map = lock(&self.inner);
+        let mut map = write(&self.inner);
         map.clear();
         for i in 0..n {
             map.insert(
                 self.key("https", &format!("h{i}.bench"), 443, None, Transport::Tcp),
                 PooledConn::Mux {
                     handle: MuxHandle::H2(handle.clone()),
-                    last_use: Instant::now(),
+                    last_use: super::types::Stamp::now(),
                     tls: TlsInfo::default(),
                 },
             );

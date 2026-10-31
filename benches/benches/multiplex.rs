@@ -136,7 +136,7 @@ fn req() -> (
     PseudoHeaders,
     Vec<(
         std::borrow::Cow<'static, str>,
-        std::borrow::Cow<'static, str>,
+        leyline::h2::HeaderStr,
     )>,
 ) {
     (
@@ -258,7 +258,7 @@ criterion_main!(multiplex_benches);
 async fn send(
     handle: &H2Client,
     pseudo: PseudoHeaders,
-    headers: Vec<(std::borrow::Cow<'static, str>, std::borrow::Cow<'static, str>)>,
+    headers: Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
 ) -> H2ResponseEx {
     handle
         .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::from(None::<bytes::Bytes>), false)

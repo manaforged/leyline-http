@@ -63,7 +63,7 @@ where
 pub struct RequestBuilder {
     pub(super) session: Session,
     pub(super) method: Method,
-    pub(super) url: String,
+    pub(super) url: Option<url::Url>,
     pub(super) preset: Option<RequestKind>,
     pub(super) body: Body,
     pub(super) headers: HeaderList,
@@ -96,12 +96,12 @@ fn default_preset(session: &Session, method: &Method) -> Option<RequestKind> {
 }
 
 impl RequestBuilder {
-    pub(crate) fn new(session: &Session, method: Method, url: &str) -> Self {
+    pub(crate) fn new(session: &Session, method: Method, url: Option<url::Url>) -> Self {
         let preset = default_preset(session, &method);
         Self {
             session: session.clone(),
             method,
-            url: url.to_string(),
+            url,
             preset,
             body: Body::default(),
             headers: HeaderList::new(),
@@ -126,9 +126,9 @@ impl RequestBuilder {
 
     pub(crate) fn from_url(session: &Session, method: Method, url: impl IntoUrl) -> Self {
         match url.into_url_with_base(session.base_url()) {
-            Ok(url) => Self::new(session, method, url.as_str()),
+            Ok(url) => Self::new(session, method, Some(url)),
             Err(err) => {
-                let mut builder = Self::new(session, method, "");
+                let mut builder = Self::new(session, method, None);
                 builder.builder_error = Some(err);
                 builder
             }
