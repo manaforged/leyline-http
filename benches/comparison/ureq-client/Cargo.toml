@@ -1,0 +1,14 @@
+[package]
+name = "ureq-cmp-client"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "ureq"
+path = "src/main.rs"
+
+[dependencies]
+ureq = { version = "=3.5.0", default-features = false, features = ["rustls"] }

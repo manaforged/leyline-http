@@ -162,7 +162,10 @@ async fn the_pool_counts_one_checkout_per_request() {
     send(&session, &url, 1, Duration::ZERO).await;
     assert_eq!(connections.load(Ordering::SeqCst), 2);
     let stats = session.stats();
-    assert_eq!(stats.h2_hits() + stats.h2_misses(), 3);
+    assert_eq!(
+        stats.hits(leyline::http::Version::HTTP_2) + stats.misses(leyline::http::Version::HTTP_2),
+        3
+    );
 }
 
 #[tokio::test]

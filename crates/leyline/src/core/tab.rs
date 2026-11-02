@@ -1,9 +1,9 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 use http::Method;
 use url::Url;
 
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::core::into_url::IntoUrl;
 use crate::core::request::{IntoParamPair, RequestBuilder};
 use crate::core::response::Response;
@@ -40,15 +40,12 @@ impl Tab {
 
     /// Returns the URL of the page the tab has open.
     pub fn current(&self) -> Option<Url> {
-        self.page
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        crate::util::lock(&self.page).clone()
     }
 
     /// Sets the page URL the tab treats as open, or clears it with `None`.
     pub fn set_current(&self, page: Option<Url>) {
-        *self.page.lock().unwrap_or_else(PoisonError::into_inner) = page;
+        *crate::util::lock(&self.page) = page;
     }
 
     pub(crate) fn request(
@@ -74,7 +71,7 @@ impl Tab {
         let mut builder = self.request(method, url, preset);
         if self.current().is_none() {
             builder.fail(
-                Error::new(Cause::Request).with_message("the tab has no page; open one first"),
+                Error::new(Kind::Request).with_message("the tab has no page; open one first"),
             );
         }
         builder
@@ -148,7 +145,7 @@ impl Tab {
     }
 
     fn trusted(&self, mut builder: RequestBuilder) -> RequestBuilder {
-        builder.trusted_origin = self.current();
+        builder.draft.trusted_origin = self.current();
         builder
     }
 

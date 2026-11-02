@@ -216,15 +216,14 @@ impl PseudoHeaders {
     }
 }
 
-pub(crate) fn encode_request_pseudos<'a>(
-    encoder: &mut hpack::Encoder,
+pub(crate) fn encode_request_pseudos<'a, 'e>(
+    encoder: &'e mut hpack::Encoder,
     pseudo_list: &[(&'a str, &'a str)],
     headers: &'a [HeaderPair],
-) -> Vec<u8> {
-    let count = pseudo_list.len() + headers.len();
+) -> &'e [u8] {
     let pairs = pseudo_list
         .iter()
         .copied()
         .chain(headers.iter().map(|(n, v)| (n.as_ref(), v.as_ref())));
-    encoder.encode_header_block_iter(pairs, count)
+    encoder.encode_block(pairs)
 }

@@ -1,0 +1,4 @@
+leyline source: commit 9d0b91ff (bench client lib.rs from 4084f1a0).
+The leyline_git line in receipts.txt is the bench checkout's own HEAD; its files came from git archive of the commit above.
+The sha256 lines in receipts.txt identify the exact binaries.
+Run: ROUNDS=10 PROTO=h2 SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 libs.sh

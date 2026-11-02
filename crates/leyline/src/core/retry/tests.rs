@@ -1,6 +1,6 @@
 use super::wait::unix_from_ymd_hms;
 use super::*;
-use crate::core::error::{Cause, Error, Kind};
+use crate::core::error::{Error, Kind};
 
 fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
     let mut headers = http::HeaderMap::new();
@@ -9,11 +9,11 @@ fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
     }
     Response::from_parts(crate::core::response::Parts {
         status: StatusCode::from_u16(status).unwrap(),
-        version: crate::core::HttpVersion::Http2,
+        version: http::Version::HTTP_2,
         headers,
-        trailers: Vec::new(),
+        trailers: None,
         body: crate::core::response::ResponseBody::Buffered(Vec::new()),
-        url: url::Url::parse("https://example.test/").unwrap(),
+        url: std::sync::Arc::new(url::Url::parse("https://example.test/").unwrap()),
         redirect_chain: Vec::new(),
         request_headers: Vec::new(),
         tls: None,
@@ -41,12 +41,12 @@ fn grid() -> Vec<(&'static str, Result<Response>)> {
         ("503 retry-after 120", Ok(grid_response(503, Some("120")))),
         ("504", Ok(grid_response(504, None))),
         ("block 403", Ok(grid_response(403, None))),
-        ("connect refused", Err(Error::new(Cause::Connect))),
+        ("connect refused", Err(Error::new(Kind::Connect))),
         (
             "tls handshake timeout",
             Err(Error::from(crate::tls::TlsError::HandshakeIo(handshake))),
         ),
-        ("timeout after send", Err(Error::new(Cause::Timeout))),
+        ("timeout after send", Err(Error::new(Kind::Timeout))),
         ("reset after send", Err(Error::from(reset))),
     ]
 }

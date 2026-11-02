@@ -26,12 +26,18 @@ async fn serve_h2(mut stream: SslStream<TcpStream>, refuse_after: Option<usize>)
     read_preface(&mut stream).await;
     write_server_settings(&mut stream).await;
     let mut answered = 0;
+    let mut received = 0;
     loop {
-        let (frame, _) = read_frame(&mut stream).await;
+        let (frame, payload) = read_frame(&mut stream).await;
         if frame.frame_type == FrameType::Settings as u8 && frame.flags & SETTINGS_ACK == 0 {
             write_settings_ack(&mut stream).await;
         }
-        if frame.frame_type != FrameType::Headers as u8 || frame.flags & END_STREAM == 0 {
+        if frame.frame_type == FrameType::Data as u8 {
+            received += payload.len();
+        }
+        let ends = frame.frame_type == FrameType::Headers as u8
+            || frame.frame_type == FrameType::Data as u8;
+        if !ends || frame.flags & END_STREAM == 0 {
             continue;
         }
         if refuse_after.is_some_and(|limit| answered >= limit) {
@@ -42,7 +48,8 @@ async fn serve_h2(mut stream: SslStream<TcpStream>, refuse_after: Option<usize>)
             continue;
         }
         write_response_headers(&mut stream, frame.stream_id).await;
-        write_data(&mut stream, frame.stream_id, b"ok", true).await;
+        let body = std::mem::take(&mut received).to_string();
+        write_data(&mut stream, frame.stream_id, body.as_bytes(), true).await;
         answered += 1;
     }
 }
@@ -87,8 +94,13 @@ async fn an_http1_fallback_that_reaches_h2_sends_on_h2() {
         .bytes()
         .await
         .unwrap();
-    let resp = session.get(format!("{url}b")).send().await.unwrap();
+    let resp = session
+        .put(format!("{url}b"))
+        .body("hello")
+        .send()
+        .await
+        .unwrap();
     assert_eq!(resp.version(), http::Version::HTTP_2);
-    assert_eq!(resp.bytes().await.unwrap(), "ok");
+    assert_eq!(resp.bytes().await.unwrap(), "5");
     assert_eq!(connections.load(Ordering::SeqCst), 3);
 }

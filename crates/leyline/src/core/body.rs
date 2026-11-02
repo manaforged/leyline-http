@@ -1,12 +1,36 @@
 use std::fmt;
 use std::io;
 use std::pin::Pin;
+use std::sync::{Mutex, PoisonError};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures_util::Stream;
 
-pub(crate) type BoxedStream = Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>>;
+pub(crate) type BoxedStream =
+    Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + Sync + 'static>>;
+
+fn exclusive<S>(stream: S) -> BoxedStream
+where
+    S: Stream<Item = io::Result<Bytes>> + Send + Unpin + 'static,
+{
+    Box::pin(Exclusive(Mutex::new(stream)))
+}
+
+struct Exclusive<S>(Mutex<S>);
+
+impl<S: Stream + Unpin> Stream for Exclusive<S> {
+    type Item = S::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let stream = self
+            .get_mut()
+            .0
+            .get_mut()
+            .unwrap_or_else(PoisonError::into_inner);
+        Pin::new(stream).poll_next(cx)
+    }
+}
 
 #[derive(Default)]
 pub(crate) enum BodyKind {
@@ -19,7 +43,7 @@ pub(crate) enum BodyKind {
     },
 }
 
-/// A request body: empty, in-memory bytes, or a stream.
+/// An HTTP body, sent or received: empty, in-memory bytes, or a stream.
 #[derive(Default)]
 pub struct Body(pub(crate) BodyKind);
 
@@ -38,7 +62,7 @@ impl fmt::Debug for Body {
 }
 
 impl Stream for Body {
-    type Item = io::Result<Bytes>;
+    type Item = crate::Result<Bytes>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match &mut self.0 {
@@ -47,7 +71,10 @@ impl Stream for Body {
                 BodyKind::Bytes(b) => Poll::Ready(Some(Ok(b))),
                 _ => Poll::Ready(None),
             },
-            BodyKind::Stream { stream, .. } => stream.as_mut().poll_next(cx),
+            BodyKind::Stream { stream, .. } => stream
+                .as_mut()
+                .poll_next(cx)
+                .map(|chunk| chunk.map(|chunk| chunk.map_err(crate::Error::from))),
         }
     }
 }
@@ -56,7 +83,7 @@ const EXCEEDED_DECLARED: &str = "streaming body exceeded declared content-length
 const ENDED_BEFORE_DECLARED: &str = "streaming body ended before declared content-length";
 
 struct Declared {
-    inner: BoxedStream,
+    inner: Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>>,
     declared: u64,
     sent: u64,
     done: bool,
@@ -115,18 +142,29 @@ impl Body {
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
-        let stream: BoxedStream = match length {
-            Some(declared) => Box::pin(Declared {
-                inner: Box::pin(stream),
+        let stream = Box::pin(stream);
+        let stream = match length {
+            Some(declared) => exclusive(Declared {
+                inner: stream,
                 declared,
                 sent: 0,
                 done: false,
             }),
-            None => Box::pin(stream),
+            None => exclusive(stream),
         };
         Body(BodyKind::Stream {
             stream,
             length_hint: length,
+        })
+    }
+
+    pub(crate) fn shared<S>(stream: S) -> Self
+    where
+        S: Stream<Item = io::Result<Bytes>> + Send + Sync + 'static,
+    {
+        Body(BodyKind::Stream {
+            stream: Box::pin(stream),
+            length_hint: None,
         })
     }
 
@@ -149,21 +187,6 @@ impl Body {
             BodyKind::Empty => (None, None),
             BodyKind::Bytes(b) => (Some(b), None),
             BodyKind::Stream { stream, .. } => (None, Some(stream)),
-        }
-    }
-
-    pub(crate) fn into_h2(self) -> crate::h2::client::RequestBody {
-        use crate::h2::client::RequestBody;
-        match self.0 {
-            BodyKind::Empty => RequestBody::None,
-            BodyKind::Bytes(b) => RequestBody::Buffered(b),
-            BodyKind::Stream {
-                stream,
-                length_hint,
-            } => RequestBody::Streaming {
-                stream,
-                length_hint,
-            },
         }
     }
 

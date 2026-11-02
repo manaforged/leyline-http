@@ -180,3 +180,41 @@ async fn no_listener_fires_nothing() {
     assert_eq!(resp.status().as_u16(), 200);
     assert!(!super::on(), "no scope outside a traced request");
 }
+
+#[derive(Default)]
+struct HeadWait(Mutex<Option<std::time::Duration>>);
+
+impl Trace for HeadWait {
+    fn event(&self, event: &Event<'_>) {
+        if let Event::Head { elapsed, .. } = *event {
+            *lock(&self.0) = Some(elapsed);
+        }
+    }
+}
+
+#[tokio::test]
+async fn head_time_ends_when_the_headers_arrive() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut sock, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 4096];
+        assert!(sock.read(&mut buf).await.unwrap() > 0);
+        sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n")
+            .await
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        sock.write_all(b"hi").await.unwrap();
+    });
+    let hook = Arc::new(HeadWait::default());
+    let session = Session::builder().trace(Arc::clone(&hook)).build().unwrap();
+
+    let resp = session.get(format!("http://{addr}/")).send().await.unwrap();
+    assert_eq!(resp.text().await.unwrap(), "hi");
+
+    let elapsed = lock(&hook.0).expect("a head event");
+    assert!(
+        elapsed < std::time::Duration::from_millis(250),
+        "head time includes the body wait: {elapsed:?}"
+    );
+}

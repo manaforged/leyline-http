@@ -30,14 +30,17 @@ const WAIT: Duration = Duration::from_secs(3);
 #[tokio::test(flavor = "multi_thread")]
 async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
     let cases = Browser::all().iter().flat_map(|&browser| {
-        Platform::all().iter().filter_map(move |&platform| {
-            Session::builder()
-                .browser(browser)
-                .platform(platform)
-                .build()
-                .ok()
-                .map(|_| (browser, platform))
-        })
+        Platform::all()
+            .iter()
+            .filter(|&&platform| platform != Platform::Host)
+            .filter_map(move |&platform| {
+                Session::builder()
+                    .browser(browser)
+                    .platform(platform)
+                    .build()
+                    .ok()
+                    .map(|_| (browser, platform))
+            })
     });
     let rendered: String = futures_util::future::join_all(cases.map(|(browser, platform)| {
         tokio::spawn(async move {

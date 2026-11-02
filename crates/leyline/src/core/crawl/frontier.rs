@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use url::{Host, Url};
 
-use crate::cookie::parse::registrable_domain;
 use crate::core::config::{Origin, normalize_host};
+use crate::core::registrable_domain;
 use crate::core::robots::normalize;
 use crate::html::WEB_SCHEMES;
 

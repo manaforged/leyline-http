@@ -1,15 +1,16 @@
 use crate::h2_support as support;
 
+use futures_util::StreamExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
 use leyline::BrowserProfile;
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{DataFrame, FrameType, HeadersFrame, PingFrame};
 use leyline::h2::hpack;
-use leyline::h2::{Head, RequestBody, ResponseBody};
 use support::*;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
@@ -195,7 +196,7 @@ async fn transfer(config: H2Config, body_len: usize, bulk: bool) {
                 },
                 headers: vec![("user-agent".into(), "test".into())],
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             false,
         ),
     )
@@ -204,7 +205,7 @@ async fn transfer(config: H2Config, body_len: usize, bulk: bool) {
     .expect("request failed");
 
     assert_eq!(resp.status, 200);
-    let ResponseBody::Buffered(body) = resp.body else {
+    let leyline::pool::TransportBody::Buffered(body) = resp.body else {
         panic!("buffered body")
     };
     assert_eq!(body.len(), body_len);
@@ -313,13 +314,13 @@ async fn backpressure(orphaned: bool) {
                 },
                 headers: Vec::new(),
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             true,
         )
         .await
         .expect("streaming response");
     assert_eq!(response.status, 200);
-    let ResponseBody::Streaming(mut body) = response.body else {
+    let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
         panic!("streaming body");
     };
     timeout(Duration::from_secs(3), ready_rx)
@@ -331,7 +332,7 @@ async fn backpressure(orphaned: bool) {
         sleep(Duration::from_millis(750)).await;
     }
     let mut received = Vec::new();
-    while let Some(chunk) = timeout(Duration::from_secs(3), body.recv())
+    while let Some(chunk) = timeout(Duration::from_secs(3), body.next())
         .await
         .expect("body resumes after consumption")
     {

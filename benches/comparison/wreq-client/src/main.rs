@@ -1,15 +1,30 @@
 use std::env;
 use std::fs;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
+use serde::Deserialize;
+use serde::de::IntoDeserializer;
+use serde::de::value::Error as ValueError;
 use wreq::Client;
 use wreq::header::{HeaderMap, HeaderName, HeaderValue};
 use wreq::tls::trust::CertStore;
-use wreq_util::Emulation;
+use wreq_util::Profile;
+
+fn emulation() -> Profile {
+    let version = env::var("CMP_CHROME").unwrap_or_else(|_| "149".into());
+    let name = format!("chrome_{version}");
+    Profile::deserialize(IntoDeserializer::<ValueError>::into_deserializer(
+        name.as_str(),
+    ))
+    .unwrap_or_else(|_| panic!("wreq has no {name} emulation"))
+}
 
 fn build(ca: Option<&[u8]>) -> Client {
-    let mut b = Client::builder().emulation(Emulation::Chrome149);
+    let mut b = Client::builder().emulation(emulation());
+    if h1() {
+        b = b.http1_only();
+    }
     if env::var_os("CMP_RECONNECT").is_some() {
         b = b.pool_max_idle_per_host(0);
     }
@@ -40,7 +55,43 @@ fn build(ca: Option<&[u8]>) -> Client {
     {
         b = b.proxy(wreq::Proxy::all(p).expect("proxy url"));
     }
+    if let Some(limit) = request_timeout() {
+        b = b.timeout(limit);
+    }
     b.build().expect("wreq client builds")
+}
+
+fn request_timeout() -> Option<Duration> {
+    static LIMIT: std::sync::LazyLock<Option<Duration>> =
+        std::sync::LazyLock::new(|| match env::var("CMP_TIMEOUT").as_deref() {
+            Err(_) | Ok("default" | "none") => None,
+            Ok(v) => Some(
+                v.strip_suffix('s')
+                    .and_then(|n| n.parse().ok())
+                    .filter(|&n: &u64| n > 0)
+                    .map(Duration::from_secs)
+                    .unwrap_or_else(|| {
+                        panic!("CMP_TIMEOUT must be default, none or <N>s, got {v}")
+                    }),
+            ),
+        });
+    *LIMIT
+}
+
+fn h1() -> bool {
+    match env::var("CMP_PROTO").as_deref() {
+        Ok("h1") => true,
+        Ok("h2") | Err(_) => false,
+        Ok(other) => panic!("CMP_PROTO must be h1 or h2, got {other}"),
+    }
+}
+
+fn version() -> wreq::Version {
+    if h1() {
+        wreq::Version::HTTP_11
+    } else {
+        wreq::Version::HTTP_2
+    }
 }
 
 fn fnv1a(bytes: &[u8]) -> u64 {
@@ -67,6 +118,17 @@ async fn main() {
         None => Arc::from(b"ok-10byte!".as_slice()),
     };
     let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(|s| s.as_str()) == Some("profiles") {
+        for profile in Profile::VARIANTS {
+            if let Some(Ok(version)) = format!("{profile:?}")
+                .strip_prefix("Chrome")
+                .map(str::parse::<u32>)
+            {
+                println!("{version}");
+            }
+        }
+        return;
+    }
     let url = args
         .get(1)
         .cloned()
@@ -101,76 +163,79 @@ async fn main() {
     if args.get(2).map(|s| s.as_str()) == Some("paced") {
         let rate: u64 = args.get(3).and_then(|s| s.parse().ok()).expect("rate");
         let seconds: u64 = args.get(4).and_then(|s| s.parse().ok()).expect("seconds");
-        let concurrency: usize = args.get(5).and_then(|s| s.parse().ok()).expect("concurrency");
+        let concurrency: usize = args
+            .get(5)
+            .and_then(|s| s.parse().ok())
+            .expect("concurrency");
         assert!(rate > 0 && seconds > 0 && concurrency > 0);
         let client = build(ca.as_deref());
         let response = client.get(url.as_str()).send().await.expect("paced warmup");
         assert_eq!(response.status().as_u16(), 200);
-        assert!(&response.bytes().await.expect("paced warmup body")[..] == expected.as_ref(), "response body mismatch");
-        let (tx, rx) = tokio::sync::mpsc::channel::<tokio::time::Instant>(concurrency);
-        let rx = Arc::new(tokio::sync::Mutex::new(rx));
+        assert!(
+            &response.bytes().await.expect("paced warmup body")[..] == expected.as_ref(),
+            "response body mismatch"
+        );
+        let start = tokio::time::Instant::now() + std::time::Duration::from_millis(50);
+        let per = rate.saturating_mul(seconds) / concurrency as u64;
+        let gap = std::time::Duration::from_secs_f64(concurrency as f64 / rate as f64);
         let mut handles = Vec::with_capacity(concurrency);
-        for _ in 0..concurrency {
+        for worker in 0..concurrency {
             let c = client.clone();
             let u = url.clone();
             let expected = Arc::clone(&expected);
-            let rx = Arc::clone(&rx);
+            let offset = gap.mul_f64(worker as f64 / concurrency as f64);
             handles.push(tokio::spawn(async move {
-                let mut service = Vec::new();
-                let mut corrected = Vec::new();
-                loop {
-                    let intended = {
-                        let mut guard = rx.lock().await;
-                        match guard.recv().await {
-                            Some(t) => t,
-                            None => break,
-                        }
-                    };
+                let mut rows = Vec::with_capacity(per as usize);
+                for i in 0..per {
+                    let intended = start + offset + gap.mul_f64(i as f64);
+                    tokio::time::sleep_until(intended).await;
                     let actual = tokio::time::Instant::now();
                     let resp = c.get(u.as_str()).send().await.expect("paced req");
                     assert_eq!(resp.status().as_u16(), 200);
-                    assert!(&resp.bytes().await.expect("paced body")[..] == expected.as_ref(), "response body mismatch");
+                    assert!(
+                        &resp.bytes().await.expect("paced body")[..] == expected.as_ref(),
+                        "response body mismatch"
+                    );
                     let done = tokio::time::Instant::now();
-                    service.push(done.duration_since(actual).as_micros() as u32);
-                    corrected.push(done.duration_since(intended).as_micros() as u32);
+                    rows.push((
+                        intended.duration_since(start).as_micros() as u32,
+                        actual.duration_since(intended).as_micros() as u32,
+                        done.duration_since(actual).as_micros() as u32,
+                    ));
                 }
-                (service, corrected)
+                rows
             }));
         }
-        let start = tokio::time::Instant::now();
-        let total = rate.saturating_mul(seconds);
-        for i in 0..total {
-            let due = start + std::time::Duration::from_secs_f64(i as f64 / rate as f64);
-            tokio::time::sleep_until(due).await;
-            if tx.send(due).await.is_err() {
-                break;
-            }
-        }
-        drop(tx);
-        let mut service = Vec::new();
-        let mut corrected = Vec::new();
+        let mut rows: Vec<(u32, u32, u32)> = Vec::new();
         for handle in handles {
-            let (s, c) = handle.await.expect("join");
-            service.extend(s);
-            corrected.extend(c);
+            rows.extend(handle.await.expect("join"));
         }
         let elapsed = start.elapsed().as_secs_f64();
         let pct = |values: &mut Vec<u32>, p: f64| {
             values.sort_unstable();
             values[((values.len() - 1) as f64 * p).round() as usize]
         };
+        let mut service: Vec<u32> = rows.iter().map(|r| r.2).collect();
+        let mut lag: Vec<u32> = rows.iter().map(|r| r.1).collect();
+        let mut corrected: Vec<u32> = rows.iter().map(|r| r.1 + r.2).collect();
         println!(
-            "PACED rate={rate} completed={} elapsed_s={elapsed:.3} rps={:.1} service_p50_us={} service_p90_us={} service_p99_us={} corrected_p50_us={} corrected_p90_us={} corrected_p99_us={} corrected_p999_us={}",
-            corrected.len(),
-            corrected.len() as f64 / elapsed,
+            "PACED rate={rate} completed={} elapsed_s={elapsed:.3} rps={:.1} service_p50_us={} service_p99_us={} service_p999_us={} service_max_us={} lag_p50_us={} lag_p999_us={} corrected_p50_us={} corrected_p99_us={} corrected_p999_us={}",
+            rows.len(),
+            rows.len() as f64 / elapsed,
             pct(&mut service, 0.50),
-            pct(&mut service, 0.90),
             pct(&mut service, 0.99),
+            pct(&mut service, 0.999),
+            pct(&mut service, 1.0),
+            pct(&mut lag, 0.50),
+            pct(&mut lag, 0.999),
             pct(&mut corrected, 0.50),
-            pct(&mut corrected, 0.90),
             pct(&mut corrected, 0.99),
             pct(&mut corrected, 0.999),
         );
+        rows.sort_unstable_by_key(|r| std::cmp::Reverse(r.2));
+        for r in rows.iter().take((rows.len() / 1000).max(1)) {
+            println!("SLOW at_us={} service_us={} lag_us={}", r.0, r.2, r.1);
+        }
         return;
     }
 
@@ -179,17 +244,26 @@ async fn main() {
     let conc_n: usize = args.get(4).and_then(|s| s.parse().ok()).unwrap_or(20000);
     let conc_c: usize = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(64);
 
-    let connections: usize = env::var("CMP_CONNECTIONS").ok().and_then(|v| v.parse().ok()).unwrap_or(1).max(1);
+    let connections: usize = env::var("CMP_CONNECTIONS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1)
+        .max(1);
     let clients: Vec<Client> = (0..connections).map(|_| build(ca.as_deref())).collect();
     let client = clients[0].clone();
     let response = client.get(url.as_str()).send().await.expect("warmup");
     assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.version(), version(), "response HTTP version");
     assert!(
         &response.bytes().await.expect("warmup body")[..] == expected.as_ref(),
         "response body mismatch"
     );
     for extra in clients.iter().skip(1) {
-        let response = extra.get(url.as_str()).send().await.expect("connection warmup");
+        let response = extra
+            .get(url.as_str())
+            .send()
+            .await
+            .expect("connection warmup");
         assert_eq!(response.status().as_u16(), 200);
         assert!(
             &response.bytes().await.expect("connection warmup body")[..] == expected.as_ref(),
@@ -267,11 +341,7 @@ async fn main() {
                 &fresh
             }
         };
-        let resp = client
-            .get(url.as_str())
-            .send()
-            .await
-            .expect("cold req");
+        let resp = client.get(url.as_str()).send().await.expect("cold req");
         assert_eq!(resp.status().as_u16(), 200);
         assert!(
             &resp.bytes().await.expect("body")[..] == expected.as_ref(),

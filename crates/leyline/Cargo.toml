@@ -96,6 +96,7 @@ toml = { workspace = true }
 # -- networking / TLS
 socket2 = { workspace = true }
 url = { workspace = true, features = ["serde"] }
+percent-encoding = "2.3"
 
 # -- tracing
 tracing = { workspace = true }
@@ -115,6 +116,8 @@ http = "1"
 
 # -- misc
 bytes = { workspace = true }
+memchr = { workspace = true }
+foldhash = { workspace = true }
 encoding_rs = { version = "0.8", optional = true }
 # Mozilla Public Suffix List (compile-time embedded) for cookie
 # registrable-domain + public-suffix checks. Non-optional: the cookie module
@@ -183,7 +186,9 @@ leyline-quiche = { workspace = true, features = ["internal"] }
 # In-test cert generation + a localhost TLS acceptor for the
 # pinning hostname-verification integration test.
 leyline-bssl = { workspace = true }
+leyline-bssl-sys = { workspace = true }
 leyline-bssl-tokio = { workspace = true }
+foreign-types = "0.5"
 tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }

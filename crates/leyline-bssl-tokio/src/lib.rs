@@ -13,10 +13,12 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 mod async_callbacks;
 mod bridge;
+mod records;
 
 use self::bridge::AsyncStreamBridge;
 
 pub use crate::async_callbacks::SslContextBuilderExt;
+pub use crate::records::RecordStream;
 pub use leyline_bssl::ssl::{
     AsyncPrivateKeyMethod, AsyncPrivateKeyMethodError, AsyncSelectCertError, BoxGetSessionFinish,
     BoxGetSessionFuture, BoxPrivateKeyMethodFinish, BoxPrivateKeyMethodFuture, BoxSelectCertFinish,
@@ -135,6 +137,16 @@ impl<S> SslStream<S>
 where
     S: AsyncRead + AsyncWrite + Unpin,
 {
+    /// Moves a finished TLS 1.3 connection onto a [`RecordStream`], or returns it unchanged.
+    pub fn into_records(self) -> Result<RecordStream<S>, Self> {
+        let Some(records) = leyline_bssl::records::Records::new(self.ssl()) else {
+            return Err(self);
+        };
+        let (bridge, ssl) = self.0.detach();
+        let (stream, inbound, unread) = bridge.into_parts();
+        Ok(RecordStream::new(stream, ssl, records, &inbound[unread]))
+    }
+
     pub unsafe fn from_raw_parts(ssl: *mut ffi::SSL, stream: S) -> Self {
         unsafe {
             Self(ssl::SslStream::from_raw_parts(

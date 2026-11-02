@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use leyline::pool::{H1Body, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
+use leyline::pool::{H1Target, Pool, TransportBody, send_request_h1_pooled};
 use leyline::profile::ProfileRegistry;
 use leyline::tls::FingerprintConnector;
 use leyline::{Browser, Platform};
@@ -105,7 +105,7 @@ async fn h1_pool_reuses_connection_for_sequential_requests() {
             "GET",
             &url,
             vec![],
-            H1Body::Empty,
+            leyline::Body::default(),
             None,
             H1Target::OriginForm,
             false,
@@ -113,7 +113,7 @@ async fn h1_pool_reuses_connection_for_sequential_requests() {
         .await
         .expect("request succeeds");
         assert_eq!(resp.status, 200);
-        let H1ResponseBody::Buffered(body) = resp.body else {
+        let TransportBody::Buffered(body) = resp.body else {
             unreachable!("buffered request returns a buffered body");
         };
         assert_eq!(body, b"ok");
@@ -157,7 +157,7 @@ async fn h1_pool_honours_connection_close() {
             "GET",
             &url,
             vec![],
-            H1Body::Empty,
+            leyline::Body::default(),
             None,
             H1Target::OriginForm,
             false,
@@ -225,7 +225,7 @@ async fn h1_pool_recovers_when_server_drops_connection() {
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
         H1Target::OriginForm,
         false,
@@ -245,7 +245,7 @@ async fn h1_pool_recovers_when_server_drops_connection() {
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
         H1Target::OriginForm,
         false,
@@ -358,7 +358,7 @@ async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
                 "GET",
                 &url,
                 vec![],
-                H1Body::Empty,
+                leyline::Body::default(),
                 None,
                 H1Target::OriginForm,
                 false,
@@ -416,7 +416,7 @@ async fn h1_cancelled_request_releases_permit() {
                 "GET",
                 &url,
                 vec![],
-                H1Body::Empty,
+                leyline::Body::default(),
                 None,
                 H1Target::OriginForm,
                 false,
@@ -440,7 +440,7 @@ async fn h1_cancelled_request_releases_permit() {
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
         H1Target::OriginForm,
         false,
@@ -493,7 +493,7 @@ async fn post_is_not_replayed_after_mid_response_close() {
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
         H1Target::OriginForm,
         false,
@@ -512,7 +512,7 @@ async fn post_is_not_replayed_after_mid_response_close() {
         "POST",
         &url,
         vec![],
-        H1Body::Buffered(bytes::Bytes::from_static(b"payload")),
+        leyline::Body::from(bytes::Bytes::from_static(b"payload")),
         None,
         H1Target::OriginForm,
         false,

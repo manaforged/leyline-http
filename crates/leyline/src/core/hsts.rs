@@ -43,8 +43,12 @@ impl HstsStore {
         self.insert(host, policy.include_subdomains, expiry, now);
     }
 
+    pub(crate) fn applies(url: &Url) -> bool {
+        url.scheme() == PLAIN_SCHEME
+    }
+
     pub(crate) fn upgrade(&mut self, url: &Url, now: SystemTime) -> Option<Url> {
-        if url.scheme() != PLAIN_SCHEME {
+        if !Self::applies(url) {
             return None;
         }
         let host = domain(url)?;

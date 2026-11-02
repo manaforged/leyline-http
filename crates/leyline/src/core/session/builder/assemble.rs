@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::profile::preset::{HeaderContext, HeaderPlan};
 use crate::tls::FingerprintConnector;
 
 use super::super::{Session, SessionInner};
@@ -16,20 +17,32 @@ impl SessionBuilder {
         let impersonates = self.impersonates();
         let pool = Arc::new(self.build_pool());
         let cookie_jar = self.cookie_jar.unwrap_or_default();
+        let user_agent = derived.user_agent.into();
+        let sec_ch_ua = derived.sec_ch_ua.into();
+        let accept_language = derived.accept_language.into();
+        let header_plan = HeaderPlan::shared(
+            derived.header_style,
+            &HeaderContext::session(&user_agent, &sec_ch_ua, &accept_language, derived.platform),
+            self.compression.accept_encoding(),
+        );
 
         Session {
             inner: Arc::new(SessionInner {
                 browser: derived.browser,
                 impersonates,
-                header_style: derived.header_style,
+                header_plan,
                 identity: derived.identity,
                 platform: derived.platform,
                 brand: self.brand,
-                user_agent: derived.user_agent.into(),
-                sec_ch_ua: derived.sec_ch_ua.into(),
-                accept_language: derived.accept_language.into(),
+                user_agent,
+                sec_ch_ua,
+                accept_language,
                 header_order: derived.header_order,
-                default_headers: self.default_headers,
+                default_headers: self
+                    .default_headers
+                    .into_iter()
+                    .map(|(name, value)| (name, crate::header_str::HeaderStr::from(value)))
+                    .collect(),
                 bearer: self.bearer,
                 proxy_shown: self.proxy_config.primary().map(crate::util::redact),
                 proxy_config: self.proxy_config,
@@ -43,7 +56,7 @@ impl SessionBuilder {
                 connector,
                 h2_config: derived.h2_config,
                 pool,
-                shutdown: tokio_util::sync::CancellationToken::new(),
+                shutdown: Arc::default(),
                 writers: Arc::default(),
                 audit_tls: derived.audit_tls,
                 protocol_policy: self.protocol_policy,

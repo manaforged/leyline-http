@@ -87,6 +87,12 @@ step. The patches are:
      points. A certificate with many such distribution points grew the heap
      without bound (CVE-2026-35189). A distribution point that uses a relative
      name is now ignored. The upstream test changes are not carried.
+7. `0007-leyline-record-takeover.patch`
+   - `SSL_copy_traffic_secrets` copies the current read and write traffic
+     secrets of a TLS 1.3 connection whose handshake has finished.
+   - `SSL_process_post_handshake` passes one NewSessionTicket message to
+     BoringSSL after the caller has taken over the connection's records.
+   - `prefix_symbols.h` entries for both exports.
 
 BoringSSL provides `SSL_CTX_set_grease_sigalgs_enabled` since commit
 `29e593e29165df578ab778269a1f04da2055c32f`. It puts one GREASE value

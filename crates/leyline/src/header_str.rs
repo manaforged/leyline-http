@@ -21,13 +21,6 @@ impl HeaderStr {
         Self(Bytes::from_static(s.as_bytes()))
     }
 
-    pub(crate) fn from_bytes_lossy(bytes: Bytes) -> Self {
-        match std::str::from_utf8(&bytes) {
-            Ok(_) => Self(bytes),
-            Err(_) => Self(Bytes::from(String::from_utf8_lossy(&bytes).into_owned())),
-        }
-    }
-
     /// Wraps bytes after checking they are UTF-8.
     pub fn from_utf8(bytes: Bytes) -> Result<Self, std::str::Utf8Error> {
         std::str::from_utf8(&bytes)?;

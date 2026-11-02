@@ -1,58 +1,62 @@
 use std::pin::Pin;
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
 use futures_util::Stream;
 
-use super::RequestBuilder;
 use super::route::Route;
+use super::{Draft, RequestBuilder};
 use crate::core::Result;
 use crate::core::body::{Body, BodyKind, BoxedStream};
 use crate::core::deadline::Deadline;
-use crate::core::error::{Cause, Error};
+use crate::core::error::{Error, Kind};
+use crate::core::headers::HeaderList;
 use crate::core::response::Response;
-use crate::core::retry::RetryPlan;
+use crate::core::retry::{Retry, RetryPlan};
 use crate::core::session::Session;
-use crate::core::session::execute::{Attempt, Parts};
 use crate::core::transport::ResponseMode;
 
 impl RequestBuilder {
     /// Sends the request with retries and waits for the response headers.
-    pub async fn send(self) -> Result<Response> {
-        self.run().await
+    pub fn send(self) -> impl Future<Output = Result<Response>> + Send {
+        self.run()
     }
 
-    fn run(mut self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
-        let url = match self.prepare() {
-            Ok(url) => url,
-            Err(error) => return Box::pin(std::future::ready(Err(error))),
-        };
-        let retry_policy = self.retry_policy.clone();
-        let session = self.session.clone();
-        let deadline = session.deadline(self.timeouts.as_ref());
-        let label = self.label.take();
-        let status_errors = self.status_errors;
-        let streamed = self.stream_response;
-        let attempt = self.into_attempt(deadline, Arc::clone(&url));
-        Box::pin(async move {
+    fn run(self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
+        match self.respond() {
+            Ok(respond) => Box::pin(respond),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        }
+    }
+
+    fn respond(mut self) -> Result<impl Future<Output = Result<Response>> + Send + 'static> {
+        let url = self.prepare()?;
+        let retry_policy = std::mem::take(&mut self.draft.retry_policy);
+        let deadline = self.session.deadline(self.draft.timeouts.as_ref());
+        let label = self.draft.label.take();
+        let status_errors = self.draft.status_errors;
+        let streamed = self.draft.stream_response;
+        let (session, attempt) = self.into_attempt(deadline, Arc::clone(&url));
+        Ok(async move {
             let method = attempt.method.clone();
             let mut exhausted = false;
-            let response = session
-                .traced(
-                    method.as_str(),
-                    url.as_str(),
-                    streamed,
-                    run_attempts(
-                        &session,
-                        attempt,
-                        &retry_policy,
-                        deadline,
-                        label,
-                        &mut exhausted,
-                    ),
-                )
-                .await?;
+            let attempts = run_attempts(
+                &session,
+                attempt,
+                &url,
+                &retry_policy,
+                &deadline,
+                label,
+                &mut exhausted,
+            );
+            let response = if session.traces() {
+                session
+                    .traced(method.as_str(), url.as_str(), streamed, attempts)
+                    .await?
+            } else {
+                attempts.await.0?
+            };
             if !status_errors {
                 return Ok(response);
             }
@@ -67,82 +71,69 @@ impl RequestBuilder {
         })
     }
 
-    fn into_attempt(mut self, deadline: Deadline, url: Arc<url::Url>) -> Attempt {
-        let headers = if self.headers.is_empty() {
-            None
-        } else {
-            Some(std::mem::take(&mut self.headers))
-        };
-        Attempt::from(Parts {
-            method: std::mem::take(&mut self.method),
-            url,
-            preset: self.preset,
-            body: std::mem::take(&mut self.body),
-            headers,
-            deadline,
-            response: ResponseMode::new(
-                self.stream_response
-                    || self.body_rules.max_body_size > self.session.body_rules().max_body_size,
-                self.status_errors
-                    .then(|| Session::error_budget(&deadline, &self.body_rules)),
-            ),
-            body_rules: self.body_rules,
-            proxy: self.proxy.take(),
-            header_order: self.header_order.take(),
-            redirect: self.redirect.take(),
-            digest: self.digest_auth.take(),
-            initiator: self.initiator.take(),
-            trusted_origin: self.trusted_origin.take(),
-        })
+    fn into_attempt(self, deadline: Deadline, url: Arc<url::Url>) -> (Session, Box<Draft>) {
+        let Self { session, mut draft } = self;
+        draft.response = ResponseMode::new(
+            draft.stream_response
+                || draft.body_rules.max_body_size > session.body_rules().max_body_size,
+            draft
+                .status_errors
+                .then(|| Session::error_budget(&deadline, &draft.body_rules)),
+        );
+        draft.url = Some(url);
+        draft.deadline = deadline;
+        (session, draft)
     }
 
     pub(crate) fn prepare(&mut self) -> Result<Arc<url::Url>> {
-        if let Some(err) = self.builder_error.take() {
+        if let Some(err) = self.draft.builder_error.take() {
             return Err(err);
         }
-        let Some(mut url) = self.url.take() else {
-            return Err(Error::from_url_parse(url::ParseError::EmptyHost));
+        let Some(mut url) = self.draft.url.take() else {
+            return Err(Error::from(url::ParseError::EmptyHost));
         };
         self.infer_from_content_type();
 
-        if !self.query_params.is_empty() {
-            let mut pairs = url.query_pairs_mut();
-            for (k, v) in &self.query_params {
+        if !self.draft.query_params.is_empty() {
+            let mut pairs = Arc::make_mut(&mut url).query_pairs_mut();
+            for (k, v) in &self.draft.query_params {
                 pairs.append_pair(k, v);
             }
         }
 
-        if let Some(encoding) = self.compress {
-            match &self.body.0 {
+        if let Some(encoding) = self.draft.compress {
+            match &self.draft.body.0 {
                 BodyKind::Bytes(b) => {
                     let compressed = encoding.encode(b)?;
-                    self.headers
+                    self.draft
+                        .headers
                         .set("content-encoding", encoding.header_value())?;
-                    self.body = Body::from(compressed);
+                    self.draft.body = Body::from(compressed);
                 }
                 BodyKind::Empty => {}
                 BodyKind::Stream { .. } => {
-                    return Err(Error::new(Cause::Body).with_message(
+                    return Err(Error::new(Kind::Body).with_message(
                         "request-body compression is not supported for streaming bodies; \
                          buffer the body into bytes before calling `.compress_body(..)`",
                     ));
                 }
             }
         }
-        Ok(Arc::new(url))
+        Ok(url)
     }
 }
 
 async fn run_attempts(
     session: &crate::core::session::Session,
-    mut attempt: Attempt,
-    retry_policy: &crate::core::retry::Retry,
-    deadline: Deadline,
+    mut attempt: Box<Draft>,
+    url: &Arc<url::Url>,
+    retry_policy: &Retry,
+    deadline: &Deadline,
     label: Option<String>,
     exhausted: &mut bool,
 ) -> (Result<Response>, u32) {
     crate::trace::note_label(label);
-    let mut route = Route::new(session, &attempt, retry_policy);
+    let mut route = Route::new(session, Arc::clone(url), &attempt, retry_policy);
     if retry_policy.is_none() {
         return (counted(route.send(attempt).await, 1), 1);
     }
@@ -191,6 +182,36 @@ async fn run_attempts(
     }
 }
 
+impl Draft {
+    fn again(&self, body: Body, headers: HeaderList) -> Box<Draft> {
+        Box::new(Draft {
+            method: self.method.clone(),
+            url: self.url.clone(),
+            preset: self.preset,
+            body,
+            headers,
+            query_params: Vec::new(),
+            timeouts: None,
+            builder_error: None,
+            stream_response: self.stream_response,
+            compress: None,
+            retry_policy: Retry::default(),
+            digest_auth: self.digest_auth.clone(),
+            proxy: self.proxy.clone(),
+            header_order: self.header_order.clone(),
+            preset_user: self.preset_user,
+            redirect: self.redirect.clone(),
+            initiator: self.initiator.clone(),
+            trusted_origin: self.trusted_origin.clone(),
+            label: None,
+            status_errors: self.status_errors,
+            body_rules: self.body_rules,
+            deadline: self.deadline,
+            response: self.response,
+        })
+    }
+}
+
 fn counted(result: Result<Response>, attempts: u32) -> Result<Response> {
     result
         .map(|mut response| {
@@ -209,10 +230,6 @@ struct Slot {
 }
 
 type SharedSlot = Arc<Mutex<Slot>>;
-
-fn lock(slot: &SharedSlot) -> MutexGuard<'_, Slot> {
-    slot.lock().unwrap_or_else(PoisonError::into_inner)
-}
 
 struct Rewind {
     slot: SharedSlot,
@@ -252,7 +269,7 @@ impl Rewind {
     }
 
     fn reclaim(&mut self) -> bool {
-        let mut slot = lock(&self.slot);
+        let mut slot = crate::util::lock(&self.slot);
         if slot.polled {
             return false;
         }
@@ -276,7 +293,7 @@ impl Stream for Reclaim {
     type Item = std::io::Result<Bytes>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let mut slot = lock(&self.0);
+        let mut slot = crate::util::lock(&self.0);
         slot.polled = true;
         match slot.stream.as_mut() {
             Some(stream) => stream.as_mut().poll_next(cx),

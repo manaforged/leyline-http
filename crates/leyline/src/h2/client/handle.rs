@@ -7,13 +7,24 @@ use crate::h2::error::{ErrorCode, H2Error};
 
 #[cfg(feature = "websocket")]
 use super::driver::PeerSettingsSnapshot;
-use super::driver::{DriverCommand, Head, ResponseSink};
-use super::types::{H2ResponseEx, RequestBody, ResponseBody};
+use super::driver::{CommandTx, DriverCommand, Head, ResponseSink};
+use crate::core::Body;
+use crate::core::BodyStream;
 use crate::core::ResponseMode;
+use crate::core::transport::{TransportBody, TransportResponse};
 
 #[derive(Clone)]
 pub struct H2Client {
-    pub(super) tx: mpsc::Sender<DriverCommand>,
+    pub(super) shared: Arc<Shared>,
+}
+
+const _: () = assert!(
+    size_of::<H2Client>() == size_of::<usize>(),
+    "the pool clones H2Client for every request; keep it one shared pointer"
+);
+
+pub(super) struct Shared {
+    pub(super) tx: CommandTx,
     pub(super) ping_tx: mpsc::Sender<oneshot::Sender<()>>,
     pub(super) closed: Arc<AtomicBool>,
     pub(super) unanswered_timeout: Arc<AtomicBool>,
@@ -25,24 +36,26 @@ pub struct H2Client {
 impl H2Client {
     /// Returns the streams open or reserved on this connection.
     pub fn load(&self) -> usize {
-        self.streams.open.load(Ordering::Relaxed) + self.streams.reserved.load(Ordering::Relaxed)
+        self.shared.streams.open.load(Ordering::Relaxed)
+            + self.shared.streams.reserved.load(Ordering::Relaxed)
     }
 
     /// Reserves a stream slot while the connection is under its capacity.
     pub fn reserve(&self) -> Option<Slot> {
-        let capacity = self.streams.capacity.load(Ordering::Relaxed);
-        let open = self.streams.open.load(Ordering::Relaxed);
-        self.streams
+        let capacity = self.shared.streams.capacity.load(Ordering::Relaxed);
+        let open = self.shared.streams.open.load(Ordering::Relaxed);
+        self.shared
+            .streams
             .reserved
             .fetch_update(Ordering::AcqRel, Ordering::Relaxed, |reserved| {
                 (open + reserved < capacity).then_some(reserved + 1)
             })
             .ok()
-            .map(|_| Slot(Arc::clone(&self.streams)))
+            .map(|_| Slot(Arc::clone(&self.shared.streams)))
     }
 
     pub fn open_streams(&self) -> usize {
-        self.streams.open.load(Ordering::Relaxed)
+        self.shared.streams.open.load(Ordering::Relaxed)
     }
 
     #[cfg_attr(
@@ -52,27 +65,27 @@ impl H2Client {
     pub async fn send_shared(
         &self,
         head: Arc<Head>,
-        body: RequestBody,
+        body: Body,
         mode: impl Into<ResponseMode>,
-    ) -> Result<H2ResponseEx, H2Error> {
+    ) -> Result<TransportResponse, H2Error> {
         self.send_reserved(head, body, mode.into(), None).await
     }
 
     pub(crate) async fn send_reserved(
         &self,
         head: Arc<Head>,
-        body: RequestBody,
+        body: Body,
         mode: ResponseMode,
         slot: Option<Slot>,
-    ) -> Result<H2ResponseEx, H2Error> {
-        if self.closed.load(Ordering::Acquire) {
+    ) -> Result<TransportResponse, H2Error> {
+        if self.shared.closed.load(Ordering::Acquire) {
             return Err(H2Error::Stream {
                 stream_id: 0,
                 code: ErrorCode::RefusedStream,
             });
         }
 
-        let (response_tx, response_rx) = oneshot::channel::<Result<H2ResponseEx, H2Error>>();
+        let (response_tx, response_rx) = oneshot::channel::<Result<TransportResponse, H2Error>>();
         let (sink, stream_body_rx) = match mode {
             ResponseMode::Buffered => (ResponseSink::Buffered(response_tx), None),
             ResponseMode::Streamed => {
@@ -91,7 +104,7 @@ impl H2Client {
             sink,
             slot,
         };
-        self.tx.send(cmd).await.map_err(|e| {
+        self.shared.tx.send(cmd).await.map_err(|e| {
             tracing::debug!(error = %e, "h2 driver command channel closed");
             H2Error::Stream {
                 stream_id: 0,
@@ -102,9 +115,9 @@ impl H2Client {
         match response_rx.await {
             Ok(Ok(mut resp)) => {
                 if let Some(rx) = stream_body_rx
-                    && mode.keeps_stream(resp.status)
+                    && mode.keeps_stream(resp.status.as_u16())
                 {
-                    resp.body = ResponseBody::Streaming(rx);
+                    resp.body = TransportBody::Streaming(Box::new(BodyStream::new(rx)));
                 }
                 Ok(resp)
             }
@@ -117,14 +130,15 @@ impl H2Client {
     }
 
     pub async fn ping(&self) -> Result<(), H2Error> {
-        if self.closed.load(Ordering::Acquire) {
+        if self.shared.closed.load(Ordering::Acquire) {
             return Err(H2Error::Connection {
                 code: ErrorCode::NoError,
                 reason: "connection closed".into(),
             });
         }
         let (ack_tx, ack_rx) = oneshot::channel();
-        self.ping_tx
+        self.shared
+            .ping_tx
             .send(ack_tx)
             .await
             .map_err(|e| H2Error::Connection {
@@ -138,11 +152,11 @@ impl H2Client {
     }
 
     pub fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::Acquire)
+        self.shared.closed.load(Ordering::Acquire)
     }
 
     pub(crate) fn take_unanswered_timeout(&self) -> bool {
-        self.unanswered_timeout.swap(false, Ordering::AcqRel)
+        self.shared.unanswered_timeout.swap(false, Ordering::AcqRel)
     }
 }
 

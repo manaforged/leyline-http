@@ -1,8 +1,8 @@
 use std::time::Duration;
 
+use crate::Error;
 use crate::h2::config::{PseudoOrder, parse_pseudo_order};
 use crate::profile::{BrowserProfile, H3Profile, TlsProfile};
-use crate::{Cause, Error};
 
 const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x06;
 
@@ -49,7 +49,7 @@ impl H3Config {
     /// Builds the config from the `[h3]` table of a browser profile, and fails when the profile has none.
     pub fn from_profile(profile: &BrowserProfile) -> Result<Self, Error> {
         let h3 = profile.h3.as_ref().ok_or_else(|| {
-            Error::new(Cause::Config).with_message(format!(
+            Error::config(format!(
                 "profile {} has no [h3] table, so it has no HTTP/3 transport",
                 profile.meta.name
             ))

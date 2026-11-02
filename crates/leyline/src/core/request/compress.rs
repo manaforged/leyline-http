@@ -4,7 +4,7 @@
     feature = "compression-zstd",
     feature = "compression-deflate"
 )))]
-use crate::core::error::Cause;
+use crate::core::error::Kind;
 use crate::core::error::{Error, Result};
 
 /// A content encoding for compressing a request body.
@@ -105,7 +105,7 @@ fn deflate(_data: &[u8]) -> Result<Vec<u8>> {
     feature = "compression-deflate"
 )))]
 fn feature_off(codec: &str, feature: &str) -> Error {
-    Error::new(Cause::Body).with_message(format!(
+    Error::new(Kind::Body).with_message(format!(
         "{codec} request compression requested but the `{feature}` feature is not compiled in"
     ))
 }

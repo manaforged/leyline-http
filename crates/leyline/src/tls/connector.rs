@@ -171,11 +171,11 @@ impl FingerprintConnector {
         &self,
         host: &str,
         port: u16,
-        proxy: Option<&str>,
+        proxy: Option<&url::Url>,
     ) -> Result<TlsStream, TlsError> {
         match proxy {
-            Some(proxy_url) => {
-                self.connect_via_proxy(host, port, proxy_url, AlpnPlan::Browser)
+            Some(proxy) => {
+                self.connect_via_proxy(host, port, proxy, AlpnPlan::Browser)
                     .await
             }
             None => {
@@ -189,11 +189,11 @@ impl FingerprintConnector {
         &self,
         host: &str,
         port: u16,
-        proxy: Option<&str>,
+        proxy: Option<&url::Url>,
     ) -> Result<TlsStream, TlsError> {
         match proxy {
-            Some(proxy_url) => {
-                self.connect_via_proxy(host, port, proxy_url, AlpnPlan::Http11)
+            Some(proxy) => {
+                self.connect_via_proxy(host, port, proxy, AlpnPlan::Http11)
                     .await
             }
             None => {
@@ -207,19 +207,18 @@ impl FingerprintConnector {
         &self,
         host: &str,
         port: u16,
-        proxy_url: &str,
+        proxy: &url::Url,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
-        let proxy = crate::tls::proxy::parse(proxy_url)?;
         let started = Instant::now();
         let tunnel = self
-            .with_timeout(crate::tls::proxy::open_tunnel(self, host, port, &proxy))
+            .with_timeout(crate::tls::proxy::open_tunnel(self, host, port, proxy))
             .await
             .map_err(TlsError::into_proxy)?;
         let remaining = self
             .connect_timeout
             .map(|budget| budget.saturating_sub(started.elapsed()));
-        let handshake = crate::tls::proxy::handshake(self, tunnel, host, port, &proxy, plan);
+        let handshake = crate::tls::proxy::handshake(self, tunnel, host, port, proxy, plan);
         within(remaining, handshake)
             .await
             .map_err(|Elapsed| connect_timeout())?

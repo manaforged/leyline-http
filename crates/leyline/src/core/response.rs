@@ -5,7 +5,7 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use url::Url;
 
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Cause, Error};
+use crate::core::error::{Error, Kind};
 use crate::trace::masked;
 use crate::util::redact;
 
@@ -23,37 +23,17 @@ pub use relay::relay_headers;
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
-    Streaming(BodyStream),
+    Streaming(Box<BodyStream>),
     Taken,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HttpVersion {
-    Http1_1,
-    Http2,
-    #[cfg(feature = "http3")]
-    Http3,
-}
-
-impl From<HttpVersion> for http::Version {
-    fn from(version: HttpVersion) -> Self {
-        match version {
-            HttpVersion::Http1_1 => Self::HTTP_11,
-            HttpVersion::Http2 => Self::HTTP_2,
-            #[cfg(feature = "http3")]
-            HttpVersion::Http3 => Self::HTTP_3,
-        }
-    }
-}
-
-impl HttpVersion {
-    pub(crate) fn ja4h_token(self) -> &'static str {
-        match self {
-            Self::Http1_1 => "1",
-            Self::Http2 => "2",
-            #[cfg(feature = "http3")]
-            Self::Http3 => "3",
-        }
+pub(crate) fn ja4h_token(version: http::Version) -> &'static str {
+    if version == http::Version::HTTP_2 {
+        "2"
+    } else if version == http::Version::HTTP_3 {
+        "3"
+    } else {
+        "1"
     }
 }
 
@@ -86,7 +66,11 @@ impl ResponseTiming {
     }
 
     pub(crate) fn millis(start: std::time::Instant) -> u32 {
-        u32::try_from(start.elapsed().as_millis()).unwrap_or(u32::MAX)
+        Self::span(start.elapsed())
+    }
+
+    pub(crate) fn span(elapsed: std::time::Duration) -> u32 {
+        u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX)
     }
 
     pub(crate) fn add_leg(&mut self, leg: &ResponseTiming) {
@@ -106,11 +90,11 @@ pub struct Response {
 
 pub(crate) struct Parts {
     pub(crate) status: StatusCode,
-    pub(crate) version: HttpVersion,
+    pub(crate) version: http::Version,
     pub(crate) headers: HeaderMap,
-    pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
+    pub(crate) trailers: Option<Box<HeaderMap>>,
     pub(crate) body: ResponseBody,
-    pub(crate) url: Url,
+    pub(crate) url: Arc<Url>,
     pub(crate) redirect_chain: Vec<Url>,
     pub(crate) request_headers: Vec<(String, String)>,
     pub(crate) tls: Option<crate::pool::TlsInfo>,
@@ -138,7 +122,7 @@ impl Response {
 
     /// Returns the HTTP version of the response.
     pub fn version(&self) -> http::Version {
-        self.parts.version.into()
+        self.parts.version
     }
 
     /// Returns whether every attempt reused a pooled connection.
@@ -204,7 +188,10 @@ impl Response {
 
     /// Returns the response trailers.
     pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
-        self.parts.trailers.iter().map(|(k, v)| (k, v))
+        self.parts
+            .trailers
+            .iter()
+            .flat_map(|trailers| trailers.iter())
     }
 
     /// Parses each `Set-Cookie` header of the response into a cookie.
@@ -256,7 +243,8 @@ impl Response {
 
     /// Returns the `content-length` header value as a number.
     pub fn content_length(&self) -> Option<u64> {
-        self.header("content-length").and_then(|v| v.parse().ok())
+        self.header("content-length")
+            .and_then(crate::util::content_length)
     }
 
     /// Returns the response, or an error of kind `Kind::Status` when the status is an error.
@@ -272,9 +260,9 @@ impl Response {
             return None;
         }
         Some(
-            Error::new(Cause::Status)
+            Error::new(Kind::Status)
                 .with_status(self.parts.status)
-                .with_url(self.parts.url.clone())
+                .with_url(Url::clone(&self.parts.url))
                 .with_headers(self.parts.headers.clone())
                 .with_trail(self.parts.attempts, self.parts.proxy.clone()),
         )
@@ -286,7 +274,7 @@ impl Response {
         Some(self.parts.audit_cache.get_or_init(|| {
             let ja4h = crate::audit::compute_ja4h(&crate::audit::Ja4hInput {
                 method: &self.parts.request_method,
-                http_version: self.parts.version.ja4h_token(),
+                http_version: ja4h_token(self.parts.version),
                 headers: &self.parts.request_headers,
             });
             crate::audit::Fingerprint {
@@ -335,6 +323,7 @@ impl fmt::Debug for Response {
                     self.parts
                         .trailers
                         .iter()
+                        .flat_map(|trailers| trailers.iter())
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
             )

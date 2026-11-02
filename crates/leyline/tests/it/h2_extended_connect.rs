@@ -13,10 +13,10 @@ use leyline::h2::codec::FrameReader;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use std::sync::Arc;
 
+use leyline::h2::Head;
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{DataFrame, Frame, FrameType, HeadersFrame, PingFrame, RstStreamFrame};
 use leyline::h2::hpack;
-use leyline::h2::{Head, RequestBody, ResponseBody};
 
 fn test_config() -> H2Config {
     H2Config {
@@ -191,9 +191,10 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
 
         write_connect_200(&mut server_io, sid).await;
 
-        let mut reader = FrameReader::new(tokio::io::BufReader::new(&mut server_io));
+        let mut buffered = tokio::io::BufReader::new(&mut server_io);
+        let mut reader = FrameReader::new();
         let frame = reader
-            .next()
+            .next(&mut buffered)
             .await
             .expect("frame read")
             .expect("some frame");
@@ -302,18 +303,20 @@ async fn dropping_connect_stream_signals_end_stream() {
         assert!(!end, "extended CONNECT must not carry END_STREAM");
         write_connect_200(&mut server_io, sid1).await;
 
-        let (server_rd, mut server_wr) = tokio::io::split(server_io);
-        let mut reader = FrameReader::new(server_rd);
+        let (mut server_rd, mut server_wr) = tokio::io::split(server_io);
+        let mut reader = FrameReader::new();
         let mut saw_end_stream = false;
         let mut saw_sibling = None::<u32>;
         let deadline = tokio::time::Instant::now() + Duration::from_millis(1_000);
         while tokio::time::Instant::now() < deadline && (!saw_end_stream || saw_sibling.is_none()) {
-            let frame = match tokio::time::timeout(Duration::from_millis(200), reader.next()).await
-            {
-                Ok(Ok(Some(f))) => f,
-                Ok(Ok(None)) => break,
-                _ => continue,
-            };
+            let frame =
+                match tokio::time::timeout(Duration::from_millis(200), reader.next(&mut server_rd))
+                    .await
+                {
+                    Ok(Ok(Some(f))) => f,
+                    Ok(Ok(None)) => break,
+                    _ => continue,
+                };
             match frame {
                 Frame::Data(d) if d.stream_id == sid1 && d.end_stream => {
                     saw_end_stream = true;
@@ -360,15 +363,15 @@ async fn dropping_connect_stream_signals_end_stream() {
                 pseudo,
                 headers: vec![("user-agent".into(), "x".into())],
             }),
-            RequestBody::from(None::<Bytes>),
+            leyline::Body::default(),
             false,
         )
         .await
         .expect("sibling request");
     assert_eq!(resp.status, 200);
     match resp.body {
-        ResponseBody::Buffered(body) => assert_eq!(body, b"sibling-ok"),
-        ResponseBody::Streaming(_) => panic!("expected buffered body"),
+        leyline::pool::TransportBody::Buffered(body) => assert_eq!(body, b"sibling-ok"),
+        leyline::pool::TransportBody::Streaming(_) => panic!("expected buffered body"),
     }
 
     drop(handle);

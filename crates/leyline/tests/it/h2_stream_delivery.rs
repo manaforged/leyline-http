@@ -1,5 +1,6 @@
 use crate::h2_support as support;
 
+use futures_util::StreamExt as _;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,7 +9,7 @@ use bytes::BytesMut;
 use leyline::BrowserProfile;
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FrameType, PingFrame, RstStreamFrame};
-use leyline::h2::{ErrorCode, H2Client, H2Config, Head, RequestBody, ResponseBody};
+use leyline::h2::{ErrorCode, H2Client, H2Config, Head};
 use support::{
     read_frame, read_preface, write_data, write_raw_headers, write_response_headers,
     write_server_settings, write_settings_ack,
@@ -118,13 +119,13 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
                 },
                 headers: Vec::new(),
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             true,
         )
         .await
         .expect("response headers");
     assert_eq!(response.status, 200);
-    let ResponseBody::Streaming(mut body) = response.body else {
+    let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
         panic!("streaming body");
     };
     timeout(Duration::from_secs(3), ready_rx)
@@ -136,7 +137,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
     }
     let mut received = 0;
     let mut failure = None;
-    while let Some(chunk) = timeout(Duration::from_secs(3), body.recv())
+    while let Some(chunk) = timeout(Duration::from_secs(3), body.next())
         .await
         .expect("body delivery")
     {
@@ -150,7 +151,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
             Err(error) => {
                 failure = Some(error);
                 assert!(
-                    timeout(Duration::from_secs(3), body.recv())
+                    timeout(Duration::from_secs(3), body.next())
                         .await
                         .expect("error is terminal")
                         .is_none()

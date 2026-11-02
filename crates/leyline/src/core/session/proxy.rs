@@ -1,4 +1,4 @@
-use crate::core::{Cause, Proxy, ProxyUrl, Result};
+use crate::core::{Kind, Proxy, ProxyUrl, Result};
 
 pub(crate) const CGI_SIGNAL_ENV_VARS: &[&str] = &[
     "GATEWAY_INTERFACE",
@@ -54,7 +54,7 @@ impl Proxy {
             return Ok(self.set_default_proxy(value).set_from_env());
         }
         let config = self.reject_env(variable);
-        match (on_invalid, config.rejection(Cause::Config)) {
+        match (on_invalid, config.rejection(Kind::Config)) {
             (InvalidEnvProxy::FailBuild, Some(error)) => Err(error),
             _ => Ok(config),
         }

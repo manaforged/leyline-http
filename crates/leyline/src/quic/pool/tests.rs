@@ -1,10 +1,22 @@
 use super::driver::{cancelled_stream_ids, command_is_cancelled, fail_all, stream_is_cancelled};
 use super::*;
 
-fn headers(fields: &[(&str, &str)]) -> Vec<(String, String)> {
+fn headers(fields: &[(&str, &str)]) -> Vec<quiche::h3::Header> {
     fields
         .iter()
-        .map(|(name, value)| ((*name).into(), (*value).into()))
+        .map(|(name, value)| quiche::h3::Header::new(name.as_bytes(), value.as_bytes()))
+        .collect()
+}
+
+fn typed(fields: &[(&'static str, &'static str)]) -> http::HeaderMap {
+    fields
+        .iter()
+        .map(|(name, value)| {
+            (
+                http::HeaderName::from_static(name),
+                http::HeaderValue::from_static(value),
+            )
+        })
         .collect()
 }
 
@@ -38,7 +50,7 @@ async fn streaming_head_waits_for_final_response_after_103() {
         .expect("final response head delivered")
         .expect("success");
     assert_eq!(head.status, 200);
-    assert_eq!(head.headers, headers(&[("content-type", "text/plain")]));
+    assert_eq!(head.headers, typed(&[("content-type", "text/plain")]));
 }
 
 #[test]
@@ -50,7 +62,7 @@ fn trailers_are_regular_fields_after_final_response() {
     ));
     assert!(matches!(
         state.headers(&headers(&[("x-checksum", "abc")])),
-        Ok(H3HeaderBlock::Trailers(fields)) if fields == headers(&[("x-checksum", "abc")])
+        Ok(H3HeaderBlock::Trailers(fields)) if fields == typed(&[("x-checksum", "abc")])
     ));
     assert_eq!(state, H3ResponseState::Trailers);
 }
@@ -151,28 +163,21 @@ fn cancel_upload_drops_queue_and_finishes_send_side() {
 async fn deliver_is_once_only() {
     let (tx, rx) = oneshot::channel();
     let mut stream = H3Stream::new(tx, None, None, false);
-    stream.status = 200;
-    stream.body.extend_from_slice(b"hello");
-    let resp = H3Response {
-        status: stream.status,
-        headers: std::mem::take(&mut stream.headers),
-        body: std::mem::take(&mut stream.body),
-        trailers: Vec::new(),
-    };
+    let resp = stream.response(b"hello".to_vec());
     stream.reply(Ok(resp));
     stream.reply(Err(H3SendError::Failed("late teardown".into())));
 
     let got = rx.await.expect("sender delivered").expect("ok response");
     assert_eq!(got.status, 200);
-    assert_eq!(got.body, b"hello");
+    assert!(matches!(got.body, TransportBody::Buffered(body) if body == b"hello"));
 }
 
 #[test]
 fn cancelled_stream_ids_selects_only_dropped_receivers() {
     let mut streams = HashMap::new();
-    let (tx_live, _rx_live) = oneshot::channel::<Result<H3Response, H3SendError>>();
+    let (tx_live, _rx_live) = oneshot::channel::<Result<TransportResponse, H3SendError>>();
     streams.insert(1u64, H3Stream::new(tx_live, None, None, false));
-    let (tx_dead, rx_dead) = oneshot::channel::<Result<H3Response, H3SendError>>();
+    let (tx_dead, rx_dead) = oneshot::channel::<Result<TransportResponse, H3SendError>>();
     streams.insert(2u64, H3Stream::new(tx_dead, None, None, false));
     drop(rx_dead);
 
@@ -186,7 +191,7 @@ fn cancelled_stream_ids_selects_only_dropped_receivers() {
 
 #[tokio::test]
 async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
-    let (tx, rx) = oneshot::channel::<Result<H3Response, H3SendError>>();
+    let (tx, rx) = oneshot::channel::<Result<TransportResponse, H3SendError>>();
     let (body_tx, body_rx) = mpsc::channel(4);
     let mut s = H3Stream::new(tx, None, Some(body_tx), true);
     assert!(
@@ -199,7 +204,7 @@ async fn cancellation_tracks_resp_then_body_receiver_across_the_head() {
         "dropped resp receiver pre-head → cancelled"
     );
 
-    let (tx2, _rx2) = oneshot::channel::<Result<H3Response, H3SendError>>();
+    let (tx2, _rx2) = oneshot::channel::<Result<TransportResponse, H3SendError>>();
     s.resp_tx = Some(tx2);
     s.deliver_head();
     assert!(
@@ -321,4 +326,23 @@ fn endless_informational_responses_fail_the_stream() {
     let Err(_) = state.headers(&early) else {
         panic!("the 17th informational response must fail the stream");
     };
+}
+
+#[test]
+fn a_status_below_100_is_malformed() {
+    let mut state = H3ResponseState::Initial(0);
+    assert!(state.headers(&headers(&[(":status", "099")])).is_err());
+}
+
+#[test]
+fn a_header_value_keeps_its_raw_bytes() {
+    let mut state = H3ResponseState::Initial(0);
+    let list = [
+        quiche::h3::Header::new(b":status", b"200"),
+        quiche::h3::Header::new(b"x-raw", &[b'a', 0xff]),
+    ];
+    let Ok(H3HeaderBlock::Final { headers, .. }) = state.headers(&list) else {
+        panic!("final response head");
+    };
+    assert_eq!(headers["x-raw"].as_bytes(), [b'a', 0xff]);
 }

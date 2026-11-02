@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Default)]
 pub(crate) struct Notes {
@@ -23,17 +23,18 @@ pub(crate) fn note_proxy(proxy: Option<&str>) {
     edit(|notes| notes.proxy = proxy);
 }
 
-pub(crate) fn note_browser(browser: Option<crate::profile::Browser>) {
+pub(crate) fn note_browser(session: &crate::core::Session) {
     if !super::on() {
         return;
     }
+    let browser = session.browser();
     edit(|notes| notes.browser = browser);
 }
 
 pub(crate) fn take(shared: &SharedNotes) -> Notes {
-    std::mem::take(&mut *shared.lock().unwrap_or_else(PoisonError::into_inner))
+    std::mem::take(&mut *crate::util::lock(shared))
 }
 
 fn edit(change: impl FnOnce(&mut Notes)) {
-    super::with(|ctx| change(&mut ctx.notes.lock().unwrap_or_else(PoisonError::into_inner)));
+    super::with(|ctx| change(&mut crate::util::lock(&ctx.notes)));
 }

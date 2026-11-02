@@ -74,7 +74,7 @@ streamed one is drained, with the `read` timeout on each chunk, then decoded.
 | `text_with_charset(label).await` | `Result<String>` | Uses `label` when the response declares no charset. Feature `charset` |
 | `bytes().await` | `Result<bytes::Bytes>` | The decoded body |
 | `json::<T>().await` | `Result<T>` | Deserializes with serde. A failure is `Kind::Json`, in `Kind::Decode` |
-| `bytes_stream()` | `Result<impl Stream<Item = Result<Bytes>>>` | The decoded body as a stream |
+| `bytes_stream()` | `Result<Body>` | The decoded body as a stream of `Result<Bytes>` |
 | `write_to(writer).await` | `Result<u64>` | Writes the decoded body |
 | `download_to(path).await` | `Result<u64>` | Saves the decoded body to a file; see [Streaming](streaming.md#download-a-file) |
 | `read_until(limit, done).await` | `Result<(Vec<u8>, bool)>` | Stops early on a predicate or a byte limit; the `bool` is `true` when the predicate matched; see [Streaming](streaming.md#stop-at-a-marker) |

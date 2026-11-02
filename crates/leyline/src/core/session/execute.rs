@@ -3,228 +3,53 @@ use std::borrow::Cow;
 use url::Url;
 
 use crate::FetchSite;
-use crate::core::transport::{ErrorBudget, Prepared, ResponseMode};
-use std::sync::Arc;
-
-use crate::profile::RequestKind;
+use crate::core::transport::Prepared;
 
 use self::auth::{DigestLeg, unreplayable_body};
 use self::journey::{Journey, redirect_location};
 use super::Session;
+use crate::core::Redirect;
 use crate::core::body::Body;
-use crate::core::config::Timeout;
-use crate::core::deadline::Deadline;
-use crate::core::digest::DigestAuth;
-use crate::core::error::{Cause, Error, Result};
-use crate::core::headers::HeaderList;
+use crate::core::error::{Error, Kind, Result};
+use crate::core::request::Draft;
 use crate::core::response::{Response, ResponseBody};
-use crate::core::{BodyRules, Proxy, Redirect};
-use crate::trace;
-use crate::util::{redact, without_userinfo};
-use tracing::Instrument as _;
+use crate::util::without_userinfo;
 
 mod auth;
 mod headers;
 mod journey;
 mod response;
 
-pub(crate) struct Attempt(Box<Parts>);
-
-pub(crate) struct Parts {
-    pub(crate) method: http::Method,
-    pub(crate) url: Arc<Url>,
-    pub(crate) preset: Option<RequestKind>,
-    pub(crate) body: Body,
-    pub(crate) headers: Option<HeaderList>,
-    pub(crate) deadline: Deadline,
-    pub(crate) response: ResponseMode,
-    pub(crate) body_rules: BodyRules,
-    pub(crate) proxy: Option<Proxy>,
-    pub(crate) header_order: Option<Vec<String>>,
-    pub(crate) redirect: Option<Redirect>,
-    pub(crate) digest: Option<DigestAuth>,
-    pub(crate) initiator: Option<Url>,
-    pub(crate) trusted_origin: Option<Url>,
-}
-
-impl std::ops::Deref for Attempt {
-    type Target = Parts;
-
-    fn deref(&self) -> &Parts {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for Attempt {
-    fn deref_mut(&mut self) -> &mut Parts {
-        &mut self.0
-    }
-}
-
-impl From<Parts> for Attempt {
-    fn from(parts: Parts) -> Self {
-        Self(Box::new(parts))
-    }
-}
-
-impl Attempt {
-    pub(crate) fn again(&self, body: Body, headers: Option<HeaderList>) -> Attempt {
-        Attempt::from(Parts {
-            method: self.method.clone(),
-            url: Arc::clone(&self.url),
-            preset: self.preset,
-            body,
-            headers,
-            deadline: self.deadline,
-            response: self.response,
-            body_rules: self.body_rules,
-            proxy: self.proxy.clone(),
-            header_order: self.header_order.clone(),
-            redirect: self.redirect.clone(),
-            digest: self.digest.clone(),
-            initiator: self.initiator.clone(),
-            trusted_origin: self.trusted_origin.clone(),
-        })
-    }
-}
-
 impl Session {
-    pub(crate) fn deadline(&self, request: Option<&Timeout>) -> Deadline {
-        Deadline::new(&self.inner.timeouts, request)
-    }
-
-    pub(crate) fn error_budget(deadline: &Deadline, rules: &BodyRules) -> ErrorBudget {
-        ErrorBudget::new(
-            deadline.error_body_wait(),
-            rules.max_error_body.min(rules.max_body_size),
+    pub(super) async fn execute_inner(&self, mut attempt: Box<Draft>) -> Result<Response> {
+        let url = attempt
+            .url
+            .take()
+            .expect("invariant: send stores the prepared URL before the attempt");
+        let headers = std::mem::take(&mut attempt.headers);
+        let mut journey = Journey::begin(
+            self.hsts_upgrade(&url),
+            std::mem::take(&mut attempt.method),
+            std::mem::take(&mut attempt.body),
+            (!headers.is_empty()).then_some(headers),
+            attempt.initiator.take(),
+            self.session_referer(),
         )
-    }
-
-    pub(crate) async fn attempt(&self, attempt: Attempt) -> Result<Response> {
-        let deadline = attempt.deadline;
-        let span = tracing::debug_span!(
-            "session.execute",
-            http.method = attempt.method.as_str(),
-            http.url = redact(attempt.url.as_str()),
-            pool.hit = tracing::field::Empty,
-        );
-        let inner: std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
-        > = Box::pin(self.execute_inner(attempt));
-        let inner = inner.instrument(span);
-        trace::scope(self.inner.trace.as_ref(), async move {
-            let out = self.unless_shut_down(deadline.total(inner)).await;
-            trace::done(match &out {
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
-            });
-            out
-        })
-        .await
-    }
-
-    pub(crate) fn unless_shut_down<T, F>(&self, fut: F) -> UnlessShutDown<'_, F>
-    where
-        F: std::future::Future<Output = Result<T>>,
-    {
-        UnlessShutDown {
-            stop: self.inner.shutdown.cancelled(),
-            fut,
-        }
-    }
-
-    /// Shuts the session down so that pending and new requests fail; await it to wait for the last autosave.
-    pub fn shutdown(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
-        self.inner.shutdown.cancel();
-        let writers = std::mem::take(&mut *self.writers());
-        async move {
-            for writer in writers {
-                drop(writer.await);
-            }
-        }
-    }
-
-    pub(crate) fn track_writer(&self, writer: tokio::task::JoinHandle<()>) {
-        let mut writers = self.writers();
-        writers.retain(|running| !running.is_finished());
-        writers.push(writer);
-    }
-
-    fn writers(&self) -> std::sync::MutexGuard<'_, Vec<tokio::task::JoinHandle<()>>> {
-        self.inner
-            .writers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    pub(crate) fn stopped(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
-        let token = self.inner.shutdown.clone();
-        async move { token.cancelled().await }
-    }
-
-    /// Returns whether `shutdown` has been called on this session.
-    pub fn is_shut_down(&self) -> bool {
-        self.inner.shutdown.is_cancelled()
-    }
-
-    pub(crate) fn traced<'a, F>(
-        &'a self,
-        method: &'a str,
-        original_url: &'a str,
-        streamed: bool,
-        request: F,
-    ) -> impl std::future::Future<Output = Result<Response>> + 'a
-    where
-        F: std::future::Future<Output = (Result<Response>, u32)> + 'a,
-    {
-        use futures_util::FutureExt;
-        let hook = self.inner.trace.as_ref();
-        trace::scope(
-            hook,
-            request.map(move |(out, attempts)| {
-                if hook.is_some() {
-                    let finish = trace::Finish {
-                        method,
-                        original_url,
-                        attempts,
-                        streamed,
-                    };
-                    trace::summary(&finish, out.as_ref());
-                }
-                out
-            }),
-        )
-    }
-
-    async fn execute_inner(&self, attempt: Attempt) -> Result<Response> {
-        let Parts {
-            method,
-            url,
+        .trusting(attempt.trusted_origin.as_ref());
+        let digest = attempt.digest_auth.take();
+        let Draft {
             preset,
-            body,
-            headers: extra_headers,
             deadline,
             response,
             body_rules,
-            proxy: request_proxy,
-            header_order,
-            redirect,
-            digest,
-            initiator,
-            trusted_origin,
-        } = *attempt.0;
-        let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
-        let request_proxy = request_proxy.as_ref();
-        let header_order = header_order.as_deref();
-        let mut journey = Journey::begin(
-            self.hsts_upgrade(&url),
-            method.to_string(),
-            body,
-            extra_headers,
-            initiator,
-            self.session_referer(),
-        )
-        .trusting(trusted_origin.as_ref());
+            ..
+        } = *attempt;
+        let redirect_policy = attempt
+            .redirect
+            .as_ref()
+            .unwrap_or(&self.inner.redirect_policy);
+        let request_proxy = attempt.proxy.as_ref();
+        let header_order = attempt.header_order.as_deref();
 
         let mut digest = digest.map(DigestLeg::new);
         let redirect_cap = redirect_policy.max_redirects_hint();
@@ -245,7 +70,7 @@ impl Session {
                 .map_err(leg_error(answered))?;
             let leg = {
                 let send = std::pin::pin!(self.send_with_policy(Prepared {
-                    method: &journey.method,
+                    method: journey.method.as_str(),
                     url: &journey.url,
                     headers,
                     body: step_body,
@@ -258,10 +83,24 @@ impl Session {
             answered |= leg.status != http::StatusCode::UNAUTHORIZED;
             journey.timing.add_leg(&leg.timing);
 
-            self.store_cookies(&leg.headers, &journey.url);
-            self.note_hsts(&journey.url, &leg.headers);
+            let (mut cookies, mut hsts, mut alt_svc) = (false, false, false);
+            for name in leg.headers.keys() {
+                cookies |= name == http::header::SET_COOKIE;
+                hsts |= name == http::header::STRICT_TRANSPORT_SECURITY;
+                alt_svc |= name == http::header::ALT_SVC;
+            }
+            if cookies {
+                self.store_cookies(&leg.headers, &journey.url);
+            }
+            if hsts {
+                self.note_hsts(&journey.url, &leg.headers);
+            }
             #[cfg(feature = "http3")]
-            self.note_alt_svc(&journey.url, &leg.headers);
+            if alt_svc {
+                self.note_alt_svc(&journey.url, &leg.headers);
+            }
+            #[cfg(not(feature = "http3"))]
+            let _ = alt_svc;
 
             let next = Turn {
                 code: leg.status.as_u16(),
@@ -361,12 +200,10 @@ mod redact_tests;
 mod referer_tests;
 #[cfg(test)]
 mod reorder_tests;
-#[cfg(test)]
-mod wrap_tests;
 
 struct Turn<'a> {
     code: u16,
-    headers: &'a [(http::HeaderName, http::HeaderValue)],
+    headers: &'a http::HeaderMap,
     redirect_policy: &'a Redirect,
     redirect_cap: usize,
 }
@@ -383,7 +220,7 @@ impl Turn<'_> {
         {
             journey.follow(hop, self.code, &location, replay_body)?;
             if journey.chain.len() > self.redirect_cap {
-                return Err(Error::new(Cause::Redirect)
+                return Err(Error::new(Kind::Redirect)
                     .with_message(format!("too many redirects (max {})", self.redirect_cap)));
             }
             if let Some(digest) = digest {
@@ -400,32 +237,5 @@ impl Turn<'_> {
             return Ok(true);
         }
         Ok(false)
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub(crate) struct UnlessShutDown<'a, F> {
-        #[pin]
-        stop: tokio_util::sync::WaitForCancellationFuture<'a>,
-        #[pin]
-        fut: F,
-    }
-}
-
-impl<T, F> std::future::Future for UnlessShutDown<'_, F>
-where
-    F: std::future::Future<Output = Result<T>>,
-{
-    type Output = Result<T>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<T>> {
-        let this = self.project();
-        if this.stop.poll(cx).is_ready() {
-            return std::task::Poll::Ready(Err(Error::shut_down()));
-        }
-        this.fut.poll(cx)
     }
 }

@@ -193,3 +193,31 @@ async fn a_failed_decoded_h2_stream_that_is_kept_releases_its_stream_and_host_sl
     .expect("the stream is reset while the failed body is kept");
     drop(body);
 }
+
+async fn padded_length<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S) {
+    read_preface(&mut stream).await;
+    write_server_settings(&mut stream).await;
+    while let Some((frame, _)) = next_frame(&mut stream).await {
+        if frame.frame_type == FrameType::Settings as u8 && frame.flags & SETTINGS_ACK == 0 {
+            write_settings_ack(&mut stream).await;
+        }
+        if frame.frame_type != FrameType::Headers as u8 {
+            continue;
+        }
+        write_raw_headers(
+            &mut stream,
+            frame.stream_id,
+            &[(":status", "200"), ("content-length", " 10 ")],
+            false,
+        )
+        .await;
+        write_data(&mut stream, frame.stream_id, &[b'x'; DECLARED / 2], true).await;
+    }
+}
+
+#[tokio::test]
+async fn a_padded_content_length_still_bounds_the_body() {
+    let (url, session) = h2_server(padded_length).await;
+    let short = async { session.get(&url).send().await?.bytes().await }.await;
+    assert!(short.is_err(), "{short:?}");
+}

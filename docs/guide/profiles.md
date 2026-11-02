@@ -505,7 +505,7 @@ turns on.
 
 A loaded profile carries its own `[identity.<platform>]` tables, which give
 the user agent, `sec-ch-ua`, and `accept_language` for the platform. A table
-without `accept_language` takes the value `profiles/bare.toml` sets for the
+without `accept_language` takes the value `profiles/platforms.toml` sets for the
 platform. `build` returns `Kind::Config` when the profile has no table for
 the platform.
 

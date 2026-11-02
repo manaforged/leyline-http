@@ -5,14 +5,14 @@ use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
 use super::journey::Journey;
-use super::{RequestContext, SiteContext, fetch_site_for, referer_for, url_origin};
+use super::{RequestContext, SiteContext, fetch_site_for, referer_for};
 use crate::FetchSite;
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
 use crate::header_str::HeaderStr;
 use crate::profile::RequestKind;
-use crate::profile::preset::HeaderPair;
+use crate::profile::preset::{HeaderContext, HeaderPair, Plan};
 use crate::util::sensitive_header;
 
 impl Session {
@@ -22,7 +22,7 @@ impl Session {
     )]
     pub(super) fn attempt_headers(
         &self,
-        preset: Option<RequestKind>,
+        plan: &Plan,
         request: RequestContext<'_>,
         current_url: &Url,
         current_method: &str,
@@ -33,12 +33,10 @@ impl Session {
     ) -> Vec<HeaderPair> {
         let referer = request.referer;
         let ctx = self.header_context(&request);
-        let mut headers = self.inner.header_style.build_headers(preset, &ctx);
-        self.shape_bare(&mut headers);
-        if matches!(current_body.0, BodyKind::Empty) {
-            headers.retain(|(k, _)| !is_request_body_header(k));
+        let mut headers = plan.headers(&ctx, !matches!(current_body.0, BodyKind::Empty));
+        if plan.has_origin() {
+            shape_origin(&mut headers, current_method, request.origin_downgrade);
         }
-        shape_origin(&mut headers, current_method, request.origin_downgrade);
         let caller_has = |name: &str| {
             extra_headers
                 .is_some_and(|h| h.iter().any(|(k, _)| k.as_str().eq_ignore_ascii_case(name)))
@@ -66,26 +64,9 @@ impl Session {
         headers
     }
 
-    fn header_context<'a>(
-        &'a self,
-        request: &RequestContext<'a>,
-    ) -> crate::profile::preset::HeaderContext<'a> {
-        let hints = !self.inner.sec_ch_ua.is_empty();
+    fn header_context<'a>(&'a self, request: &RequestContext<'a>) -> HeaderContext<'a> {
         let referer = request.referer;
-        crate::profile::preset::HeaderContext {
-            user_agent: &self.inner.user_agent,
-            sec_ch_ua: &self.inner.sec_ch_ua,
-            sec_ch_ua_mobile: if hints {
-                self.inner.platform.mobile_flag()
-            } else {
-                ""
-            },
-            sec_ch_ua_platform: if hints {
-                self.inner.platform.sec_ch_platform()
-            } else {
-                ""
-            },
-            accept_language: &self.inner.accept_language,
+        HeaderContext {
             origin: request.origin,
             referer,
             fetch_site: request.site.fetch_site.as_str(),
@@ -95,12 +76,12 @@ impl Session {
                 "none"
             },
             navigation_referer: if request.initiated { referer } else { "" },
-        }
-    }
-
-    fn shape_bare(&self, headers: &mut Vec<HeaderPair>) {
-        if self.inner.header_style == crate::profile::HeaderStyle::Bare {
-            advertise_codecs(headers, self.inner.compression.accept_encoding());
+            ..HeaderContext::session(
+                &self.inner.user_agent,
+                &self.inner.sec_ch_ua,
+                &self.inner.accept_language,
+                self.inner.platform,
+            )
         }
     }
 
@@ -110,25 +91,34 @@ impl Session {
         preset: Option<RequestKind>,
         header_order: Option<&[String]>,
     ) -> Vec<HeaderPair> {
-        let origin = url_origin(&journey.url);
-        let referer = referer_for(Some(&journey.referrer), &origin);
-        let fetch_site = fetch_site_for(journey.initiator.as_ref(), &journey.chain, &journey.url);
+        let plan = self.inner.header_plan.plan(preset);
+        let origin = journey.origin_of(&journey.url);
+        let referrer = (journey.initiated || plan.reads_referer()).then(|| journey.referrer());
+        let referer = referrer.as_deref().map_or(Cow::Borrowed(""), |referrer| {
+            referer_for(Some(referrer), &origin)
+        });
+        let fetch_site = if plan.reads_site() || !self.inner.cookie_jar.is_empty() {
+            fetch_site_for(journey.initiator.as_deref(), &journey.chain, &journey.url)
+        } else {
+            FetchSite::CrossSite
+        };
         let strip_sensitive = journey.strips_credentials(&origin);
         let initiator_origin = journey
             .initiator
-            .as_ref()
+            .as_deref()
             .filter(|url| matches!(url.scheme(), "http" | "https"))
-            .map(url_origin);
+            .map(|url| journey.origin_of(url));
         let downgrade = initiator_origin
             .as_deref()
             .is_some_and(|origin| origin.starts_with("https:") && journey.url.scheme() != "https");
+        let original_origin = journey.original_origin();
         let request_origin = match (&initiator_origin, journey.tainted) {
             (_, true) => "null",
             (Some(origin), false) => origin.as_ref(),
-            (None, false) => journey.original_origin.as_str(),
+            (None, false) => original_origin.as_ref(),
         };
         self.attempt_headers(
-            preset,
+            plan,
             RequestContext {
                 origin: request_origin,
                 origin_downgrade: downgrade,
@@ -136,12 +126,12 @@ impl Session {
                 initiated: journey.initiated,
                 site: SiteContext {
                     fetch_site,
-                    initiator: journey.initiator.as_ref(),
+                    initiator: journey.initiator.as_deref(),
                     chain: &journey.chain,
                 },
             },
             &journey.url,
-            &journey.method,
+            journey.method.as_str(),
             &journey.body,
             journey.authorized.as_ref().or(journey.extra.as_ref()),
             strip_sensitive,
@@ -172,15 +162,15 @@ impl Session {
             }
             match headers
                 .iter()
-                .position(|(hk, _)| hk.eq_ignore_ascii_case(k))
+                .position(|(hk, _)| hk == k || hk.eq_ignore_ascii_case(k))
             {
-                Some(pos) => headers[pos].1 = HeaderStr::from(v),
-                None => headers.push((Cow::Owned(k.to_owned()), HeaderStr::from(v))),
+                Some(pos) => headers[pos].1 = v,
+                None => headers.push((Cow::Owned(k.to_owned()), v)),
             }
         }
     }
 
-    fn session_defaults<'a>(&'a self, target: &Url) -> impl Iterator<Item = (&'a str, &'a str)> {
+    fn session_defaults<'a>(&'a self, target: &Url) -> impl Iterator<Item = (&'a str, HeaderStr)> {
         let bearer = self
             .inner
             .bearer
@@ -188,14 +178,14 @@ impl Session {
             .filter(|_| self.bearer_in_scope(target));
         let defaults = &self.inner.default_headers;
         let slot = bearer.map_or(defaults.len(), |b| b.slot.min(defaults.len()));
-        let pair = |(k, v): &'a (String, String)| (k.as_str(), v.as_str());
+        let pair = |(k, v): &'a (String, HeaderStr)| (k.as_str(), v.clone());
         self.inner
-            .header_style
+            .header_plan
             .append()
             .iter()
-            .map(pair)
+            .map(|(k, v)| (k.as_str(), HeaderStr::from_static(v.as_str())))
             .chain(defaults[..slot].iter().map(pair))
-            .chain(bearer.map(|b| (AUTHORIZATION.as_str(), b.value.as_str())))
+            .chain(bearer.map(|b| (AUTHORIZATION.as_str(), HeaderStr::from(b.value.as_str()))))
             .chain(defaults[slot..].iter().map(pair))
     }
 
@@ -266,32 +256,12 @@ impl Session {
         self.inner
             .header_order
             .as_deref()
-            .or_else(|| self.inner.header_style.order())
+            .or_else(|| self.inner.header_plan.order())
             .map(Cow::Borrowed)
     }
 }
 
-const REQUEST_BODY_HEADERS: [&str; 4] = [
-    "content-encoding",
-    "content-language",
-    "content-location",
-    "content-type",
-];
-
 const CORS_MODES: [&str; 2] = ["cors", "websocket"];
-
-fn advertise_codecs(headers: &mut Vec<HeaderPair>, codecs: Option<String>) {
-    match codecs {
-        Some(list) => {
-            for (name, value) in headers.iter_mut() {
-                if name.eq_ignore_ascii_case("accept-encoding") {
-                    *value = HeaderStr::from(list.as_str());
-                }
-            }
-        }
-        None => headers.retain(|(name, _)| !name.eq_ignore_ascii_case("accept-encoding")),
-    }
-}
 
 fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
     if !referer.is_empty() && header_value(headers, "referer").is_none() {
@@ -313,12 +283,6 @@ fn set_content_length(headers: &mut Vec<HeaderPair>, body: &Body) {
 
 fn cross_origin_stripped(name: &str) -> bool {
     sensitive_header(name) || name.eq_ignore_ascii_case(HOST.as_str())
-}
-
-fn is_request_body_header(name: &str) -> bool {
-    REQUEST_BODY_HEADERS
-        .iter()
-        .any(|h| name.eq_ignore_ascii_case(h))
 }
 
 fn header_value<'a>(headers: &'a [HeaderPair], name: &str) -> Option<&'a str> {

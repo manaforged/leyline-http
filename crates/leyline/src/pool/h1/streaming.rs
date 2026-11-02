@@ -11,7 +11,7 @@ pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
         stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, drain).await;
     if drained_clean && pump.reusable && !excess {
         pump.pool
-            .return_h1(pump.key, H1Slot { io: pump.io }, pump.tls);
+            .return_h1(&pump.key, H1Slot::new(pump.io), pump.tls);
         if pump.count_install {
             pump.pool.note_h1_install();
         }
@@ -149,14 +149,14 @@ pub(super) async fn stream_chunked_into(
         let Some(line) = until_closed(tx, read_until_crlf(stream, &mut buf)).await else {
             return Ok(false);
         };
-        let line_end = line.map_err(h1err_to_io)?;
+        let line_end = line.map_err(Error::into_io)?;
         let mut remaining = parse::chunk_size(&buf[..line_end])
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         buf.drain(..line_end + 2);
 
         if remaining == 0 {
             return match until_closed(tx, read_chunk_trailers(stream, &mut buf)).await {
-                Some(trailers) => trailers.map(|()| true).map_err(h1err_to_io),
+                Some(trailers) => trailers.map(|()| true).map_err(Error::into_io),
                 None => Ok(false),
             };
         }
@@ -166,7 +166,7 @@ pub(super) async fn stream_chunked_into(
                 let Some(more) = until_closed(tx, read_more(stream, &mut buf)).await else {
                     return Ok(false);
                 };
-                more.map_err(h1err_to_io)?;
+                more.map_err(Error::into_io)?;
             }
             let take = usize::try_from(remaining).map_or(buf.len(), |wanted| wanted.min(buf.len()));
             let piece = Bytes::copy_from_slice(&buf[..take]);
@@ -180,7 +180,7 @@ pub(super) async fn stream_chunked_into(
         let Some(tail) = until_closed(tx, read_until_available(stream, &mut buf, 2)).await else {
             return Ok(false);
         };
-        tail.map_err(h1err_to_io)?;
+        tail.map_err(Error::into_io)?;
         if &buf[..2] != b"\r\n" {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -190,102 +190,68 @@ pub(super) async fn stream_chunked_into(
         buf.drain(..2);
     }
 }
-#[expect(
-    clippy::too_many_arguments,
-    reason = "flat per-request wire fields across one internal call path"
-)]
-pub(super) async fn send_request_h1_streaming(
-    pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
-    req: H1Request<'_>,
-    body: H1Body,
-    permit: OwnedSemaphorePermit,
-    key: PoolKey,
-    dial: H1Dial<'_>,
-    legs: FirstLegs,
-) -> Result<H1Outcome, H1PooledError> {
-    let H1Request {
-        scheme,
-        host,
-        port,
-        method,
-        url,
-        headers,
-        target,
-        response,
-        ..
-    } = req;
-    let started = legs.started;
-    let replay = replay_body(&body);
-    let mut body = body;
-    let mut permit = Some(permit);
+pub(super) struct Exchange<'a> {
+    pub(super) pool: &'a Arc<Pool>,
+    pub(super) key: &'a PoolKey,
+    pub(super) req: &'a H1Request<'a>,
+    pub(super) permit: Option<OwnedSemaphorePermit>,
+}
 
-    if let Some((slot, tls)) = legs.pooled {
-        trace::connect(host, port, true, Duration::ZERO);
-        let pooled_body = std::mem::replace(&mut body, H1Body::Empty);
-        let mut io = slot.io;
-        let delivered = match exchange_head_on_stream(
+impl Exchange<'_> {
+    pub(super) async fn on(
+        &mut self,
+        slot: H1Slot,
+        tls: &TlsInfo,
+        body: Body,
+        count_install: bool,
+    ) -> Result<Delivered, Error> {
+        let req = self.req;
+        let H1Slot { mut io, buf } = slot;
+        let (head, reusable) = exchange_head_on_stream(
             io.as_mut(),
-            method,
-            url,
-            headers.clone(),
-            pooled_body,
-            target,
+            req.method,
+            req.url,
+            &req.headers,
+            body,
+            req.target,
+            buf,
         )
-        .await
-        {
-            Ok((head, reusable)) => {
-                let leg = HeadLeg {
-                    io,
-                    tls: tls.clone(),
-                    head,
-                    reusable,
-                    count_install: false,
-                };
-                deliver_head(pool, key.clone(), leg, response, &mut permit).await
-            }
-            Err(e) => Err(e),
+        .await?;
+        let leg = HeadLeg {
+            io,
+            tls: tls.clone(),
+            head,
+            reusable,
+            count_install,
         };
-        match delivered {
-            Ok((status, headers, body)) => {
-                tracing::Span::current().record("pool.hit", true);
-                return Ok(H1Outcome::Response(H1Response {
-                    status,
-                    headers,
-                    body,
-                    tls: tls_for_scheme(scheme, &tls),
-                    timing: ResponseTiming::leg(started, None),
-                }));
-            }
-            Err(e) => body = resend_after_failure(pool, &key, method, replay, e)?,
-        }
+        deliver_head(self.pool, self.key, leg, req.response, &mut self.permit).await
     }
-    tracing::Span::current().record("pool.hit", false);
-    let installed = legs.fresh.is_some();
+}
 
-    let opened = match fresh_leg(pool, &key, connector, dial, legs.fresh).await? {
-        Leg::H1(opened) => opened,
-        Leg::H2(opened) => return Ok(H1Outcome::Upgraded { opened, body }),
-    };
-    let connect_ms = opened.connect_ms.unwrap_or_default();
-    let (mut slot, tls) = (opened.conn, opened.tls);
-    let (head, reusable) =
-        exchange_head_on_stream(slot.io.as_mut(), method, url, headers, body, target).await?;
-    let leg = HeadLeg {
-        io: slot.io,
-        tls: tls.clone(),
-        head,
-        reusable,
-        count_install: !installed,
-    };
-    let (status, headers, body) = deliver_head(pool, key, leg, response, &mut permit).await?;
-    Ok(H1Outcome::Response(H1Response {
-        status,
-        headers,
-        body,
-        tls: tls_for_scheme(scheme, &tls),
-        timing: ResponseTiming::leg(started, Some(connect_ms)),
-    }))
+pub(super) struct Delivered {
+    status: u16,
+    headers: HeaderMap,
+    body: TransportBody,
+}
+
+impl Delivered {
+    pub(super) fn respond(
+        self,
+        scheme: &str,
+        tls: TlsInfo,
+        timing: ResponseTiming,
+    ) -> Result<H1Outcome, Error> {
+        let status = crate::core::transport::status(self.status)?;
+        Ok(H1Outcome::Response(TransportResponse {
+            status,
+            headers: self.headers,
+            trailers: None,
+            body: self.body,
+            version: http::Version::HTTP_11,
+            tls: (scheme == "https").then_some(tls),
+            timing,
+        }))
+    }
 }
 
 pub(super) struct HeadLeg {
@@ -308,11 +274,11 @@ fn inline_error_len(response: ResponseMode, head: &H1Head) -> Option<(ErrorBudge
 
 async fn deliver_head(
     pool: &Arc<Pool>,
-    key: PoolKey,
+    key: &PoolKey,
     leg: HeadLeg,
     response: ResponseMode,
     permit: &mut Option<OwnedSemaphorePermit>,
-) -> Result<(u16, Vec<(String, String)>, H1ResponseBody), H1PooledError> {
+) -> Result<Delivered, Error> {
     let HeadLeg {
         mut io,
         tls,
@@ -336,19 +302,24 @@ async fn deliver_head(
         };
         let (body, excess) = body;
         if complete && reusable && !excess {
-            pool.return_h1(key, H1Slot { io }, tls);
+            let buf = std::mem::take(&mut head.initial_body);
+            pool.return_h1(key, H1Slot { io, buf }, tls);
             if count_install {
                 pool.note_h1_install();
             }
         }
-        return Ok((status, headers, H1ResponseBody::Buffered(body)));
+        return Ok(Delivered {
+            status,
+            headers,
+            body: TransportBody::Buffered(body),
+        });
     }
     let (tx, rx) = mpsc::channel(STREAM_CHANNEL_DEPTH);
-    tokio::spawn(run_h1_stream_pump(H1StreamPump {
+    let pump = run_h1_stream_pump(H1StreamPump {
         io,
         permit: permit.take(),
         pool: pool.clone(),
-        key,
+        key: key.clone(),
         tls,
         framing: head.framing,
         initial_body: head.initial_body,
@@ -358,12 +329,19 @@ async fn deliver_head(
             .error_budget()
             .map_or(0, |budget| budget.bytes as u64),
         tx,
-    }));
-    Ok((
+    });
+    let body = BodyStream::new(rx);
+    let body = if pool.config.blocking.is_some() {
+        body.pumped_by(pump)
+    } else {
+        tokio::spawn(pump);
+        body
+    };
+    Ok(Delivered {
         status,
         headers,
-        H1ResponseBody::Streaming(BodyStream::new(rx)),
-    ))
+        body: TransportBody::Streaming(Box::new(body)),
+    })
 }
 
 async fn read_error_prefix(

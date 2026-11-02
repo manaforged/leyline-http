@@ -52,6 +52,89 @@ What the table shows:
   new connection than Leyline or wreq. The comparison with reqwest includes
   that difference.
 
+## Client libraries
+
+Thirteen HTTP/2 clients ran the same requests against the same local origin on 2026-10-31. The files are in [`benches/comparison/results/2026-10-31-libs`](benches/comparison/results/2026-10-31-libs), and [`benches/comparison/libs.sh`](benches/comparison/libs.sh) reproduces them. Each value is the median of 3 rounds in alternating order. Every client checks the status and full body of every response and holds exactly the stated number of connections. Leyline is commit `beef1b9d`, with no browser profile.
+
+Requests per second:
+
+| Client | Sequential | 1 conn, 64 streams | 8 conns, 8 in flight | 8 conns, 256 in flight |
+| --- | ---: | ---: | ---: | ---: |
+| Leyline | 32,481 | 206,727 | 228,290 | 982,506 |
+| hyper-util client | 35,247 | 172,041 | 255,506 | 1,106,986 |
+| h2 crate (no client layer) | 38,455 | 156,048 | 271,817 | 1,197,853 |
+| reqwest | 31,978 | 168,936 | 212,142 | 822,686 |
+| wreq | 30,775 | 142,765 | 193,803 | 648,983 |
+| libcurl (multi) | 39,312 | 95,651 | 197,486 | 566,666 |
+| Go net/http | 37,332 | 95,124 | 204,348 | 489,990 |
+| Go tls-client | 36,848 | 68,854 | 185,206 | 383,916 |
+| OkHttp | 22,556 | 120,870 | 161,806 | 235,455 |
+| JDK HttpClient | 17,459 | 98,228 | 117,919 | 244,982 |
+| Node http2 (no client layer) | 20,699 | 61,936 | 39,927 | 62,242 |
+| undici | 14,121 | 45,351 | 30,370 | 40,412 |
+| httpx | 2,726 | 2,835 | 3,163 | 2,672 |
+
+User-space instructions per request, measured as the difference between a run of n requests and a run of 2n, so process startup and setup cancel out:
+
+| Client | Sequential | 1 conn, 64 streams | 8 conns, 8 in flight | 8 conns, 256 in flight |
+| --- | ---: | ---: | ---: | ---: |
+| Leyline | 67.2k | 47.3k | 62.5k | 44.4k |
+| hyper-util client | 51.9k | 39.6k | 46.0k | 35.1k |
+| h2 crate (no client layer) | 35.7k | 26.5k | 31.0k | 22.8k |
+| reqwest | 89.0k | 74.0k | 80.5k | 69.5k |
+| wreq | 87.6k | 70.6k | 79.4k | 64.3k |
+| libcurl (multi) | 100.6k | 83.4k | 100.7k | 82.6k |
+| Go net/http | 89.8k | 83.2k | 64.6k | 70.5k |
+| Go tls-client | 106.2k | 105.1k | 97.5k | 99.4k |
+| OkHttp | 103.2k | 91.1k | 93.5k | 86.7k |
+| JDK HttpClient | 1,601.4k | 115.1k | 108.0k | 111.0k |
+| Node http2 (no client layer) | 293.7k | 236.6k | 256.2k | 246.0k |
+| undici | 392.6k | 335.3k | 339.1k | 383.6k |
+| httpx | 3,380.2k | 3,216.8k | 3,296.3k | 3,196.5k |
+
+The h2 crate and Node http2 rows are HTTP/2 engines with no client layer on top: no URL parsing, pooling, redirects, cookies or response object. They show what the client layer costs. hyper-util is the layer that reqwest builds on. Leyline uses fewer instructions per request than every client except hyper-util, and it leads in requests per second with 1 connection and 64 streams. hyper-util is ahead of it with 8 connections, by 11.9% at 8 in flight and 12.7% at 256 in flight. In the sequential row, which varied 11% to 26% between rounds, hyper-util, libcurl, Go net/http, and tls-client are ahead of it. The JDK sequential instruction count includes JIT compilation that the short run does not cancel.
+
+## HTTP/1.1 client libraries
+
+Five HTTP/1.1 clients ran the same requests on 2026-11-01, once over loopback and once over a link with added delay. The files are in [`benches/comparison/results/2026-11-01-h1-r10b`](benches/comparison/results/2026-11-01-h1-r10b) and [`benches/comparison/results/2026-11-01-h1-net100us-b`](benches/comparison/results/2026-11-01-h1-net100us-b). Each value is the median of 10 rounds in alternating order. Every client sends the same three request headers, which the origin checks before the rounds start, and every client checks the status and body of every response. Leyline is commit `d6d58d15`, with no browser profile. These runs used Linux 7.0.0-38-generic, Rust 1.98.1 and Go 1.27.3, with HTTP/1.1 over TLS and the CPU pinning listed under Setup.
+
+`leyline` is the async `Session` with tasks on the tokio multi-thread runtime. `leyline-blocking` is `blocking::Session`, one per thread. ureq has one `Agent` per thread. fasthttp runs one goroutine per request in flight. hyper is the hyper-util client on tokio.
+
+Requests per second over loopback (round trip about 15 µs), with CPU time per request in µs:
+
+| Client | Sequential | 8 in flight | 64 in flight |
+| --- | ---: | ---: | ---: |
+| Leyline blocking | 64,665 (8.27) | 392,900 (9.47) | 976,540 (14.12) |
+| Leyline async | 63,806 (8.73) | 343,810 (10.12) | 846,651 (11.07) |
+| fasthttp 1.77.0 | 66,980 (9.02) | 365,365 (11.04) | 950,530 (11.73) |
+| ureq 3.5.0 | 62,493 (9.14) | 368,049 (10.83) | 992,121 (14.88) |
+| hyper 1.12.0 | 60,391 (9.51) | 331,848 (11.28) | 744,428 (14.82) |
+
+Requests per second over a network namespace link with 50 µs of netem delay each way (ping round trip 0.12 to 0.25 ms):
+
+| Client | Sequential | 8 in flight | 64 in flight |
+| --- | ---: | ---: | ---: |
+| Leyline blocking | 7,863 (5.86) | 61,182 (7.09) | 389,497 (10.27) |
+| Leyline async | 7,821 (6.23) | 57,344 (7.23) | 375,199 (8.87) |
+| fasthttp 1.77.0 | 7,734 (9.42) | 57,286 (8.60) | 374,338 (11.19) |
+| ureq 3.5.0 | 7,769 (6.80) | 61,307 (8.42) | 387,141 (11.90) |
+| hyper 1.12.0 | 7,802 (6.88) | 57,134 (8.51) | 366,802 (11.00) |
+
+The ratio of Leyline blocking to the fastest other client, paired by round, with its bootstrap 95% interval:
+
+| Cell | Loopback | Delayed link |
+| --- | --- | --- |
+| Sequential | 0.966 (0.957 to 0.974) vs fasthttp: behind | 1.008 (1.005 to 1.011) vs hyper: ahead |
+| 8 in flight | 1.063 (1.038 to 1.086) vs ureq: ahead | 0.999 (0.995 to 1.004) vs ureq: tie |
+| 64 in flight | 1.002 (0.950 to 1.062) vs ureq: tie | 1.014 (1.003 to 1.026) vs ureq: ahead |
+
+What the tables show:
+
+- Leyline blocking uses the least CPU per request in every cell except 64 in flight, where Leyline async uses less.
+- Over loopback, fasthttp is about 3.5% faster on sequential requests while using 9% more CPU per request. A profile shows Go's scheduler spinning briefly before it sleeps, which shortens the wait for each response. With 0.1 ms of added round trip that lead is gone, and fasthttp is last.
+- At 64 in flight over loopback, the rounds varied by 16% to 22% for the three fastest clients, so the interval does not separate Leyline blocking from ureq.
+- Leyline async is behind Leyline blocking and ureq with 8 or 64 requests in flight, by 4% to 15%.
+
 ## Setup
 
 | Item | Value |
@@ -84,12 +167,10 @@ server and the clients.
 
 ## Limits
 
-- One machine, one day, loopback only. Loopback removes network latency, so
-  the results show client CPU cost. On a real network the round trip
-  dominates, and the clients get closer together.
+- One machine. The HTTP/2 tables ran over loopback only, which removes network latency, so they show client CPU cost. The HTTP/1.1 delayed-link run emulates the round trip with netem on a veth pair; it is not a physical network.
 - One response size (10 bytes). Large bodies measure decompression and copy
   cost, which this table does not cover.
-- HTTP/2 only. HTTP/1.1 and HTTP/3 are not compared here.
+- HTTP/3 is not compared here.
 
 ## Reproduce
 
@@ -120,8 +201,19 @@ and OpenSSL.
      ./matrix.sh
    ```
 
+3. Run the client-library comparison from `benches/comparison`. It also needs `perf`, Node.js 22.19 or later, Java 21, and a Python with `python-client/requirements.txt` installed:
+
+   ```bash
+   CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der \
+     SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 ./libs.sh
+   ```
+
 `matrix.sh` builds the four clients and the Hyper server, runs the nine
 cells, and writes one JSON file and one log per cell to
 `results/<date>/`. `PEERS`, `ROUNDS`, `SERVER_CPUS`, and `CLIENT_CPUS` override
 the defaults. Set the CPU governor to `performance` before the run for stable
 results.
+
+4. Run the HTTP/1.1 comparison with `PROTO=h1 ROUNDS=10`. For the delayed link, put the origin in a network namespace joined to the host by a veth pair with `tc qdisc add dev <veth> root netem delay 50us` on each end, issue a server certificate that also covers the namespace address, and set `SERVER_NETNS=<namespace>` and `SERVER_ADDR=<address>:0`.
+
+`libs.sh` builds all thirteen clients, checks each one's response body, and writes `rows.txt`, `table.txt`, and `receipts.txt` (versions, binary hashes, and host state) to `results/<date>-libs/`. `LIBS`, `CELLS`, and `ROUNDS` override the defaults.

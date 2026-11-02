@@ -1,6 +1,6 @@
 use url::Url;
 
-use crate::cookie::parse::registrable_domain;
+use crate::core::registrable_domain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
@@ -10,10 +10,21 @@ pub(crate) enum FetchSite {
     CrossSite,
 }
 
+fn same_origin(a: &Url, b: &Url) -> bool {
+    if a.scheme() == "blob" || b.scheme() == "blob" {
+        return a.origin() == b.origin();
+    }
+    matches!(a.scheme(), "http" | "https" | "ws" | "wss" | "ftp")
+        && (std::ptr::eq(a, b)
+            || a.scheme() == b.scheme()
+                && a.host() == b.host()
+                && a.port_or_known_default() == b.port_or_known_default())
+}
+
 impl FetchSite {
     #[must_use]
     pub(crate) fn of(context: &Url, request: &Url) -> Self {
-        if context.origin() == request.origin() {
+        if same_origin(context, request) {
             return Self::SameOrigin;
         }
         let same_site = context.scheme() == request.scheme()
@@ -58,3 +69,7 @@ impl std::fmt::Display for FetchSite {
         f.write_str(self.as_str())
     }
 }
+
+#[cfg(test)]
+#[path = "fetch_site_tests.rs"]
+mod tests;

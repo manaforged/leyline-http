@@ -28,7 +28,7 @@ impl Session {
             .get(target.as_str())
             .redirect(Redirect::limit(MAX_REDIRECTS))
             .retry(retry);
-        builder.trusted_origin = trusted;
+        builder.draft.trusted_origin = trusted;
         let response = match builder.stream().send().await {
             Ok(response) => response,
             Err(err) if err.is_shut_down() => return Err(err),

@@ -3,7 +3,6 @@ use crate::h2_support as support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::h2::RequestBody;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::frame::FrameType;
 use support::*;
@@ -101,7 +100,7 @@ async fn a_reassembly_timeout_of_duration_max_sets_no_deadline() {
     let handle = leyline::h2::start(client_io, config)
         .await
         .expect("handshake");
-    let sent = handle.send_shared(Arc::new(get_head("/")), RequestBody::None, false);
+    let sent = handle.send_shared(Arc::new(get_head("/")), leyline::Body::default(), false);
     let response = tokio::time::timeout(Duration::from_secs(5), sent)
         .await
         .expect("the response arrives")

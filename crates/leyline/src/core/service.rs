@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 use http::{Request as HttpRequest, Response as HttpResponse};
 
 use crate::core::body::Body;
-use crate::core::{Cause, Response, Result, Session};
+use crate::core::{Kind, Response, Result, Session};
 
 fn adapt(resp: Response) -> Result<HttpResponse<Body>> {
     let decoded = resp.decodes_body();
@@ -21,10 +21,10 @@ fn adapt(resp: Response) -> Result<HttpResponse<Body>> {
         }
         builder = builder.header(name, value);
     }
-    let body = Body::stream(resp.body_stream()?, None);
+    let body = resp.bytes_stream()?;
     builder
         .body(body)
-        .map_err(|e| crate::core::Error::new(Cause::Request).with_source(e))
+        .map_err(|e| crate::core::Error::new(Kind::Request).with_source(e))
 }
 
 impl tower_service::Service<HttpRequest<Body>> for Session {

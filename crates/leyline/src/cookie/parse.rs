@@ -76,11 +76,8 @@ fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Opti
     if !host_only && is_public_suffix(&cookie_domain) {
         return None;
     }
-    if !host_only {
-        let rh = request_host.to_lowercase();
-        if rh != cookie_domain && !rh.ends_with(&format!(".{cookie_domain}")) {
-            return None;
-        }
+    if !host_only && !crate::core::domain_match(&request_host, &cookie_domain) {
+        return None;
     }
     Some((host_only, cookie_domain))
 }
@@ -159,10 +156,6 @@ fn is_public_suffix(domain: &str) -> bool {
     }
     psl::suffix(domain.as_bytes())
         .is_some_and(|s| s.as_bytes().eq_ignore_ascii_case(domain.as_bytes()))
-}
-
-pub(crate) fn registrable_domain(host: &str) -> Option<String> {
-    psl::domain(host.as_bytes()).map(|d| String::from_utf8_lossy(d.as_bytes()).into_owned())
 }
 
 fn default_path(request_path: &str) -> String {

@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
+use crate::Error;
 use crate::h2::config::SettingId;
 use crate::profile::H3Profile;
 use crate::profile::preset::HeaderStyle;
-use crate::{Cause, Error};
 
 #[cfg_attr(
     feature = "bench-internals",
@@ -123,7 +123,7 @@ pub struct TlsProfile {
     pub extension_permutation: Option<Vec<u16>>,
     #[serde(default)]
     pub extension_tail: Vec<u16>,
-    #[serde(default = "default_grease")]
+    #[serde(default = "default_true")]
     pub grease: bool,
     #[serde(default)]
     pub sigalg_grease: bool,
@@ -143,10 +143,6 @@ pub struct TlsProfile {
     pub min_tls_version: Option<String>,
     #[serde(default)]
     pub tls12_extensions: bool,
-}
-
-const fn default_grease() -> bool {
-    true
 }
 
 const fn default_true() -> bool {
@@ -328,7 +324,7 @@ pub struct BrowserHeaders {
 }
 
 fn invalid_profile(why: impl std::fmt::Display) -> crate::Error {
-    crate::Error::new(crate::Cause::Config).with_message(format!("invalid profile: {why}"))
+    Error::config(format!("invalid profile: {why}"))
 }
 
 impl BrowserProfile {
@@ -406,7 +402,7 @@ impl H2Profile {
                 return Ok(self.clone());
             };
             let mut out = self.clone();
-            let config = |why: String| Error::new(Cause::Config).with_message(why);
+            let config = |why: String| Error::config(why);
 
             for id in SettingId::all() {
                 if let Some(v) = over.setting(id) {

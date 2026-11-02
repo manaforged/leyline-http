@@ -36,10 +36,15 @@ macro_rules! impl_encode {
     };
 }
 
+impl<F: AsRef<[u8]>> Encode for HeadersFrame<F> {
+    fn encode(&self, buf: &mut BytesMut) {
+        HeadersFrame::<F>::encode(self, buf);
+    }
+}
+
 impl_encode!(
     SettingsFrame,
     WindowUpdateFrame,
-    HeadersFrame,
     ContinuationFrame<'_>,
     DataFrame,
     PingFrame,

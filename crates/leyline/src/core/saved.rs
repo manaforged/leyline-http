@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::cookie::Jar;
-use crate::core::error::{Cause, Error, ProfileChanged, Result};
+use crate::core::error::{Error, ProfileChanged, Result};
 use crate::core::{Identity, Proxy, ProxyUrl, Session, SessionBuilder};
 use crate::profile::{BrowserProfile, ChromiumBrand, Platform};
 use crate::util::atomic::{FileMode, write_atomic};
@@ -14,7 +14,7 @@ mod state;
 mod version;
 
 pub use state::ConnectionState;
-pub(crate) use state::{StateParts, unix_secs};
+pub(crate) use state::StateParts;
 pub(crate) use version::FileVersion;
 
 #[derive(Serialize)]
@@ -89,7 +89,7 @@ impl Serialize for Session {
             identity: &identity,
             platform: identity.platform(),
             profile_id: self.profile_id(),
-            proxy: self.proxy_url().map(|proxy| secret::strip_password(&proxy)),
+            proxy: self.proxy_url().map(|proxy| proxy.without_password()),
             jar: self.cookies().snapshot(),
             state: self.connection_state(),
         }
@@ -145,10 +145,10 @@ impl SavedIn {
 
     fn strict_gaps(&self) -> Result<()> {
         if self.strict && self.profile_id.is_none() {
-            return Err(config("the strict saved file has no profile_id"));
+            return Err(Error::config("the strict saved file has no profile_id"));
         }
         if self.strict && self.proxy.is_none() && !self.env_proxy {
-            return Err(config("the strict saved file has no proxy"));
+            return Err(Error::config("the strict saved file has no proxy"));
         }
         Ok(())
     }
@@ -159,7 +159,7 @@ impl Saved {
         if let Some(expected) = self.profile_id.as_deref() {
             let actual = session.profile_id();
             if actual.as_deref() != Some(expected) {
-                return Err(config(format!(
+                return Err(Error::config(format!(
                     "the session differs from the saved file: profile_id {actual:?} (saved {expected:?})"
                 ))
                 .with_source(ProfileChanged));
@@ -168,8 +168,4 @@ impl Saved {
         session.restore(&self.state);
         Ok(())
     }
-}
-
-fn config(message: impl Into<String>) -> Error {
-    Error::new(Cause::Config).with_message(message.into())
 }

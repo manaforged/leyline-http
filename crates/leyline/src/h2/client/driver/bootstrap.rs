@@ -13,7 +13,7 @@ use crate::h2::connection::{
 use crate::h2::error::H2Error;
 use crate::h2::hpack;
 
-use super::super::handle::H2Client;
+use super::super::handle::{H2Client, Shared};
 
 use super::*;
 
@@ -23,9 +23,9 @@ pub async fn start<T>(io: T, config: H2Config) -> Result<H2Client, H2Error>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let (read_half, write_half) = tokio::io::split(io);
-    let mut reader = FrameReader::new(read_half);
-    let mut writer = FrameWriter::new(write_half);
+    let mut io = io;
+    let mut reader = FrameReader::new();
+    let mut writer = FrameWriter::new();
 
     writer.write_preface().await?;
 
@@ -37,7 +37,7 @@ where
             .map(|&(id, val)| (id as u16, val))
             .collect(),
     };
-    writer.write_settings(&settings_frame).await?;
+    writer.write_settings(&mut io, &settings_frame).await?;
 
     if config.initial_connection_window_size > DEFAULT_WINDOW_SIZE {
         let increment = config.initial_connection_window_size - DEFAULT_WINDOW_SIZE;
@@ -48,7 +48,7 @@ where
             })
             .await?;
     }
-    writer.flush().await?;
+    writer.flush(&mut io).await?;
 
     let peer_settings = PeerSettings::default();
     let initial_send_window = i64::from(DEFAULT_WINDOW_SIZE);
@@ -71,7 +71,7 @@ where
     let snapshot = Arc::new(PeerSettingsSnapshot::new());
     snapshot.set_enable_connect_protocol(peer_settings.enable_connect_protocol);
 
-    let (tx, rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
+    let (tx, rx) = super::protocol::command_channel(COMMAND_CHANNEL_CAPACITY);
     let (ping_tx, ping_rx) = mpsc::channel(PING_CHANNEL_CAPACITY);
     let closed = Arc::new(AtomicBool::new(false));
     let unanswered_timeout = Arc::new(AtomicBool::new(false));
@@ -80,6 +80,7 @@ where
     let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4);
 
     let driver = Driver {
+        io,
         reader,
         writer,
         encoder,
@@ -111,6 +112,7 @@ where
         config: config.clone(),
         command_rx: rx,
         ping_rx,
+        ping_armed: false,
         closed: closed.clone(),
         unanswered_timeout: Arc::clone(&unanswered_timeout),
         load: Arc::clone(&streams),
@@ -128,12 +130,14 @@ where
     drop(tokio::spawn(driver.run()));
 
     Ok(H2Client {
-        tx,
-        ping_tx,
-        closed,
-        unanswered_timeout,
-        streams,
-        #[cfg(feature = "websocket")]
-        peer_settings: snapshot,
+        shared: Arc::new(Shared {
+            tx,
+            ping_tx,
+            closed,
+            unanswered_timeout,
+            streams,
+            #[cfg(feature = "websocket")]
+            peer_settings: snapshot,
+        }),
     })
 }

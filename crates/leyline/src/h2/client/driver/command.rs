@@ -7,7 +7,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "websocket")]
 use tokio::sync::mpsc;
 
-use crate::h2::client::RequestBody;
+use crate::core::{Body, BodyKind};
 use crate::h2::connection::PseudoHeaders;
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
@@ -38,8 +38,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
             #[cfg(feature = "websocket")]
             DriverCommand::OpenConnect {
-                pseudo,
-                headers,
+                head,
                 write_rx,
                 sink,
             } => {
@@ -61,7 +60,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     send_err_to_sink(sink, e);
                     return Ok(());
                 }
-                self.start_extended_connect(&pseudo, &headers, write_rx, sink)
+                self.start_extended_connect(&head.pseudo, &head.headers, write_rx, sink)
                     .await
             }
             DriverCommand::SendRequest {
@@ -117,7 +116,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    fn start_upload(&mut self, stream_id: u32, body: crate::util::upload::BodyStream) {
+    fn start_upload(&mut self, stream_id: u32, body: crate::core::BoxedStream) {
         let Some(actor) = self.streams.get_mut(stream_id) else {
             return;
         };
@@ -196,16 +195,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         &mut self,
         pseudo: &PseudoHeaders,
         headers: &[crate::h2::connection::HeaderPair],
-        body: RequestBody,
+        body: Body,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
-        match body {
-            RequestBody::None => self.start_request(pseudo, headers, None, sink).await,
-            RequestBody::Buffered(b) => {
+        match body.0 {
+            BodyKind::Empty => self.start_request(pseudo, headers, None, sink).await,
+            BodyKind::Bytes(b) => {
                 let body = if b.is_empty() { None } else { Some(b) };
                 self.start_request(pseudo, headers, body, sink).await
             }
-            RequestBody::Streaming { stream: body, .. } => {
+            BodyKind::Stream { stream: body, .. } => {
                 let stream_id = self.alloc_stream_id();
                 let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 

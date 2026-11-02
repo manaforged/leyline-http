@@ -39,16 +39,9 @@ fn bind_local_address(
     peer: std::net::SocketAddr,
     config: &SocketOptions,
 ) -> Result<(), std::io::Error> {
-    let local_ip = match (
-        peer,
-        config.local_address,
-        config.local_ipv4,
-        config.local_ipv6,
-    ) {
-        (_, Some(ip), _, _) => Some(ip),
-        (std::net::SocketAddr::V4(_), None, Some(ip), _) => Some(std::net::IpAddr::V4(ip)),
-        (std::net::SocketAddr::V6(_), None, _, Some(ip)) => Some(std::net::IpAddr::V6(ip)),
-        _ => None,
+    let local_ip = match peer {
+        std::net::SocketAddr::V4(_) => config.local_ipv4.map(std::net::IpAddr::V4),
+        std::net::SocketAddr::V6(_) => config.local_ipv6.map(std::net::IpAddr::V6),
     };
     if let Some(ip) = local_ip {
         socket.bind(&std::net::SocketAddr::new(ip, 0).into())?;

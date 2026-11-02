@@ -104,7 +104,7 @@ impl H3Loop {
             let reason = close_reason("h3", 0, &self.conn);
             return self.stop(reason);
         }
-        if self.is_idle() {
+        if self.commands_closed && self.streams.is_empty() && self.pending.is_empty() {
             self.closed.store(true, Ordering::Release);
             self.open_streams.store(0, Ordering::Relaxed);
             return ControlFlow::Break(());
@@ -141,10 +141,6 @@ impl H3Loop {
         );
         self.open_streams.store(0, Ordering::Relaxed);
         ControlFlow::Break(())
-    }
-
-    fn is_idle(&self) -> bool {
-        self.commands_closed && self.streams.is_empty() && self.pending.is_empty()
     }
 
     fn accepting_commands(&self) -> bool {

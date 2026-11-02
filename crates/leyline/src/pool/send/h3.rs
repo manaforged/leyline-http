@@ -1,22 +1,23 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::Error;
+use crate::core::transport::TransportResponse;
 use crate::core::{Body, ResponseMode};
-use crate::quic::{H3Client, H3RespBody, H3Response};
+use crate::quic::H3Client;
 use crate::trace;
-use crate::{Error, HttpVersion, ResponseTiming};
 
 use super::{Sent, not_resendable, resend};
 use crate::pool::connect::{H3Target, checkout_h3_opened, open_h3};
 use crate::pool::pool::Pool;
-use crate::pool::types::{LegKind, Opened, PoolKey, TlsInfo, Transport};
+use crate::pool::types::{LegKind, Opened, PoolKey, Transport};
 
 pub(crate) struct H3Request<'a> {
     pub(crate) method: &'a str,
     pub(crate) authority: &'a str,
     pub(crate) path: &'a str,
-    pub(crate) headers: &'a [(String, String)],
-    pub(crate) proxy: Option<&'a str>,
+    pub(crate) headers: &'a [crate::h2::connection::HeaderPair],
+    pub(crate) proxy: Option<&'a crate::core::ProxyUrl>,
 }
 
 struct H3Send<'a> {
@@ -37,7 +38,7 @@ pub(crate) async fn send_request_h3_pooled(
     request: H3Request<'_>,
     body: Body,
     mode: ResponseMode,
-) -> Result<(H3Response<H3RespBody>, TlsInfo, ResponseTiming), Error> {
+) -> Result<TransportResponse, Error> {
     let started = Instant::now();
     let key = pool.key("https", host, port, request.proxy, Transport::Quic);
     let mut opened = checkout_h3_opened(pool, target, key.clone()).await?;
@@ -68,7 +69,7 @@ async fn send_on(
     ctx: &H3Send<'_>,
     opened: Opened<H3Client>,
     body: Body,
-) -> Result<Sent<H3Response<H3RespBody>>, Error> {
+) -> Result<Sent<TransportResponse>, Error> {
     let leg = opened.leg();
     let replay = match leg {
         LegKind::Pooled => {
@@ -95,7 +96,7 @@ async fn send_on(
         ctx.host,
         request.method,
         request.path,
-        HttpVersion::Http3,
+        http::Version::HTTP_3,
         Duration::ZERO,
     );
     let (bytes, stream) = body.into_parts();
@@ -115,13 +116,8 @@ async fn send_on(
         Ok(resp) => resp,
         Err(e) if leg == LegKind::Fresh || !e.is_retryable() => return Err(Error::from(e)),
         Err(e) => {
-            tracing::info!(
-                target: "leyline::pool",
-                host = %ctx.key.host,
-                port = ctx.key.port,
-                error = %e.message(),
-                "pool stale hit -- pooled h3 connection unsent, opening fresh"
-            );
+            ctx.pool
+                .stale_hit(ctx.key, http::Version::HTTP_3, &e.message());
             ctx.pool.invalidate(ctx.key);
             return resend(
                 replay,
@@ -133,18 +129,12 @@ async fn send_on(
             .map(Sent::Retry);
         }
     };
-    trace::head(
+    Ok(Sent::Done(super::answered(
+        resp,
         ctx.host,
-        resp.status,
-        HttpVersion::Http3,
-        send_started.elapsed(),
-        resp.headers.iter().cloned(),
-    );
-    let timing = ResponseTiming {
-        reused: leg == LegKind::Pooled,
-        connect_ms: opened.connect_ms,
-        send_ms: ResponseTiming::millis(send_started),
-        total_ms: ResponseTiming::millis(ctx.started),
-    };
-    Ok(Sent::Done((resp, opened.tls, timing)))
+        opened.tls,
+        opened.connect_ms,
+        send_started,
+        ctx.started,
+    )))
 }

@@ -79,7 +79,7 @@ Default: `charset`, `compression-gzip`, `compression-brotli`,
 `SessionBuilder::profile` takes the TOML text of a profile laid out like the
 bundled `profiles/<family>/<version>.toml` files, and
 `Session::profile` returns it. `profiles/bare.toml` holds the bare profile and `profiles/platforms.toml`
-the per-platform TCP values. The `[meta]` keys `capture`, `variant`,
+the per-platform TCP values and the `accept_language` a profile uses when its identity table sets none. The `[meta]` keys `capture`, `variant`,
 `hello`, `platform_browser`, `deprecated`, and `verified_at` are valid and
 ignored at runtime, and the build reads the first five to generate
 `Browser`. The TOML schema is part of the API: a patch release can add keys,

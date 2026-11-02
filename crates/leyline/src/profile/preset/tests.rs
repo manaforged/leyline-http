@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use super::*;
 
 fn style(firefox: bool) -> HeaderStyle {
@@ -27,6 +29,33 @@ fn ctx() -> HeaderContext<'static> {
     }
 }
 
+fn build(
+    style: HeaderStyle,
+    kind: Option<RequestKind>,
+    ctx: &HeaderContext<'_>,
+) -> Vec<HeaderPair> {
+    HeaderPlan::new(style, ctx, None)
+        .plan(kind)
+        .headers(ctx, true)
+}
+
+#[test]
+fn same_identity_shares_one_plan() {
+    let cache = PlanCache::default();
+    let first_ctx = ctx();
+    let first = HeaderPlan::cached(&cache, HeaderStyle::Chromium, &first_ctx, None);
+    let second = HeaderPlan::cached(&cache, HeaderStyle::Chromium, &first_ctx, None);
+    assert!(Arc::ptr_eq(&first, &second));
+    let mut other = ctx();
+    other.user_agent = shared("other-agent");
+    let different = HeaderPlan::cached(&cache, HeaderStyle::Chromium, &other, None);
+    assert!(!Arc::ptr_eq(&first, &different));
+    assert_ne!(
+        first.plan(None).headers(&first_ctx, false),
+        different.plan(None).headers(&other, false)
+    );
+}
+
 fn names(h: &[HeaderPair]) -> Vec<String> {
     h.iter().map(|(n, _)| n.to_string()).collect()
 }
@@ -37,7 +66,7 @@ fn value<'a>(h: &'a [HeaderPair], name: &str) -> Option<&'a str> {
 
 #[test]
 fn firefox_reshapes_client_hints_accept_priority_and_te() {
-    let chrome = style(false).build_headers(Some(RequestKind::Navigate), &ctx());
+    let chrome = build(style(false), Some(RequestKind::Navigate), &ctx());
     assert!(names(&chrome).iter().any(|n| n == "sec-ch-ua-mobile"));
     assert!(value(&chrome, "accept").unwrap().contains("image/apng"));
     assert_eq!(value(&chrome, "priority"), Some("u=0, i"));
@@ -45,7 +74,7 @@ fn firefox_reshapes_client_hints_accept_priority_and_te() {
     assert_eq!(names_ref.last().map(String::as_str), Some("priority"));
     assert_eq!(value(&chrome, "te"), None);
 
-    let ff = style(true).build_headers(Some(RequestKind::Navigate), &ctx());
+    let ff = build(style(true), Some(RequestKind::Navigate), &ctx());
     assert!(
         names(&ff).iter().all(|n| !n.starts_with("sec-ch-ua")),
         "firefox must send no Client Hints: {:?}",
@@ -58,7 +87,7 @@ fn firefox_reshapes_client_hints_accept_priority_and_te() {
     assert_eq!(value(&ff, "priority"), Some("u=0, i"));
     assert_eq!(value(&ff, "te"), Some("trailers"));
 
-    let ff_xhr = style(true).build_headers(Some(RequestKind::SameSite), &ctx());
+    let ff_xhr = build(style(true), Some(RequestKind::SameSite), &ctx());
     assert!(names(&ff_xhr).iter().all(|n| !n.starts_with("sec-ch-ua")));
     assert_eq!(
         value(&ff_xhr, "accept"),
@@ -70,11 +99,11 @@ fn firefox_reshapes_client_hints_accept_priority_and_te() {
 
 #[test]
 fn chrome_xhr_sends_priority_and_accept_language() {
-    let xhr = style(false).build_headers(Some(RequestKind::Xhr), &ctx());
+    let xhr = build(style(false), Some(RequestKind::Xhr), &ctx());
     assert_eq!(value(&xhr, "priority"), Some("u=1, i"));
     assert_eq!(value(&xhr, "accept-language"), Some("en-US,en;q=0.9"));
     assert_eq!(xhr.iter().filter(|(n, _)| n == "priority").count(), 1);
-    let ff = style(true).build_headers(Some(RequestKind::Xhr), &ctx());
+    let ff = build(style(true), Some(RequestKind::Xhr), &ctx());
     assert_eq!(
         ff.iter().filter(|(n, _)| n == "priority").count(),
         1,
@@ -85,7 +114,7 @@ fn chrome_xhr_sends_priority_and_accept_language() {
 #[test]
 fn session_constant_headers_share_the_session_bytes() {
     let ctx = ctx();
-    let headers = style(false).build_headers(Some(RequestKind::Navigate), &ctx);
+    let headers = build(style(false), Some(RequestKind::Navigate), &ctx);
     let user_agent = headers
         .iter()
         .find(|(n, _)| n == "user-agent")
@@ -101,7 +130,7 @@ fn session_constant_headers_share_the_session_bytes() {
 #[test]
 fn static_placeholders_reuse_the_static_text() {
     let ctx = ctx();
-    let headers = style(false).build_headers(Some(RequestKind::Navigate), &ctx);
+    let headers = build(style(false), Some(RequestKind::Navigate), &ctx);
     let mobile = headers
         .iter()
         .find(|(n, _)| n == "sec-ch-ua-mobile")

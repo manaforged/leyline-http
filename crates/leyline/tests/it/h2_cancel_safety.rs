@@ -6,10 +6,10 @@ use std::time::Duration;
 use support::*;
 use tokio::io::AsyncReadExt;
 
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody};
 
 fn test_config() -> H2Config {
     H2Config {
@@ -107,7 +107,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
                         pseudo,
                         headers: vec![],
                     }),
-                    RequestBody::None,
+                    leyline::Body::default(),
                     false,
                 )
                 .await,

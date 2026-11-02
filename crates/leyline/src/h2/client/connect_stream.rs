@@ -9,9 +9,9 @@ use tokio_util::sync::PollSender;
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
 use crate::h2::error::{ErrorCode, H2Error};
 
-use super::driver::{DriverCommand, ResponseSink, STREAM_REQ_BODY_CAPACITY};
+use super::driver::{DriverCommand, Head, ResponseSink, STREAM_REQ_BODY_CAPACITY};
 use super::handle::H2Client;
-use super::types::H2ResponseEx;
+use crate::core::transport::TransportResponse;
 
 pub struct H2ConnectStream {
     pub(super) status: u16,
@@ -194,7 +194,7 @@ impl Drop for H2ConnectStream {
 
 impl H2Client {
     pub fn peer_enables_connect_protocol(&self) -> bool {
-        self.peer_settings.enable_connect_protocol()
+        self.shared.peer_settings.enable_connect_protocol()
     }
 
     pub async fn open_extended_connect(
@@ -210,7 +210,7 @@ impl H2Client {
                     .into(),
             });
         }
-        if self.closed.load(Ordering::Acquire) {
+        if self.shared.closed.load(Ordering::Acquire) {
             return Err(H2Error::Connection {
                 code: ErrorCode::NoError,
                 reason: "connection closed".into(),
@@ -224,16 +224,15 @@ impl H2Client {
         }
 
         let (write_tx, write_rx) = mpsc::channel::<io::Result<Bytes>>(STREAM_REQ_BODY_CAPACITY);
-        let (headers_tx, headers_rx) = oneshot::channel::<Result<H2ResponseEx, H2Error>>();
+        let (headers_tx, headers_rx) = oneshot::channel::<Result<TransportResponse, H2Error>>();
         let (sink, body_rx) = ResponseSink::streaming(headers_tx);
 
         let cmd = DriverCommand::OpenConnect {
-            pseudo,
-            headers,
+            head: Box::new(Head { pseudo, headers }),
             write_rx,
             sink,
         };
-        self.tx.send(cmd).await.map_err(|e| {
+        self.shared.tx.send(cmd).await.map_err(|e| {
             tracing::debug!(error = %e, "h2 driver command channel closed");
             H2Error::Stream {
                 stream_id: 0,
@@ -254,12 +253,8 @@ impl H2Client {
 
         Ok(H2ConnectStream {
             shutdown_state: ShutdownState::Open,
-            status: resp.status,
-            response_headers: resp
-                .headers
-                .into_iter()
-                .map(|(k, v)| (k.as_str().to_owned(), v.as_str().to_owned()))
-                .collect(),
+            status: resp.status.as_u16(),
+            response_headers: crate::core::transport::string_pairs(&resp.headers),
             write_tx: Some(PollSender::new(write_tx)),
             read_rx: body_rx,
             read_leftover: Bytes::new(),

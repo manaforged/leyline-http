@@ -1,6 +1,6 @@
 use crate::Session;
 use crate::profile::{Browser, Platform, RequestKind};
-use crate::{Body, Cause, RequestBuilder};
+use crate::{Body, Kind, RequestBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 async fn capture_get_headers(session: Session) -> String {
@@ -104,16 +104,16 @@ fn session_retry_default_is_inherited_by_requests() {
     let policy = Retry::new(7);
     let session = Session::builder().retry(policy).build().unwrap();
     let req = session.request(http::Method::GET, "https://example.test/");
-    assert_eq!(req.retry_policy.count(), 7);
+    assert_eq!(req.draft.retry_policy.count(), 7);
     let overridden = session
         .request(http::Method::GET, "https://example.test/")
         .retry(0);
-    assert_eq!(overridden.retry_policy.count(), 0);
+    assert_eq!(overridden.draft.retry_policy.count(), 0);
     let bare = Session::builder()
         .build()
         .unwrap()
         .request(http::Method::GET, "https://example.test/");
-    assert_eq!(bare.retry_policy.count(), 0);
+    assert_eq!(bare.draft.retry_policy.count(), 0);
 }
 
 #[test]
@@ -172,7 +172,7 @@ fn safari_windows_profile_is_err() {
         ))
         .build()
         .expect_err("safari on windows is not a profile");
-    assert_eq!(err.cause(), Cause::Config, "expected Config, got {err:?}");
+    assert_eq!(err.cause(), Kind::Config, "expected Config, got {err:?}");
     let message = err.message().expect("config errors carry a message");
     assert!(message.contains("Windows"), "unexpected config: {message}");
 }

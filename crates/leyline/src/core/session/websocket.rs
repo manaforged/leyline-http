@@ -1,7 +1,7 @@
 use super::Session;
 use super::header_merge::apply_extra_headers;
 use crate::core::config::{Proxy, Timeout};
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
 use crate::core::websocket::WebSocket;
 use crate::pool::OriginFlag;
@@ -32,7 +32,7 @@ impl Session {
     ) -> Result<WebSocket> {
         let config = self.inner.websocket_config;
         let origin = ws_origin(url)?;
-        let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
+        let parsed = url::Url::parse(url).map_err(crate::core::Error::from)?;
         let proxy = self.proxy_for(&parsed, request_proxy)?;
         let extra_headers = &self.websocket_headers(&parsed, extra_headers);
 
@@ -126,15 +126,15 @@ fn http_equivalent(url: &url::Url) -> url::Url {
 }
 
 fn ws_origin(url: &str) -> Result<String> {
-    let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
+    let parsed = url::Url::parse(url).map_err(crate::core::Error::from)?;
     let scheme = match parsed.scheme() {
         "wss" => "https",
         "ws" => {
-            return Err(Error::new(Cause::Request)
+            return Err(Error::new(Kind::Request)
                 .with_message("plaintext ws:// is not supported; use wss://"));
         }
         other => {
-            return Err(Error::new(Cause::Request)
+            return Err(Error::new(Kind::Request)
                 .with_message(format!("websocket URL must use wss://, not {other}")));
         }
     };

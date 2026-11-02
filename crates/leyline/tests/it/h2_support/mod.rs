@@ -20,7 +20,7 @@ use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
     WindowUpdateFrame,
 };
-use leyline::h2::{H2Client, Head, RequestBody, hpack};
+use leyline::h2::{H2Client, Head, hpack};
 
 const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const END_HEADERS: u8 = 0x4;
@@ -239,7 +239,7 @@ pub fn head(method: &str) -> Arc<Head> {
     })
 }
 
-pub fn send(handle: &H2Client, method: &str, body: RequestBody) -> tokio::task::JoinHandle<()> {
+pub fn send(handle: &H2Client, method: &str, body: leyline::Body) -> tokio::task::JoinHandle<()> {
     let handle = handle.clone();
     let head = head(method);
     tokio::spawn(async move {
@@ -270,9 +270,6 @@ impl Drop for Endless {
     }
 }
 
-pub fn endless(producer: &Arc<Producer>) -> RequestBody {
-    RequestBody::Streaming {
-        stream: Box::pin(Endless(Arc::clone(producer))),
-        length_hint: None,
-    }
+pub fn endless(producer: &Arc<Producer>) -> leyline::Body {
+    leyline::Body::stream(Endless(Arc::clone(producer)), None)
 }

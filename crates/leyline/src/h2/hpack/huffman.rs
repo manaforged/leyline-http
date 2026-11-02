@@ -24,9 +24,11 @@ pub fn encode(src: &[u8], dst: &mut Vec<u8>) {
     }
 }
 
+const SHORTEST_CODE_BITS: usize = 5;
+
 pub fn decode(src: &[u8]) -> Result<Vec<u8>, &'static str> {
     let table = decode_table();
-    let mut dst = Vec::new();
+    let mut dst = Vec::with_capacity(src.len() * 8 / SHORTEST_CODE_BITS + 1);
     let mut acc: u64 = 0;
     let mut acc_bits: u8 = 0;
 

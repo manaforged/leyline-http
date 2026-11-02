@@ -1,3 +1,4 @@
+#[inline]
 pub fn encode(value: usize, prefix_bits: u8, prefix_pattern: u8, dst: &mut Vec<u8>) {
     let max_prefix = (1 << prefix_bits) - 1;
 

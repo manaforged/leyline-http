@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use foldhash::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -15,7 +15,7 @@ use crate::tls::Tls;
 use crate::tls::{FingerprintConnector, TlsStream};
 use crate::trace;
 use crate::util::lock;
-use crate::{Cause, Error};
+use crate::{Error, Kind};
 
 use super::checkout_live_h2;
 use super::pool::{OriginFlag, Pool};
@@ -35,7 +35,7 @@ impl<C> Clone for Inflight<C> {
 
 impl<C> Default for Inflight<C> {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(HashMap::new())))
+        Self(Arc::default())
     }
 }
 
@@ -43,7 +43,7 @@ impl<C: Clone + Send + Sync + 'static> Inflight<C> {
     fn join_or_spawn<Fut>(
         &self,
         key: &PoolKey,
-        failed: Cause,
+        failed: Kind,
         open: impl FnOnce() -> Fut,
     ) -> SharedConnect<C>
     where
@@ -78,7 +78,7 @@ impl<C: Clone + Send + Sync + 'static> Inflight<C> {
 async fn open_coalesced<C, Fut>(
     inflight: &Inflight<C>,
     key: &PoolKey,
-    failed: Cause,
+    failed: Kind,
     checkout: impl Fn() -> Option<(C, TlsInfo)>,
     open: impl Fn() -> Fut,
 ) -> Result<(C, TlsInfo), Error>
@@ -100,10 +100,14 @@ async fn open_fresh_h2(
     connector: FingerprintConnector,
     h2_config: H2Config,
     key: PoolKey,
-    proxy: Option<String>,
+    proxy: Option<crate::core::ProxyUrl>,
 ) -> Result<(H2Client, TlsInfo), Error> {
     let tls_stream = connector
-        .connect(&key.host, key.port, proxy.as_deref())
+        .connect(
+            &key.host,
+            key.port,
+            proxy.as_ref().map(crate::core::ProxyUrl::url),
+        )
         .await
         .map_err(Error::from)?;
     let tls = tls_info(&tls_stream);
@@ -114,7 +118,7 @@ async fn open_fresh_h2(
             .map(|p| String::from_utf8_lossy(p).to_string())
             .unwrap_or_else(|| "none".to_string());
         park_h1(&pool, key, tls_stream, tls);
-        return Err(Error::new(Cause::Http2)
+        return Err(Error::new(Kind::Http2)
             .with_message(format!("alpn: negotiated {negotiated}, expected h2"))
             .with_alpn(negotiated));
     }
@@ -127,27 +131,16 @@ async fn open_fresh_h2(
 }
 
 pub(crate) fn tls_info(tls_stream: &TlsStream) -> TlsInfo {
-    TlsInfo {
+    TlsInfo::from(super::types::TlsFacts {
         peer_cert_der: tls_stream.peer_cert_der.clone(),
         version: tls_stream.tls_version.clone(),
         cipher: tls_stream.tls_cipher.clone(),
-    }
+    })
 }
 
 fn park_h1(pool: &Pool, key: PoolKey, tls_stream: TlsStream, tls: TlsInfo) {
-    pool.remember(
-        OriginFlag::H1Only,
-        &key.host,
-        key.port,
-        key.proxy.as_deref(),
-    );
-    pool.return_h1(
-        key,
-        H1Slot {
-            io: Box::new(tls_stream.stream),
-        },
-        tls,
-    );
+    pool.remember(OriginFlag::H1Only, &key.host, key.port, key.proxy.as_ref());
+    pool.return_h1(&key, H1Slot::new(Box::new(tls_stream.stream)), tls);
     pool.note_h1_install();
 }
 
@@ -162,16 +155,16 @@ pub(crate) async fn negotiate(
     h2_config: &H2Config,
     host: &str,
     port: u16,
-    proxy: Option<&str>,
+    proxy: Option<&crate::core::ProxyUrl>,
 ) -> Result<Negotiated, Error> {
     if pool.recalls(OriginFlag::H1Only, host, port, proxy) {
         return Ok(Negotiated::H1(None));
     }
-    let key = pool.key("https", host, port, proxy, Transport::Tcp);
-    match checkout_h2_opened(pool, connector, h2_config, key.clone()).await {
+    let mut key = pool.key("https", host, port, proxy, Transport::Tcp);
+    match checkout_h2_opened(pool, connector, h2_config, &mut key).await {
         Ok(opened) => Ok(Negotiated::H2(opened)),
         Err((e, started)) if e.alpn().is_some() => Ok(Negotiated::H1(
-            pool.checkout_h1(&key)
+            pool.checkout_h1(&PoolKey { lane: 0, ..key }, started)
                 .map(|parked| Opened::fresh(parked, started)),
         )),
         Err((e, _)) => Err(e),
@@ -182,7 +175,7 @@ pub(crate) async fn checkout_h2_opened(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
     h2_config: &H2Config,
-    key: PoolKey,
+    key: &mut PoolKey,
 ) -> Result<Opened<H2Client>, (Error, Instant)> {
     let opened = pick_h2_lane(pool, connector, h2_config, key).await;
     let reused = matches!(&opened, Ok(opened) if opened.connect_ms.is_none());
@@ -194,17 +187,17 @@ async fn pick_h2_lane(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
     h2_config: &H2Config,
-    key: PoolKey,
+    key: &mut PoolKey,
 ) -> Result<Opened<H2Client>, (Error, Instant)> {
-    pool.evict_idle();
+    let now = Instant::now();
+    pool.evict_idle(now);
     let lanes = pool.config.h2_lanes();
-    let mut key = key;
     loop {
         let mut least: Option<((H2Client, TlsInfo), u8)> = None;
         let mut missing = None;
         for lane in 0..lanes {
             key.lane = lane;
-            match checkout_live_h2(pool, &key).await {
+            match checkout_live_h2(pool, key, now).await {
                 Some(hit) => {
                     if let Some(slot) = hit.0.reserve() {
                         return Ok(Opened::pooled(hit).on_lane(lane).with_slot(Some(slot)));
@@ -228,12 +221,15 @@ async fn pick_h2_lane(
             OriginFlag::H2SpillFailed,
             &key.host,
             key.port,
-            key.proxy.as_deref(),
+            key.proxy.as_ref(),
         );
         let (least, lane) = match (least, missing) {
             (None, missing) => (None, missing.unwrap_or(0)),
             (Some(full), Some(lane)) if !paused => (Some(full), lane),
-            (Some((hit, used)), _) => return Ok(Opened::pooled(hit).on_lane(used)),
+            (Some((hit, used)), _) => {
+                key.lane = used;
+                return Ok(Opened::pooled(hit).on_lane(used));
+            }
         };
         key.lane = lane;
         let started = Instant::now();
@@ -247,7 +243,8 @@ async fn pick_h2_lane(
             }
             Err(e) => match least {
                 Some((hit, used)) => {
-                    spill_failed(pool, &key, &e);
+                    spill_failed(pool, key, &e);
+                    key.lane = used;
                     return Ok(Opened::pooled(hit).on_lane(used));
                 }
                 None => return Err((e, started)),
@@ -268,7 +265,7 @@ fn spill_failed(pool: &Pool, key: &PoolKey, e: &Error) {
         OriginFlag::H2SpillFailed,
         &key.host,
         key.port,
-        key.proxy.as_deref(),
+        key.proxy.as_ref(),
     );
 }
 
@@ -281,7 +278,7 @@ pub(crate) async fn open_h2(
     open_coalesced(
         &pool.inflight_h2,
         &key,
-        Cause::Http2,
+        Kind::Http2,
         || pool.checkout_mux::<H2Client>(&key),
         || {
             open_fresh_h2(
@@ -308,10 +305,10 @@ pub async fn checkout_handle(
     h2_config: &H2Config,
     host: &str,
     port: u16,
-    proxy: Option<&str>,
+    proxy: Option<&crate::core::ProxyUrl>,
 ) -> Result<(H2Client, TlsInfo), Error> {
-    let key = pool.key("https", host, port, proxy, Transport::Tcp);
-    match checkout_h2_opened(pool, connector, h2_config, key).await {
+    let mut key = pool.key("https", host, port, proxy, Transport::Tcp);
+    match checkout_h2_opened(pool, connector, h2_config, &mut key).await {
         Ok(opened) => Ok((opened.conn, opened.tls)),
         Err((e, _)) => Err(e),
     }
@@ -338,14 +335,14 @@ async fn open_fresh_h3_installed(
         &connector,
         &key.host,
         key.port,
-        key.proxy.as_deref(),
+        key.proxy.as_ref(),
     )
     .await?;
     pool.forget(
         OriginFlag::H3Broken,
         &key.host,
         key.port,
-        key.proxy.as_deref(),
+        key.proxy.as_ref(),
     );
     Ok(pool.install_mux(key, handle, tls))
 }
@@ -359,7 +356,7 @@ pub(crate) async fn open_h3(
     open_coalesced(
         &pool.inflight_h3,
         &key,
-        Cause::Http3,
+        Kind::Http3,
         || pool.checkout_mux::<H3Client>(&key),
         || {
             open_fresh_h3_installed(
@@ -386,7 +383,7 @@ pub(crate) async fn checkout_h3_handle(
     target: &H3Target<'_>,
     host: &str,
     port: u16,
-    proxy: Option<&str>,
+    proxy: Option<&crate::core::ProxyUrl>,
 ) -> Result<Opened<H3Client>, Error> {
     let key = pool.key("https", host, port, proxy, Transport::Quic);
     checkout_h3_opened(pool, target, key).await
@@ -398,7 +395,7 @@ pub(crate) async fn checkout_h3_opened(
     target: &H3Target<'_>,
     key: PoolKey,
 ) -> Result<Opened<H3Client>, Error> {
-    pool.evict_idle();
+    pool.evict_idle(Instant::now());
     let hit = pool.checkout_mux::<H3Client>(&key);
     pool.counters.checkout(Proto::H3, hit.is_some());
     if let Some(hit) = hit {

@@ -18,7 +18,10 @@ fn rotate() {
 
     let url = url::Url::parse("https://example.test/").unwrap();
     assert_eq!(
-        rotated.proxy_for(&url, None).expect("valid proxy url"),
+        rotated
+            .proxy_for(&url, None)
+            .expect("valid proxy url")
+            .map(crate::core::ProxyUrl::as_str),
         Some("http://second:2"),
         "with_proxy must win over the build-time proxy"
     );

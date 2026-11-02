@@ -570,6 +570,11 @@ impl SessionBuilder {
         self
     }
 
+    pub(crate) fn blocking_io(mut self) -> Self {
+        self.pool_config.blocking = Some(None);
+        self
+    }
+
     fn invalid_header(&mut self, name: &str) {
         self.config_error
             .get_or_insert(format!("invalid header `{}`", name.escape_debug()));

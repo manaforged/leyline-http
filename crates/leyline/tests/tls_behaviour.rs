@@ -498,3 +498,98 @@ async fn saved_tickets_through_a_proxy_hold_no_proxy_credentials() {
         "the proxy password was saved"
     );
 }
+
+async fn read_request(stream: &mut SslStream<TcpStream>) -> Option<usize> {
+    let mut head = Vec::new();
+    let mut buf = [0u8; 4096];
+    let end = loop {
+        if let Some(end) = head.windows(4).position(|window| window == b"\r\n\r\n") {
+            break end + 4;
+        }
+        match stream.read(&mut buf).await {
+            Ok(0) | Err(_) => return None,
+            Ok(read) => head.extend_from_slice(&buf[..read]),
+        }
+    };
+    let text = String::from_utf8_lossy(&head[..end]).to_ascii_lowercase();
+    let length = text
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:"))
+        .map_or(0, |value| value.trim().parse().unwrap());
+    let mut body = head.len() - end;
+    while body < length {
+        match stream.read(&mut buf).await {
+            Ok(0) | Err(_) => return None,
+            Ok(read) => body += read,
+        }
+    }
+    Some(length)
+}
+
+#[tokio::test]
+async fn a_key_update_from_the_server_rekeys_both_directions() {
+    use foreign_types::ForeignTypeRef;
+
+    let (cert, key) = tls_support::self_signed();
+    let der = cert.to_der().unwrap();
+    let read_sequence = Arc::new(Mutex::new(None));
+    let seen = Arc::clone(&read_sequence);
+    let port = tls_support::tls_server_per_connection(
+        cert,
+        key,
+        Arc::new(AtomicUsize::new(0)),
+        |_| tls_support::HTTP11,
+        move |_, mut stream: SslStream<TcpStream>| {
+            let seen = Arc::clone(&seen);
+            async move {
+                let mut served = 0;
+                while let Some(length) = read_request(&mut stream).await {
+                    served += 1;
+                    if served == 3 {
+                        // SAFETY: the SSL is live for the whole borrow.
+                        let sequence = unsafe {
+                            leyline_bssl_sys::SSL_get_read_sequence(stream.ssl().as_ptr())
+                        };
+                        *seen.lock().unwrap() = Some(sequence);
+                    }
+                    let body = if served == 4 {
+                        vec![b'x'; length]
+                    } else {
+                        b"ok".to_vec()
+                    };
+                    if served == 2 {
+                        // SAFETY: the SSL is live for the whole borrow.
+                        let queued = unsafe {
+                            leyline_bssl_sys::SSL_key_update(
+                                stream.ssl().as_ptr(),
+                                leyline_bssl_sys::SSL_KEY_UPDATE_REQUESTED,
+                            )
+                        };
+                        assert_eq!(queued, 1);
+                    }
+                    let head = format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n", body.len());
+                    if stream.write_all(head.as_bytes()).await.is_err()
+                        || stream.write_all(&body).await.is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        },
+    )
+    .await;
+    let session = http1_session(bare_trust().ca_der(der));
+    let url = format!("https://127.0.0.1:{port}/");
+    for _ in 0..3 {
+        let reply = session.get(&url).send().await.unwrap();
+        assert_eq!(reply.text().await.unwrap(), "ok");
+    }
+    let reply = session
+        .post(&url)
+        .body(vec![b'y'; 100 * 1024])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.bytes().await.unwrap().len(), 100 * 1024);
+    assert_eq!(*read_sequence.lock().unwrap(), Some(1));
+}

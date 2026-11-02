@@ -1,4 +1,3 @@
-use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::h2::connection::{HeaderPair, encode_request_pseudos};
@@ -46,7 +45,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         (pseudo, headers): (&[(&str, &str)], &[HeaderPair]),
         with_priority: bool,
     ) -> Result<(), H2Error> {
-        let fragment = encode_request_pseudos(&mut self.encoder, pseudo, headers);
         let max_frame = self.peer_settings.max_frame_size as usize;
         let priority = if with_priority {
             self.config.default_priority
@@ -54,6 +52,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             None
         };
         let prio_overhead = if priority.is_some() { 5 } else { 0 };
+        let fragment = encode_request_pseudos(&mut self.encoder, pseudo, headers);
 
         if fragment.len() + prio_overhead <= max_frame {
             self.writer
@@ -62,10 +61,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     end_stream,
                     end_headers: true,
                     priority,
-                    fragment: Bytes::from(fragment),
+                    fragment,
                 })
                 .await?;
         } else {
+            let fragment = fragment.to_vec();
             let first_cap = max_frame.saturating_sub(prio_overhead).max(1);
             let first_len = first_cap.min(fragment.len());
             let first = &fragment[..first_len];
@@ -75,7 +75,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     end_stream,
                     end_headers: false,
                     priority,
-                    fragment: Bytes::copy_from_slice(first),
+                    fragment: first,
                 })
                 .await?;
             self.write_continuations(stream_id, &fragment, first_len, max_frame)

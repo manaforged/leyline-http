@@ -1,5 +1,5 @@
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, PoisonError};
 use std::time::Duration;
 
 use tokio::time::Instant;
@@ -83,10 +83,14 @@ struct Pause {
 }
 
 impl Pause {
-    fn length(&self, status: http::StatusCode, wait: Option<Duration>) -> Option<Duration> {
+    fn length(
+        &self,
+        status: http::StatusCode,
+        wait: impl FnOnce() -> Option<Duration>,
+    ) -> Option<Duration> {
         self.statuses
             .contains(&status)
-            .then(|| wait.unwrap_or(self.default).min(self.max))
+            .then(|| wait().unwrap_or(self.default).min(self.max))
     }
 }
 
@@ -189,7 +193,12 @@ impl HostLimits {
         self
     }
 
-    pub(crate) fn observe(&self, url: &url::Url, status: http::StatusCode, wait: Option<Duration>) {
+    pub(crate) fn observe(
+        &self,
+        url: &url::Url,
+        status: http::StatusCode,
+        wait: impl FnOnce() -> Option<Duration>,
+    ) {
         let Some(length) = self.pause.length(status, wait) else {
             return;
         };
@@ -247,11 +256,7 @@ impl HostLimits {
         let free = |slots: Option<&Arc<tokio::sync::Semaphore>>| {
             slots.is_none_or(|slots| slots.available_permits() > 0)
         };
-        let gate = self
-            .gates
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        let gate = crate::util::lock(&self.gates.by_origin)
             .get(origin)
             .cloned();
         free(self.gates.total.as_ref()) && gate.is_none_or(|gate| free(gate.slots.as_ref()))
@@ -259,11 +264,7 @@ impl HostLimits {
 
     #[cfg(feature = "html")]
     pub(crate) fn ready_at(&self, origin: &Origin) -> Option<Instant> {
-        let gate = self
-            .gates
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        let gate = crate::util::lock(&self.gates.by_origin)
             .get(origin)
             .cloned()?;
         let interval = self.interval_for(origin, self.rule_for(&origin.host));
@@ -298,6 +299,12 @@ impl HostLimits {
         extra: Option<&HostLimits>,
         url: &url::Url,
     ) -> Option<HostPass> {
+        if std::iter::once(self)
+            .chain(extra)
+            .all(HostLimits::is_unlimited)
+        {
+            return None;
+        }
         let origin = Origin::of(url)?;
         let sides: Vec<Side<'_>> = std::iter::once(self)
             .chain(extra)
@@ -322,7 +329,7 @@ impl HostLimits {
                 .filter_map(|side| side.gate.ready_at(side.interval(&origin), now))
                 .max();
             if let Some(at) = due {
-                HostGate::wait_until(at).await;
+                tokio::time::sleep_until(at).await;
                 continue;
             }
             let mut totals = Vec::with_capacity(sides.len());
@@ -362,10 +369,7 @@ impl HostLimits {
     }
 
     pub(crate) fn stats(&self) -> Vec<HostStats> {
-        self.gates
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+        crate::util::lock(&self.gates.by_origin)
             .iter()
             .map(|(origin, gate)| HostStats {
                 origin: origin.to_string(),

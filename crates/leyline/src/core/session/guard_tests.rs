@@ -21,3 +21,16 @@ async fn wrappers_hold_their_future_once() {
     assert!(size_of_val(&session.unless_shut_down(heavy())) < limit);
     assert!(size_of_val(&crate::trace::scope(None, heavy())) < limit);
 }
+
+struct Silent;
+
+impl crate::trace::Trace for Silent {
+    fn event(&self, _: &crate::trace::Event<'_>) {}
+}
+
+#[tokio::test]
+async fn a_trace_scope_costs_an_untraced_request_one_pointer() {
+    let hook: std::sync::Arc<dyn crate::trace::Trace> = std::sync::Arc::new(Silent);
+    let bare = size_of_val(&heavy());
+    assert!(size_of_val(&crate::trace::scope(Some(&hook), heavy())) <= bare + 8);
+}

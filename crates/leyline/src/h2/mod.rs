@@ -14,6 +14,6 @@ pub use crate::core::{ErrorBudget, ResponseMode};
 pub use crate::header_str::HeaderStr;
 pub use client::start;
 #[cfg(feature = "bench-internals")]
-pub use client::{H2Client, H2ResponseEx, Head, RequestBody, ResponseBody};
+pub use client::{H2Client, Head};
 pub use config::H2Config;
 pub use error::{ErrorCode, H2Error};

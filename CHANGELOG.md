@@ -8,21 +8,7 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
-## Unreleased
-
-### Changed
-
-- A request uses less CPU: its futures are a quarter of their former size, its URL is parsed once, and TLS reads the socket in 16 KiB batches. At 8 connections and 256 requests in flight, a session serves 20 to 23% more requests per second than before on the same machine.
-- HTTP/2 writes the requests that callers queue together in one write, and while requests wait for a stream slot it reads up to four frames before it writes. On loopback, 8 connections with 256 requests in flight serve 14.5% more requests per second, and one connection with 256 in flight against a 200-stream server serves 49.9% more.
-- A session without a browser profile opens another HTTP/2 connection to a host when every open one is at the server's stream limit, up to `max_connections_per_host`. Before the server announces its limit, a connection takes 100 requests, as Chrome and Go assume. With 1,024 requests in flight, one session serves 54% more requests per second on loopback and 4.8 times as many over a 10 ms round trip. A browser profile keeps one connection per host unless `max_connections_per_host` is set, and `max_connections_per_host(1)` keeps any session on one.
-- Sessions without a browser profile, client certificate, or custom CA files share one TLS context per trust setting. Each session keeps its own TLS session cache.
-- Tracing has one `session.execute` span per request, and `pool.hit` is recorded on it. The `transport.*` and `pool.send_request*` spans are gone.
-
-### Fixed
-
-- `Session::stats()` counts one HTTP/2 or HTTP/3 checkout per request. It counted again when a request opened a connection.
-
-## 0.2.0 - 2026-10-30
+## 0.2.0 - 2026-11-02
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The table maps every 0.1.6 name that changed. The sections after it list new features, behavior changes, removals without a replacement, and fixes.
 
@@ -70,6 +56,7 @@ version and publish as separate crates.
 | `min_tls_version(TlsMinVersion::Tls12)`, `(TlsMinVersion::Tls13)` | `tls12_min()`, `tls13_only()` |
 | `resp.tls()` returning `TlsInfo { version, cipher, peer_cert_der }` | `resp.tls_version()`, `tls_cipher()`, `peer_certificate()` |
 | `.socket(SocketConfig::new().tcp_nodelay(true))` | `.tcp_nodelay(true)` on `SessionBuilder`, one setter per option; `strict` is `strict_socket_options` |
+| `SocketConfig::local_address(ip)`, `local_ipv4(ip)`, `local_ipv6(ip)` | `.local_address(ip)`, once per address family; an IPv4 address no longer binds IPv6 connections |
 | `SocketConfig::happy_eyeballs(HappyEyeballsConfig::new().resolve_delay(d).attempt_limit(n))` | `.happy_eyeballs_delay(d).happy_eyeballs_attempts(n)` |
 | `.pool(PoolConfig::new())` with `max_connections`, `max_h1_conns_per_host`, `idle_timeout`, `keepalive`, `h2_ping_after_idle`, `h2_ping_timeout` | `SessionBuilder` setters: `max_connections`, `max_connections_per_host`, `pool_idle_timeout`, `keep_alive`, `http2_ping_after_idle`, `http2_ping_timeout` |
 | `.dns(DnsConfig::new().resolve_host(host, addrs).resolver(r))` | `.resolve(host, addrs)` and `.dns_resolver(r)`; several `resolve` calls add up |
@@ -79,7 +66,7 @@ version and publish as separate crates.
 | `ContentEncoding` | `Encoding` |
 | `HostLimits::host(host, HostLimits::new().max_in_flight(n).per_second(r))` | `HostLimits::new().host_max_in_flight(host, n).host_per_second(host, r)` |
 | `TimeoutConfig`, `RedirectPolicy`, `ProtocolPolicy` | `Timeout`, `Redirect`, `Protocol`; `RedirectPolicy::limited(n)` is `Redirect::limit(n)` |
-| `session.pool_stats()`, `PoolStats` fields | `session.stats()`, with the same counters as methods |
+| `session.pool_stats()`, `PoolStats` fields | `session.stats()`, with the same counters as methods; the six `h1_hits` to `h3_misses` fields are `hits(version)` and `misses(version)` with an `http::Version` |
 | `session.host_stats()`, `HostStats` | `session.stats()`: `hosts()`, `in_flight(host)`, `waiting(host)` |
 | `session.with_proxy(p)`, `with_cookie_jar(jar)`, `with_redirect(r)`, `with_base_url(url)`, `with_identity(id)` | `session.to_builder()`, the setter, then `build()` |
 | `session.fresh_pool()` | `session.to_builder().share_connections(false).build()` |
@@ -102,7 +89,7 @@ version and publish as separate crates.
 | `RedirectPolicy::custom(\|a\| RedirectAction::Follow)` | `Redirect::custom(\|a\| true)` |
 | `HttpVersion`, `HttpVersion::as_str()` | `http::Version` from `Response::version()`; its `Debug` prints `HTTP/2.0` where `as_str()` printed `HTTP/2` |
 | `resp.timing()`, `ResponseTiming` | `resp.reused()`, `connect_time()`, `send_time()`, `elapsed()`, as `Duration` values |
-| `into_stream()`, `into_decoded_stream(limit)`, `BodyStream` | `bytes_stream()`, which yields the decoded body as `leyline::Result<Bytes>`; `.decode(false)` on the request gives the raw bytes |
+| `into_stream()`, `into_decoded_stream(limit)`, `BodyStream` | `bytes_stream()`, a `Body` that yields the decoded body as `leyline::Result<Bytes>`; `.decode(false)` on the request gives the raw bytes |
 | `copy_to(writer)`, `copy_decoded_to(writer, limit)` | `write_to(writer)`; `.max_body_size(n)` on the request sets a limit |
 | `download_to(path, limit)`, `RequestBuilder::download(path)` | `.error_for_status().stream()` on the request, then `Response::download_to(path)` |
 | `RequestBuilder::read_until(n, f)`, `PrefixRead { bytes, stopped_by }`, `StopReason` | `.stream()`, then `Response::read_until(n, f)` returning `(bytes, matched)` |
@@ -162,9 +149,21 @@ version and publish as separate crates.
 - `AGENTS.md`, for coding agents that write code with Leyline.
 - `docs/guide/bundled-profiles.md` lists every bundled profile and brand overlay, generated from the profile files.
 - `Crawl::agent(name)` obeys the robots.txt group and meta robots name of a named crawler, and `Crawl::max_body_size(n)` reads pages larger than the session's cap without a new session.
+- `blocking::Session` runs requests on the calling thread for code without an async runtime: `blocking::Session::new(builder)`, then `session.block_on(future)`, with every `Session` method through `Deref`. Its direct HTTP/1.1 connections read and write blocking sockets, and every timeout still applies. A blocking session is `Send` but not `Sync`; build one per thread.
+- `leyline-bssl-tokio`: `RecordStream::try_map_io` moves a TLS 1.3 record stream onto another transport for the same connection.
 
 ### Changed
 
+- A browser profile id no longer includes `profiles/bare.toml`, so an edit to the bare profile does not change browser profile ids. A saved session from before this change reports a changed profile id.
+- The bare profile advertises a 64 KiB HTTP/2 maximum frame size.
+- `Body` is `Send + Sync` and is the one body type for requests and responses: `bytes_stream()` and the `tower` service both return it.
+- A request uses less CPU: it parses its URL once, keeps its method, URL, and headers in typed values that the response shares, and TLS reads the socket in 16 KiB batches. [BENCHMARKS.md](BENCHMARKS.md#client-libraries) compares leyline with other HTTP clients over HTTP/2 and HTTP/1.1.
+- HTTP/2 writes the requests that callers queue together in one write, and while requests wait for a stream slot it reads up to four frames before it writes.
+- A session without a browser profile opens another HTTP/2 connection to a host when every open one is at the server's stream limit, up to `max_connections_per_host`. Before the server announces its limit, a connection takes 100 requests, as Chrome and Go assume. A browser profile keeps one connection per host unless `max_connections_per_host` is set, and `max_connections_per_host(1)` keeps any session on one.
+- After a TLS 1.3 handshake, leyline seals and opens the connection's records itself and BoringSSL handles only the handshake and session tickets. A profile that sets a record size limit keeps BoringSSL's record layer, as does TLS 1.2.
+- Sessions without a browser profile, client certificate, or custom CA files share one TLS context per trust setting. Each session keeps its own TLS session cache.
+- Tracing has one `session.execute` span per request, and `pool.hit` is recorded on it. The `transport.*` and `pool.send_request*` spans are gone.
+- An HTTP/1.1 or HTTP/2 response header value that is not valid UTF-8 reaches `Response::headers()` with its bytes unchanged. It was replaced with U+FFFD before.
 - `Session::shutdown()` returns a future. It still cancels at once; `.await` it to wait until every autosave writer has made its last save. A call without `.await` warns.
 - Brave, Firefox, Safari, and Safari on iOS 18 and later race HTTP/3 by default, as Chrome does, from their captured HTTP/3 hellos. Their profile ids change.
 - Every session applies the built-in block rules. A Cloudflare or AWS WAF challenge counts against its proxy in a proxy list, and `Attempt::is_block()` sees it, without a `block_rules` call.
@@ -186,6 +185,7 @@ version and publish as separate crates.
 
 ### Fixed
 
+- `Session::stats()` counts one HTTP/2 or HTTP/3 checkout per request. It counted again when a request opened a connection.
 - The `Debug` output of a response fingerprint printed the `authorization` and `cookie` values it sent. `Fingerprint` prints them as `***`.
 - A zstd body whose frame declares a window over 8 MiB fails to decode, the limit RFC 9659 sets for the `zstd` coding.
 - Cookie `Expires` dates with an hour over 23, a minute or second over 59, or a year before 1601 are ignored, as RFC 6265 requires.

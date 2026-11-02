@@ -1,9 +1,9 @@
 use crate::h2_support as support;
 
+use futures_util::StreamExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::h2::RequestBody;
 use leyline::h2::frame::FrameType;
 use support::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -45,7 +45,7 @@ async fn goaway_no_error_refuses_streams_above_last_id() {
         .expect("handshake");
     let head = Arc::new(get_head("/"));
     let err = handle
-        .send_shared(head, RequestBody::None, false)
+        .send_shared(head, leyline::Body::default(), false)
         .await
         .expect_err("refused");
     assert!(
@@ -89,15 +89,15 @@ async fn slow_streaming_consumer_is_not_cancelled() {
         .expect("handshake");
     let head = Arc::new(get_head("/"));
     let resp = handle
-        .send_shared(head, RequestBody::None, true)
+        .send_shared(head, leyline::Body::default(), true)
         .await
         .expect("head");
-    let leyline::h2::ResponseBody::Streaming(mut rx) = resp.body else {
+    let leyline::pool::TransportBody::Streaming(mut rx) = resp.body else {
         panic!("expected a streaming body");
     };
     tokio::time::sleep(Duration::from_millis(200)).await;
     let mut total = 0usize;
-    while let Some(chunk) = rx.recv().await {
+    while let Some(chunk) = rx.next().await {
         total += chunk.expect("chunk").len();
     }
     assert_eq!(total, CHUNKS * CHUNK);
@@ -142,14 +142,7 @@ async fn early_end_stream_resets_open_request_body() {
         rx.recv().await.map(|item| (item, rx))
     });
     let resp = handle
-        .send_shared(
-            Arc::new(head),
-            RequestBody::Streaming {
-                stream: Box::pin(stream),
-                length_hint: None,
-            },
-            false,
-        )
+        .send_shared(Arc::new(head), leyline::Body::stream(stream, None), false)
         .await
         .expect("response");
     assert_eq!(resp.status, 200);

@@ -84,6 +84,10 @@ async fn a_response_that_breaks_the_wire_format_is_an_invalid_data_io_error() {
         Some(std::io::ErrorKind::InvalidData),
         "{err:?}"
     );
+    assert!(
+        err.to_string().contains("multiple Content-Length"),
+        "the error names the defect: {err}"
+    );
 }
 
 #[tokio::test]

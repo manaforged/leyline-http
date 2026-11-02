@@ -7,7 +7,8 @@ use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, 
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
-use leyline::h2::{H2Client, H2ResponseEx, Head, RequestBody};
+use leyline::h2::{H2Client, Head};
+use leyline::pool::TransportResponse;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{
@@ -240,9 +241,9 @@ async fn send(
     handle: &H2Client,
     pseudo: PseudoHeaders,
     headers: Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
-) -> H2ResponseEx {
+) -> TransportResponse {
     handle
-        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::from(None::<bytes::Bytes>), false)
+        .send_shared(Arc::new(Head { pseudo, headers }), leyline::Body::default(), false)
         .await
         .expect("req ok")
 }

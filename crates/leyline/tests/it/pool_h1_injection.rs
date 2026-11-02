@@ -2,7 +2,7 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
-use leyline::pool::{H1Body, H1PooledError, H1Target, Pool, send_request_h1_pooled};
+use leyline::pool::{H1Target, Pool, send_request_h1_pooled};
 use leyline::profile::ProfileRegistry;
 use leyline::tls::FingerprintConnector;
 use leyline::{Browser, Platform};
@@ -20,7 +20,7 @@ const UNROUTABLE_URL: &str = "http://127.0.0.1:1/";
 async fn short_exchange(
     method: &str,
     headers: Vec<(String, String)>,
-) -> Result<leyline::pool::H1Response, H1PooledError> {
+) -> Result<leyline::pool::TransportResponse, leyline::Error> {
     let pool = Arc::new(Pool::new());
     let connector = connector();
     let url = url::Url::parse(UNROUTABLE_URL).unwrap();
@@ -33,7 +33,7 @@ async fn short_exchange(
         method,
         &url,
         headers,
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
         H1Target::OriginForm,
         false,
@@ -45,8 +45,7 @@ async fn short_exchange(
 async fn method_with_crlf_rejected_before_wire() {
     let err = short_exchange("GET\r\nInjected: yes", vec![])
         .await
-        .err()
-        .expect("must reject before reaching the wire");
+        .expect_err("must reject before reaching the wire");
     let msg = format!("{err}");
     assert!(
         msg.contains("invalid HTTP method"),
@@ -64,8 +63,7 @@ async fn header_value_with_crlf_rejected_before_wire() {
         )],
     )
     .await
-    .err()
-    .expect("must reject before reaching the wire");
+    .expect_err("must reject before reaching the wire");
     let msg = format!("{err}");
     assert!(
         msg.contains("invalid value for header"),
@@ -77,8 +75,7 @@ async fn header_value_with_crlf_rejected_before_wire() {
 async fn header_name_with_colon_rejected_before_wire() {
     let err = short_exchange("GET", vec![(": evil".into(), "1".into())])
         .await
-        .err()
-        .expect("must reject before reaching the wire");
+        .expect_err("must reject before reaching the wire");
     let msg = format!("{err}");
     assert!(
         msg.contains("invalid header name"),
@@ -90,7 +87,6 @@ async fn header_name_with_colon_rejected_before_wire() {
 async fn header_value_with_null_rejected() {
     let err = short_exchange("GET", vec![("X-Ok".into(), "a\0b".into())])
         .await
-        .err()
-        .expect("must reject before reaching the wire");
+        .expect_err("must reject before reaching the wire");
     assert!(format!("{err}").contains("invalid value for header"));
 }

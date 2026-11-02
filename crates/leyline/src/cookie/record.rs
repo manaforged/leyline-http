@@ -1,7 +1,8 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
+use crate::core::domain_match;
 use crate::util::epoch_plus;
 
 const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
@@ -109,12 +110,6 @@ impl Cookie {
     }
 }
 
-fn domain_match(host: &str, domain: &str) -> bool {
-    let host = host.to_lowercase();
-    let domain = domain.to_lowercase();
-    host == domain || host.ends_with(&format!(".{domain}"))
-}
-
 fn path_match(request_path: &str, cookie_path: &str) -> bool {
     if request_path == cookie_path {
         return true;
@@ -135,9 +130,7 @@ fn from_unix_millis(ms: i64) -> Option<SystemTime> {
 }
 
 fn unix_millis(t: &SystemTime) -> i64 {
-    t.duration_since(UNIX_EPOCH).map_or(0, |since| {
-        i64::try_from(since.as_millis()).unwrap_or(i64::MAX)
-    })
+    i64::try_from(crate::util::since_epoch(*t).as_millis()).unwrap_or(i64::MAX)
 }
 
 mod systime_ms {

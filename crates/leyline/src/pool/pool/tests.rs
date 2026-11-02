@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 fn h1_key(host: &str) -> PoolKey {
     PoolKey {
-        scheme: "http".to_string(),
+        scheme: "http".into(),
         host: host.to_string(),
         port: 80,
         proxy: None,
@@ -33,7 +33,7 @@ fn evict_idle_drops_abandoned_empty_h1_entry() {
         .expect("monotonic clock is >40ms past its epoch");
     insert_empty_h1(&pool, "abandoned", stale);
 
-    pool.evict_idle();
+    pool.evict_idle(std::time::Instant::now());
 
     assert_eq!(
         pool.stats().entries,
@@ -47,7 +47,7 @@ fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
     let pool = Pool::with_limits(Duration::from_secs(300), 2048, 6);
     insert_empty_h1(&pool, "in-flight", Instant::now());
 
-    pool.evict_idle();
+    pool.evict_idle(std::time::Instant::now());
 
     assert_eq!(
         pool.stats().entries,
@@ -104,7 +104,7 @@ fn alpn_h1_memory_is_per_origin_and_proxy() {
         OriginFlag::H1Only,
         "example.com",
         443,
-        Some("http://proxy:1")
+        Some(&crate::core::ProxyUrl::parse("http://proxy:1").unwrap())
     ));
     assert!(!pool.recalls(OriginFlag::H1Only, "example.com", 8443, None));
 }
@@ -192,31 +192,31 @@ fn a_failed_http3_origin_is_skipped_until_cleared() {
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some("socks5://p:1")
+        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap())
     ));
     pool.remember(
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some("socks5://p:1"),
+        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap()),
     );
     assert!(pool.recalls(
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some("socks5://p:1")
+        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap())
     ));
     assert!(!pool.recalls(OriginFlag::H3Broken, "example.com", 443, None));
     pool.forget(
         super::OriginFlag::H3Broken,
         "example.com",
         443,
-        Some("socks5://p:1"),
+        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap()),
     );
     assert!(!pool.recalls(
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some("socks5://p:1")
+        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap())
     ));
 }

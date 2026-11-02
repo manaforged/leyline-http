@@ -177,7 +177,11 @@ async fn https_proxy_tunnels_with_encrypted_connect() {
 
     let proxy_url = format!("https://user:secret@localhost:{}", addr.port());
     let res = Arc::new(connector(&r#gen))
-        .connect("right.example", 443, Some(&proxy_url))
+        .connect(
+            "right.example",
+            443,
+            Some(&url::Url::parse(&proxy_url).unwrap()),
+        )
         .await;
     assert!(
         res.is_ok(),
@@ -213,7 +217,11 @@ async fn https_proxy_refused_when_connector_has_origin_identity() {
     .expect("connector build");
 
     let err = match conn
-        .connect("right.example", 443, Some("https://localhost:1"))
+        .connect(
+            "right.example",
+            443,
+            Some(&url::Url::parse("https://localhost:1").unwrap()),
+        )
         .await
     {
         Ok(_) => panic!("https proxy + origin pins must be refused"),

@@ -64,21 +64,21 @@ impl Template {
     fn of(first: &RequestBuilder) -> Self {
         Self {
             session: first.session.clone(),
-            first: first.url.clone(),
-            preset: first.preset,
-            preset_user: first.preset_user,
-            headers: first.headers.clone(),
-            timeouts: first.timeouts,
-            stream_response: first.stream_response,
-            retry_policy: first.retry_policy.clone(),
-            digest_auth: first.digest_auth.clone(),
-            proxy: first.proxy.clone(),
-            header_order: first.header_order.clone(),
-            redirect: first.redirect.clone(),
-            initiator: first.initiator.clone(),
-            label: first.label.clone(),
-            status_errors: first.status_errors,
-            body_rules: first.body_rules,
+            first: first.draft.url.as_deref().cloned(),
+            preset: first.draft.preset,
+            preset_user: first.draft.preset_user,
+            headers: first.draft.headers.clone(),
+            timeouts: first.draft.timeouts,
+            stream_response: first.draft.stream_response,
+            retry_policy: first.draft.retry_policy.clone(),
+            digest_auth: first.draft.digest_auth.clone(),
+            proxy: first.draft.proxy.clone(),
+            header_order: first.draft.header_order.clone(),
+            redirect: first.draft.redirect.clone(),
+            initiator: first.draft.initiator.clone(),
+            label: first.draft.label.clone(),
+            status_errors: first.draft.status_errors,
+            body_rules: first.draft.body_rules,
         }
     }
 
@@ -94,29 +94,34 @@ impl Template {
     }
 
     fn follow(&self, url: &Url) -> RequestBuilder {
-        let mut next = RequestBuilder::new(&self.session, Method::GET, Some(url.clone()));
+        let mut next = RequestBuilder::new(
+            &self.session,
+            Method::GET,
+            Some(std::sync::Arc::new(url.clone())),
+        );
         if self.preset_user {
-            next.preset = self.preset;
-            next.preset_user = true;
+            next.draft.preset = self.preset;
+            next.draft.preset_user = true;
         }
-        next.headers = self.headers.clone();
-        next.timeouts = self.timeouts;
-        next.stream_response = self.stream_response;
-        next.retry_policy = self.retry_policy.clone();
+        next.draft.headers = self.headers.clone();
+        next.draft.timeouts = self.timeouts;
+        next.draft.stream_response = self.stream_response;
+        next.draft.retry_policy = self.retry_policy.clone();
         if self.same_origin(url) {
-            next.digest_auth = self.digest_auth.clone();
+            next.draft.digest_auth = self.digest_auth.clone();
         } else {
-            next.headers
+            next.draft
+                .headers
                 .remove_where(|name| sensitive_header(name.as_str()));
         }
-        next.proxy = self.proxy.clone();
-        next.header_order = self.header_order.clone();
-        next.redirect = self.redirect.clone();
-        next.initiator = self.initiator.clone();
-        next.label = self.label.clone();
-        next.status_errors = self.status_errors;
-        next.body_rules = self.body_rules;
-        next.trusted_origin = self.first.clone();
+        next.draft.proxy = self.proxy.clone();
+        next.draft.header_order = self.header_order.clone();
+        next.draft.redirect = self.redirect.clone();
+        next.draft.initiator = self.initiator.clone();
+        next.draft.label = self.label.clone();
+        next.draft.status_errors = self.status_errors;
+        next.draft.body_rules = self.body_rules;
+        next.draft.trusted_origin = self.first.clone();
         next
     }
 }

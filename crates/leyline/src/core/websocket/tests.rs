@@ -2,7 +2,7 @@ use super::{
     WebSocket, is_reserved_ws_header, overlay_headers, tungstenite_config, ws_header_pair,
 };
 use crate::core::config::WebSocketOptions;
-use crate::core::error::{Cause, Error};
+use crate::core::error::{Error, Kind};
 use crate::profile::preset::HeaderPair;
 
 #[test]
@@ -52,10 +52,10 @@ fn valid_header_pair_ok() {
 #[test]
 fn only_missing_connect_protocol_falls_back() {
     assert!(WebSocket::is_h2_fallback_trigger(
-        &Error::new(Cause::Request).with_message("h2-no-connect-protocol")
+        &Error::new(Kind::Request).with_message("h2-no-connect-protocol")
     ));
     assert!(!WebSocket::is_h2_fallback_trigger(
-        &Error::new(Cause::Request).with_message("peer reset")
+        &Error::new(Kind::Request).with_message("peer reset")
     ));
 }
 

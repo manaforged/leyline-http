@@ -10,14 +10,6 @@ use crate::quic::wire;
 
 const DGRAM_QUEUE_LEN: usize = 16;
 
-#[derive(Debug)]
-pub struct H3Response<B = Vec<u8>> {
-    pub status: u16,
-    pub headers: Vec<(String, String)>,
-    pub body: B,
-    pub trailers: Vec<(String, String)>,
-}
-
 pub(crate) struct EstablishedH3 {
     pub(crate) socket: DatagramTransport,
     pub(crate) conn: Box<quiche::Connection>,
@@ -116,7 +108,7 @@ pub(crate) async fn connect_and_handshake(
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
-    proxy: Option<&str>,
+    proxy: Option<&crate::core::ProxyUrl>,
 ) -> Result<EstablishedH3, String> {
     let dcid_len = wire::connection_id_len(&h3_cfg.wire.dcid_length);
     validate_connection_id_len(dcid_len)?;
@@ -136,8 +128,8 @@ pub(crate) async fn connect_and_handshake(
         .local_addr()
         .map_err(|e| format!("local addr: {e}"))?;
 
-    let scid_bytes = wire::random_bytes(scid_len);
-    let dcid_bytes = wire::random_bytes(dcid_len);
+    let scid_bytes = crate::util::random_bytes(scid_len);
+    let dcid_bytes = crate::util::random_bytes(dcid_len);
     let scid = quiche::ConnectionId::from_ref(&scid_bytes);
     let dcid = quiche::ConnectionId::from_ref(&dcid_bytes);
 
@@ -189,11 +181,11 @@ pub(crate) async fn connect_and_handshake(
         }
 
         if let Some(h3) = h3.take() {
-            let tls = crate::pool::TlsInfo {
-                peer_cert_der: conn.peer_cert().map(<[u8]>::to_vec),
-                version: Some("TLSv1.3".to_string()),
-                cipher: conn.cipher().map(str::to_string),
-            };
+            let tls = crate::pool::TlsInfo::from(crate::pool::TlsFacts {
+                peer_cert_der: conn.peer_cert().map(Into::into),
+                version: Some("TLSv1.3".into()),
+                cipher: conn.cipher().map(Into::into),
+            });
             return Ok(EstablishedH3 {
                 socket,
                 conn,

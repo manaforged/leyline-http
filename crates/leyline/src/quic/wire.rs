@@ -1,7 +1,9 @@
 use leyline_quiche as quiche;
 use quiche::TransportParamEntry;
+use rand::Rng;
 use rand::seq::SliceRandom;
-use rand::{Rng, RngCore};
+
+use crate::util::random_bytes;
 
 use crate::profile::{
     H3ConnectionIdLength, H3CryptoReorder, H3CryptoSplit, H3Grease, H3Order, H3Profile, H3Setting,
@@ -27,12 +29,6 @@ pub(crate) fn connection_id_len(len: &H3ConnectionIdLength) -> usize {
             weights.last().map_or(0, |(len, _)| *len)
         }
     }
-}
-
-pub(crate) fn random_bytes(len: usize) -> Vec<u8> {
-    let mut out = vec![0u8; len];
-    rand::rng().fill_bytes(&mut out);
-    out
 }
 
 impl H3Profile {

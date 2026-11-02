@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -56,7 +56,7 @@ impl Gates {
     }
 
     pub(super) fn floor(&self, origin: &Origin) -> Option<Duration> {
-        let floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
+        let floors = crate::util::lock(&self.floors);
         floors.get(origin).copied()
     }
 
@@ -66,7 +66,7 @@ impl Gates {
 
     #[cfg(feature = "html")]
     pub(super) fn set_floor(&self, origin: Origin, gap: Option<Duration>) {
-        let mut floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut floors = crate::util::lock(&self.floors);
         match gap {
             Some(gap) => {
                 floors.insert(origin, gap);
@@ -79,15 +79,12 @@ impl Gates {
     }
 
     pub(super) fn gate(&self, origin: Origin, max_in_flight: Option<usize>) -> Arc<HostGate> {
-        let mut map = self
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
+        let mut map = crate::util::lock(&self.by_origin);
         if let Some(gate) = map.get(&origin) {
             return Arc::clone(gate);
         }
         let now = Instant::now();
-        let floors = self.floors.lock().unwrap_or_else(PoisonError::into_inner);
+        let floors = crate::util::lock(&self.floors);
         map.retain(|kept, gate| {
             Arc::strong_count(gate) > 1 || gate.busy_after(now, floors.get(kept).copied())
         });
@@ -130,7 +127,7 @@ impl HostGate {
             {
                 continue;
             }
-            let last = gate.last.lock().unwrap_or_else(PoisonError::into_inner);
+            let last = crate::util::lock(&gate.last);
             if spaced_until(*last, *interval, now) > now || gate.paused_until() > now {
                 return false;
             }
@@ -138,36 +135,32 @@ impl HostGate {
         }
         for (gate, mut last, interval) in locks {
             *last = Some(now);
-            let mut quiet = gate.quiet.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut quiet = crate::util::lock(&gate.quiet);
             *quiet = (*quiet).max(spaced_until(*last, interval, now));
         }
         true
     }
 
     pub(super) fn ready_at(&self, interval: Option<Duration>, now: Instant) -> Option<Instant> {
-        let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
+        let last = *crate::util::lock(&self.last);
         let end = spaced_until(last, interval, now).max(self.paused_until());
         (end > now).then_some(end)
     }
 
     pub(super) fn busy_after(&self, now: Instant, floor: Option<Duration>) -> bool {
-        let last = *self.last.lock().unwrap_or_else(PoisonError::into_inner);
-        *self.quiet.lock().unwrap_or_else(PoisonError::into_inner) > now
+        let last = *crate::util::lock(&self.last);
+        *crate::util::lock(&self.quiet) > now
             || spaced_until(last, floor, now) > now
             || self.paused_until() > now
     }
 
     pub(super) fn paused_until(&self) -> Instant {
-        *self.paused.lock().unwrap_or_else(PoisonError::into_inner)
+        *crate::util::lock(&self.paused)
     }
 
     pub(super) fn pause_until(&self, end: Instant) {
-        let mut paused = self.paused.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut paused = crate::util::lock(&self.paused);
         *paused = (*paused).max(end);
-    }
-
-    pub(super) async fn wait_until(at: Instant) {
-        tokio::time::sleep_until(at).await;
     }
 }
 

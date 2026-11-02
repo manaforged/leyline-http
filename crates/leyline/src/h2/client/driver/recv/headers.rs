@@ -1,43 +1,10 @@
 use bytes::Bytes;
+use http::HeaderMap;
 
 use crate::core::deadline::{Elapsed, within};
-use crate::header_str::HeaderStr;
+use crate::core::transport::ResponseHead;
 
 use super::*;
-
-impl StreamActor {
-    fn pseudo(&mut self, decoded: Vec<(Bytes, Bytes)>) -> Option<u16> {
-        let mut status = None;
-        let mut saw_regular = false;
-        let mut bad_status = false;
-        for (name, value) in decoded {
-            if name.starts_with(b":") {
-                let digits = value.as_ref();
-                if saw_regular
-                    || name.as_ref() != b":status"
-                    || status.is_some()
-                    || digits.len() != 3
-                    || !digits.iter().all(u8::is_ascii_digit)
-                {
-                    bad_status = true;
-                    break;
-                }
-                status = Some(
-                    digits
-                        .iter()
-                        .fold(0_u16, |code, digit| code * 10 + u16::from(*digit - b'0')),
-                );
-            } else {
-                saw_regular = true;
-                self.resp_headers.push((
-                    HeaderStr::from_bytes_lossy(name),
-                    HeaderStr::from_bytes_lossy(value),
-                ));
-            }
-        }
-        status.filter(|status| !bad_status && *status != 101)
-    }
-}
 
 const BODY_RESERVE_CAP: usize = 64 * 1024;
 
@@ -48,9 +15,9 @@ impl StreamActor {
         }
         self.declared_len = self
             .resp_headers
-            .iter()
-            .find(|(name, _)| name.as_str() == "content-length")
-            .and_then(|(_, value)| value.as_str().parse::<u64>().ok());
+            .get(http::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(crate::util::content_length);
         if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
             return;
         }
@@ -65,22 +32,39 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_headers(&mut self, h: HeadersFrame) -> Result<(), H2Error> {
         let full_fragment = self.reassemble(&h).await?;
 
-        let decoded: Vec<(Bytes, Bytes)> = self
-            .decoder
-            .decode_header_block(&full_fragment)
-            .map_err(H2Error::Hpack)?
-            .into_iter()
-            .map(|header| (header.name, header.value))
-            .collect();
-
-        let first = match self.streams.get(h.stream_id) {
-            Some(actor) => !actor.got_headers,
-            None => return Ok(()),
-        };
+        let first = self
+            .streams
+            .get(h.stream_id)
+            .is_none_or(|actor| !actor.got_headers);
         if first {
-            self.respond(&h, decoded).await
+            let mut head = ResponseHead::default();
+            let mut malformed = false;
+            self.decoder
+                .decode_block(&full_fragment, |name, value, typed| {
+                    if typed.is_none() && name.starts_with(b":") {
+                        malformed |= head.pseudo(name, value).is_err();
+                    } else {
+                        head.field(typed);
+                    }
+                })
+                .map_err(H2Error::Hpack)?;
+            if self.streams.get(h.stream_id).is_none() {
+                return Ok(());
+            }
+            let head = if malformed { None } else { head.finish().ok() };
+            self.respond(&h, head).await
         } else {
-            self.on_trailers(&h, decoded).await
+            let mut trailers = HeaderMap::new();
+            let mut pseudo = false;
+            self.decoder
+                .decode_block(&full_fragment, |name, _, typed| match typed {
+                    Some((name, value)) => {
+                        trailers.append(name, value);
+                    }
+                    None => pseudo |= name.starts_with(b":"),
+                })
+                .map_err(H2Error::Hpack)?;
+            self.on_trailers(&h, trailers, pseudo).await
         }
     }
 
@@ -135,15 +119,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         remaining: std::time::Duration,
         limit: std::time::Duration,
     ) -> Result<Frame, H2Error> {
+        let io = &mut self.io;
         let reader = &mut self.reader;
         let writer = &mut self.writer;
         let output = &mut self.output;
         let read_while_writing = async {
             loop {
-                tokio::select! {
-                    biased;
-                    written = writer.write_some(), if writer.has_output() => output.wrote(written)?,
-                    frame = reader.next(), if !writer.saturated() => return frame,
+                let event = std::future::poll_fn(|cx| {
+                    let (writing, reading) = (writer.has_output(), !writer.saturated());
+                    super::super::event::poll_io(io, writer, reader, writing, reading, cx)
+                })
+                .await;
+                match event {
+                    super::super::event::Io::Written(written) => output.wrote(written)?,
+                    super::super::event::Io::Read(frame) => return frame,
                 }
             }
         };
@@ -162,7 +151,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     async fn respond(
         &mut self,
         h: &HeadersFrame,
-        decoded: Vec<(Bytes, Bytes)>,
+        head: Option<(http::StatusCode, HeaderMap)>,
     ) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
         let Some(actor) = self.streams.get_mut(stream_id) else {
@@ -185,7 +174,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
             return Ok(());
         }
-        let Some(status) = actor.pseudo(decoded) else {
+        let Some((status, headers)) = head else {
             self.fail_stream(
                 stream_id,
                 H2Error::Stream {
@@ -196,7 +185,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         };
         actor.status = status;
-        if matches!(actor.status, 100..=199) && actor.status != 101 && !h.end_stream {
+        actor.resp_headers = headers;
+        if actor.status.is_informational() && !h.end_stream {
             actor.informational += 1;
             if actor.informational > crate::util::MAX_INFORMATIONAL {
                 self.fail_stream(
@@ -208,14 +198,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 );
                 return Ok(());
             }
-            actor.status = 0;
-            actor.resp_headers.clear();
             return Ok(());
         }
         actor.got_headers = true;
         let status = actor.status;
         actor.response_tx = actor.response_tx.take().map(|sink| sink.settle(status));
-        if matches!(actor.status, 204 | 304) {
+        if matches!(actor.status.as_u16(), 204 | 304) {
             actor.drop_body = true;
         }
         actor.reserve_body(self.config.max_response_body_bytes);
@@ -231,10 +219,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     async fn on_trailers(
         &mut self,
         h: &HeadersFrame,
-        decoded: Vec<(Bytes, Bytes)>,
+        trailers: HeaderMap,
+        pseudo: bool,
     ) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
-        if !h.end_stream || decoded.iter().any(|(name, _)| name.starts_with(b":")) {
+        if !h.end_stream || pseudo {
             self.fail_stream(
                 stream_id,
                 H2Error::Stream {
@@ -252,14 +241,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             self.fail_stream(stream_id, err);
             return Ok(());
         }
-        let mut th = Vec::new();
-        for (name, value) in decoded {
-            th.push((
-                HeaderStr::from_bytes_lossy(name),
-                HeaderStr::from_bytes_lossy(value),
-            ));
-        }
-        actor.trailers = Some(th);
+        actor.trailers = trailers;
         self.finish_remote(stream_id).await
     }
 }

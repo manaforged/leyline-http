@@ -1,9 +1,6 @@
 use super::*;
 
-pub(super) async fn read_chunk_trailers<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-) -> Result<(), H1PooledError>
+pub(super) async fn read_chunk_trailers<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<(), Error>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
@@ -13,7 +10,7 @@ where
         let empty = line_end == 0;
         trailer_bytes += line_end + 2;
         if trailer_bytes > MAX_H1_HEADER_BYTES {
-            return Err(H1PooledError::Http(format!(
+            return Err(malformed(format!(
                 "HTTP/1.1 trailers exceed {MAX_H1_HEADER_BYTES} bytes"
             )));
         }
@@ -26,10 +23,7 @@ where
 
 pub(super) const MAX_H1_CHUNK_LINE_BYTES: usize = 16 * 1024;
 
-pub(super) async fn read_until_crlf<S>(
-    stream: &mut S,
-    buf: &mut Vec<u8>,
-) -> Result<usize, H1PooledError>
+pub(super) async fn read_until_crlf<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<usize, Error>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
@@ -38,7 +32,7 @@ where
             return Ok(pos);
         }
         if buf.len() > MAX_H1_CHUNK_LINE_BYTES {
-            return Err(H1PooledError::Http(format!(
+            return Err(malformed(format!(
                 "chunked size/trailer line exceeds {MAX_H1_CHUNK_LINE_BYTES} bytes"
             )));
         }
@@ -50,7 +44,7 @@ pub(super) async fn read_until_available<S>(
     stream: &mut S,
     buf: &mut Vec<u8>,
     len: usize,
-) -> Result<(), H1PooledError>
+) -> Result<(), Error>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
@@ -60,17 +54,22 @@ where
     Ok(())
 }
 
-pub(super) async fn read_more<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<(), H1PooledError>
+pub(super) async fn read_more<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<(), Error>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    let mut tmp = [0u8; 8192];
-    let n = stream.read(&mut tmp).await?;
-    if n == 0 {
-        return Err(H1PooledError::ConnectionClosed(
-            "during chunked body".into(),
-        ));
+    if read_into(stream, buf, 8192).await? == 0 {
+        return Err(closed("during chunked body"));
     }
-    buf.extend_from_slice(&tmp[..n]);
     Ok(())
+}
+
+pub(super) async fn read_into<S>(stream: &mut S, buf: &mut Vec<u8>, max: usize) -> io::Result<usize>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    buf.reserve(max);
+    stream
+        .read_buf(&mut bytes::BufMut::limit(&mut *buf, max))
+        .await
 }

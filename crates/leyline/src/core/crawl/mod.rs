@@ -23,7 +23,7 @@ use sites::{Site, SitemapFile};
 use visit::Held;
 
 use crate::core::config::{HostLimits, Origin};
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Result};
 use crate::core::into_url::IntoUrl;
 use crate::core::retry::Retry;
 use crate::core::robots::{Purpose, Robots};
@@ -106,10 +106,6 @@ fn polite_limits() -> HostLimits {
         .max_in_flight(POLITE_IN_FLIGHT)
         .per_second(POLITE_PER_SECOND)
         .pause_on(PAUSE_STATUSES)
-}
-
-fn inherited(session: &Session) -> HostLimits {
-    session.host_limits().clone().filled_from(&polite_limits())
 }
 
 impl Session {
@@ -228,14 +224,19 @@ impl Crawl {
         let pace = match self.limits.take() {
             Some(limits) => match limits.config_error() {
                 Some(message) => {
-                    let error = Error::new(Cause::Config).with_message(message);
+                    let error = Error::config(message);
                     self.ready.push_back(Err(error));
                     self.seeds.clear();
                     return;
                 }
                 None => limits.armed(),
             },
-            None => self.session.crawl_limits(|| inherited(&self.session)),
+            None => self.session.crawl_limits(|| {
+                self.session
+                    .host_limits()
+                    .clone()
+                    .filled_from(&polite_limits())
+            }),
         };
         let pace = match self.respect {
             Some(_) => pace,
@@ -247,7 +248,7 @@ impl Crawl {
             .default_retry()
             .clone()
             .or(Retry::new(PAGE_RETRIES));
-        self.clock.stopped = Some(Box::pin(self.session.shut_down_signal()));
+        self.clock.stopped = Some(self.session.stopped());
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {
             match seed {

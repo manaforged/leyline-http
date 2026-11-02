@@ -7,7 +7,8 @@ use crate::tcp::TcpProfile;
 
 #[derive(Deserialize)]
 struct PlatformData {
-    tcp: TcpProfile,
+    tcp: Option<TcpProfile>,
+    accept_language: String,
 }
 
 static PLATFORMS: LazyLock<HashMap<String, PlatformData>> = LazyLock::new(|| {
@@ -125,8 +126,14 @@ impl Platform {
     pub fn tcp_profile(&self) -> TcpProfile {
         PLATFORMS
             .get(self.identity_key())
-            .map(|data| data.tcp.clone())
+            .and_then(|data| data.tcp.clone())
             .unwrap_or_default()
+    }
+
+    pub(crate) fn default_accept_language(&self) -> Option<&'static str> {
+        PLATFORMS
+            .get(self.identity_key())
+            .map(|data| data.accept_language.as_str())
     }
 
     bench_pub! {

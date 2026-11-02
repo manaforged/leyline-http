@@ -11,6 +11,7 @@ pub(crate) struct HelloOptions {
     request_trust_anchors: bool,
     key_shares: Option<Vec<u16>>,
     tls12_extensions: bool,
+    records: bool,
 }
 
 impl HelloOptions {
@@ -22,7 +23,12 @@ impl HelloOptions {
             request_trust_anchors: tls.request_trust_anchors,
             key_shares: tls.key_share_ids()?,
             tls12_extensions: tls.tls12_extensions,
+            records: tls.record_size_limit.is_none(),
         })
+    }
+
+    pub(crate) fn records(&self) -> bool {
+        self.records
     }
 
     pub(crate) fn ech_grease(&self) -> bool {

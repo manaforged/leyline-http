@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::AsyncWriteExt;
 
@@ -123,7 +123,7 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
                         pseudo: p,
                         headers: h,
                     }),
-                    RequestBody::None,
+                    leyline::Body::default(),
                     false,
                 )
                 .await

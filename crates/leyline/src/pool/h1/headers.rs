@@ -1,40 +1,50 @@
-use super::*;
-
-pub(super) fn contains_header(headers: &[(String, String)], name: &str) -> bool {
-    headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
+pub(super) fn contains_header<K: AsRef<str>, V>(headers: &[(K, V)], name: &str) -> bool {
+    headers
+        .iter()
+        .any(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
 }
 
 pub(super) fn is_valid_token(s: &str) -> bool {
-    if s.is_empty() {
-        return false;
+    !s.is_empty() && s.bytes().all(|b| TOKEN[usize::from(b)])
+}
+
+static TOKEN: [bool; 256] = {
+    let mut table = [false; 256];
+    let mut i = 0;
+    while i < 256 {
+        table[i] = token_byte(i as u8);
+        i += 1;
     }
-    s.bytes().all(|b| {
-        matches!(
-            b,
-            b'!' | b'#'
-                | b'$'
-                | b'%'
-                | b'&'
-                | b'\''
-                | b'*'
-                | b'+'
-                | b'-'
-                | b'.'
-                | b'^'
-                | b'_'
-                | b'`'
-                | b'|'
-                | b'~'
-                | b'0'..=b'9'
-                | b'A'..=b'Z'
-                | b'a'..=b'z'
-        )
-    })
+    table
+};
+
+const fn token_byte(b: u8) -> bool {
+    matches!(
+        b,
+        b'!' | b'#'
+            | b'$'
+            | b'%'
+            | b'&'
+            | b'\''
+            | b'*'
+            | b'+'
+            | b'-'
+            | b'.'
+            | b'^'
+            | b'_'
+            | b'`'
+            | b'|'
+            | b'~'
+            | b'0'..=b'9'
+            | b'A'..=b'Z'
+            | b'a'..=b'z'
+    )
 }
 
 pub(super) fn is_valid_header_value(s: &str) -> bool {
-    s.bytes()
-        .all(|b| matches!(b, b'\t' | b' '..=b'~' | 0x80..=0xFF))
+    s.bytes().fold(true, |valid, b| {
+        valid & ((b >= b' ') & (b != 0x7F) | (b == b'\t'))
+    })
 }
 
 pub(super) fn is_valid_request_target(s: &str) -> bool {
@@ -44,42 +54,28 @@ pub(super) fn is_valid_request_target(s: &str) -> bool {
     s.bytes().all(|b| b > 0x20 && b != 0x7F)
 }
 
-pub(super) fn h1_header_name(name: &str) -> Cow<'_, str> {
+pub(super) fn h1_header_name(name: &str) -> &str {
     match name {
-        _ if name.eq_ignore_ascii_case("host") => Cow::Borrowed("Host"),
-        _ if name.eq_ignore_ascii_case("connection") => Cow::Borrowed("Connection"),
-        _ if name.eq_ignore_ascii_case("user-agent") => Cow::Borrowed("User-Agent"),
-        _ if name.eq_ignore_ascii_case("accept") => Cow::Borrowed("Accept"),
-        _ if name.eq_ignore_ascii_case("accept-encoding") => Cow::Borrowed("Accept-Encoding"),
-        _ if name.eq_ignore_ascii_case("accept-language") => Cow::Borrowed("Accept-Language"),
-        _ if name.eq_ignore_ascii_case("content-length") => Cow::Borrowed("Content-Length"),
-        _ if name.eq_ignore_ascii_case("content-type") => Cow::Borrowed("Content-Type"),
-        _ if name.eq_ignore_ascii_case("cookie") => Cow::Borrowed("Cookie"),
-        _ if name.eq_ignore_ascii_case("authorization") => Cow::Borrowed("Authorization"),
-        _ if name.eq_ignore_ascii_case("proxy-authorization") => {
-            Cow::Borrowed("Proxy-Authorization")
-        }
-        _ if name.eq_ignore_ascii_case("origin") => Cow::Borrowed("Origin"),
-        _ if name.eq_ignore_ascii_case("referer") => Cow::Borrowed("Referer"),
-        _ if name.eq_ignore_ascii_case("upgrade") => Cow::Borrowed("Upgrade"),
-        _ => Cow::Borrowed(name),
+        _ if name.eq_ignore_ascii_case("host") => "Host",
+        _ if name.eq_ignore_ascii_case("connection") => "Connection",
+        _ if name.eq_ignore_ascii_case("user-agent") => "User-Agent",
+        _ if name.eq_ignore_ascii_case("accept") => "Accept",
+        _ if name.eq_ignore_ascii_case("accept-encoding") => "Accept-Encoding",
+        _ if name.eq_ignore_ascii_case("accept-language") => "Accept-Language",
+        _ if name.eq_ignore_ascii_case("content-length") => "Content-Length",
+        _ if name.eq_ignore_ascii_case("content-type") => "Content-Type",
+        _ if name.eq_ignore_ascii_case("cookie") => "Cookie",
+        _ if name.eq_ignore_ascii_case("authorization") => "Authorization",
+        _ if name.eq_ignore_ascii_case("proxy-authorization") => "Proxy-Authorization",
+        _ if name.eq_ignore_ascii_case("origin") => "Origin",
+        _ if name.eq_ignore_ascii_case("referer") => "Referer",
+        _ if name.eq_ignore_ascii_case("upgrade") => "Upgrade",
+        _ => name,
     }
 }
 
-pub(super) fn header_first<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case(name))
-        .map(|(_, v)| v.as_str())
-}
-
-pub(super) fn header_contains_token(headers: &[(String, String)], name: &str, token: &str) -> bool {
-    header_first(headers, name).is_some_and(|v| {
-        v.split(',')
-            .any(|part| part.trim().eq_ignore_ascii_case(token))
-    })
-}
-
 pub(super) fn find_header_end(buf: &[u8]) -> Option<usize> {
-    buf.windows(4).position(|w| w == b"\r\n\r\n")
+    memchr::memchr_iter(b'\n', buf)
+        .find(|&i| i >= 3 && &buf[i - 3..=i] == b"\r\n\r\n")
+        .map(|i| i - 3)
 }

@@ -1,5 +1,5 @@
-use crate::profile::{BrowserHeaders, BrowserProfile, ChromiumBrand, Platform};
-use crate::{Cause, Error};
+use crate::Error;
+use crate::profile::{BrowserHeaders, ChromiumBrand, Platform};
 
 mod digest;
 
@@ -47,7 +47,7 @@ impl std::str::FromStr for Browser {
 string_id_serde!(Browser);
 
 pub(crate) fn unknown<'a>(kind: &str, id: &str, known: impl Iterator<Item = &'a str>) -> Error {
-    Error::new(Cause::Config).with_message(format!(
+    Error::config(format!(
         "unknown {kind} {id:?}; expected one of {}",
         known.collect::<Vec<_>>().join(", ")
     ))
@@ -159,13 +159,11 @@ impl Browser {
     }
 
     pub(crate) fn identity_headers(self, platform: Platform) -> Option<BrowserHeaders> {
-        self.platform_profile(platform)
+        self.base()
+            .for_platform(platform)
+            .profile()
             .resolve_identity(platform, self.brand().unwrap_or_default())
             .ok()
-    }
-
-    pub(crate) fn platform_profile(self, platform: Platform) -> &'static BrowserProfile {
-        self.base().for_platform(platform).profile()
     }
 
     pub(crate) fn profile_source(self) -> &'static str {

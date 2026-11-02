@@ -257,6 +257,23 @@ tokio::spawn(async move { worker.get("https://example.com/").send().await })
 and sessions made with `to_builder()` too. See [Crawling](crawling.md#limit-each-host) and
 [Proxies](proxies.md).
 
+## Block the calling thread
+
+Code without an async runtime uses `blocking::Session`. It owns a small runtime and runs each call on the calling thread. Everything a `Session` offers is available through it, and `block_on` waits for the result.
+
+```rust,no_run
+# fn run() -> leyline::Result<()> {
+let session = leyline::blocking::Session::new(leyline::Session::builder())?;
+let body = session.block_on(async {
+    session.get("https://example.com/").send().await?.text().await
+})?;
+println!("{body}");
+# Ok(())
+# }
+```
+
+Build one blocking session per thread: it is `Send` but not `Sync`. Call `block_on` from a thread outside any tokio runtime. Direct HTTP/1.1 connections read and write blocking sockets, so a request costs no task switch. HTTP/2, TLS 1.2, and proxied connections keep the runtime's reactor. Every timeout applies; while a streamed body is read, each read waits at most the session's read or total timeout.
+
 ## Derive a session
 
 `session.to_builder()` returns a `SessionBuilder` that holds the session's

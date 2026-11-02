@@ -1,12 +1,9 @@
 use std::io;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use tokio::sync::{Semaphore, mpsc};
-
-pub(crate) type BodyStream = Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + 'static>>;
 
 pub(crate) const UPLOAD_WINDOW: usize = 256 * 1024;
 

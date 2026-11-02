@@ -15,7 +15,8 @@ use leyline::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
 use leyline::h2::hpack;
-use leyline::h2::{H2Client, H2ResponseEx, Head, RequestBody};
+use leyline::h2::{H2Client, Head};
+use leyline::pool::TransportResponse;
 use leyline::{Browser, Session};
 
 struct Counting;
@@ -474,11 +475,11 @@ async fn send(
         std::borrow::Cow<'static, str>,
         leyline::h2::HeaderStr,
     )>,
-) -> H2ResponseEx {
+) -> TransportResponse {
     handle
         .send_shared(
             Arc::new(Head { pseudo, headers }),
-            RequestBody::from(None::<bytes::Bytes>),
+            leyline::Body::default(),
             false,
         )
         .await

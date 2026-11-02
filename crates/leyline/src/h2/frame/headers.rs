@@ -19,12 +19,12 @@ pub struct StreamDependency {
 }
 
 #[derive(Debug)]
-pub struct HeadersFrame {
+pub struct HeadersFrame<F = Bytes> {
     pub stream_id: u32,
     pub end_stream: bool,
     pub end_headers: bool,
     pub priority: Option<StreamDependency>,
-    pub fragment: Bytes,
+    pub fragment: F,
 }
 
 impl HeadersFrame {
@@ -93,7 +93,9 @@ impl HeadersFrame {
             fragment,
         })
     }
+}
 
+impl<F: AsRef<[u8]>> HeadersFrame<F> {
     pub fn encode(&self, buf: &mut impl BufMut) {
         let mut flags = 0u8;
         if self.end_stream {
@@ -107,7 +109,8 @@ impl HeadersFrame {
         }
 
         let priority_len = if self.priority.is_some() { 5 } else { 0 };
-        let length = priority_len + self.fragment.len() as u32;
+        let fragment = self.fragment.as_ref();
+        let length = priority_len + fragment.len() as u32;
 
         let header = FrameHeader {
             length,
@@ -126,7 +129,7 @@ impl HeadersFrame {
             buf.put_u8(dep.weight);
         }
 
-        buf.put_slice(&self.fragment);
+        buf.put_slice(fragment);
     }
 }
 

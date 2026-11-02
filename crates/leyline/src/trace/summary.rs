@@ -1,7 +1,8 @@
 use url::Url;
 
-use super::{Event, ms};
+use super::Event;
 use crate::Error;
+use crate::core::ResponseTiming;
 
 pub(crate) struct Finish<'a> {
     pub(crate) method: &'a str,
@@ -69,7 +70,7 @@ pub(super) fn render(event: &Event<'_>) {
     let url = crate::util::redact(url.map_or(*original_url, Url::as_str));
     let status = status.map(|s| s.as_u16());
     let version = version.map(tracing::field::debug);
-    let elapsed_ms = ms(*elapsed);
+    let elapsed_ms = ResponseTiming::span(*elapsed);
     let label = *label;
     let proxy = proxy.as_deref();
     let browser = browser.map(tracing::field::debug);

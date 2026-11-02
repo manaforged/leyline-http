@@ -7,6 +7,7 @@ use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamState;
 
 use super::*;
+use crate::core::deadline::Tick;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn run(mut self) -> Result<(), H2Error> {
@@ -40,10 +41,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) async fn event_loop(&mut self) -> Result<(), H2Error> {
-        let mut sweep_tick = tokio::time::interval(std::time::Duration::from_millis(100));
-        sweep_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut flush_tick = tokio::time::interval(std::time::Duration::from_millis(1));
-        flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut sweep_tick = Tick::every(SWEEP_PERIOD);
+        let mut flush_tick = Tick::every(FLUSH_PERIOD);
         loop {
             if self.shutdown_started && self.streams.is_empty() && self.goaway_drained().await? {
                 return Ok(());
@@ -102,7 +101,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if !self.reader.buffered() || self.writer.saturated() {
                 break;
             }
-            let frame = self.reader.next().await;
+            let frame = self.reader.next(&mut self.io).await;
             if self.on_read(frame).await?.is_break() {
                 return Ok(ControlFlow::Break(()));
             }
@@ -303,10 +302,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         self.complete_stream(stream_id);
         Ok(())
-    }
-
-    pub(super) fn has_stalled(&self) -> bool {
-        self.stalled > 0
     }
 
     pub(super) async fn flush_stalled(&mut self) -> Result<(), H2Error> {

@@ -29,7 +29,7 @@ fn decompress_multi_encoding_in_reverse_order() {
 fn gzip_without_feature_is_an_error() {
     let err = decompress_body(vec![0x1f, 0x8b], Some("gzip"), &BodyRules::default())
         .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-brotli"))]
@@ -37,7 +37,7 @@ fn gzip_without_feature_is_an_error() {
 fn brotli_without_feature_is_an_error() {
     let err = decompress_body(vec![0x0b], Some("br"), &BodyRules::default())
         .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-deflate"))]
@@ -45,7 +45,7 @@ fn brotli_without_feature_is_an_error() {
 fn deflate_without_feature_is_an_error() {
     let err = decompress_body(vec![0x78, 0x9c], Some("deflate"), &BodyRules::default())
         .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(not(feature = "compression-zstd"))]
@@ -53,7 +53,7 @@ fn deflate_without_feature_is_an_error() {
 fn zstd_without_feature_is_an_error() {
     let err = decompress_body(vec![0x28, 0xb5], Some("zstd"), &BodyRules::default())
         .expect_err("disabled response codec must fail");
-    assert_eq!(err.kind(), crate::core::Cause::Decode, "got: {err:?}");
+    assert_eq!(err.kind(), crate::core::Kind::Decode, "got: {err:?}");
 }
 
 #[cfg(feature = "compression-gzip")]
@@ -78,12 +78,16 @@ fn decompress_and_strip_drops_stale_framing_headers() {
             HeaderValue::from_static("text/plain"),
         ),
     ];
-    let (decoded, headers) =
-        decompress_and_strip(gzip_body, headers, &BodyRules::default()).unwrap();
+    let (decoded, headers) = decompress_and_strip(
+        gzip_body,
+        headers.into_iter().collect(),
+        &BodyRules::default(),
+    )
+    .unwrap();
 
     assert_eq!(decoded, body);
-    assert!(!headers.iter().any(|(k, _)| *k == "content-encoding"));
-    assert!(!headers.iter().any(|(k, _)| *k == "content-length"));
+    assert!(!headers.contains_key("content-encoding"));
+    assert!(!headers.contains_key("content-length"));
     assert!(
         headers
             .iter()
@@ -103,10 +107,14 @@ fn decompress_and_strip_preserves_headers_when_not_decoded() {
             HeaderValue::from_static("text/plain"),
         ),
     ];
-    let (body, out) =
-        decompress_and_strip(b"plain".to_vec(), headers.clone(), &BodyRules::default()).unwrap();
+    let (body, out) = decompress_and_strip(
+        b"plain".to_vec(),
+        headers.clone().into_iter().collect(),
+        &BodyRules::default(),
+    )
+    .unwrap();
     assert_eq!(body, b"plain");
-    assert_eq!(out, headers);
+    assert_eq!(out, headers.into_iter().collect::<http::HeaderMap>());
 }
 
 #[cfg(feature = "compression-deflate")]

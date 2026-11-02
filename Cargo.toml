@@ -59,6 +59,8 @@ leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.2.0" }
 leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.2.0" }
 socket2 = { version = "0.6", features = ["all"] }
 bytes = "1.9.0"
+memchr = "2.7"
+foldhash = "0.2"
 tokio-tungstenite = "0.26"
 base64 = "0.22"
 leyline-quiche = { path = "crates/leyline-quiche", version = "=0.2.0", default-features = false, features = ["boringssl-bssl-crate"] }

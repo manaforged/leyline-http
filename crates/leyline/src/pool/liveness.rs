@@ -13,8 +13,9 @@ pub const DEFAULT_H2_PING_TIMEOUT: Duration = Duration::from_secs(2);
 pub(crate) async fn checkout_live_h2(
     pool: &Arc<Pool>,
     key: &PoolKey,
+    now: std::time::Instant,
 ) -> Option<(H2Client, TlsInfo)> {
-    let (handle, tls, idle) = pool.checkout_mux_idle::<H2Client>(key)?;
+    let (handle, tls, idle) = pool.checkout_mux_idle::<H2Client>(key, now)?;
     let Some(after_idle) = pool.config.h2_ping_after_idle else {
         return Some((handle, tls));
     };

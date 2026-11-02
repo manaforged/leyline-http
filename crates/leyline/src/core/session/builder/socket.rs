@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::time::Duration;
 
 use super::SessionBuilder;
@@ -16,19 +16,17 @@ impl SessionBuilder {
         self.update_socket(|s| f(s.happy_eyeballs.get_or_insert_with(HappyEyeballs::default)))
     }
 
-    /// Binds new connections to a local address; the default lets the OS choose.
+    /// Binds new connections of the address's family to a local address, or clears both families with `None`.
     pub fn local_address(self, addr: impl Into<Option<IpAddr>>) -> Self {
-        self.update_socket(|s| s.local_address = addr.into())
-    }
-
-    /// Binds new IPv4 connections to a local address; the default lets the OS choose.
-    pub fn local_ipv4(self, addr: impl Into<Option<Ipv4Addr>>) -> Self {
-        self.update_socket(|s| s.local_ipv4 = addr.into())
-    }
-
-    /// Binds new IPv6 connections to a local address; the default lets the OS choose.
-    pub fn local_ipv6(self, addr: impl Into<Option<Ipv6Addr>>) -> Self {
-        self.update_socket(|s| s.local_ipv6 = addr.into())
+        let addr = addr.into();
+        self.update_socket(|s| match addr {
+            Some(IpAddr::V4(ip)) => s.local_ipv4 = Some(ip),
+            Some(IpAddr::V6(ip)) => s.local_ipv6 = Some(ip),
+            None => {
+                s.local_ipv4 = None;
+                s.local_ipv6 = None;
+            }
+        })
     }
 
     /// Sets `TCP_NODELAY` on new sockets; the default leaves the OS setting.

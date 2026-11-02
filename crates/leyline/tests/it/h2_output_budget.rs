@@ -15,7 +15,7 @@ use tokio::time::timeout;
 
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
-use leyline::h2::{H2Client, Head, RequestBody};
+use leyline::h2::{H2Client, Head};
 
 #[tokio::test]
 async fn a_peer_that_stops_reading_still_delivers_its_response() {
@@ -79,7 +79,7 @@ async fn a_buffered_upload_queues_a_bounded_amount_ahead_of_its_reset() {
         let (handle, mut server_io) = wide_open(64 * 1024, max_frame).await;
         let client = handle.clone();
         let upload = tokio::spawn(async move {
-            let body = RequestBody::Buffered(Bytes::from(vec![0u8; BODY]));
+            let body = leyline::Body::from(Bytes::from(vec![0u8; BODY]));
             client.send_shared(head("POST"), body, false).await
         });
         tokio::time::sleep(Duration::from_millis(300)).await;
@@ -121,7 +121,7 @@ async fn a_header_block_over_the_limit_is_refused_before_the_wire() {
     };
     let sent = timeout(
         Duration::from_secs(2),
-        handle.send_shared(Arc::new(big), RequestBody::None, false),
+        handle.send_shared(Arc::new(big), leyline::Body::default(), false),
     )
     .await
     .expect("the oversized request fails without waiting for a response");
@@ -162,10 +162,7 @@ impl Drop for Empty {
 async fn a_cancelled_upload_of_empty_chunks_drops_its_producer() {
     let (handle, _server_io) = wide_open(1 << 20, DEFAULT_FRAME).await;
     let producer = Arc::new(Producer::default());
-    let body = RequestBody::Streaming {
-        stream: Box::pin(Empty(Arc::clone(&producer))),
-        length_hint: None,
-    };
+    let body = leyline::Body::stream(Empty(Arc::clone(&producer)), None);
     let upload = send(&handle, "POST", body);
     tokio::time::sleep(Duration::from_millis(100)).await;
     upload.abort();
@@ -204,7 +201,7 @@ async fn a_refused_header_block_leaves_the_peer_able_to_decode_the_next_request(
         .collect::<Vec<_>>();
     let refused = timeout(
         Duration::from_secs(2),
-        handle.send_shared(head_with(oversized), RequestBody::None, false),
+        handle.send_shared(head_with(oversized), leyline::Body::default(), false),
     )
     .await
     .expect("the oversized request fails without waiting for a response");
@@ -212,8 +209,11 @@ async fn a_refused_header_block_leaves_the_peer_able_to_decode_the_next_request(
 
     let client = handle.clone();
     let next = head_with(vec![("x-h299".into(), value.clone())]);
-    let pending =
-        tokio::spawn(async move { client.send_shared(next, RequestBody::None, false).await });
+    let pending = tokio::spawn(async move {
+        client
+            .send_shared(next, leyline::Body::default(), false)
+            .await
+    });
     let block = timeout(Duration::from_secs(2), async {
         loop {
             let (header, payload) = read_frame(&mut server_io).await;
@@ -256,7 +256,7 @@ async fn settings_acks_for_a_peer_that_stops_reading_stay_bounded() {
     let client = handle.clone();
     let retained = tokio::spawn(async move {
         client
-            .send_shared(head("GET"), RequestBody::None, true)
+            .send_shared(head("GET"), leyline::Body::default(), true)
             .await
     });
     let mut settings = Vec::new();
@@ -307,7 +307,7 @@ async fn the_header_list_limit_follows_the_peer_not_the_inbound_limit() {
     write_settings_ack(&mut server_io).await;
     let refused = timeout(
         Duration::from_secs(2),
-        handle.send_shared(big(), RequestBody::None, false),
+        handle.send_shared(big(), leyline::Body::default(), false),
     )
     .await
     .expect("a request over the peer's limit fails without waiting");
@@ -324,8 +324,11 @@ async fn the_header_list_limit_follows_the_peer_not_the_inbound_limit() {
     write_server_settings(&mut server_io).await;
     write_settings_ack(&mut server_io).await;
     let client = handle.clone();
-    let pending =
-        tokio::spawn(async move { client.send_shared(big(), RequestBody::None, false).await });
+    let pending = tokio::spawn(async move {
+        client
+            .send_shared(big(), leyline::Body::default(), false)
+            .await
+    });
     let reached = timeout(Duration::from_secs(2), async {
         loop {
             let (header, _) = read_frame(&mut server_io).await;

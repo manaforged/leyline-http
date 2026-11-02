@@ -8,6 +8,10 @@ publish = false
 # not enter (or conflict with) the main build graph.
 [workspace]
 
+[[bin]]
+name = "leyline-blocking"
+path = "src/blocking.rs"
+
 [dependencies]
 leyline = { package = "leyline-http", path = "../../../crates/leyline" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

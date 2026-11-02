@@ -1,11 +1,6 @@
-use super::{TransportBody, TransportResponse};
-use crate::core::body_stream::BodyStream;
-use crate::core::error::{Cause, Error, Result};
-use crate::core::response::{HttpVersion, ResponseTiming};
-use crate::h2::client::{H2ResponseEx, ResponseBody};
+use crate::core::error::{Error, Result};
 use crate::h2::connection::PseudoHeaders;
 use crate::header_str::HeaderStr;
-use crate::pool::TlsInfo;
 use crate::util::request_target;
 
 const STANDARD_METHODS: [&str; 9] = [
@@ -22,38 +17,16 @@ fn method_header(method: &str) -> HeaderStr {
 
 pub(super) fn request_pseudo(method: &str, url: &url::Url) -> Result<PseudoHeaders> {
     if url.scheme() != "https" {
-        return Err(Error::new(Cause::Config).with_message("HTTP/2 requires an https:// URL"));
+        return Err(Error::config("HTTP/2 requires an https:// URL"));
     }
-    let host = url
-        .host_str()
-        .ok_or_else(|| Error::new(Cause::Config).with_message("no host in URL"))?;
-    let port = url.port_or_known_default().unwrap_or(443);
+    if !url.has_host() {
+        return Err(Error::config("no host in URL"));
+    }
     Ok(PseudoHeaders {
         method: method_header(method),
         scheme: HeaderStr::from_static("https"),
-        authority: HeaderStr::from(crate::util::authority(url, host, port)),
+        authority: HeaderStr::from(&url[url::Position::BeforeHost..url::Position::AfterPort]),
         path: HeaderStr::from(request_target(url)),
         protocol: None,
     })
-}
-
-pub(super) fn transport_response(
-    resp: H2ResponseEx,
-    tls: TlsInfo,
-    timing: ResponseTiming,
-    url: &url::Url,
-) -> Result<TransportResponse> {
-    let body = match resp.body {
-        ResponseBody::Buffered(b) => TransportBody::Buffered(b),
-        ResponseBody::Streaming(rx) => TransportBody::Streaming(BodyStream::new(rx)),
-    };
-    TransportResponse::mux(
-        HttpVersion::Http2,
-        resp.status,
-        resp.headers,
-        resp.trailers.unwrap_or_default(),
-        body,
-        (tls, timing),
-        url,
-    )
 }

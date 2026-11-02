@@ -9,11 +9,28 @@ use crate::quic::H3Client;
 use crate::pool::h1::H1Io;
 
 #[derive(Debug, Clone, Default)]
+pub struct TlsInfo(std::sync::Arc<TlsFacts>);
+
+#[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct TlsInfo {
+pub struct TlsFacts {
     pub peer_cert_der: Option<Vec<u8>>,
     pub version: Option<String>,
     pub cipher: Option<String>,
+}
+
+impl From<TlsFacts> for TlsInfo {
+    fn from(facts: TlsFacts) -> Self {
+        Self(std::sync::Arc::new(facts))
+    }
+}
+
+impl std::ops::Deref for TlsInfo {
+    type Target = TlsFacts;
+
+    fn deref(&self) -> &TlsFacts {
+        &self.0
+    }
 }
 
 pub(crate) struct Opened<C> {
@@ -86,8 +103,8 @@ pub(crate) enum Transport {
 pub(crate) struct PoolKey {
     pub(crate) host: String,
     pub(crate) port: u16,
-    pub(crate) scheme: String,
-    pub(crate) proxy: Option<String>,
+    pub(crate) scheme: std::borrow::Cow<'static, str>,
+    pub(crate) proxy: Option<crate::core::ProxyUrl>,
     pub(crate) transport: Transport,
     pub(crate) partition: u64,
     pub(crate) lane: u8,
@@ -95,6 +112,16 @@ pub(crate) struct PoolKey {
 
 pub struct H1Slot {
     pub(crate) io: Box<dyn H1Io>,
+    pub(crate) buf: Vec<u8>,
+}
+
+impl H1Slot {
+    pub(crate) fn new(io: Box<dyn H1Io>) -> Self {
+        Self {
+            io,
+            buf: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

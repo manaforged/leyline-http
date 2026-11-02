@@ -105,7 +105,7 @@ fn disabled_codecs_return_body_errors() {
             let error = encoding
                 .encode(b"request body")
                 .expect_err("disabled codec must fail");
-            assert_eq!(error.kind(), crate::core::Cause::Body);
+            assert_eq!(error.kind(), crate::core::Kind::Body);
             assert!(error.message().expect("feature guidance").contains(feature));
         }
     }

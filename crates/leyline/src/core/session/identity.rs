@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Result};
 use crate::profile::browser::digest;
 use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Family, Platform};
 
@@ -79,7 +79,7 @@ impl TryFrom<SavedIdentity> for Identity {
         let source = match (saved.http, saved.tls, saved.profile) {
             (Some(http), Some(tls), None) => {
                 if http.family() != tls.family() {
-                    return Err(Error::new(Cause::Config).with_message(format!(
+                    return Err(Error::config(format!(
                         "saved identity tls {tls} is not the same family as {http}"
                     )));
                 }
@@ -90,7 +90,7 @@ impl TryFrom<SavedIdentity> for Identity {
             }
             (None, None, None) => Source::Plain,
             _ => {
-                return Err(Error::new(Cause::Config).with_message(
+                return Err(Error::config(
                     "saved identity needs both http and tls, or a profile, or neither",
                 ));
             }
@@ -181,12 +181,14 @@ impl Identity {
     pub(crate) fn rotate_tls(self, tls: Browser) -> Result<Self> {
         let tls = tls.base();
         let Source::Browser { http, .. } = self.source else {
-            return Err(Error::new(Cause::Config)
-                .with_message("tls rotate needs a browser identity, not a profile or plain one"));
+            return Err(Error::config(
+                "tls rotate needs a browser identity, not a profile or plain one",
+            ));
         };
         if http.family() != tls.family() {
-            return Err(Error::new(Cause::Config)
-                .with_message(format!("tls rotate {tls} is not the same family as {http}")));
+            return Err(Error::config(format!(
+                "tls rotate {tls} is not the same family as {http}"
+            )));
         }
         Ok(Self {
             source: Source::Browser {
@@ -288,10 +290,6 @@ impl Session {
     #[must_use]
     pub fn profile(&self) -> Option<&str> {
         self.inner.profile_source()
-    }
-
-    pub(crate) fn http_browser(&self) -> Option<Browser> {
-        self.inner.identity.as_ref().and_then(Identity::http)
     }
 }
 

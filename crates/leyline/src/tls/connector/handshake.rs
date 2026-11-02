@@ -21,8 +21,17 @@ impl FingerprintConnector {
         session_key: &str,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
-        self.handshake_over(tcp_stream, host, session_key, plan, TlsIo::Boring)
-            .await
+        let records = self.hello.records();
+        self.handshake_over(tcp_stream, host, session_key, plan, move |stream| {
+            if !records {
+                return TlsIo::Boring(stream);
+            }
+            match stream.into_records() {
+                Ok(stream) => TlsIo::Records(Box::new(stream)),
+                Err(stream) => TlsIo::Boring(stream),
+            }
+        })
+        .await
     }
 
     pub(crate) async fn tls_handshake_nested(
@@ -123,6 +132,7 @@ impl FingerprintConnector {
             self.session_cache.attach(&mut ssl, session_key)?;
         }
         self.hello.apply(&mut ssl, plan.alps())?;
+        ssl.shed_handshake_config();
         Ok((ssl, verification_failure))
     }
 }

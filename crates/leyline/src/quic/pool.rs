@@ -10,13 +10,12 @@ use quiche::h3::NameValue;
 use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::AbortHandle;
 
+use crate::core::BoxedStream;
 use crate::core::ResponseMode;
 use crate::core::session::decompress::BodyLimit;
+use crate::core::transport::{TransportBody, TransportResponse};
 use crate::h2::config::PseudoOrder;
-use crate::quic::connection::{
-    EstablishedH3, H3Response, check_body_budget, close_reason, flush_egress,
-};
-use crate::util::upload::BodyStream;
+use crate::quic::connection::{EstablishedH3, check_body_budget, close_reason, flush_egress};
 
 const STREAM_RESP_CAPACITY: usize = 32;
 
@@ -32,17 +31,12 @@ enum H3Command {
     Request {
         headers: Vec<quiche::h3::Header>,
         body: Option<Bytes>,
-        body_stream: Option<BodyStream>,
+        body_stream: Option<BoxedStream>,
         stream_body_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
         mode: ResponseMode,
         retried: bool,
-        resp_tx: oneshot::Sender<Result<H3Response, H3SendError>>,
+        resp_tx: oneshot::Sender<Result<TransportResponse, H3SendError>>,
     },
-}
-
-pub enum H3RespBody {
-    Buffered(Vec<u8>),
-    Streaming(mpsc::Receiver<std::io::Result<Bytes>>),
 }
 
 #[derive(Debug)]
@@ -94,11 +88,11 @@ impl H3Client {
         method: &str,
         authority: &str,
         path: &str,
-        headers: &[(String, String)],
+        headers: &[crate::h2::connection::HeaderPair],
         body: Option<Bytes>,
-        body_stream: Option<BodyStream>,
+        body_stream: Option<BoxedStream>,
         mode: ResponseMode,
-    ) -> Result<H3Response<H3RespBody>, H3SendError> {
+    ) -> Result<TransportResponse, H3SendError> {
         if self.closed.load(Ordering::Acquire) {
             return Err(H3SendError::NotSent("h3 connection closed".into()));
         }
@@ -140,15 +134,15 @@ impl H3Client {
             .map_err(|e| H3SendError::NotSent(format!("h3 driver task has exited: {e}")))?;
 
         match resp_rx.await {
-            Ok(Ok(head)) => Ok(H3Response {
-                status: head.status,
-                headers: head.headers,
-                trailers: head.trailers,
-                body: match stream_body_rx {
-                    Some(rx) if mode.keeps_stream(head.status) => H3RespBody::Streaming(rx),
-                    _ => H3RespBody::Buffered(head.body),
-                },
-            }),
+            Ok(Ok(mut head)) => {
+                if let Some(rx) = stream_body_rx
+                    && mode.keeps_stream(head.status.as_u16())
+                {
+                    head.body =
+                        TransportBody::Streaming(Box::new(crate::core::BodyStream::new(rx)));
+                }
+                Ok(head)
+            }
             Ok(Err(e)) => Err(e),
             Err(_) => Err(H3SendError::Failed(
                 "h3 driver dropped response sender".into(),
@@ -162,11 +156,11 @@ impl H3Client {
 }
 
 struct H3Stream {
-    resp_tx: Option<oneshot::Sender<Result<H3Response, H3SendError>>>,
+    resp_tx: Option<oneshot::Sender<Result<TransportResponse, H3SendError>>>,
     response: H3ResponseState,
-    status: u16,
-    headers: Vec<(String, String)>,
-    trailers: Vec<(String, String)>,
+    status: http::StatusCode,
+    headers: http::HeaderMap,
+    trailers: http::HeaderMap,
     body: Vec<u8>,
     stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
     terminal: Option<mpsc::OwnedPermit<std::io::Result<Bytes>>>,

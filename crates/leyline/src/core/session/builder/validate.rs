@@ -1,7 +1,6 @@
 #[cfg(feature = "http3")]
 use crate::core::Protocol;
-use crate::core::ProxyUrl;
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Result};
 use crate::core::proxy_pool::ProxyPool;
 use crate::profile::Platform;
 
@@ -23,7 +22,7 @@ impl SessionBuilder {
 
     fn check_config(&mut self) -> Result<()> {
         match self.config_error.take() {
-            Some(error) => Err(Error::new(Cause::Config).with_message(error)),
+            Some(error) => Err(Error::config(error)),
             None => Ok(()),
         }
     }
@@ -35,7 +34,7 @@ impl SessionBuilder {
                 .as_ref()
                 .is_some_and(ProxyPool::needs_impersonation)
         {
-            return Err(Error::new(Cause::Config).with_message(
+            return Err(Error::config(
                 "Proxy::identified pins a browser per proxy and needs a browser \
                  session: add `.browser(..)`, or use Proxy::list",
             ));
@@ -70,7 +69,7 @@ impl SessionBuilder {
 
     fn resolve_proxies(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
         for rule in self.proxy_rules() {
-            ProxyUrl::parse(rule.url())?;
+            rule.proxy()?;
         }
         #[cfg(not(feature = "socks"))]
         self.check_socks_feature()?;
@@ -88,11 +87,11 @@ impl SessionBuilder {
     #[cfg(not(feature = "socks"))]
     fn check_socks_feature(&self) -> Result<()> {
         let socks = self.proxy_rules().find(|rule| {
-            url::Url::parse(rule.url())
-                .is_ok_and(|url| matches!(url.scheme(), "socks5" | "socks5h"))
+            rule.proxy()
+                .is_ok_and(|proxy| matches!(proxy.url().scheme(), "socks5" | "socks5h"))
         });
         match socks {
-            Some(rule) => Err(ProxyUrl::socks_feature_error(rule.url())),
+            Some(rule) => Err(crate::core::ProxyUrl::socks_feature_error(rule.url())),
             None => Ok(()),
         }
     }
@@ -101,9 +100,9 @@ impl SessionBuilder {
     fn check_h3_proxy(&self) -> Result<()> {
         if self.proxy_config.proxies_every_url()
             && matches!(self.protocol_policy, Protocol::Http3)
-            && !crate::quic::proxy_carries_h3(self.proxy_config.primary())
+            && !crate::quic::proxy_carries_h3(self.proxy_config.primary_url())
         {
-            return Err(Error::new(Cause::Config).with_message(
+            return Err(Error::config(
                 "HTTP/3 needs a socks5:// or socks5h:// proxy with UDP ASSOCIATE; http and \
                  https proxies cannot carry QUIC: use another `.protocol(..)` to run HTTP/2 \
                  over the proxy's CONNECT tunnel, or use a SOCKS5 proxy",

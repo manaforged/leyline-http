@@ -1,0 +1,25 @@
+
+seq    lib                  req/s  spread  instr/req   over h2 cpu_us/req conns
+       h2                   52651    3.0%      33743        +0       9.84     -
+       leyline              51986    2.7%      38045     +4303      10.22     -
+       hyper                43981    7.3%      52233    +18490      17.27     -
+
+1c64   lib                  req/s  spread  instr/req   over h2 cpu_us/req conns
+       leyline             204137    2.8%      32172     +2105       8.00     1
+       hyper               183893    1.6%      44718    +14651      16.51     1
+       h2                  169938    2.1%      30067        +0      12.86     1
+
+8c8    lib                  req/s  spread  instr/req   over h2 cpu_us/req conns
+       h2                  285498    3.3%      34445        +0      10.74     8
+       leyline             275084    2.6%      38605     +4161      12.10     8
+       hyper               269356    7.9%      50590    +16145      15.76     8
+
+8c256  lib                  req/s  spread  instr/req   over h2 cpu_us/req conns
+       leyline            1405019    6.2%      28881     +2428       6.94     8
+       h2                 1222930    2.4%      26454        +0       9.84     8
+       hyper              1149153    2.4%      39824    +13370      11.63     8
+
+seq    leyline           vs h2         req/s 0.982 [0.975, 0.989] behind; CPU/req 1.042 [1.027, 1.055] more CPU; 10 rounds
+1c64   leyline           vs hyper      req/s 1.104 [1.097, 1.111] ahead; CPU/req 0.486 [0.482, 0.490] less CPU; 10 rounds
+8c8    leyline           vs h2         req/s 0.965 [0.956, 0.974] behind; CPU/req 1.120 [1.090, 1.146] more CPU; 10 rounds
+8c256  leyline           vs h2         req/s 1.143 [1.129, 1.153] ahead; CPU/req 0.706 [0.701, 0.711] less CPU; 10 rounds

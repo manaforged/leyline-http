@@ -1,7 +1,7 @@
 use md5::{Digest as Md5Digest, Md5};
 use sha2::{Sha256, Sha512_256};
 
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 
 mod scan;
 
@@ -76,24 +76,20 @@ impl Algorithm {
             Algorithm::Md5 | Algorithm::Md5Sess => {
                 let mut h = Md5::new();
                 h.update(input);
-                hex(&h.finalize())
+                hex::encode(h.finalize())
             }
             Algorithm::Sha256 | Algorithm::Sha256Sess => {
                 let mut h = Sha256::new();
                 h.update(input);
-                hex(&h.finalize())
+                hex::encode(h.finalize())
             }
             Algorithm::Sha512_256 | Algorithm::Sha512_256Sess => {
                 let mut h = Sha512_256::new();
                 h.update(input);
-                hex(&h.finalize())
+                hex::encode(h.finalize())
             }
         }
     }
-}
-
-fn hex(bytes: &[u8]) -> String {
-    hex::encode(bytes)
 }
 
 pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
@@ -101,7 +97,7 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let body = trimmed
         .strip_prefix("Digest ")
         .or_else(|| trimmed.strip_prefix("digest "))
-        .ok_or_else(|| Error::new(Cause::Request).with_message("digest: not a Digest challenge"))?;
+        .ok_or_else(|| Error::new(Kind::Request).with_message("digest: not a Digest challenge"))?;
 
     let mut ch = Challenge::default();
     for pair in pairs(body) {
@@ -110,7 +106,7 @@ pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
 
     if ch.nonce.is_empty() {
         return Err(
-            Error::new(Cause::Request).with_message("digest: challenge missing required `nonce`")
+            Error::new(Kind::Request).with_message("digest: challenge missing required `nonce`")
         );
     }
 
@@ -142,7 +138,7 @@ fn algorithm(val: &str) -> Result<Algorithm> {
         "SHA-256-sess" | "sha-256-sess" => Ok(Algorithm::Sha256Sess),
         "SHA-512-256" | "sha-512-256" => Ok(Algorithm::Sha512_256),
         "SHA-512-256-sess" | "sha-512-256-sess" => Ok(Algorithm::Sha512_256Sess),
-        other => Err(Error::new(Cause::Request)
+        other => Err(Error::new(Kind::Request)
             .with_message(format!("digest: unsupported algorithm {other}"))),
     }
 }
@@ -235,10 +231,6 @@ pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
         }
     }
     None
-}
-
-pub(crate) fn generate_cnonce() -> String {
-    crate::util::random_hex_token(8)
 }
 
 pub(crate) const DIGEST_NONCE_CACHE_CAP: usize = 4096;

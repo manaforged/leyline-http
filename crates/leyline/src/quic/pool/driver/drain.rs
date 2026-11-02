@@ -21,19 +21,10 @@ impl Drain<'_> {
     }
 
     fn headers(&mut self, id: u64, list: &[quiche::h3::Header]) {
-        let list = list
-            .iter()
-            .map(|header| {
-                (
-                    String::from_utf8_lossy(header.name()).to_string(),
-                    String::from_utf8_lossy(header.value()).to_string(),
-                )
-            })
-            .collect::<Vec<_>>();
         let Some(stream) = self.streams.get_mut(&id) else {
             return;
         };
-        if let Err(message) = stream.headers(&list) {
+        if let Err(message) = stream.headers(list) {
             abort_stream(
                 self.h3,
                 self.conn,
@@ -158,12 +149,8 @@ impl Drain<'_> {
                         &mut stream,
                         quiche::h3::WireErrorCode::RequestCancelled,
                     );
-                    let resp = H3Response {
-                        status: stream.status,
-                        headers: std::mem::take(&mut stream.headers),
-                        body: std::mem::take(&mut stream.body),
-                        trailers: std::mem::take(&mut stream.trailers),
-                    };
+                    let body = std::mem::take(&mut stream.body);
+                    let resp = stream.response(body);
                     stream.reply(Ok(resp));
                 }
             }

@@ -156,7 +156,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) async fn on_push(&mut self, pp: PushPromiseFrame) -> Result<(), H2Error> {
-        let decoded = self.decoder.decode_header_block(&pp.fragment);
+        let decoded = self.decoder.decode_block(&pp.fragment, |_, _, _| {});
         self.writer
             .write_frame(&RstStreamFrame {
                 stream_id: pp.promised_stream_id,

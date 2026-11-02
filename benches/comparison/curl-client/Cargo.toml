@@ -1,0 +1,10 @@
+[package]
+name = "curl-cmp-client"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+curl = { version = "=0.4.51", default-features = false, features = ["ssl", "http2", "static-curl", "static-ssl"] }

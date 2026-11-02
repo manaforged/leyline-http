@@ -12,13 +12,12 @@ pub(crate) use limit::BodyLimit;
 use limit::{Cap, Overflow};
 use stage::Stage;
 
-use super::helpers::header_values;
 use crate::core::BodyRules;
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 
 const MAX_CODINGS: usize = 4;
 
-type HeaderPairs = Vec<(http::HeaderName, http::HeaderValue)>;
+use http::HeaderMap;
 
 pub(crate) struct Decoder {
     stages: Vec<Stage>,
@@ -56,7 +55,7 @@ impl Decoder {
         };
         let encodings: Vec<&str> = encoding.split(',').map(str::trim).collect();
         if encodings.len() > MAX_CODINGS {
-            return Err(Error::new(Cause::Decode).with_message(format!(
+            return Err(Error::new(Kind::Decode).with_message(format!(
                 "content-encoding lists {} codings; at most {MAX_CODINGS} are decoded",
                 encodings.len()
             )));
@@ -155,18 +154,18 @@ pub(crate) fn content_codings<'a>(
 
 pub(crate) fn decompress_and_strip(
     body: Vec<u8>,
-    headers: HeaderPairs,
+    headers: HeaderMap,
     config: &BodyRules,
-) -> Result<(Vec<u8>, HeaderPairs)> {
+) -> Result<(Vec<u8>, HeaderMap)> {
     let (body, decoded) = decompress_body(body, pair_codings(&headers).as_deref(), config)?;
     Ok((body, strip_decoded(headers, decoded)))
 }
 
 pub(crate) async fn buffer_and_strip(
     bs: crate::core::body_stream::BodyStream,
-    headers: HeaderPairs,
+    headers: HeaderMap,
     config: &BodyRules,
-) -> Result<(Vec<u8>, HeaderPairs)> {
+) -> Result<(Vec<u8>, HeaderMap)> {
     let (body, decoded) = buffer_decoded(bs, pair_codings(&headers).as_deref(), config).await?;
     Ok((body, strip_decoded(headers, decoded)))
 }
@@ -187,7 +186,7 @@ pub(crate) async fn buffer_decoded(
     let mut read = 0usize;
     let mut out = Vec::new();
     while let Some(chunk) = bs.next().await {
-        let chunk = chunk.map_err(body_read_error)?;
+        let chunk = chunk.map_err(Error::from)?;
         read += chunk.len();
         if read > config.max_body_size {
             return Err(BodyLimit::session(config.max_body_size).error());
@@ -198,19 +197,16 @@ pub(crate) async fn buffer_decoded(
     Ok((out, true))
 }
 
-fn pair_codings(headers: &[(http::HeaderName, http::HeaderValue)]) -> Option<String> {
-    content_codings(header_values(headers, "content-encoding"))
+fn pair_codings(headers: &HeaderMap) -> Option<String> {
+    content_codings(headers.get_all(http::header::CONTENT_ENCODING).iter())
 }
 
-fn strip_decoded(headers: HeaderPairs, decoded: bool) -> HeaderPairs {
+fn strip_decoded(mut headers: HeaderMap, decoded: bool) -> HeaderMap {
     if decoded {
-        headers
-            .into_iter()
-            .filter(|(k, _)| *k != "content-encoding" && *k != "content-length")
-            .collect()
-    } else {
-        headers
+        headers.remove(http::header::CONTENT_ENCODING);
+        headers.remove(http::header::CONTENT_LENGTH);
     }
+    headers
 }
 
 async fn drain_stream_into_vec(
@@ -220,32 +216,13 @@ async fn drain_stream_into_vec(
     use futures_util::StreamExt;
     let mut out = Vec::new();
     while let Some(chunk) = bs.next().await {
-        let chunk = chunk.map_err(body_read_error)?;
+        let chunk = chunk.map_err(Error::from)?;
         if out.len() + chunk.len() > limit {
             return Err(BodyLimit::session(limit).error());
         }
         out.extend_from_slice(&chunk);
     }
     Ok(out)
-}
-
-pub(crate) fn body_read_error(e: std::io::Error) -> Error {
-    if let Some(limit) = BodyLimit::of_io(&e) {
-        return limit.error();
-    }
-    if e.get_ref().is_some_and(|inner| inner.is::<Error>()) {
-        if let Some(inner) = e.into_inner()
-            && let Ok(err) = inner.downcast::<Error>()
-        {
-            return *err;
-        }
-        return Error::new(Cause::Body).with_message("response body stream failed");
-    }
-    if e.kind() == std::io::ErrorKind::TimedOut {
-        Error::new(Cause::Timeout).with_source(e)
-    } else {
-        Error::from(e)
-    }
 }
 
 #[cfg(test)]

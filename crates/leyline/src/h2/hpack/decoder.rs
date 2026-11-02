@@ -2,7 +2,7 @@ use bytes::Bytes;
 
 use super::huffman;
 use super::integer;
-use super::table::{self, DynamicTable};
+use super::table::{self, DynamicTable, Typed};
 use crate::h2::config::DEFAULT_HEADER_TABLE_SIZE;
 
 const MAX_HEADER_LIST_SIZE: usize = 64 * 1024;
@@ -38,56 +38,70 @@ impl Decoder {
         self.max_header_list_size = size;
     }
 
+    #[cfg(any(test, feature = "bench-internals"))]
     pub fn decode_header_block(&mut self, src: &[u8]) -> Result<Vec<Header>, String> {
         let mut headers = Vec::new();
+        self.decode_block(src, |name, value, _| {
+            headers.push(Header {
+                name: Bytes::copy_from_slice(name),
+                value: Bytes::copy_from_slice(value),
+            });
+        })?;
+        Ok(headers)
+    }
+
+    pub fn decode_block(
+        &mut self,
+        src: &[u8],
+        mut each: impl FnMut(&[u8], &[u8], Typed),
+    ) -> Result<(), String> {
         let mut total_size = 0usize;
         let mut pos = 0;
         let mut size_updates_left = MAX_TABLE_SIZE_UPDATES;
 
         while pos < src.len() {
             let byte = src[pos];
-
-            let decoded = if byte & 0x80 != 0 {
+            if byte & 0xE0 == 0x20 {
+                pos += self.decode_table_size_update(src, pos, &mut size_updates_left)?;
+                continue;
+            }
+            size_updates_left = 0;
+            if byte & 0x80 != 0 {
                 let (index, consumed) =
                     integer::decode(byte, 7, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
                 pos += 1 + consumed;
-
                 if index == 0 {
                     return Err("HPACK index 0 is invalid".into());
                 }
-
-                let (name, value) = table::lookup(index, &self.dynamic)
+                let (name, value, typed) = table::entry(index, &self.dynamic)
                     .ok_or_else(|| format!("invalid index {index}"))?;
-                Some(Header { name, value })
-            } else if byte & 0xC0 == 0x40 {
-                let (header, consumed) = self.decode_literal(src, pos, 6, 0x3F, true)?;
-                pos += consumed;
-                Some(header)
-            } else if byte & 0xE0 == 0x00 {
-                let (header, consumed) = self.decode_literal(src, pos, 4, 0x0F, false)?;
-                pos += consumed;
-                Some(header)
-            } else if byte & 0xE0 == 0x20 {
-                pos += self.decode_table_size_update(src, pos, &mut size_updates_left)?;
-                None
-            } else {
-                return Err(format!("unexpected byte {byte:#04x} at position {pos}"));
-            };
-
-            if let Some(header) = decoded {
-                size_updates_left = 0;
-                total_size += header.name.len() + header.value.len() + table::ENTRY_OVERHEAD;
-                if total_size > self.max_header_list_size {
-                    return Err(format!(
-                        "decoded header list size {} exceeds max {}",
-                        total_size, self.max_header_list_size
-                    ));
-                }
-                headers.push(header);
+                self.account(&mut total_size, name.len() + value.len())?;
+                each(name, value, typed.clone());
+                continue;
             }
+            let (prefix, mask, add_to_table) = match byte {
+                b if b & 0xC0 == 0x40 => (6, 0x3F, true),
+                b if b & 0xE0 == 0x00 => (4, 0x0F, false),
+                _ => return Err(format!("unexpected byte {byte:#04x} at position {pos}")),
+            };
+            let (header, typed, consumed) =
+                self.decode_literal(src, pos, prefix, mask, add_to_table)?;
+            pos += consumed;
+            self.account(&mut total_size, header.name.len() + header.value.len())?;
+            each(&header.name, &header.value, typed);
         }
+        Ok(())
+    }
 
-        Ok(headers)
+    fn account(&self, total_size: &mut usize, len: usize) -> Result<(), String> {
+        *total_size += len + table::ENTRY_OVERHEAD;
+        if *total_size > self.max_header_list_size {
+            return Err(format!(
+                "decoded header list size {} exceeds max {}",
+                total_size, self.max_header_list_size
+            ));
+        }
+        Ok(())
     }
 
     fn decode_table_size_update(
@@ -121,7 +135,7 @@ impl Decoder {
         prefix_bits: u8,
         mask: u8,
         add_to_table: bool,
-    ) -> Result<(Header, usize), String> {
+    ) -> Result<(Header, Typed, usize), String> {
         let byte = src[pos];
         let mut offset = pos + 1;
 
@@ -129,25 +143,43 @@ impl Decoder {
             .map_err(|e| e.to_string())?;
         offset += consumed;
 
-        let name = if name_index == 0 {
+        let (name, typed_name) = if name_index == 0 {
             let (s, consumed) = decode_string(&src[offset..])?;
             offset += consumed;
-            s
+            let typed = parse_name(&s);
+            (s, typed)
         } else {
             let (n, _) = table::lookup(name_index, &self.dynamic)
                 .ok_or_else(|| format!("invalid name index {name_index}"))?;
-            n
+            let typed = match table::entry(name_index, &self.dynamic) {
+                Some((_, _, Some((typed, _)))) => Some(typed.clone()),
+                _ => parse_name(&n),
+            };
+            (n, typed)
         };
 
         let (value, consumed) = decode_string(&src[offset..])?;
         offset += consumed;
 
+        let typed = typed_name.and_then(|name| {
+            http::HeaderValue::from_maybe_shared(value.clone())
+                .ok()
+                .map(|value| (name, value))
+        });
         if add_to_table {
-            self.dynamic.insert(name.clone(), value.clone());
+            self.dynamic
+                .insert_typed(name.clone(), value.clone(), typed.clone());
         }
 
-        Ok((Header { name, value }, offset - pos))
+        Ok((Header { name, value }, typed, offset - pos))
     }
+}
+
+fn parse_name(name: &[u8]) -> Option<http::HeaderName> {
+    if name.starts_with(b":") {
+        return None;
+    }
+    http::HeaderName::from_bytes(name).ok()
 }
 
 impl Default for Decoder {

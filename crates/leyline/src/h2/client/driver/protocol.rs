@@ -1,14 +1,13 @@
 #[cfg(feature = "websocket")]
 use std::io;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 #[cfg(feature = "websocket")]
 use bytes::Bytes;
-#[cfg(feature = "websocket")]
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use tokio::sync::{mpsc, oneshot};
 
-use crate::h2::client::RequestBody;
+use crate::core::Body;
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
 
 use super::ResponseSink;
@@ -32,20 +31,67 @@ pub struct Head {
 pub(crate) enum DriverCommand {
     SendRequest {
         head: Arc<Head>,
-        body: RequestBody,
+        body: Body,
         sink: ResponseSink,
         slot: Option<super::super::handle::Slot>,
     },
     #[cfg(feature = "websocket")]
     OpenConnect {
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
+        head: Box<Head>,
         write_rx: mpsc::Receiver<io::Result<Bytes>>,
         sink: ResponseSink,
     },
     Ping {
         ack_tx: oneshot::Sender<()>,
     },
+}
+
+const _: () = assert!(
+    size_of::<DriverCommand>() <= 112,
+    "DriverCommand is copied into the driver queue after the channel unboxes it"
+);
+
+pub(super) type CommandSlot = Box<DriverCommand>;
+
+const _: () = assert!(
+    size_of::<CommandSlot>() == size_of::<usize>(),
+    "the command channel stores a box, not the enum"
+);
+
+#[derive(Clone)]
+pub(crate) struct CommandTx(mpsc::Sender<CommandSlot>);
+
+pub(super) struct CommandRx(mpsc::Receiver<CommandSlot>);
+
+pub(super) fn command_channel(capacity: usize) -> (CommandTx, CommandRx) {
+    let (tx, rx) = mpsc::channel(capacity);
+    (CommandTx(tx), CommandRx(rx))
+}
+
+impl CommandTx {
+    pub(crate) async fn send(
+        &self,
+        cmd: DriverCommand,
+    ) -> Result<(), mpsc::error::SendError<DriverCommand>> {
+        self.0
+            .send(Box::new(cmd))
+            .await
+            .map_err(|err| mpsc::error::SendError(*err.0))
+    }
+}
+
+impl CommandRx {
+    pub(super) fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<DriverCommand>> {
+        self.0.poll_recv(cx).map(|cmd| cmd.map(|boxed| *boxed))
+    }
+
+    pub(super) fn try_recv(&mut self) -> Result<DriverCommand, mpsc::error::TryRecvError> {
+        self.0.try_recv().map(|boxed| *boxed)
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.0.len()
+    }
 }
 
 impl DriverCommand {
@@ -68,5 +114,7 @@ impl DriverCommand {
     }
 }
 
+#[cfg(test)]
+mod command_channel_tests;
 #[cfg(test)]
 mod flow_control_tests;
