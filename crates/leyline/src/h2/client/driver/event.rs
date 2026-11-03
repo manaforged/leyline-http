@@ -77,7 +77,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let reading = !self.writer.saturated();
         let accepting = self.accepting_commands();
         let taking_body = !self.writer.congested()
-            && (self.body_chunk_tx.strong_count() > 1 || !self.body_chunk_rx.is_empty());
+            && self
+                .body_chunks
+                .as_ref()
+                .is_some_and(|(tx, rx)| tx.strong_count() > 1 || !rx.is_empty());
         let stalled = self.stalled > 0;
         let write_first = self.pending.is_empty() || self.output.batch_full();
         poll_fn(|cx| {
@@ -100,7 +103,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if accepting && let Poll::Ready(cmd) = self.command_rx.poll_recv(cx) {
                 return Poll::Ready(Event::Command(cmd));
             }
-            if taking_body && let Poll::Ready(Some(chunk)) = self.body_chunk_rx.poll_recv(cx) {
+            if taking_body
+                && let Some((_, rx)) = self.body_chunks.as_mut()
+                && let Poll::Ready(Some(chunk)) = rx.poll_recv(cx)
+            {
                 return Poll::Ready(Event::BodyChunk(chunk));
             }
             if let Poll::Ready(Some(ack_tx)) =
@@ -128,11 +134,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             Event::Read(frame) => {
                 return Ok(self.on_read(frame).await?.is_continue().then_some(false));
             }
-            Event::Command(cmd) => self.on_command_received(cmd).await?,
-            Event::BodyChunk(chunk) => self.on_body_chunk(chunk).await?,
-            Event::Ping(ack_tx) => self.on_command(DriverCommand::Ping { ack_tx }).await?,
+            Event::Command(cmd) => self.on_command_received(cmd)?,
+            Event::BodyChunk(chunk) => self.on_body_chunk(chunk)?,
+            Event::Ping(ack_tx) => self.on_command(DriverCommand::Ping { ack_tx })?,
             Event::Sweep => return Ok(Some(true)),
-            Event::FlushStalled => self.flush_stalled().await?,
+            Event::FlushStalled => self.flush_stalled()?,
         }
         Ok(Some(false))
     }

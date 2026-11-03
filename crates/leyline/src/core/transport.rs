@@ -16,6 +16,9 @@ use crate::core::error::{Error, Kind, Result};
 mod h1;
 mod h2;
 mod mode;
+mod response;
+
+pub(crate) use response::ResponseState;
 
 use crate::pool::h1::H1Outcome;
 pub(crate) use h1::send_h1;
@@ -38,6 +41,22 @@ pub(crate) struct ResponseHead {
     status: Option<StatusCode>,
     regular: bool,
     headers: HeaderMap,
+    length: Option<u64>,
+}
+
+pub(crate) fn response_field(
+    name: &[u8],
+    value: &[u8],
+    typed: Option<(HeaderName, HeaderValue)>,
+) -> std::result::Result<(HeaderName, HeaderValue), &'static str> {
+    if name.iter().any(u8::is_ascii_uppercase)
+        || value.iter().any(|byte| matches!(byte, 0 | b'\r' | b'\n'))
+        || matches!(value.first(), Some(b' ' | b'\t'))
+        || matches!(value.last(), Some(b' ' | b'\t'))
+    {
+        return Err("response contains malformed fields");
+    }
+    typed.ok_or("response contains malformed fields")
 }
 
 impl ResponseHead {
@@ -59,16 +78,33 @@ impl ResponseHead {
         Ok(())
     }
 
-    pub(crate) fn field(&mut self, field: Option<(HeaderName, HeaderValue)>) {
+    pub(crate) fn field(
+        &mut self,
+        field: std::result::Result<(HeaderName, HeaderValue), &'static str>,
+    ) -> std::result::Result<(), &'static str> {
         self.regular = true;
-        if let Some((name, value)) = field {
-            self.headers.append(name, value);
+        let (name, value) = field?;
+        if name == http::header::CONTENT_LENGTH {
+            if self.length.is_some() {
+                return Err("response has multiple content-length fields");
+            }
+            self.length = Some(
+                value
+                    .to_str()
+                    .ok()
+                    .and_then(crate::util::content_length)
+                    .ok_or("response has invalid content-length")?,
+            );
         }
+        self.headers.append(name, value);
+        Ok(())
     }
 
-    pub(crate) fn finish(self) -> std::result::Result<(StatusCode, HeaderMap), &'static str> {
+    pub(crate) fn finish(
+        self,
+    ) -> std::result::Result<(StatusCode, HeaderMap, Option<u64>), &'static str> {
         self.status
-            .map(|status| (status, self.headers))
+            .map(|status| (status, self.headers, self.length))
             .ok_or("response missing :status pseudo-header")
     }
 }

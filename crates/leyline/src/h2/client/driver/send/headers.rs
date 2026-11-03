@@ -38,7 +38,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(in crate::h2::client::driver) async fn write_headers_block(
+    pub(in crate::h2::client::driver) fn write_headers_block(
         &mut self,
         stream_id: u32,
         end_stream: bool,
@@ -55,36 +55,31 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let fragment = encode_request_pseudos(&mut self.encoder, pseudo, headers);
 
         if fragment.len() + prio_overhead <= max_frame {
-            self.writer
-                .write_frame(&HeadersFrame {
-                    stream_id,
-                    end_stream,
-                    end_headers: true,
-                    priority,
-                    fragment,
-                })
-                .await?;
+            self.writer.write_frame(&HeadersFrame {
+                stream_id,
+                end_stream,
+                end_headers: true,
+                priority,
+                fragment,
+            })?;
         } else {
             let fragment = fragment.to_vec();
             let first_cap = max_frame.saturating_sub(prio_overhead).max(1);
             let first_len = first_cap.min(fragment.len());
             let first = &fragment[..first_len];
-            self.writer
-                .write_frame(&HeadersFrame {
-                    stream_id,
-                    end_stream,
-                    end_headers: false,
-                    priority,
-                    fragment: first,
-                })
-                .await?;
-            self.write_continuations(stream_id, &fragment, first_len, max_frame)
-                .await?;
+            self.writer.write_frame(&HeadersFrame {
+                stream_id,
+                end_stream,
+                end_headers: false,
+                priority,
+                fragment: first,
+            })?;
+            self.write_continuations(stream_id, &fragment, first_len, max_frame)?;
         }
         Ok(())
     }
 
-    pub(in crate::h2::client::driver) async fn write_continuations(
+    pub(in crate::h2::client::driver) fn write_continuations(
         &mut self,
         stream_id: u32,
         fragment: &[u8],
@@ -93,13 +88,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     ) -> Result<(), H2Error> {
         while offset < fragment.len() {
             let end = (offset + max_frame).min(fragment.len());
-            self.writer
-                .write_frame(&ContinuationFrame {
-                    stream_id,
-                    end_headers: end == fragment.len(),
-                    fragment: &fragment[offset..end],
-                })
-                .await?;
+            self.writer.write_frame(&ContinuationFrame {
+                stream_id,
+                end_headers: end == fragment.len(),
+                fragment: &fragment[offset..end],
+            })?;
             offset = end;
         }
         Ok(())

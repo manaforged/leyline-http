@@ -100,6 +100,19 @@ impl StreamActor {
     }
 
     fn accept_data(&mut self, d: &DataFrame, len: i64, max_body: usize) -> Intake {
+        if self.response.data().is_err() {
+            self.recv_window -= len;
+            return Intake::Taken {
+                queued: 0,
+                failure: Some((
+                    H2Error::Stream {
+                        stream_id: d.stream_id,
+                        code: ErrorCode::ProtocolError,
+                    },
+                    ErrorCode::ProtocolError,
+                )),
+            };
+        }
         let event = StreamEvent::RecvData {
             end_stream: d.end_stream,
         };
@@ -125,6 +138,25 @@ impl StreamActor {
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_inbound_frame(&mut self, frame: Frame) -> Result<(), H2Error> {
+        if !self.peer_greeted && !matches!(&frame, Frame::Settings(s) if !s.ack) {
+            return Err(H2Error::Connection {
+                code: ErrorCode::ProtocolError,
+                reason: "server preface must start with non-ACK SETTINGS".into(),
+            });
+        }
+        let stream_id = match &frame {
+            Frame::Headers(h) => h.stream_id,
+            Frame::Data(d) => d.stream_id,
+            Frame::RstStream(r) => r.stream_id,
+            Frame::WindowUpdate(w) => w.stream_id,
+            _ => 0,
+        };
+        if stream_id % 2 == 1 && stream_id >= self.next_stream_id {
+            return Err(H2Error::Connection {
+                code: ErrorCode::ProtocolError,
+                reason: format!("peer referenced idle stream id {stream_id}"),
+            });
+        }
         match frame {
             Frame::Headers(h) => {
                 enforce_odd(h.stream_id)?;
@@ -132,14 +164,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
             Frame::Data(d) => {
                 enforce_odd(d.stream_id)?;
-                self.on_data(d).await
+                self.on_data(d)
             }
-            Frame::Settings(s) => self.on_settings(s).await,
-            Frame::WindowUpdate(w) => self.on_window(w).await,
-            Frame::Ping(p) => self.on_ping(p).await,
+            Frame::Settings(s) => self.on_settings(s),
+            Frame::WindowUpdate(w) => self.on_window(w),
+            Frame::Ping(p) => self.on_ping(p),
             Frame::GoAway(g) => self.on_goaway(g),
             Frame::RstStream(r) => self.on_rst(r),
-            Frame::PushPromise(pp) => self.on_push(pp).await,
+            Frame::PushPromise(pp) => self.on_push(pp),
             Frame::Continuation { .. } => Err(H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: "unexpected CONTINUATION".into(),
@@ -148,18 +180,21 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    pub(super) async fn on_data(&mut self, d: DataFrame) -> Result<(), H2Error> {
+    pub(super) fn on_data(&mut self, d: DataFrame) -> Result<(), H2Error> {
         let stream_id = d.stream_id;
         let len = d.wire_len as i64;
         self.charge_conn_window(len)?;
         match self.receive_data(&d, len) {
-            Intake::NoStream => self.maybe_top_up_conn_window().await,
-            Intake::Illegal(err) => self.reject_data(stream_id, err).await,
+            Intake::NoStream => self.maybe_top_up_conn_window(),
+            Intake::Illegal(err) => self.reject_data(stream_id, err),
             Intake::Taken { queued, failure } => {
                 self.stalled += queued;
                 match failure {
-                    Some((err, code)) => self.abort_data(stream_id, err, code).await,
-                    None => self.settle_data(stream_id, d.end_stream).await,
+                    Some((err, code)) => {
+                        self.reset_stream(stream_id, err, code)?;
+                        self.maybe_top_up_conn_window()
+                    }
+                    None => self.settle_data(stream_id, d.end_stream),
                 }
             }
         }
@@ -182,73 +217,41 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     fn receive_data(&mut self, d: &DataFrame, len: i64) -> Intake {
         let max_body = self.config.max_response_body_bytes;
         match self.streams.get_mut(d.stream_id) {
-            Some(actor) => actor.accept_data(d, len, max_body),
+            Some(actor) if !actor.state.is_reset_local() => actor.accept_data(d, len, max_body),
+            Some(_) => Intake::NoStream,
             None => Intake::NoStream,
         }
     }
 
-    async fn reject_data(&mut self, stream_id: u32, err: H2Error) -> Result<(), H2Error> {
-        self.fail_stream(stream_id, err);
-        if let Err(e) = self
-            .writer
-            .write_frame(&RstStreamFrame {
-                stream_id,
-                error_code: ErrorCode::StreamClosed,
-            })
-            .await
-        {
-            tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
-        }
-        self.maybe_top_up_conn_window().await
+    fn reject_data(&mut self, stream_id: u32, err: H2Error) -> Result<(), H2Error> {
+        self.reset_stream(stream_id, err, ErrorCode::StreamClosed)?;
+        self.maybe_top_up_conn_window()
     }
 
-    async fn abort_data(
-        &mut self,
-        stream_id: u32,
-        err: H2Error,
-        code: ErrorCode,
-    ) -> Result<(), H2Error> {
-        drop(
-            self.writer
-                .write_frame(&RstStreamFrame {
-                    stream_id,
-                    error_code: code,
-                })
-                .await,
-        );
-        self.fail_stream(stream_id, err);
-        self.maybe_top_up_conn_window().await
-    }
-
-    async fn settle_data(&mut self, stream_id: u32, end_stream: bool) -> Result<(), H2Error> {
-        self.maybe_top_up_conn_window().await?;
-        self.maybe_top_up_stream_window(stream_id).await?;
+    fn settle_data(&mut self, stream_id: u32, end_stream: bool) -> Result<(), H2Error> {
+        self.maybe_top_up_conn_window()?;
+        self.maybe_top_up_stream_window(stream_id)?;
         if end_stream {
-            self.finish_remote(stream_id).await?;
+            self.finish_remote(stream_id)?;
         }
         Ok(())
     }
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    pub(super) async fn maybe_top_up_conn_window(&mut self) -> Result<(), H2Error> {
+    pub(super) fn maybe_top_up_conn_window(&mut self) -> Result<(), H2Error> {
         let initial = self.config.initial_connection_window_size as i64;
         if let Some(increment) = refill(initial, self.conn_recv_window) {
-            self.writer
-                .write_frame(&WindowUpdateFrame {
-                    stream_id: 0,
-                    increment,
-                })
-                .await?;
+            self.writer.write_frame(&WindowUpdateFrame {
+                stream_id: 0,
+                increment,
+            })?;
             self.conn_recv_window += increment as i64;
         }
         Ok(())
     }
 
-    pub(super) async fn maybe_top_up_stream_window(
-        &mut self,
-        stream_id: u32,
-    ) -> Result<(), H2Error> {
+    pub(super) fn maybe_top_up_stream_window(&mut self, stream_id: u32) -> Result<(), H2Error> {
         let initial = self.config.advertised_initial_window_size() as i64;
         let increment = self
             .streams
@@ -256,12 +259,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .filter(|a| a.stalled.is_empty())
             .and_then(|a| refill(initial, a.recv_window));
         if let Some(increment) = increment {
-            self.writer
-                .write_frame(&WindowUpdateFrame {
-                    stream_id,
-                    increment,
-                })
-                .await?;
+            self.writer.write_frame(&WindowUpdateFrame {
+                stream_id,
+                increment,
+            })?;
             if let Some(actor) = self.streams.get_mut(stream_id) {
                 actor.recv_window += increment as i64;
             }

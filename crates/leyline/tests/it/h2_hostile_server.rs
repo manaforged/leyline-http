@@ -227,8 +227,9 @@ async fn push_promise_field_block_is_hpack_decoded_before_reset() {
 
         server_io
             .write_all(&[
-                0x00, 0x00, 0x09, 0x05, 0x04, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02, 0x40,
-                0x01, b'x', 0x01, b'y',
+                0x00, 0x00, 0x19, 0x05, 0x04, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x82,
+                0x87, 0x84, 0x01, 0x0b, b'e', b'x', b'a', b'm', b'p', b'l', b'e', b'.', b'c', b'o',
+                b'm', 0x40, 0x01, b'x', 0x01, b'y',
             ])
             .await
             .unwrap();
@@ -247,7 +248,13 @@ async fn push_promise_field_block_is_hpack_decoded_before_reset() {
         }
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let mut config = test_config();
+    for (id, value) in &mut config.settings {
+        if *id == leyline::h2::config::SettingId::EnablePush {
+            *value = 1;
+        }
+    }
+    let handle = leyline::h2::start(client_io, config)
         .await
         .expect("handshake");
 

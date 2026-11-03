@@ -1,3 +1,5 @@
+#[cfg(feature = "websocket")]
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -290,8 +292,8 @@ impl HostLimits {
     }
 
     #[cfg(feature = "websocket")]
-    pub(crate) async fn admit(&self, url: &url::Url) -> Option<HostPass> {
-        self.admit_with(None, url).await
+    pub(crate) fn admit(&self, url: &url::Url) -> impl Future<Output = Option<HostPass>> {
+        self.admit_with(None, url)
     }
 
     pub(crate) async fn admit_with(

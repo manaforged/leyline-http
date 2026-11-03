@@ -7,7 +7,7 @@ mod sites;
 mod visit;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::Future;
+use std::future::{Future, poll_fn};
 use std::pin::Pin;
 
 use futures_util::stream::{FuturesUnordered, Stream};
@@ -206,8 +206,8 @@ impl Crawl {
     }
 
     /// Returns the next crawled page or error, or `None` when the crawl is done.
-    pub async fn next(&mut self) -> Option<Result<Page>> {
-        std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
+    pub fn next(&mut self) -> impl Future<Output = Option<Result<Page>>> {
+        poll_fn(move |cx| Pin::new(&mut *self).poll_next(cx))
     }
 
     fn purpose(&self) -> Option<Purpose> {

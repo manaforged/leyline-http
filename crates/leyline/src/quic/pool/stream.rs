@@ -32,7 +32,7 @@ impl H3Stream {
         let terminal = stream_tx.as_ref().and_then(reserve_terminal);
         Self {
             resp_tx: Some(resp_tx),
-            response: H3ResponseState::Initial(0),
+            response: ResponseState::Initial(0),
             status: http::StatusCode::OK,
             headers: http::HeaderMap::new(),
             trailers: http::HeaderMap::new(),
@@ -80,16 +80,17 @@ impl H3Stream {
     pub(super) fn headers(&mut self, list: &[quiche::h3::Header]) -> Result<(), &'static str> {
         match self.response.headers(list)? {
             H3HeaderBlock::Informational => {}
-            H3HeaderBlock::Final { status, headers } => {
+            H3HeaderBlock::Final {
+                status,
+                headers,
+                length,
+            } => {
                 self.status = status;
                 if !self.mode.keeps_stream(status.as_u16()) {
                     self.stream_tx = None;
                     self.terminal = None;
                 }
-                self.declared_len = headers
-                    .get(http::header::CONTENT_LENGTH)
-                    .and_then(|value| value.to_str().ok())
-                    .and_then(crate::util::content_length);
+                self.declared_len = length;
                 self.headers = headers;
             }
             H3HeaderBlock::Trailers(headers) => self.trailers = headers,

@@ -5,7 +5,7 @@ use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::h2::H2Error;
-use crate::h2::frame::{Encode, SettingsFrame};
+use crate::h2::frame::Encode;
 
 const CAP: usize = 64 * 1024;
 const CEILING: usize = 4 * CAP;
@@ -67,24 +67,14 @@ impl FrameWriter {
         Poll::Ready(Ok(()))
     }
 
-    pub async fn write_preface(&mut self) -> Result<(), H2Error> {
+    pub fn write_preface(&mut self) {
         self.buf
             .extend_from_slice(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
-        Ok(())
     }
 
-    pub(crate) async fn write_frame<F: Encode>(&mut self, frame: &F) -> Result<(), H2Error> {
+    pub(crate) fn write_frame<F: Encode>(&mut self, frame: &F) -> Result<(), H2Error> {
         frame.encode(&mut self.buf);
         Ok(())
-    }
-
-    pub async fn write_settings<W: AsyncWrite + Unpin + ?Sized>(
-        &mut self,
-        io: &mut W,
-        frame: &SettingsFrame,
-    ) -> Result<(), H2Error> {
-        self.write_frame(frame).await?;
-        self.flush(io).await
     }
 
     pub async fn flush<W: AsyncWrite + Unpin + ?Sized>(

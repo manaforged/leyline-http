@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use http::Method;
 
 use crate::cookie::Jar;
@@ -5,6 +7,7 @@ use crate::pool::OriginFlag;
 use crate::profile::{Browser, RequestKind};
 
 use super::{Session, SessionBuilder};
+use crate::core::config::HostPass;
 use crate::core::request::RequestBuilder;
 use crate::core::retry::Retry;
 use crate::core::{Body, Error, IntoUrl, Proxy, ProxyUrl, Redirect, Response, Result, Timeout};
@@ -79,12 +82,12 @@ impl Session {
         self.changed(|inner| inner.crawl_pace = Some(pace))
     }
 
-    pub(crate) async fn admit_host(&self, url: &url::Url) -> Option<crate::core::config::HostPass> {
+    pub(crate) fn admit_host(&self, url: &url::Url) -> impl Future<Output = Option<HostPass>> {
         #[cfg(feature = "html")]
         let pace = self.inner.crawl_pace.as_ref();
         #[cfg(not(feature = "html"))]
         let pace = None;
-        self.inner.host_limits.admit_with(pace, url).await
+        self.inner.host_limits.admit_with(pace, url)
     }
 
     pub(crate) fn observe_host(

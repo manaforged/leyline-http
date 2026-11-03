@@ -8,6 +8,13 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Fixed
+
+- Reject malformed HTTP/2 response fields and invalid or repeated Content-Length fields instead of accepting incomplete metadata. Apply the shared field validation to HTTP/3 responses and trailers.
+- Reject HTTP/2 connections whose server preface does not start with SETTINGS, and server push after acknowledgement of disabled push.
+
 ## 0.2.0 - 2026-11-02
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The table maps every 0.1.6 name that changed. The sections after it list new features, behavior changes, removals without a replacement, and fixes.

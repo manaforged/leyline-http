@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
@@ -127,8 +128,8 @@ impl H3Loop {
         ControlFlow::Continue(())
     }
 
-    async fn flush(&mut self) -> Result<(), String> {
-        flush_egress(&self.socket, &mut self.conn, &mut self.out).await
+    fn flush(&mut self) -> impl Future<Output = Result<(), String>> {
+        flush_egress(&self.socket, &mut self.conn, &mut self.out)
     }
 
     fn stop(&mut self, reason: String) -> ControlFlow<()> {

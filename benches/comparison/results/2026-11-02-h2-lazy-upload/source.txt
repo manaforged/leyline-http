@@ -1,0 +1,38 @@
+Baseline: cf18f4bcc6e3eda1699f9f3233b8910b3455a8dc.
+Candidate: baseline plus the HTTP/2 lazy upload channel change in this commit.
+Candidate patch SHA-256: 085338d0c6a0334d76d0890f747132bf2e9ca4144034a2a4d754d24063870f80.
+The patch hash covers git diff for crates/leyline/src/h2/client/driver.rs and driver/{bootstrap,command,event,lifecycle}.rs, before these result files were added.
+
+scale-before.txt and scale-after.txt:
+SKIP_CORES=1 LO=1000 HI=5000 bash scale.sh
+The h2 workload creates one session per connection and one in-flight request per session.
+Each endpoint runs count * 5 requests, with count=1000 and count=5000.
+The slope is (peak RSS at 5000 - peak RSS at 1000) / 4000.
+The /usr/bin/time %M unit is KiB; the original script labels it KB.
+This measures peak process RSS growth, not isolated idle-connection storage or a universal per-connection constant.
+
+memory-pairs.txt:
+Five repetitions of the same h2 workload, alternating before/after order.
+Both binaries use the same origin, request headers, CPU affinity, and connection counts.
+Median before: 47.206 KiB; median after: 45.390 KiB.
+Median reduction: 1.816 KiB, or 3.847% of the baseline median.
+All five paired slopes decreased.
+
+quick.txt: N=10000 REPS=5 KEEP=0 bash quick.sh, before then after for each cell.
+quick-reversed.txt: N=30000 REPS=7 KEEP=0 bash quick.sh, after then before for each cell.
+PATHS cells: bare=h2/bare/sequential/1 connection; chrome=h2/Chrome156/sequential/1 connection; 8c8=h2/bare/8 in flight/8 connections; 8c256=h2/bare/256 in flight/8 connections.
+The binary component of each PATHS entry selects the saved baseline or candidate executable.
+Spread is the instruction-count range, not a throughput confidence interval.
+The delta columns compare each label with its own prior saved quick.sh result; these new labels have no history, so those columns do not compare before with after.
+Sequential throughput changed direction between runs; these samples do not establish a throughput improvement or equivalence.
+
+Massif on the baseline with 200 sessions/connections attributed 262400 + 102400 bytes to the request-upload channel, or 1824 bytes per connection.
+The candidate allocates that channel on the first streaming upload and retains it for subsequent uploads on the connection.
+Upload capacity, flow-control credit, producer cancellation, and queue consumption are unchanged once the channel exists.
+
+Validation:
+cargo check -p leyline-http: Finished `dev` profile.
+cargo test -p leyline-http --test it --features bench-internals h2_shutdown_streaming_e2e::streaming_upload_completes_after_last_handle_drops -- --exact: 1 passed; 0 failed.
+cargo test -p leyline-http --test it --features bench-internals h2_backpressure::cancelled_endless_upload_resets_the_stream_and_drops_the_producer -- --exact: 1 passed; 0 failed.
+bash scripts/verify.sh --only comments: comment lint ok.
+bash scripts/verify.sh --only fmt: format clean.

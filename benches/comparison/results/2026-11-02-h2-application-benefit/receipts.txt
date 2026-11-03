@@ -1,0 +1,36 @@
+before_commit 5d6ddc36
+after_commit d72639e0
+cpu AMD Ryzen 9 9950X3D 16-Core Processor
+logical_cpus 32
+kernel 7.0.0-38-generic
+governor performance
+host_exclusive no
+perf_version 7.0.14
+openssl_version 3.0.13
+protocol h2
+profile bare
+network loopback
+request_body_bytes 0
+response_body_bytes 10
+request_headers benches/comparison/request-headers.tsv
+client_cpus 8
+client_tokio_worker_threads 1
+server_cpus 0-6,16-22
+server_tokio_worker_threads default
+request_timeout default
+certificate_verification local-test-ca
+cmp_tls matched
+private_key_disposition deleted-after-runs
+cpu_paired_rounds 10
+window_paired_rounds 10
+window_seconds 3
+window_streams 64
+window_active_warmup_ms 300
+paced_paired_rounds_per_rate 5
+paced_scheduling_seconds 3
+paced_workers 64
+paced_offered_rates 93000 148000 185000 222000 278000
+sha256 49bed6081c8fcb9c93dafb7fda772d78eb5d0a8830abf2002614b868289d67db leyline-before
+sha256 99d28a5175af0b323dbbba10c248481c4c9aaec2380cf1f43d1782369659ea58 leyline-after
+sha256 6d089e57fc7b7403e50aafa0b57c10efa6852fd4c3c0d0fa7d796df98b99a22c server
+sha256 197e21abec529b5e6235bc83da89b1d1eb099470f7103c20b4a8a27ba44934a0 test-certificate-der

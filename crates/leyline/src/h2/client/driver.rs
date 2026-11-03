@@ -17,7 +17,7 @@ use crate::h2::frame::*;
 use crate::h2::hpack;
 use crate::h2::stream_state::{StreamState, StreamStateError};
 
-use crate::core::transport::{TransportBody, TransportResponse};
+use crate::core::transport::{ResponseState, TransportBody, TransportResponse};
 
 mod bootstrap;
 mod command;
@@ -159,8 +159,7 @@ struct StreamActor {
     recv_window: i64,
     response_tx: Option<ResponseSink>,
     status: http::StatusCode,
-    got_headers: bool,
-    informational: usize,
+    response: ResponseState,
     resp_headers: http::HeaderMap,
     body: Vec<u8>,
     trailers: http::HeaderMap,
@@ -169,7 +168,6 @@ struct StreamActor {
     send_body_input: SendBodyInput,
     upload_credit: Option<Arc<Semaphore>>,
     pump: Option<AbortHandle>,
-    send_closed: bool,
     stalled: std::collections::VecDeque<Bytes>,
     remote_done: bool,
     declared_len: Option<u64>,
@@ -184,8 +182,7 @@ impl StreamActor {
             recv_window,
             response_tx: Some(sink),
             status: http::StatusCode::OK,
-            got_headers: false,
-            informational: 0,
+            response: ResponseState::Initial(0),
             resp_headers: http::HeaderMap::new(),
             body: Vec::new(),
             trailers: http::HeaderMap::new(),
@@ -194,7 +191,6 @@ impl StreamActor {
             send_body_input: SendBodyInput::None,
             upload_credit: None,
             pump: None,
-            send_closed: false,
             stalled: std::collections::VecDeque::new(),
             remote_done: false,
             declared_len: None,
@@ -266,11 +262,20 @@ impl StreamActor {
     }
 }
 
-impl Drop for StreamActor {
-    fn drop(&mut self) {
+impl StreamActor {
+    fn cancel_upload(&mut self) {
         if let Some(pump) = self.pump.take() {
             pump.abort();
         }
+        self.pending_send = None;
+        self.send_body_input = SendBodyInput::None;
+        self.upload_credit = None;
+    }
+}
+
+impl Drop for StreamActor {
+    fn drop(&mut self) {
+        self.cancel_upload();
         if self.response_tx.is_some() {
             self.deliver_err(H2Error::Connection {
                 code: ErrorCode::InternalError,
@@ -290,6 +295,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     decoder: hpack::Decoder,
     peer_settings: PeerSettings,
     peer_greeted: bool,
+    local_settings_acked: bool,
     peer_snapshot: Arc<PeerSettingsSnapshot>,
     conn_send_window: i64,
     conn_recv_window: i64,
@@ -309,8 +315,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     peer_goaway_last_stream: Option<u32>,
     pending: VecDeque<DriverCommand>,
     shutdown_started: bool,
-    body_chunk_tx: mpsc::Sender<BodyChunkIn>,
-    body_chunk_rx: mpsc::Receiver<BodyChunkIn>,
+    body_chunks: Option<(mpsc::Sender<BodyChunkIn>, mpsc::Receiver<BodyChunkIn>)>,
     stalled: usize,
     output: output::OutputState,
     ping_seq: u64,

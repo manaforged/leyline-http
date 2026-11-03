@@ -36,7 +36,7 @@ impl Drain<'_> {
             self.streams.remove(&id);
             return;
         }
-        if stream.is_streaming() && stream.response == H3ResponseState::Final && !stream.head_sent {
+        if stream.is_streaming() && stream.response == ResponseState::Final && !stream.head_sent {
             stream.deliver_head();
         }
     }
@@ -178,7 +178,7 @@ impl Drain<'_> {
             quiche::h3::WireErrorCode::RequestCancelled,
         );
         if rejected
-            && matches!(stream.response, H3ResponseState::Initial(_))
+            && matches!(stream.response, ResponseState::Initial(_))
             && let Some((headers, body)) = stream.retry.take()
             && let Some(resp_tx) = stream.resp_tx.take()
         {
@@ -199,7 +199,7 @@ impl Drain<'_> {
             }
             return;
         }
-        if rejected && matches!(stream.response, H3ResponseState::Initial(_)) {
+        if rejected && matches!(stream.response, ResponseState::Initial(_)) {
             stream.reply(Err(H3SendError::Rejected(stream_reset_message(e))));
             return;
         }

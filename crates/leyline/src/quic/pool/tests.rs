@@ -29,8 +29,8 @@ async fn streaming_head_waits_for_final_response_after_103() {
     stream
         .headers(&headers(&[(":status", "103"), ("link", "</style.css>")]))
         .expect("valid informational response");
-    assert_eq!(stream.response, H3ResponseState::Initial(1));
-    if stream.is_streaming() && stream.response == H3ResponseState::Final && !stream.head_sent {
+    assert_eq!(stream.response, ResponseState::Initial(1));
+    if stream.is_streaming() && stream.response == ResponseState::Final && !stream.head_sent {
         stream.deliver_head();
     }
     assert!(!stream.head_sent, "103 must not deliver a streaming head");
@@ -41,7 +41,7 @@ async fn streaming_head_waits_for_final_response_after_103() {
             ("content-type", "text/plain"),
         ]))
         .expect("valid final response");
-    if stream.is_streaming() && stream.response == H3ResponseState::Final && !stream.head_sent {
+    if stream.is_streaming() && stream.response == ResponseState::Final && !stream.head_sent {
         stream.deliver_head();
     }
 
@@ -55,7 +55,7 @@ async fn streaming_head_waits_for_final_response_after_103() {
 
 #[test]
 fn trailers_are_regular_fields_after_final_response() {
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     assert!(matches!(
         state.headers(&headers(&[(":status", "200")])),
         Ok(H3HeaderBlock::Final { .. })
@@ -64,28 +64,28 @@ fn trailers_are_regular_fields_after_final_response() {
         state.headers(&headers(&[("x-checksum", "abc")])),
         Ok(H3HeaderBlock::Trailers(fields)) if fields == typed(&[("x-checksum", "abc")])
     ));
-    assert_eq!(state, H3ResponseState::Trailers);
+    assert_eq!(state, ResponseState::Trailers);
 }
 
 #[test]
 fn response_head_rejects_duplicate_and_malformed_status() {
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     assert!(
         state
             .headers(&headers(&[(":status", "200"), (":status", "201")]))
             .is_err()
     );
 
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     assert!(state.headers(&headers(&[(":status", "20")])).is_err());
 
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     assert!(state.headers(&headers(&[(":status", "101")])).is_err());
 }
 
 #[test]
 fn trailers_reject_status_pseudo_header() {
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     state
         .headers(&headers(&[(":status", "200")]))
         .expect("final response");
@@ -94,7 +94,7 @@ fn trailers_reject_status_pseudo_header() {
 
 #[test]
 fn data_requires_final_response_head() {
-    assert!(H3ResponseState::Initial(0).data().is_err());
+    assert!(ResponseState::Initial(0).data().is_err());
 }
 
 #[test]
@@ -315,7 +315,7 @@ fn a_queued_request_whose_caller_left_is_cancelled() {
 
 #[test]
 fn endless_informational_responses_fail_the_stream() {
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     let early = headers(&[(":status", "103")]);
     for _ in 0..crate::util::MAX_INFORMATIONAL {
         assert!(matches!(
@@ -330,13 +330,13 @@ fn endless_informational_responses_fail_the_stream() {
 
 #[test]
 fn a_status_below_100_is_malformed() {
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     assert!(state.headers(&headers(&[(":status", "099")])).is_err());
 }
 
 #[test]
 fn a_header_value_keeps_its_raw_bytes() {
-    let mut state = H3ResponseState::Initial(0);
+    let mut state = ResponseState::Initial(0);
     let list = [
         quiche::h3::Header::new(b":status", b"200"),
         quiche::h3::Header::new(b"x-raw", &[b'a', 0xff]),

@@ -1,3 +1,6 @@
+#[cfg(feature = "charset")]
+use std::future::Future;
+
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
@@ -13,8 +16,8 @@ use crate::core::session::decompress::{BodyLimit, Decoder, buffer_decoded, conte
 impl Response {
     /// Reads the body as text in the charset from `content-type`, defaulting to UTF-8.
     #[cfg(feature = "charset")]
-    pub async fn text(self) -> crate::core::Result<String> {
-        self.text_with_charset("utf-8").await
+    pub fn text(self) -> impl Future<Output = Result<String>> {
+        self.text_with_charset("utf-8")
     }
 
     /// Reads the body as UTF-8 text and replaces invalid bytes.

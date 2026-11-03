@@ -1,4 +1,4 @@
-use std::future::poll_fn;
+use std::future::{Future, poll_fn};
 use std::pin::Pin;
 use std::task::{Context, Poll, ready};
 
@@ -121,10 +121,10 @@ impl FrameReader {
         Poll::Ready(Frame::parse(header, payload).map(Some))
     }
 
-    pub async fn next<R: AsyncRead + Unpin + ?Sized>(
+    pub fn next<R: AsyncRead + Unpin + ?Sized>(
         &mut self,
         io: &mut R,
-    ) -> Result<Option<Frame>, H2Error> {
-        poll_fn(|cx| self.poll_next(io, cx)).await
+    ) -> impl Future<Output = Result<Option<Frame>, H2Error>> {
+        poll_fn(move |cx| self.poll_next(io, cx))
     }
 }

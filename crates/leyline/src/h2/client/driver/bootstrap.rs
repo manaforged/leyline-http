@@ -27,7 +27,7 @@ where
     let mut reader = FrameReader::new();
     let mut writer = FrameWriter::new();
 
-    writer.write_preface().await?;
+    writer.write_preface();
 
     let settings_frame = SettingsFrame {
         ack: false,
@@ -37,16 +37,14 @@ where
             .map(|&(id, val)| (id as u16, val))
             .collect(),
     };
-    writer.write_settings(&mut io, &settings_frame).await?;
+    writer.write_frame(&settings_frame)?;
 
     if config.initial_connection_window_size > DEFAULT_WINDOW_SIZE {
         let increment = config.initial_connection_window_size - DEFAULT_WINDOW_SIZE;
-        writer
-            .write_frame(&WindowUpdateFrame {
-                stream_id: 0,
-                increment,
-            })
-            .await?;
+        writer.write_frame(&WindowUpdateFrame {
+            stream_id: 0,
+            increment,
+        })?;
     }
     writer.flush(&mut io).await?;
 
@@ -77,8 +75,6 @@ where
     let unanswered_timeout = Arc::new(AtomicBool::new(false));
     let streams = crate::h2::client::handle::Streams::new(INITIAL_MAX_CONCURRENT_STREAMS);
 
-    let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4);
-
     let driver = Driver {
         io,
         reader,
@@ -87,6 +83,7 @@ where
         decoder,
         peer_settings,
         peer_greeted: false,
+        local_settings_acked: false,
         peer_snapshot: snapshot.clone(),
         conn_send_window: initial_send_window,
         conn_recv_window: config.initial_connection_window_size as i64,
@@ -119,8 +116,7 @@ where
         peer_goaway_last_stream: None,
         pending: VecDeque::new(),
         shutdown_started: false,
-        body_chunk_tx,
-        body_chunk_rx,
+        body_chunks: None,
         ping_seq: 0,
         pings: VecDeque::new(),
         stalled: 0,

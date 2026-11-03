@@ -1,0 +1,64 @@
+print-type-size type: `tokio::runtime::task::core::Cell<{async fn body of h2::client::driver::lifecycle::<impl h2::client::driver::Driver<tls::stream::TlsIo>>::run()}, std::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle>>`: 4480 bytes, alignment: 128 bytes
+print-type-size type: `{async fn body of h2::client::driver::lifecycle::<impl h2::client::driver::Driver<tls::stream::TlsIo>>::run()}`: 4264 bytes, alignment: 8 bytes
+print-type-size     discriminant: 1 bytes
+print-type-size     variant `Unresumed`: 1088 bytes
+print-type-size         upvar `.self`: 1088 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size     variant `Suspend0`: 4256 bytes
+print-type-size         upvar `.self`: 1088 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size         local `.self`: 1088 bytes
+print-type-size         local `.__awaitee`: 2080 bytes, type: {async fn body of lifecycle::<impl h2::client::driver::Driver<TlsIo>>::event_loop()}
+print-type-size     variant `Returned`: 1088 bytes
+print-type-size         upvar `.self`: 1088 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size     variant `Panicked`: 1088 bytes
+print-type-size         upvar `.self`: 1088 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size     end padding: 7 bytes
+print-type-size type: `{async fn body of h2::client::driver::lifecycle::<impl h2::client::driver::Driver<tls::stream::TlsIo>>::event_loop()}`: 2080 bytes, alignment: 8 bytes
+print-type-size     discriminant: 1 bytes
+print-type-size     variant `Unresumed`: 8 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size     variant `Suspend0`: 175 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size         local `.self`: 8 bytes
+print-type-size         local `.sweep_tick`: 32 bytes
+print-type-size         local `.flush_tick`: 32 bytes
+print-type-size         padding: 8 bytes
+print-type-size         local `.__awaitee`: 88 bytes, alignment: 8 bytes, type: {async fn body of h2::client::driver::output::<impl h2::client::driver::Driver<TlsIo>>::goaway_drained()}
+print-type-size     variant `Suspend1`: 1727 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size         local `.self`: 8 bytes
+print-type-size         local `.sweep_tick`: 32 bytes
+print-type-size         local `.flush_tick`: 32 bytes
+print-type-size         padding: 8 bytes
+print-type-size         local `.__awaitee`: 1640 bytes, alignment: 8 bytes, type: {async fn body of lifecycle::<impl h2::client::driver::Driver<TlsIo>>::read_buffered_frames()}
+print-type-size     variant `Suspend2`: 1655 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size         local `.self`: 8 bytes
+print-type-size         local `.sweep_tick`: 32 bytes
+print-type-size         local `.flush_tick`: 32 bytes
+print-type-size         padding: 8 bytes
+print-type-size         local `.__awaitee`: 1568 bytes, alignment: 8 bytes, type: {async fn body of lifecycle::<impl h2::client::driver::Driver<TlsIo>>::run_ready_work()}
+print-type-size     variant `Suspend3`: 103 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size         local `.self`: 8 bytes
+print-type-size         local `.sweep_tick`: 32 bytes
+print-type-size         local `.flush_tick`: 32 bytes
+print-type-size         padding: 8 bytes
+print-type-size         local `.__awaitee`: 16 bytes, alignment: 8 bytes, type: {async fn body of tokio::task::yield_now::yield_now()}
+print-type-size     variant `Suspend4`: 2079 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size         local `.self`: 8 bytes
+print-type-size         local `.sweep_tick`: 32 bytes
+print-type-size         local `.flush_tick`: 32 bytes
+print-type-size         padding: 8 bytes
+print-type-size         local `.__awaitee`: 1992 bytes, alignment: 8 bytes, type: {async fn body of h2::client::driver::event::<impl h2::client::driver::Driver<TlsIo>>::wait_event()}
+print-type-size     variant `Suspend5`: 1655 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size         local `.self`: 8 bytes
+print-type-size         local `.sweep_tick`: 32 bytes
+print-type-size         local `.flush_tick`: 32 bytes
+print-type-size         padding: 8 bytes
+print-type-size         local `.__awaitee`: 1568 bytes, alignment: 8 bytes, type: {async fn body of lifecycle::<impl h2::client::driver::Driver<TlsIo>>::after_event()}
+print-type-size     variant `Returned`: 8 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes
+print-type-size     variant `Panicked`: 8 bytes
+print-type-size         upvar `.self`: 8 bytes, offset: 0 bytes, alignment: 8 bytes

@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -62,13 +63,13 @@ impl H2Client {
         not(feature = "bench-internals"),
         expect(dead_code, reason = "integration tests drive the client directly")
     )]
-    pub async fn send_shared(
+    pub fn send_shared(
         &self,
         head: Arc<Head>,
         body: Body,
         mode: impl Into<ResponseMode>,
-    ) -> Result<TransportResponse, H2Error> {
-        self.send_reserved(head, body, mode.into(), None).await
+    ) -> impl Future<Output = Result<TransportResponse, H2Error>> {
+        self.send_reserved(head, body, mode.into(), None)
     }
 
     pub(crate) async fn send_reserved(

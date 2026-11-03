@@ -13,6 +13,7 @@ use tokio::task::AbortHandle;
 use crate::core::BoxedStream;
 use crate::core::ResponseMode;
 use crate::core::session::decompress::BodyLimit;
+use crate::core::transport::ResponseState;
 use crate::core::transport::{TransportBody, TransportResponse};
 use crate::h2::config::PseudoOrder;
 use crate::quic::connection::{EstablishedH3, check_body_budget, close_reason, flush_egress};
@@ -157,7 +158,7 @@ impl H3Client {
 
 struct H3Stream {
     resp_tx: Option<oneshot::Sender<Result<TransportResponse, H3SendError>>>,
-    response: H3ResponseState,
+    response: ResponseState,
     status: http::StatusCode,
     headers: http::HeaderMap,
     trailers: http::HeaderMap,

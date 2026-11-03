@@ -555,6 +555,8 @@ dependencies = [
  "libc",
  "lru",
  "md-5",
+ "memchr",
+ "percent-encoding",
  "pin-project-lite",
  "psl",
  "rand",
