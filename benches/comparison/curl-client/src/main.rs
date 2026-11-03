@@ -5,7 +5,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use curl::easy::{Easy2, Handler, HttpVersion, WriteError};
+use curl::easy::{Easy2, Handler, HttpVersion, List, WriteError};
 use curl::multi::{Easy2Handle, Multi};
 
 struct Collector(Vec<u8>);
@@ -21,6 +21,7 @@ struct Setup {
     url: String,
     ca_file: Option<std::path::PathBuf>,
     expected: Arc<[u8]>,
+    headers: Vec<String>,
     h1: bool,
 }
 
@@ -73,6 +74,13 @@ fn request_timeout() -> Option<Duration> {
 fn easy(setup: &Setup) -> Easy2<Collector> {
     let mut e = Easy2::new(Collector(Vec::new()));
     e.url(&setup.url).expect("url");
+    if !setup.headers.is_empty() {
+        let mut headers = List::new();
+        for header in &setup.headers {
+            headers.append(header).expect("request header");
+        }
+        e.http_headers(headers).expect("request headers");
+    }
     if setup.h1 {
         e.http_version(HttpVersion::V11).expect("http version");
     } else {
@@ -190,10 +198,23 @@ fn main() {
         .get(1)
         .cloned()
         .unwrap_or_else(|| "https://127.0.0.1:8443/".to_string());
+    let headers = env::var_os("CMP_HEADERS")
+        .map(|path| {
+            fs::read_to_string(path)
+                .expect("read request headers")
+                .lines()
+                .map(|line| {
+                    let (name, value) = line.split_once('\t').expect("header name and value");
+                    format!("{name}: {value}")
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let setup = Arc::new(Setup {
         url,
         ca_file,
         expected,
+        headers,
         h1: match env::var("CMP_PROTO").as_deref() {
             Ok("h1") => true,
             Ok("h2") | Err(_) => false,

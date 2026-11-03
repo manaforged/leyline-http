@@ -206,8 +206,8 @@ impl Crawl {
     }
 
     /// Returns the next crawled page or error, or `None` when the crawl is done.
-    pub fn next(&mut self) -> impl Future<Output = Option<Result<Page>>> {
-        poll_fn(move |cx| Pin::new(&mut *self).poll_next(cx))
+    pub async fn next(&mut self) -> Option<Result<Page>> {
+        poll_fn(move |cx| Pin::new(&mut *self).poll_next(cx)).await
     }
 
     fn purpose(&self) -> Option<Purpose> {

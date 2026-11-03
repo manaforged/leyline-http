@@ -1,0 +1,14 @@
+# started on Tue Nov 3 20:40:47 2026
+
+
+ Performance counter stats for 'taskset -c 8-15,24-31 bin/leyline-blocking https://127.0.0.1:35243/ 200000 0 1 1':
+
+ 4,584,427,225 instructions:u
+ 1,796.23 msec task-clock
+ 200,022 context-switches
+ 97 cpu-migrations
+
+ 3.406048566 seconds time elapsed
+
+ 0.360035000 seconds user
+ 1.497189000 seconds sys

@@ -176,10 +176,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             };
 
-            if let Some(actor) = self.streams.get_mut(stream_id) {
-                if let Err(e) = actor.state.transition(StreamEvent::SendData { end_stream }) {
-                    return Err(map_state_err(stream_id, e));
-                }
+            if let Some(actor) = self.streams.get_mut(stream_id)
+                && let Err(e) = actor.state.transition(StreamEvent::SendData { end_stream })
+            {
+                return Err(map_state_err(stream_id, e));
             }
 
             let wire_len = piece.len() as u64;

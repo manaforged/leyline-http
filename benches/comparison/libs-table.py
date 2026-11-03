@@ -5,7 +5,7 @@ try:
 except ImportError:
     T975=[12.706,4.303,3.182,2.776,2.571,2.447,2.365,2.306,2.262,2.228,2.201,2.179,2.160,2.145,2.131,2.120,2.110,2.101,2.093,2.086,2.080,2.074,2.069,2.064,2.060,2.056,2.052,2.048,2.045,2.042]
     tq=lambda df:T975[df-1] if df<=30 else 1.96
-IDENTITY=("proto","profile","timeout","leyline_source_hash")
+IDENTITY={"proto":None,"profile":None,"timeout":None,"tls":None,"certificate_verification":None,"ca_sha256":None,"leyline_source_hash":None,"leyline_python_artifact_sha256":"leyline-python","leyline_node_artifact_sha256":"leyline-node"}
 
 def receipts(path):
     p=os.path.join(os.path.dirname(path),"receipts.txt")
@@ -37,7 +37,9 @@ if len(runs)>1:
     missing=[p for p,i in zip(dirs,ids) if i is None]
     if missing: sys.exit("refusing to pool: no receipts.txt next to "+", ".join(missing))
     bad=False
-    for k in IDENTITY:
+    clients={lib for run in runs for _,lib in run}
+    for k,client in IDENTITY.items():
+        if client is not None and client not in clients: continue
         vals={p:i.get(k,"absent") for p,i in zip(dirs,ids)}
         if len(set(vals.values()))>1 or any(v=="absent" or v.startswith("unknown") for v in vals.values()):
             bad=True; print(f"refusing to pool: {k} differs or is unknown",file=sys.stderr)

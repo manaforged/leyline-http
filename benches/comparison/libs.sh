@@ -10,7 +10,7 @@ if [ "$PROFILE" = bare ]; then
 else
   unset CMP_HEADERS
   LIBS=${LIBS:-leyline wreq tlsclient}; kept=""
-  for lib in $LIBS; do case $lib in leyline|leyline-nt|leyline-blocking|wreq|tlsclient) kept="$kept $lib" ;; *) echo "$lib has no browser profile; left out" >&2 ;; esac; done
+  for lib in $LIBS; do case $lib in leyline|leyline-nt|leyline-blocking|leyline-python|leyline-node|wreq|tlsclient) kept="$kept $lib" ;; *) echo "$lib has no browser profile; left out" >&2 ;; esac; done
   LIBS=${kept# }
   [[ " $LIBS " == *" leyline "* ]] || { echo "PROFILE=$PROFILE needs leyline in LIBS: its headers are the reference" >&2; exit 1; }
 fi
@@ -27,6 +27,11 @@ else
   LIBS=${LIBS:-leyline h2 hyper}
   CELLS=${CELLS:-seq:1:1:20000 1c64:1:64:200000 8c8:8:8:200000 8c256:8:256:400000}
 fi
+if [ "$PROFILE" = bare ]; then
+  for lib in $LIBS; do
+    case $lib in leyline-python|leyline-node) echo "$lib requires PROFILE=chrome or chrome<N>; bindings do not expose bare sessions" >&2; exit 1 ;; esac
+  done
+fi
 if [ "$TIMEOUT" != default ]; then
   for lib in $LIBS; do
     case $lib in
@@ -41,22 +46,25 @@ SPIN=(); [ -n "${SERVER_CPUS:-}" ] && SPIN=(taskset -c "$SERVER_CPUS")
 CPIN=(); [ -n "${CLIENT_CPUS:-}" ] && CPIN=(taskset -c "$CLIENT_CPUS")
 
 if [ "${BUILD:-1}" = 1 ]; then
-  (cd .. && cargo build --release -q --example origin && cp target/release/examples/origin comparison/bin/server)
-  source_hash > bin/leyline.source_hash
-  for c in leyline reqwest hyper h2 curl wreq ureq pingora; do
-    (cd $c-client && cargo build --release -q && b=$c-cmp-client && { [ -f target/release/$b ] || b=$c; } && cp target/release/$b ../bin/$c) || exit 1
+  (cd .. && cargo build --release -q --example origin && cp target/release/examples/origin comparison/bin/server) || exit 1
+  for lib in $LIBS; do
+    case $lib in
+      leyline|leyline-nt|leyline-blocking)
+        (cd leyline-client && cargo build --release -q && cp target/release/leyline-cmp-client ../bin/leyline && cp target/release/leyline-blocking ../bin/leyline-blocking) && source_hash > bin/leyline.source_hash ;;
+      reqwest|hyper|h2|curl|wreq|ureq|pingora)
+        (cd "$lib-client" && cargo build --release -q && b=$lib-cmp-client && { [ -f "target/release/$b" ] || b=$lib; } && cp "target/release/$b" "../bin/$lib") ;;
+      floor) (cd floor-client && cargo build --release -q && cp target/release/floor ../bin/floor) ;;
+      nethttp|tlsclient|fasthttp) (cd go && go build -o "../bin/$lib" "./$lib") ;;
+      dotnet-httpclient) (cd dotnet-client && $DOTNET publish -c Release -o bin --nologo -v q) ;;
+      undici|axios) (cd node-client && npm install --silent) ;;
+      okhttp|apache-httpclient) sh java-client/fetch-deps.sh >/dev/null ;;
+    esac || exit 1
   done
-  cp leyline-client/target/release/leyline-blocking bin/leyline-blocking || exit 1
-  (cd floor-client && cargo build --release -q && cp target/release/floor ../bin/floor) || exit 1
-  (cd go && go build -o ../bin/nethttp ./nethttp && go build -o ../bin/tlsclient ./tlsclient && go build -o ../bin/fasthttp ./fasthttp) || exit 1
-  (cd dotnet-client && $DOTNET publish -c Release -o bin --nologo -v q) || exit 1
-  (cd node-client && npm install --silent) || exit 1
-  sh java-client/fetch-deps.sh >/dev/null || exit 1
 fi
 
 LCH=bare
 if [ "$PROFILE" != bare ]; then
-  versions() { case $1 in leyline|leyline-nt|leyline-blocking) ls "$ROOT/crates/leyline/profiles/chrome" | sed -n 's/^\([0-9]*\)\.toml$/\1/p' ;; *) "$C/bin/$1" profiles ;; esac; }
+  versions() { case $1 in leyline|leyline-nt|leyline-blocking) ls "$ROOT/crates/leyline/profiles/chrome" | sed -n 's/^\([0-9]*\)\.toml$/\1/p' ;; leyline-python) "$PYTHON" "$C/python-client/leyline_client.py" profiles ;; leyline-node) node "$C/node-client/leyline.mjs" profiles ;; *) "$C/bin/$1" profiles ;; esac; }
   if [ "$PROFILE" = chrome ]; then
     N=$(for lib in $LIBS; do versions "$lib" | sort -u; done | sort -n | uniq -c | awk -v n="$(wc -w <<<"$LIBS")" '$1 == n {v = $2} END {print v}')
     [ -n "$N" ] || { echo "no Chrome version is common to: $LIBS" >&2; exit 1; }
@@ -76,6 +84,7 @@ declare -A CMD=(
   [h2]="$C/bin/h2" [curl]="$C/bin/curl" [wreq]="$C/bin/wreq" [nethttp]="$C/bin/nethttp" [tlsclient]="$C/bin/tlsclient"
   [undici]="node $C/node-client/undici.mjs" [node-http2]="node $C/node-client/http2.mjs"
   [httpx]="$PYTHON -I $C/python-client/httpx_client.py"
+  [leyline-python]="$PYTHON $C/python-client/leyline_client.py" [leyline-node]="node $C/node-client/leyline.mjs"
   [jdk-httpclient]="java $C/java-client/JdkClient.java" [okhttp]="java -cp $CP $C/java-client/OkClient.java"
   [apache-httpclient]="java -cp $CP $C/java-client/ApacheClient.java" [dotnet-httpclient]="$DOTNET $C/dotnet-client/bin/dotnet-client.dll"
   [ureq]="$C/bin/ureq" [fasthttp]="$C/bin/fasthttp" [axios]="node $C/node-client/axios.mjs"
@@ -176,9 +185,22 @@ done
   fi
   [ -f "$C/SOURCE" ] && echo "leyline_commit $(paste -sd' ' "$C/SOURCE")"
   echo "profile $PROFILE"; echo "timeout $TIMEOUT"; echo "leyline_chrome $LCH"; echo "tls $CMP_TLS"
+  if [ -n "${CMP_CA:-}" ]; then
+    echo "certificate_verification trusted-ca"
+    echo "ca_sha256 $(sha256sum "$CMP_CA" | cut -d' ' -f1)"
+  else
+    echo "certificate_verification disabled"
+    echo "ca_sha256 none"
+  fi
   for lock in */Cargo.lock; do grep -A1 -E '^name = "(leyline-http|reqwest|hyper|hyper-util|h2|wreq|curl-sys|pingora-core)"$' "$lock" | paste -sd' ' | sed "s#^#$lock #"; done
   echo "go $(go version 2>/dev/null)"; echo "node $(node --version) undici $(node -p "require('$C/node-client/node_modules/undici/package.json').version")"
   echo "python $($PYTHON -V 2>&1) $($PYTHON -m pip freeze 2>/dev/null | grep -E '^(httpx|h2|httpcore)==' | paste -sd' ')"
+  if [[ " $LIBS " == *" leyline-python "* ]]; then
+    "$PYTHON" -c 'import hashlib,pathlib,sys,leyline,leyline._leyline as native,leyline._session as wrapper; print("leyline_python_version",leyline.__version__); print("leyline_python_native_sha256",hashlib.sha256(pathlib.Path(native.__file__).read_bytes()).hexdigest()); paths=[native.__file__,wrapper.__file__,*sys.argv[1:]]; print("leyline_python_artifact_sha256",hashlib.sha256(b"".join(hashlib.sha256(pathlib.Path(p).read_bytes()).digest() for p in paths)).hexdigest())' "$C/python-client/leyline_client.py" "$C/python-client/httpx_client.py"
+  fi
+  if [[ " $LIBS " == *" leyline-node "* ]]; then
+    node -e 'const fs=require("node:fs"),crypto=require("node:crypto"),p=require("leyline-http"),digest=name=>crypto.createHash("sha256").update(fs.readFileSync(name)).digest(); console.log("leyline_node_version",p.version()); const native=Object.keys(require.cache).filter(n=>n.endsWith(".node")); for(const name of native) console.log("leyline_node_native_sha256",digest(name).toString("hex")); console.log("leyline_node_artifact_sha256",crypto.createHash("sha256").update(Buffer.concat([...native,require.resolve("leyline-http"),...process.argv.slice(1)].map(digest))).digest("hex"))' "$C/node-client/leyline.mjs" "$C/node-client/harness.mjs"
+  fi
   echo "java $(java -version 2>&1 | head -1)"; echo "okhttp $(ls java-client/lib | paste -sd' ')"
   echo "dotnet $($DOTNET --version 2>/dev/null)"; echo "proto $PROTO"
   (cd bin && sha256sum server floor leyline leyline-blocking reqwest hyper h2 curl wreq ureq nethttp tlsclient fasthttp pingora 2>/dev/null)

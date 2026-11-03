@@ -1,0 +1,14 @@
+# started on Tue Nov 3 20:43:38 2026
+
+
+ Performance counter stats for 'taskset -c 8-15,24-31 bin/nethttp https://127.0.0.1:42959/ 1 0 1000000 8':
+
+ 85,547,179,198 instructions:u
+ 21,204.31 msec task-clock
+ 972,485 context-switches
+ 5,471 cpu-migrations
+
+ 4.191327841 seconds time elapsed
+
+ 12.390410000 seconds user
+ 9.066127000 seconds sys

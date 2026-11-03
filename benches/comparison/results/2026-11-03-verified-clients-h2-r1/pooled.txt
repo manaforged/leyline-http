@@ -1,0 +1,42 @@
+3 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       h2                   51763    4.1%      35314         +0      10.16     12     -
+       leyline              51725    3.8%      34043      -1271      10.33     12     -
+       hyper                42763    7.7%      53678     +18364      17.75     12     -
+       curl                 41573    3.7%     116233     +80919      19.06     12     -
+       nethttp              38325    4.2%     101332     +66018      22.16     12     -
+       reqwest              34921    2.7%      94328     +59014      24.30     12     -
+
+1c64   lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline             203610    3.2%      30480       -485       8.09     12     1
+       hyper               178928    2.9%      45875     +14910      17.05     12     1
+       reqwest             177875    1.7%      78254     +47289      22.57     12     1
+       h2                  165934    1.7%      30965         +0      13.65     12     1
+       nethttp             102578    1.9%      95392     +64427      22.54     12     1
+       curl                 96447    4.2%      98891     +67926      10.37     12     1
+
+8c8    lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       h2                  281358    4.1%      35344         +0      11.16     12     8
+       leyline             274678    3.8%      34387       -957      11.87     12     8
+       hyper               256870    7.7%      52107     +16763      16.49     12     8
+       nethttp             239766    3.6%      74386     +39043      19.39     12     8
+       reqwest             223909    7.1%      84502     +49159      21.90     12     8
+       curl                214316    9.8%     116272     +80928      26.60     12     8
+
+8c256  lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline            1369390    4.5%      27247       -171       6.94     12     8
+       h2                 1191256    2.3%      27418         +0      10.20     12     8
+       hyper              1120893    9.2%      40901     +13483      12.01     12     8
+       reqwest             854499    2.3%      73371     +45953      16.48     12     8
+       curl                672036    7.3%      97890     +70472      11.57     12     8
+       nethttp             547258    4.4%      83149     +55731      23.38     12     8
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline           vs h2         req/s 0.999 [0.989, 1.008] tie; CPU/req 1.022 [1.003, 1.041] more CPU; 3 runs
+seq    leyline           vs hyper      req/s 1.206 [1.186, 1.227] ahead; CPU/req 0.582 [0.576, 0.588] less CPU; 3 runs
+1c64   leyline           vs hyper      req/s 1.136 [1.110, 1.162] ahead; CPU/req 0.473 [0.466, 0.480] less CPU; 3 runs
+8c8    leyline           vs h2         req/s 0.975 [0.927, 1.025] tie; CPU/req 1.064 [1.027, 1.103] more CPU; 3 runs
+8c8    leyline           vs hyper      req/s 1.062 [1.019, 1.106] ahead; CPU/req 0.713 [0.693, 0.734] less CPU; 3 runs
+8c256  leyline           vs h2         req/s 1.155 [1.129, 1.181] ahead; CPU/req 0.681 [0.669, 0.693] less CPU; 3 runs
+8c256  leyline           vs hyper      req/s 1.234 [1.223, 1.246] ahead; CPU/req 0.577 [0.575, 0.579] less CPU; 3 runs

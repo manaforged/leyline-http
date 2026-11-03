@@ -1,0 +1,31 @@
+3 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline              49106    7.2%      36807          -      10.48     12     -
+       wreq                 33355    4.6%      91900          -      24.71     12     -
+       tlsclient            28799    3.9%     261642          -      33.87     12     -
+
+1c64   lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline             176620    2.2%      33553          -       8.46     12     1
+       wreq                147945    2.0%      74215          -      20.89     12     1
+       tlsclient            52436    1.7%     242768          -      31.35     12     1
+
+8c8    lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline             260241   11.1%      37150          -      12.14     12     8
+       wreq                200467    6.6%      83766          -      29.07     12     8
+       tlsclient           150434    1.9%     254232          -      39.89     12     8
+
+8c256  lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline            1077095    8.0%      30485          -       7.28     12     8
+       wreq                686757    5.9%      67939          -      16.25     12     8
+       tlsclient           272135    2.8%     249579          -      38.84     12     8
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline           vs wreq       req/s 1.491 [1.466, 1.516] ahead; CPU/req 0.423 [0.413, 0.432] less CPU; 3 runs
+seq    leyline           vs tlsclient  req/s 1.724 [1.696, 1.753] ahead; CPU/req 0.308 [0.305, 0.311] less CPU; 3 runs
+1c64   leyline           vs wreq       req/s 1.196 [1.181, 1.211] ahead; CPU/req 0.405 [0.400, 0.411] less CPU; 3 runs
+1c64   leyline           vs tlsclient  req/s 3.376 [3.338, 3.415] ahead; CPU/req 0.270 [0.265, 0.275] less CPU; 3 runs
+8c8    leyline           vs wreq       req/s 1.255 [1.254, 1.256] ahead; CPU/req 0.420 [0.402, 0.438] less CPU; 3 runs
+8c8    leyline           vs tlsclient  req/s 1.695 [1.664, 1.727] ahead; CPU/req 0.302 [0.293, 0.312] less CPU; 3 runs
+8c256  leyline           vs wreq       req/s 1.574 [1.460, 1.697] ahead; CPU/req 0.449 [0.436, 0.463] less CPU; 3 runs
+8c256  leyline           vs tlsclient  req/s 3.948 [3.694, 4.220] ahead; CPU/req 0.188 [0.186, 0.191] less CPU; 3 runs

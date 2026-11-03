@@ -1,0 +1,28 @@
+core_revision bde05ee72bc830496a3f0a78d13f81092f1bdaa2
+curl_and_nethttp_adapter_revision 222e83aa
+verification_harness_git_blob 1b1ed9c66fa019be2db04e0d362897865e92e28a
+build_harness_git_blob 37b008b5a1e781c4b46b5717d78d83e9e90102b7
+libs_table_py_git_blob 6ea5cae314bd60b809fd33cbec26d52f31421edf
+trusted_ca_sha256 0f7f993f451ecd3a17978f2ccf2776dfbc8b796bf1ecd6754a6254a9b0c2310d
+server_certificate_sha256 1d75189f6c759e412523203a47d2623386e61576f2d8cb9b56a2ec8c63d7eef2
+wrong_ca_sha256 b37f460a8a90ce7ea52b3c9e47665d7d31859fa2068561e9060fb25ddc2a14eb
+certificate_command openssl verify -CAfile pki/ca.pem -verify_ip 127.0.0.1 pki/server.pem
+certificate_output pki/server.pem: OK
+build_command BUILD=1 ROUNDS=1 CELLS=seq:1:1:2000 PROTO=h2 LIBS="leyline curl nethttp" TAG=2026-11-03-verified-adapters bash libs.sh
+build_environment CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der CMP_TLS=matched TIMEOUT=30s
+build_output SELECTED-BUILD-AND-HEADERS-PASS
+verification_environment CMP_PROTO=<h1|h2> CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der CMP_TLS=matched LEYLINE_CHROME=146 CMP_CHROME=146 CMP_TIMEOUT=30s
+accept_command bin/<client> <local-origin-url> equiv
+reject_command CMP_CA=$PWD/pki/wrong.der bin/<client> <local-origin-url> equiv
+accept_exit 0
+reject_exit nonzero
+pooling_command python3 libs-table.py results/2026-11-03-verified-adapters/rows.txt results/2026-11-03-release-clients-h2-r1/rows.txt
+pooling_exit 1
+pooling_output POOLING-IDENTITY-PASS
+additional_ca_probes h1 ureq; h1 fasthttp
+final_build_command BUILD=1 ROUNDS=1 CELLS=seq:1:1:2000 PROTO=h2 LIBS="leyline curl nethttp" TAG=2026-11-03-selected-final bash libs.sh
+final_build_output FINAL-SELECTED-BUILD-PASS
+non_leyline_build_command BUILD=1 ROUNDS=1 CELLS=seq:1:1:2000 PROTO=h2 LIBS=curl TAG=2026-11-03-selected-curl bash libs.sh
+non_leyline_build_output NON-LEYLINE-BUILD-PRESERVES-SOURCE-RECEIPT-PASS
+private_key_disposition deleted-after-runs
+owned_temporary_certificate_files_deleted 37

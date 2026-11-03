@@ -1,0 +1,46 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 882 of event 'cycles:u'
+# Event count (approx.): 2627302652
+#
+# Overhead Symbol IPC [IPC Coverage]
+# ........ ........................................................................................................................................................................................................................................................................................................................................................................................................................................... ....................
+#
+ 5.01% [.] leyline::pool::h1::parse::read_h1_head::<dyn leyline::pool::h1::H1Io>::{closure#0} - -
+ 4.97% [.] __memmove_avx512_unaligned_erms - -
+ 4.03% [.] __GI___pthread_enable_asynccancel - -
+ 3.77% [.] <leyline::core::session::Session>::execute_inner::{closure#0} - -
+ 3.67% [.] <tokio::runtime::time::handle::Handle>::process_at_time - -
+ 3.08% [.] LEYLINE_aes_hw_encrypt - -
+ 2.83% [.] leyline::pool::h1::send_h1_pooled::{closure#0} - -
+ 2.61% [.] <leyline::pool::pool::Pool>::return_h1 - -
+ 2.29% [.] bytes::bytes::shared_drop - -
+ 2.18% [.] <leyline::pool::h1::streaming::Exchange>::on::{closure#0} - -
+ 2.16% [.] <address> - -
+ 2.09% [.] <address> - -
+ 1.89% [.] <tokio::runtime::io::scheduled_io::ScheduledIo>::poll_readiness - -
+ 1.78% [.] malloc - -
+ 1.54% [.] <leyline::pool::pool::Pool>::checkout_h1 - -
+ 1.54% [.] leyline::core::deadline::expiring::<core::task::poll::Poll<core::result::Result<leyline::core::response::Response, leyline::core::error::Error>>, <leyline::core::session::guard::Guarded<core::pin::Pin<alloc::boxed::Box<dyn core::future::future::Future<Output = core::result::Result<leyline::core::response::Response, leyline::core::error::Error>> + core::marker::Send>>> as core::future::future::Future>::poll::{closure#0}> - -
+ 1.45% [.] <tokio::runtime::scheduler::multi_thread::worker::Context>::run - -
+ 1.39% [.] __ieee754_pow_fma - -
+ 1.31% [.] <tokio::runtime::io::scheduled_io::ScheduledIo>::wake - -
+ 1.28% [.] clock_gettime@@GLIBC_2.17 - -
+ 1.28% [.] <leyline::core::request::RequestBuilder>::respond::{closure#0} - -
+ 1.26% [.] <tokio::sync::notify::NotifiedProject>::drop_notified - -
+ 1.18% [.] LEYLINE_gcm_gmult_vpclmulqdq_avx512 - -
+ 1.13% [.] <tokio::time::sleep::Sleep as core::future::future::Future>::poll - -
+ 1.12% [.] LEYLINE_aes_gcm_enc_update_vaes_avx512 - -
+ 1.12% [.] bytes::bytes::promotable_even_clone - -
+ 1.12% [.] <tokio::runtime::task::state::State>::transition_to_running - -
+ 1.04% [.] <tokio::runtime::io::registration::Registration>::poll_ready - -
+ 1.01% [.] <http::header::map::HeaderMap>::try_append2::<http::header::name::HeaderName> - -
+ 1.00% [.] tokio::runtime::task::waker::clone_waker - -
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

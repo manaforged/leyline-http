@@ -7,16 +7,7 @@
 
 An async Rust HTTP client that matches the TLS, HTTP/2, and HTTP/3 fingerprints of Chrome, Edge, Opera, Brave, Firefox, and Safari.
 
-## Features
-
-- Browser profiles from real captures: TLS ClientHello, HTTP/2 settings and priorities, HTTP/3 transport parameters, and header order
-- HTTP/1.1, HTTP/2, and HTTP/3 over BoringSSL
-- Cookies, redirects, retries, timeouts, and per-host rate limits
-- HTTP, HTTPS, and SOCKS5 proxies, and proxy pools
-- JSON, form, and multipart bodies; gzip, deflate, Brotli, and zstd
-- WebSocket and streaming bodies
-- Save and load a session with its cookies
-- Custom root certificates, certificate pinning, and client certificates
+Choose a browser once. Cloned sessions share connections and cookies.
 
 ## Example
 
@@ -25,7 +16,7 @@ use leyline::{Browser, Session};
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Session::from(Browser::chrome());
+    let session = Session::from(Browser::Chrome154);
     let body = session.get("https://example.com/").send().await?.text().await?;
     println!("{body}");
     Ok(())
@@ -41,6 +32,27 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 Rust 1.96 or later. Building BoringSSL needs a C and C++ compiler and `git`.
+
+## Performance
+
+With a Chrome 146 profile, Leyline completed 1.08 million HTTP/2 requests per
+second at 256 in flight against a local origin serving 10-byte responses on a
+Ryzen 9 9950X3D. Three independent runs used certificate verification and a
+30-second request timeout.
+
+[Results, comparisons, and reproduction commands](BENCHMARKS.md#v020-measurements)
+include all four workloads, CPU cost, confidence intervals, and limitations.
+
+## Features
+
+- Browser profiles from real captures: TLS ClientHello, HTTP/2 settings and priorities, HTTP/3 transport parameters, and header order
+- HTTP/1.1, HTTP/2, and HTTP/3 over BoringSSL
+- Cookies, redirects, retries, timeouts, and per-host rate limits
+- HTTP, HTTPS, and SOCKS5 proxies, and proxy pools
+- JSON, form, and multipart bodies; gzip, deflate, Brotli, and zstd
+- WebSocket and streaming bodies
+- Save and load a session with its cookies
+- Custom root certificates, certificate pinning, and client certificates
 
 ## Documentation
 

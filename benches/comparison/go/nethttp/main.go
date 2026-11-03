@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"leyline-comparison/cmpheaders"
 	"leyline-comparison/cmptimeout"
 )
 
@@ -66,8 +67,19 @@ func total() time.Duration {
 	return cmptimeout.Total
 }
 
+func get(c *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for _, h := range cmpheaders.Pairs {
+		req.Header.Set(h[0], h[1])
+	}
+	return c.Do(req)
+}
+
 func do(c *http.Client, url string) {
-	resp, err := c.Get(url)
+	resp, err := get(c, url)
 	if err != nil {
 		panic(err)
 	}
@@ -116,7 +128,7 @@ func main() {
 	}
 	if len(os.Args) > 2 && os.Args[2] == "equiv" {
 		c := newClient()
-		resp, err := c.Get(url)
+		resp, err := get(c, url)
 		if err != nil {
 			panic(err)
 		}

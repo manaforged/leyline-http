@@ -1,10 +1,204 @@
 # Benchmarks
 
-This page compares Leyline with wreq, reqwest, and tls-client on one machine. All numbers
-come from the files in
-[`benches/comparison/results/2026-09-24`](benches/comparison/results/2026-09-24).
+This page records client-library comparisons on one machine. Each section links
+to its raw results and identifies the configuration under measurement.
+
+## v0.2.0 measurements
+
+### Browser profiles over HTTP/2
+
+Three independent runs used four alternating-order rounds each, Chrome 146
+profiles, a 10-byte response, certificate verification against a local test CA,
+and a 30-second request timeout. The origin negotiated TLS 1.3 with
+AES-128-GCM and X25519 for every client. The host was not dedicated; the server
+and clients used separate pinned CPU sets.
+
+Requests per second are medians over the 12 observations per client and workload:
+
+| Workload | Leyline | wreq | tls-client |
+| --- | ---: | ---: | ---: |
+| Sequential, one connection | 49,106 | 33,355 | 28,799 |
+| 1 connection, 64 streams | 176,620 | 147,945 | 52,436 |
+| 8 connections, 8 in flight | 260,241 | 200,467 | 150,434 |
+| 8 connections, 256 in flight | 1,077,095 | 686,757 | 272,135 |
+
+Paired throughput ratios use the geometric mean, with a 95% t-interval across
+three independent run means. A ratio above 1 favors Leyline; these ratios are
+not ratios of the pooled medians above.
+
+| Workload | Leyline / wreq [95% interval] | Leyline / tls-client [95% interval] |
+| --- | ---: | ---: |
+| Sequential, one connection | 1.491 [1.466, 1.516] | 1.724 [1.696, 1.753] |
+| 1 connection, 64 streams | 1.196 [1.181, 1.211] | 3.376 [3.338, 3.415] |
+| 8 connections, 8 in flight | 1.255 [1.254, 1.256] | 1.695 [1.664, 1.727] |
+| 8 connections, 256 in flight | 1.574 [1.460, 1.697] | 3.948 [3.694, 4.220] |
+
+Leyline completes more requests per second and uses less client CPU per request
+than both peers in every cell. The
+[pooled table](benches/comparison/results/2026-11-03-verified-browser-h2-r1/pooled.txt)
+includes CPU intervals and instruction counts. Raw observations, request-header
+audits, observed connection counts, and binary hashes are in
+[run 1](benches/comparison/results/2026-11-03-verified-browser-h2-r1),
+[run 2](benches/comparison/results/2026-11-03-verified-browser-h2-r2), and
+[run 3](benches/comparison/results/2026-11-03-verified-browser-h2-r3).
+The measured core is `bde05ee7`; the peers are wreq 0.16.3 and tls-client 1.16.0.
+
+These are native browser-profile defaults, not identical browser identities:
+Leyline uses Windows headers, wreq uses macOS headers, and tls-client receives
+Leyline's captured header values. The gate requires the same end-to-end header
+names; values remain visible in each audit. This result does not establish a
+universal client ranking, a tail-latency lead, or performance on HTTP/3, large
+bodies, or other hardware.
+
+The HTTP/1.1 browser-profile comparison with wreq was not measured: its
+`priority` header differs from Leyline's header set, so the equality gate stopped
+the run. The [failed header audit](benches/comparison/results/2026-11-03-verified-browser-h1-audit/headers.txt)
+is retained rather than changing either fingerprint for the benchmark.
+
+### General clients over HTTP/2
+
+A separate three-run comparison disabled browser profiles and required identical
+request-header values, the same verified TLS connection setup, and a 30-second
+request timeout. Each run again used four alternating-order rounds.
+
+| Client | Sequential | 1 conn, 64 streams | 8 conns, 8 in flight | 8 conns, 256 in flight |
+| --- | ---: | ---: | ---: | ---: |
+| Leyline | 51,725 | 203,610 | 274,678 | 1,369,390 |
+| hyper-util client | 42,763 | 178,928 | 256,870 | 1,120,893 |
+| reqwest | 34,921 | 177,875 | 223,909 | 854,499 |
+| libcurl (multi) | 41,573 | 96,447 | 214,316 | 672,036 |
+| Go net/http | 38,325 | 102,578 | 239,766 | 547,258 |
+| h2 crate (no client layer) | 51,763 | 165,934 | 281,358 | 1,191,256 |
+
+Leyline leads all four full-client peers in throughput and client CPU per request
+in all four workloads. All 16
+[paired comparisons](benches/comparison/results/2026-11-03-verified-clients-h2-r1/peer-intervals.txt)
+have throughput intervals above 1 and CPU intervals below 1. Against bare h2,
+sequential and low-concurrency throughput remain unresolved; Leyline uses more
+CPU per request in those two workloads. This is not a win on every metric.
+
+The [pooled table](benches/comparison/results/2026-11-03-verified-clients-h2-r1/pooled.txt)
+and raw [run 1](benches/comparison/results/2026-11-03-verified-clients-h2-r1),
+[run 2](benches/comparison/results/2026-11-03-verified-clients-h2-r2), and
+[run 3](benches/comparison/results/2026-11-03-verified-clients-h2-r3)
+include observed connection counts, headers, instructions, CPU, and binary hashes.
+
+### HTTP/1.1 baseline
+
+The same three-run, four-round method used identical request-header values,
+verified TLS, and a 30-second timeout. The sequential pair used 20,000 and
+40,000 requests; the eight-worker pair used 100,000 and 200,000; the 64-worker
+pair used 200,000 and 400,000.
+
+| Client | Sequential | 8 workers | 64 workers |
+| --- | ---: | ---: | ---: |
+| Leyline | 58,534 | 319,933 | 810,948 |
+| Leyline blocking | 58,856 | 370,442 | 772,340 |
+| fasthttp | 58,797 | 325,726 | 904,703 |
+| Go net/http | 41,661 | 348,199 | 557,055 |
+| hyper-util client | 54,433 | 306,256 | 686,334 |
+| reqwest | 37,852 | 239,214 | 581,590 |
+| libcurl (multi) | 50,853 | 101,158 | 98,560 |
+| ureq | 34,293 | 69,410 | 46,265 |
+
+This is not an across-the-board throughput lead. Async Leyline is behind
+net/http at eight workers: ratio 0.934 [0.919, 0.948]. Blocking Leyline is behind
+fasthttp at 64 workers: 0.859 [0.741, 0.996], with more client CPU per request.
+Async Leyline's 64-worker comparison with fasthttp remains unresolved:
+0.914 [0.708, 1.180]. The short high-concurrency measurements have substantial
+spread and should not be read as a stable ranking.
+
+The [pooled table](benches/comparison/results/2026-11-03-verified-clients-h1-r1/pooled.txt)
+and raw [run 1](benches/comparison/results/2026-11-03-verified-clients-h1-r1),
+[run 2](benches/comparison/results/2026-11-03-verified-clients-h1-r2), and
+[run 3](benches/comparison/results/2026-11-03-verified-clients-h1-r3)
+retain the observed connection counts. Workers do not imply identical total TCP
+connection counts: each client manages its own HTTP/1.1 pool.
+
+A separate Chrome 146 comparison with tls-client passed the header gate and
+showed a throughput and CPU lead for async and blocking Leyline at all three
+worker counts. Its [pooled table](benches/comparison/results/2026-11-03-verified-browser-h1-matched-r1/pooled.txt)
+and raw [run 1](benches/comparison/results/2026-11-03-verified-browser-h1-matched-r1),
+[run 2](benches/comparison/results/2026-11-03-verified-browser-h1-matched-r2), and
+[run 3](benches/comparison/results/2026-11-03-verified-browser-h1-matched-r3)
+record the differing observed connection counts. This does not replace the
+excluded wreq comparison or establish an HTTP/1.1 browser-client ranking.
+
+### Longer HTTP/1.1 follow-up
+
+The five closest implementations repeated the eight- and 64-worker cells with
+1,000,000 and 2,000,000 requests per pair. This used the unchanged comparison
+runner and counters, not the additional profiling instrumentation. Three runs
+again used four alternating-order rounds each. The full eight-client baseline
+above is retained; this follow-up is a subset, not a replacement matrix.
+
+| Client | 8 workers | 64 workers |
+| --- | ---: | ---: |
+| Leyline | 317,476 | 763,944 |
+| Leyline blocking | 370,119 | 871,335 |
+| fasthttp | 323,201 | 816,562 |
+| Go net/http | 253,941 | 612,192 |
+| hyper-util client | 292,779 | 717,648 |
+
+Async Leyline now leads net/http at eight workers: 1.244 [1.209, 1.280], showing
+that the short-count ordering does not hold at the longer request count. Its
+comparisons with fasthttp remain unresolved at eight workers,
+0.977 [0.949, 1.007], and at 64 workers, 0.892 [0.788, 1.009]. Blocking Leyline's
+64-worker comparison with fasthttp is also unresolved, 1.044 [0.972, 1.122],
+while using more client CPU per request: ratio 1.118 [1.105, 1.130].
+
+The [pooled table](benches/comparison/results/2026-11-03-verified-h1-long-r1/pooled.txt)
+and raw [run 1](benches/comparison/results/2026-11-03-verified-h1-long-r1),
+[run 2](benches/comparison/results/2026-11-03-verified-h1-long-r2), and
+[run 3](benches/comparison/results/2026-11-03-verified-h1-long-r3) retain all
+observations. Neither HTTP/1.1 run length supports a universal throughput and CPU
+lead. The [diagnostic profiles](benches/comparison/results/2026-11-03-h1-profile)
+include additional counters and different request counts; they are not ranking
+inputs. No production optimization was retained from these profiles.
+
+### Fresh sessions and closed-loop latency
+
+The existing paired runner measured one connection and 64 streams, with 2,000
+warm requests, 200 fresh clients, and 200,000 concurrent requests per round.
+Each peer has three batches of four alternating-order rounds. The wreq pair uses
+native Chrome 146 profiles; the reqwest pair uses bare profiles and identical
+request headers. Both use verified TLS and a 30-second timeout.
+
+| Peer and configuration | Leyline p99 µs | Peer p99 µs | p99 ratio [95% interval] | Fresh-client throughput ratio [95% interval] |
+| --- | ---: | ---: | ---: | ---: |
+| wreq, Chrome 146 | 557 | 585.5 | 0.946 [0.910, 0.982] | 0.975 [0.871, 1.092] |
+| reqwest, bare | 561 | 519.5 | 1.075 [1.036, 1.116] | 0.966 [0.875, 1.067] |
+
+The p99 values are medians of per-round p99 observations, not a percentile of
+pooled requests. Ratios use the existing table tool's log-ratio interval across
+three batch means. Leyline's p99 is lower than wreq's in this workload but higher
+than reqwest's. Fresh-client throughput is unresolved against both peers.
+These are closed-loop measurements, without offered-load pacing or
+coordinated-omission correction; they do not establish an application tail-latency
+lead. The [raw JSON and derived table](benches/comparison/results/2026-11-03-verified-latency)
+retain every round.
+
+The [verification probes](benches/comparison/results/2026-11-03-verification)
+record trusted-CA acceptance, wrong-CA rejection, and refusal to pool results
+with missing trust metadata.
+
+To reproduce this HTTP/2 browser comparison, create the certificates in the
+[reproduction steps](#reproduce), then run from `benches/comparison`:
+
+```bash
+export CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der
+for run in 1 2 3; do
+  TAG=reproduce-browser-h2-r$run PROFILE=chrome146 PROTO=h2 TIMEOUT=30s ROUNDS=4 \
+    LIBS="leyline wreq tlsclient" SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 \
+    bash libs.sh
+done
+python3 libs-table.py results/reproduce-browser-h2-r{1,2,3}/rows.txt --vs tlsclient
+```
 
 ## Results
+
+Raw results are in
+[`benches/comparison/results/2026-09-24`](benches/comparison/results/2026-09-24).
 
 Each row is 20 paired rounds. In a round, both clients run the same workload
 against the same server, and the order alternates between rounds. The delta is
@@ -94,6 +288,22 @@ User-space instructions per request, measured as the difference between a run of
 
 The h2 crate and Node http2 rows are HTTP/2 engines with no client layer on top: no URL parsing, pooling, redirects, cookies or response object. They show what the client layer costs. hyper-util is the layer that reqwest builds on. Leyline uses fewer instructions per request than every client except hyper-util, and it leads in requests per second with 1 connection and 64 streams. hyper-util is ahead of it with 8 connections, by 11.9% at 8 in flight and 12.7% at 256 in flight. In the sequential row, which varied 11% to 26% between rounds, hyper-util, libcurl, Go net/http, and tls-client are ahead of it. The JDK sequential instruction count includes JIT compilation that the short run does not cancel.
 
+### Installed bindings
+
+`leyline-python` and `leyline-node` use the installed Python wheel and Node
+package through the existing comparison runners. Install the Python comparison
+requirements in the interpreter selected by `PYTHON`; Node uses its normal module
+resolution, including `NODE_PATH`. Both adapters require a Chrome profile and
+support HTTP/1.1 or HTTP/2 with the default timeout. They reject bare-profile runs.
+The receipts identify the native extensions, wrappers, and adapter code; the
+existing table tool rejects pooling runs with different binding artifacts. A
+binding overhead comparison also requires matching the Rust client's core revision.
+
+The [initial installed-binding baseline](benches/comparison/results/2026-11-03-bindings-macos/table.txt)
+used release artifacts on macOS with Chrome 147, a trusted local certificate,
+and an HTTP/2 origin. Both runs are retained. Their large throughput drift makes
+them diagnostic measurements, not evidence for a speed claim.
+
 ## HTTP/1.1 client libraries
 
 Five HTTP/1.1 clients ran the same requests on 2026-11-01, once over loopback and once over a link with added delay. The files are in [`benches/comparison/results/2026-11-01-h1-r10b`](benches/comparison/results/2026-11-01-h1-r10b) and [`benches/comparison/results/2026-11-01-h1-net100us-b`](benches/comparison/results/2026-11-01-h1-net100us-b). Each value is the median of 10 rounds in alternating order. Every client sends the same three request headers, which the origin checks before the rounds start, and every client checks the status and body of every response. Leyline is commit `d6d58d15`, with no browser profile. These runs used Linux 7.0.0-38-generic, Rust 1.98.1 and Go 1.27.3, with HTTP/1.1 over TLS and the CPU pinning listed under Setup.
@@ -177,7 +387,7 @@ server and the clients.
 You need Linux, Rust 1.96 or later, Go 1.26 or later, Python 3, `taskset`,
 and OpenSSL.
 
-1. Create a test CA and a server certificate for `127.0.0.1`:
+1. From `benches/comparison`, create a test CA and a server certificate for `127.0.0.1`:
 
    ```bash
    mkdir -p pki && cd pki
@@ -201,7 +411,7 @@ and OpenSSL.
      ./matrix.sh
    ```
 
-3. Run the client-library comparison from `benches/comparison`. It also needs `perf`, Node.js 22.19 or later, Java 21, and a Python with `python-client/requirements.txt` installed:
+3. Run the client-library comparison from `benches/comparison`. It also needs `perf`. Install other runtimes only for the clients selected in `LIBS`:
 
    ```bash
    CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der \
@@ -216,4 +426,4 @@ results.
 
 4. Run the HTTP/1.1 comparison with `PROTO=h1 ROUNDS=10`. For the delayed link, put the origin in a network namespace joined to the host by a veth pair with `tc qdisc add dev <veth> root netem delay 50us` on each end, issue a server certificate that also covers the namespace address, and set `SERVER_NETNS=<namespace>` and `SERVER_ADDR=<address>:0`.
 
-`libs.sh` builds all thirteen clients, checks each one's response body, and writes `rows.txt`, `table.txt`, and `receipts.txt` (versions, binary hashes, and host state) to `results/<date>-libs/`. `LIBS`, `CELLS`, and `ROUNDS` override the defaults.
+`libs.sh` builds the selected clients, checks their response bodies and request headers, and writes `rows.txt`, `table.txt`, and `receipts.txt` to `results/<date>-libs-<protocol>-<profile>-timeout-<timeout>/`. The receipts record versions, binary hashes, host state, TLS mode, certificate verification, and the CA hash. `LIBS`, `CELLS`, `ROUNDS`, `PROFILE`, `TIMEOUT`, and `TAG` override the defaults. The table tool refuses to pool runs with different or unknown trust settings.

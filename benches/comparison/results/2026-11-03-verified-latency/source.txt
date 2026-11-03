@@ -1,0 +1,22 @@
+core_revision bde05ee72bc830496a3f0a78d13f81092f1bdaa2
+runner benches/comparison/paired.sh
+batches_per_peer 3
+rounds_per_batch 4
+response_body_bytes 10
+origin hyper-origin-example
+origin_lifetime shared-across-batches
+certificate_verification trusted-ca
+ca_sha256 0f7f993f451ecd3a17978f2ccf2776dfbc8b796bf1ecd6754a6254a9b0c2310d
+tls matched
+request_timeout 30s
+host_exclusive no
+common_environment CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der CMP_TLS=matched CMP_PROTO=h2 CMP_TIMEOUT=30s CMP_CHROME=146
+wreq_environment LEYLINE_CHROME=146; CMP_HEADERS unset
+reqwest_environment LEYLINE_CHROME=bare CMP_HEADERS=$PWD/request-headers.tsv
+command ROUNDS=4 WARM=2000 COLD=200 CONC=200000 CONCURRENCY=64 CMP_CONNECTIONS=1 CONTROL=0 TARGET_URL=<local-origin-url> LEFT=leyline RIGHT=<peer> PAIRED_JSON=results/2026-11-03-verified-latency/<peer>-r<batch>.json CELL_NAME=h2-1c64 SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash paired.sh
+summary_owner benches/comparison/libs-table.py ratio_ci and show, unchanged
+summary_inputs wreq-r1.json wreq-r2.json wreq-r3.json reqwest-r1.json reqwest-r2.json reqwest-r3.json
+summary_metrics conc_rps conc_p99_us warm_rps cold_rps
+summary_method per-batch mean paired log-ratios; 95-percent t-interval across three batch means
+summary_medians pooled-over-twelve-round-observations
+latency_scope closed-loop; no coordinated-omission correction

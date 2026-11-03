@@ -1,0 +1,24 @@
+3 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-blocking      55441    3.5%      27507          -       9.25     12     -
+       leyline              54692    8.6%      32459          -       9.97     12     -
+       tlsclient            34476    4.0%     179517          -      26.69     12     -
+
+8par   lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-blocking     336204    8.4%      27744          -      10.34     12     8
+       leyline             292910    6.2%      32884          -      11.38     12     8
+       tlsclient            97634   20.2%     345196          -      45.32     12   4/3
+
+64par  lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-blocking     780813   18.6%      27740          -      14.91     12    64
+       leyline             724067   45.5%      30867          -      12.47     12    64
+       tlsclient           241706   15.6%     282650          -      54.09     12 60/55/57
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline           vs tlsclient  req/s 1.618 [1.605, 1.631] ahead; CPU/req 0.371 [0.357, 0.385] less CPU; 3 runs
+seq    leyline-blocking  vs tlsclient  req/s 1.613 [1.573, 1.653] ahead; CPU/req 0.346 [0.332, 0.359] less CPU; 3 runs
+8par   leyline           vs tlsclient  req/s 3.016 [2.809, 3.239] ahead; CPU/req 0.252 [0.244, 0.260] less CPU; 3 runs
+8par   leyline-blocking  vs tlsclient  req/s 3.535 [3.208, 3.895] ahead; CPU/req 0.229 [0.218, 0.240] less CPU; 3 runs
+64par  leyline           vs tlsclient  req/s 3.112 [2.129, 4.549] ahead; CPU/req 0.228 [0.224, 0.233] less CPU; 3 runs
+64par  leyline-blocking  vs tlsclient  req/s 3.104 [2.548, 3.781] ahead; CPU/req 0.271 [0.260, 0.283] less CPU; 3 runs

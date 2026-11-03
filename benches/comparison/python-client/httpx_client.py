@@ -18,7 +18,7 @@ def tls():
         return ssl.create_default_context(cadata=f.read())
 
 
-VERIFY = tls()
+VERIFY = None
 PROTO = os.environ.get("CMP_PROTO", "h2")
 if PROTO not in ("h1", "h2"):
     sys.exit(f"CMP_PROTO {PROTO}")
@@ -28,6 +28,9 @@ POOL = max(64, int(sys.argv[5]) if len(sys.argv) > 5 else 64)
 
 
 def build():
+    global VERIFY
+    if VERIFY is None:
+        VERIFY = tls()
     if H1:
         limits = httpx.Limits(max_connections=POOL, max_keepalive_connections=POOL)
         return httpx.AsyncClient(http2=False, verify=VERIFY, limits=limits)
@@ -49,6 +52,7 @@ async def get(client, url):
     assert resp.status_code == 200, f"status {resp.status_code}"
     assert resp.http_version == VERSION, f"version {resp.http_version}"
     assert resp.content == EXPECTED, "response body mismatch"
+    return resp.status_code, resp.content
 
 
 def fnv1a(data):
@@ -67,14 +71,13 @@ def arg(i, default):
     return int(sys.argv[i]) if len(sys.argv) > i else default
 
 
-async def main():
+async def main(*, name=NAME, build=build, get=get, close=httpx.AsyncClient.aclose):
     url = sys.argv[1] if len(sys.argv) > 1 else "https://127.0.0.1:8443/"
 
     if len(sys.argv) > 2 and sys.argv[2] == "equiv":
         async with build() as client:
-            resp = await client.get(url)
-            body = resp.content
-            print(f"EQUIV {NAME} status={resp.status_code} fnv={fnv1a(body):016x} len={len(body)}")
+            status, body = await get(client, url)
+            print(f"EQUIV {name} status={status} fnv={fnv1a(body):016x} len={len(body)}")
         return
 
     warm_n = arg(2, 2000)
@@ -118,13 +121,14 @@ async def main():
     cold_rps = cold_n / (time.perf_counter() - start)
 
     for c in clients:
-        await c.aclose()
+        await close(c)
 
     print(
-        f"RESULT {NAME} connections={connections} warm_rps={warm_rps:.3f} conc_rps={conc_rps:.3f} cold_rps={cold_rps:.3f}"
+        f"RESULT {name} connections={connections} warm_rps={warm_rps:.3f} conc_rps={conc_rps:.3f} cold_rps={cold_rps:.3f}"
         f" warm_p50_us={pct(warm, 0.50)} warm_p90_us={pct(warm, 0.90)} warm_p99_us={pct(warm, 0.99)}"
         f" conc_p50_us={pct(conc, 0.50)} conc_p90_us={pct(conc, 0.90)} conc_p99_us={pct(conc, 0.99)} conc_p999_us={pct(conc, 0.999)}"
     )
 
 
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,4 @@
+EQUIV leyline-python status=200 fnv=5df04559e15e1bf4 len=10
+EQUIV leyline-node status=200 fnv=5df04559e15e1bf4 len=10
+headers: exact field values match
+TLS: both negotiated h2 with the trusted local certificate
