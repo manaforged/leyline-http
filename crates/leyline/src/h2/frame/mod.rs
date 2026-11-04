@@ -209,5 +209,10 @@ impl Frame {
     }
 }
 
+#[cfg(kani)]
+mod proofs;
+#[cfg(test)]
+#[path = "rfc_tests.rs"]
+mod rfc_tests;
 #[cfg(test)]
 mod tests;

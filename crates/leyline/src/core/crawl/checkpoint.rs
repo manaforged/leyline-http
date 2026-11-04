@@ -91,8 +91,10 @@ impl Checkpoint {
             .ready
             .iter()
             .map(|page| {
-                page.as_ref().cloned().map_err(|_| {
-                    Error::config("consume buffered crawl errors before saving a checkpoint")
+                page.as_ref().cloned().map_err(|buffered| {
+                    Error::config(format!(
+                        "consume buffered crawl errors before saving a checkpoint: {buffered}"
+                    ))
                 })
             })
             .collect::<Result<_>>()?;

@@ -26,7 +26,7 @@ const _: () = assert!(
 
 pub(super) struct Shared {
     pub(super) tx: CommandTx,
-    pub(super) ping_tx: mpsc::Sender<oneshot::Sender<()>>,
+    pub(super) ping_tx: mpsc::Sender<super::driver::Ping>,
     pub(super) closed: Arc<AtomicBool>,
     pub(super) unanswered_timeout: Arc<AtomicBool>,
     pub(super) streams: Arc<Streams>,
@@ -130,7 +130,15 @@ impl H2Client {
         }
     }
 
-    pub async fn ping(&self) -> Result<(), H2Error> {
+    pub fn is_closed(&self) -> bool {
+        self.shared.closed.load(Ordering::Acquire)
+    }
+
+    /// Sends a PING ahead of later requests and fails the connection if no ACK arrives by `timeout`.
+    pub async fn probe(
+        &self,
+        timeout: std::time::Duration,
+    ) -> Result<oneshot::Receiver<()>, H2Error> {
         if self.shared.closed.load(Ordering::Acquire) {
             return Err(H2Error::Connection {
                 code: ErrorCode::NoError,
@@ -138,22 +146,16 @@ impl H2Client {
             });
         }
         let (ack_tx, ack_rx) = oneshot::channel();
+        let deadline = std::time::Instant::now() + timeout;
         self.shared
             .ping_tx
-            .send(ack_tx)
+            .send((ack_tx, deadline))
             .await
             .map_err(|e| H2Error::Connection {
                 code: ErrorCode::NoError,
                 reason: format!("driver task has exited: {e}"),
             })?;
-        ack_rx.await.map_err(|e| H2Error::Connection {
-            code: ErrorCode::NoError,
-            reason: format!("connection closed before the ping was acknowledged: {e}"),
-        })
-    }
-
-    pub fn is_closed(&self) -> bool {
-        self.shared.closed.load(Ordering::Acquire)
+        Ok(ack_rx)
     }
 
     pub(crate) fn take_unanswered_timeout(&self) -> bool {

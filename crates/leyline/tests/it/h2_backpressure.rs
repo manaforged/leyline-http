@@ -151,7 +151,7 @@ async fn ping_is_sent_while_a_request_waits_for_a_slot() {
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let pinger = handle.clone();
-    let ping = tokio::spawn(async move { pinger.ping().await });
+    let ping = tokio::spawn(async move { pinger.probe(Duration::from_secs(5)).await });
     let (header, _) = next_of(&mut frames, FrameType::Ping).await;
     assert_eq!(header.flags & 0x1, 0);
     first.abort();

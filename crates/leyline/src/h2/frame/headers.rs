@@ -41,34 +41,10 @@ impl HeadersFrame {
         let padded = header.flags & flags::PADDED != 0;
         let has_priority = header.flags & flags::PRIORITY != 0;
 
-        let mut offset = 0;
-        let mut end = payload.len();
-
-        if padded {
-            if payload.is_empty() {
-                return Err(H2Error::Connection {
-                    code: ErrorCode::ProtocolError,
-                    reason: "HEADERS PADDED flag but no payload".into(),
-                });
-            }
-            let pad_len = payload[0] as usize;
-            offset = 1;
-            if offset + pad_len > payload.len() {
-                return Err(H2Error::Connection {
-                    code: ErrorCode::ProtocolError,
-                    reason: "HEADERS padding exceeds payload".into(),
-                });
-            }
-            end -= pad_len;
-        }
+        let mut offset = usize::from(padded);
+        let end = padded_end(&payload, padded, if has_priority { 5 } else { 0 })?;
 
         let priority = if has_priority {
-            if offset + 5 > end {
-                return Err(H2Error::Connection {
-                    code: ErrorCode::FrameSizeError,
-                    reason: "HEADERS PRIORITY flag but insufficient payload".into(),
-                });
-            }
             let dep_raw = be_u32(&payload[offset..offset + 4]);
             let exclusive = dep_raw & 0x8000_0000 != 0;
             let dependency_id = dep_raw & 0x7FFF_FFFF;
@@ -93,6 +69,28 @@ impl HeadersFrame {
             fragment,
         })
     }
+}
+
+/// Returns where the field block ends after RFC 9113 padding, checking frame size before padding.
+pub(super) fn padded_end(payload: &[u8], padded: bool, fixed: usize) -> Result<usize, H2Error> {
+    let mandatory = usize::from(padded) + fixed;
+    if payload.len() < mandatory {
+        return Err(H2Error::Connection {
+            code: ErrorCode::FrameSizeError,
+            reason: format!(
+                "frame of {} bytes is shorter than its {mandatory} fixed bytes",
+                payload.len()
+            ),
+        });
+    }
+    let pad_len = if padded { usize::from(payload[0]) } else { 0 };
+    if pad_len > payload.len() - mandatory {
+        return Err(H2Error::Connection {
+            code: ErrorCode::ProtocolError,
+            reason: "padding exceeds the field block".into(),
+        });
+    }
+    Ok(payload.len() - pad_len)
 }
 
 impl<F: AsRef<[u8]>> HeadersFrame<F> {

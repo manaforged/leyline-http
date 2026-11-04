@@ -502,10 +502,33 @@ fn body_too_large(limit: usize) -> Error {
 }
 
 pub(super) fn chunk_size(line: &[u8]) -> Result<u64, String> {
-    let line = String::from_utf8_lossy(line);
-    let token = line.split(';').next().unwrap_or("").trim();
-    if token.is_empty() || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(format!("invalid chunk size: {token:?}"));
+    let invalid = || {
+        format!(
+            "invalid chunk size line: {:?}",
+            line.escape_ascii().to_string()
+        )
+    };
+    let digits = line
+        .iter()
+        .take_while(|byte| byte.is_ascii_hexdigit())
+        .count();
+    let rest = &line[digits..];
+    let blank = rest
+        .iter()
+        .take_while(|byte| matches!(byte, b' ' | b'\t'))
+        .count();
+    if digits == 0 || rest.get(blank).is_some_and(|&byte| byte != b';') {
+        return Err(invalid());
     }
-    u64::from_str_radix(token, 16).map_err(|e| format!("invalid chunk size: {e}"))
+    line[..digits]
+        .iter()
+        .try_fold(0u64, |size, &byte| {
+            let digit = char::from(byte).to_digit(16)?;
+            size.checked_mul(16)?.checked_add(u64::from(digit))
+        })
+        .ok_or_else(invalid)
 }
+
+#[cfg(test)]
+#[path = "parse_tests.rs"]
+mod tests;

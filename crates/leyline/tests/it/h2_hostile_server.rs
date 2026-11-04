@@ -410,3 +410,94 @@ async fn a_status_below_100_fails_the_stream() {
 
     server.abort();
 }
+
+#[tokio::test]
+async fn a_stream_level_frame_error_resets_only_that_stream() {
+    let priority_too_short = [0u8, 0, 4, 0x2, 0, 0, 0, 0, 1, 0, 0, 0, 0];
+    let zero_window_update = [0u8, 0, 4, 0x8, 0, 0, 0, 0, 1, 0, 0, 0, 0];
+    for (bad, code) in [(priority_too_short, 0x6u32), (zero_window_update, 0x1)] {
+        let (client_io, mut server_io) = tokio::io::duplex(65_536);
+        let server = tokio::spawn(async move {
+            read_preface(&mut server_io).await;
+            read_frame(&mut server_io).await;
+            write_server_settings(&mut server_io).await;
+            write_settings_ack(&mut server_io).await;
+            read_frame(&mut server_io).await;
+            let (h, _) = read_frame(&mut server_io).await;
+            assert_eq!(h.frame_type, FrameType::Headers as u8);
+            server_io.write_all(&bad).await.expect("write bad frame");
+            let (rst, payload) = loop {
+                let (fh, payload) = read_frame(&mut server_io).await;
+                if fh.frame_type == FrameType::RstStream as u8 {
+                    break (fh, payload);
+                }
+            };
+            assert_eq!(rst.stream_id, 1);
+            assert_eq!(payload, code.to_be_bytes());
+            let hb = loop {
+                let (fh, _) = read_frame(&mut server_io).await;
+                if fh.frame_type == FrameType::Headers as u8 {
+                    break fh;
+                }
+            };
+            assert_eq!(hb.stream_id, 3);
+            write_response(&mut server_io, 3, b"ok").await;
+            let mut sink = [0u8; 256];
+            drop(server_io.read(&mut sink).await);
+        });
+
+        let handle = leyline::h2::start(client_io, test_config())
+            .await
+            .expect("handshake");
+        let a = tokio::time::timeout(
+            Duration::from_secs(2),
+            handle.send_shared(Arc::new(get_head("/a")), leyline::Body::default(), false),
+        )
+        .await
+        .expect("stream 1 must fail, not hang");
+        assert!(a.is_err(), "the bad frame must fail stream 1, got {a:?}");
+        let b = tokio::time::timeout(
+            Duration::from_secs(2),
+            handle.send_shared(Arc::new(get_head("/b")), leyline::Body::default(), false),
+        )
+        .await
+        .expect("stream 3 must answer, not hang")
+        .expect("a stream error must not close the connection");
+        assert_eq!(b.status, 200);
+        server.abort();
+    }
+}
+
+#[tokio::test]
+async fn a_server_that_enables_push_fails_the_connection() {
+    let (client_io, mut server_io) = tokio::io::duplex(65_536);
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        read_frame(&mut server_io).await;
+        write_server_settings_with(&mut server_io, vec![(0x2, 1)]).await;
+        write_settings_ack(&mut server_io).await;
+        let mut sink = [0u8; 4096];
+        while server_io.read(&mut sink).await.is_ok_and(|n| n > 0) {}
+    });
+    let attempt = async {
+        let handle = leyline::h2::start(client_io, test_config()).await?;
+        handle
+            .send_shared(Arc::new(get_head("/")), leyline::Body::default(), false)
+            .await
+    };
+    let err = tokio::time::timeout(Duration::from_secs(2), attempt)
+        .await
+        .expect("the connection must fail, not hang")
+        .expect_err("SETTINGS_ENABLE_PUSH = 1 from a server is a connection error");
+    assert!(
+        matches!(
+            err,
+            leyline::h2::H2Error::Connection {
+                code: leyline::h2::error::ErrorCode::ProtocolError,
+                ..
+            }
+        ),
+        "got {err:?}"
+    );
+    server.abort();
+}

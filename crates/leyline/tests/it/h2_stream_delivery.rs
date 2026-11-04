@@ -25,6 +25,7 @@ enum Ending {
     Complete,
     Trailers,
     Reset,
+    CompleteThenReset,
     Disconnect,
 }
 
@@ -77,16 +78,22 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
         };
         write_response_headers(&mut peer, stream_id).await;
         for (index, chunk) in payload.chunks(16_384).enumerate() {
-            let end = matches!(ending, Ending::Complete) && (index + 1) * 16_384 == SIZE;
+            let end = matches!(ending, Ending::Complete | Ending::CompleteThenReset)
+                && (index + 1) * 16_384 == SIZE;
             write_data(&mut peer, stream_id, chunk, end).await;
         }
         if matches!(ending, Ending::Trailers) {
             write_raw_headers(&mut peer, stream_id, &[("x-complete", "yes")], true).await;
         }
-        if matches!(ending, Ending::Reset) {
+        if matches!(ending, Ending::Reset | Ending::CompleteThenReset) {
+            let error_code = if matches!(ending, Ending::Reset) {
+                ErrorCode::Cancel
+            } else {
+                ErrorCode::NoError
+            };
             let reset = RstStreamFrame {
                 stream_id,
-                error_code: ErrorCode::Cancel,
+                error_code,
             };
             let mut encoded = BytesMut::new();
             reset.encode(&mut encoded);
@@ -132,7 +139,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
         .await
         .expect("peer completed frames")
         .expect("peer barrier");
-    if !matches!(ending, Ending::Reset) {
+    if !matches!(ending, Ending::Reset | Ending::CompleteThenReset) {
         closed(&handle).await;
     }
     let mut received = 0;
@@ -160,7 +167,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
             }
         }
     }
-    if matches!(ending, Ending::Reset) {
+    if matches!(ending, Ending::Reset | Ending::CompleteThenReset) {
         done_tx.send(()).expect("server waiting");
     }
     server.await.expect("peer task");
@@ -191,6 +198,13 @@ async fn stream_reset_survives_a_full_body_queue() {
 #[tokio::test]
 async fn trailers_preserve_queued_body_data() {
     let (received, failure) = transfer(Ending::Trailers).await;
+    assert!(failure.is_none(), "{failure:?}");
+    assert_eq!(received, SIZE);
+}
+
+#[tokio::test]
+async fn a_reset_after_end_stream_keeps_the_queued_body() {
+    let (received, failure) = transfer(Ending::CompleteThenReset).await;
     assert!(failure.is_none(), "{failure:?}");
     assert_eq!(received, SIZE);
 }

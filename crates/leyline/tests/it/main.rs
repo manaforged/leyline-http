@@ -68,6 +68,8 @@ mod h2_frame_roundtrip;
 #[cfg(feature = "bench-internals")]
 mod h2_hostile_server;
 #[cfg(feature = "bench-internals")]
+mod h2_idle_ping;
+#[cfg(feature = "bench-internals")]
 mod h2_informational_e2e;
 #[cfg(feature = "bench-internals")]
 mod h2_lanes;

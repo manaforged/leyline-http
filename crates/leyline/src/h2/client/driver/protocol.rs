@@ -43,6 +43,7 @@ pub(crate) enum DriverCommand {
     },
     Ping {
         ack_tx: oneshot::Sender<()>,
+        deadline: std::time::Instant,
     },
 }
 
@@ -100,7 +101,7 @@ impl DriverCommand {
             DriverCommand::SendRequest { sink, .. } => sink.is_cancelled(),
             #[cfg(feature = "websocket")]
             DriverCommand::OpenConnect { sink, .. } => sink.is_cancelled(),
-            DriverCommand::Ping { ack_tx } => ack_tx.is_closed(),
+            DriverCommand::Ping { .. } => false,
         }
     }
 
@@ -116,5 +117,7 @@ impl DriverCommand {
 
 #[cfg(test)]
 mod command_channel_tests;
+#[cfg(kani)]
+mod flow_control_proofs;
 #[cfg(test)]
 mod flow_control_tests;

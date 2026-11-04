@@ -40,6 +40,7 @@ pub(crate) struct Opened<C> {
     pub(crate) connect_ms: Option<u32>,
     pub(crate) lane: u8,
     pub(crate) slot: Option<crate::h2::client::Slot>,
+    pub(crate) probe: Option<super::liveness::Probe>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +58,7 @@ impl<C> Opened<C> {
             connect_ms: None,
             lane: 0,
             slot: None,
+            probe: None,
         }
     }
 
@@ -68,11 +70,17 @@ impl<C> Opened<C> {
             connect_ms: Some(crate::ResponseTiming::millis(started)),
             lane: 0,
             slot: None,
+            probe: None,
         }
     }
 
     pub(crate) fn on_lane(mut self, lane: u8) -> Self {
         self.lane = lane;
+        self
+    }
+
+    pub(crate) fn with_probe(mut self, probe: Option<super::liveness::Probe>) -> Self {
+        self.probe = probe;
         self
     }
 

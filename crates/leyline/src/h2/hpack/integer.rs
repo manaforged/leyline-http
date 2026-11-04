@@ -58,5 +58,7 @@ pub fn decode(
     Ok((result, i - pos))
 }
 
+#[cfg(kani)]
+mod proofs;
 #[cfg(test)]
 mod tests;

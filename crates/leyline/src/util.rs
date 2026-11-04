@@ -282,8 +282,42 @@ pub(crate) const MAX_INFORMATIONAL: usize = 16;
 
 pub(crate) mod atomic;
 pub(crate) mod autosave;
+pub(crate) mod coalesce;
 pub(crate) mod date;
 pub(crate) mod upload;
 
 #[cfg(test)]
 mod tests;
+
+/// Calls `check` with every concatenation of up to `max_len` tokens from `alphabet`.
+#[cfg(test)]
+pub(crate) fn every_input(alphabet: &[&[u8]], max_len: usize, mut check: impl FnMut(&[u8])) {
+    let mut digits: Vec<usize> = Vec::with_capacity(max_len);
+    let mut input = Vec::new();
+    loop {
+        input.clear();
+        for &digit in &digits {
+            input.extend_from_slice(alphabet[digit]);
+        }
+        check(&input);
+        if !next_input(&mut digits, alphabet.len(), max_len) {
+            return;
+        }
+    }
+}
+
+#[cfg(test)]
+fn next_input(digits: &mut Vec<usize>, base: usize, max_len: usize) -> bool {
+    for digit in digits.iter_mut() {
+        *digit += 1;
+        if *digit < base {
+            return true;
+        }
+        *digit = 0;
+    }
+    if digits.len() == max_len {
+        return false;
+    }
+    digits.push(0);
+    true
+}

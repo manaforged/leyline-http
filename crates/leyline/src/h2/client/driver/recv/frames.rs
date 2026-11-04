@@ -62,7 +62,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
         if let Some(actor) = self.streams.get_mut(w.stream_id) {
-            if actor.state.is_reset_local() {
+            if actor.state.is_reset_local() || actor.remote_done {
                 return Ok(());
             }
             match checked_window_add(actor.send_window, w.increment as i64) {
@@ -97,8 +97,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if let Some(index) = self
             .pings
             .iter()
-            .position(|(payload, _)| *payload == p.payload)
-            && let Some((_, ack_tx)) = self.pings.remove(index)
+            .position(|(payload, ..)| *payload == p.payload)
+            && let Some((_, ack_tx, _)) = self.pings.remove(index)
             && ack_tx.send(()).is_err()
         {
             tracing::trace!("ping ack receiver dropped");
@@ -139,7 +139,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         if self
             .streams
             .get(r.stream_id)
-            .is_some_and(|actor| actor.state.is_reset_local())
+            .is_some_and(|actor| actor.state.is_reset_local() || actor.remote_done)
         {
             return Ok(());
         }

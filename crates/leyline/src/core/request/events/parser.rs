@@ -126,3 +126,7 @@ impl Parser {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "parser_tests.rs"]
+mod tests;

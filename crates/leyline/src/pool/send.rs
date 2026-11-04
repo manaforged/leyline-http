@@ -14,6 +14,7 @@ use crate::util::is_idempotent;
 use crate::{Error, Kind, ResponseTiming};
 
 use super::connect::{checkout_h2_opened, open_h2};
+use super::liveness::confirm;
 use super::pool::Pool;
 use super::types::{LegKind, Opened, PoolKey, TlsInfo, Transport};
 
@@ -92,7 +93,7 @@ struct H2Send<'a> {
 
 async fn send_on(
     ctx: &H2Send<'_>,
-    opened: Opened<H2Client>,
+    mut opened: Opened<H2Client>,
     body: Body,
 ) -> Result<Sent<TransportResponse>, Error> {
     let leg = opened.leg();
@@ -107,6 +108,12 @@ async fn send_on(
             None
         }
     };
+    if let Some(probe) = opened.probe.take()
+        && !(replay.is_some() && is_idempotent(&ctx.head.pseudo.method))
+        && !confirm(ctx.pool, ctx.key, probe).await
+    {
+        return Ok(Sent::Retry(body));
+    }
     let send_started = Instant::now();
     trace::sent(
         ctx.host,

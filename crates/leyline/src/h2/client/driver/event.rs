@@ -2,7 +2,6 @@ use std::future::poll_fn;
 use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::oneshot;
 
 use crate::h2::error::H2Error;
 use crate::h2::frame::Frame;
@@ -15,7 +14,7 @@ enum Event {
     Read(Result<Option<Frame>, H2Error>),
     Command(Option<DriverCommand>),
     BodyChunk(BodyChunkIn),
-    Ping(oneshot::Sender<()>),
+    Ping(Ping),
     Sweep,
     FlushStalled,
 }
@@ -100,19 +99,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     Io::Read(frame) => Event::Read(frame),
                 });
             }
-            if accepting && let Poll::Ready(cmd) = self.command_rx.poll_recv(cx) {
-                return Poll::Ready(Event::Command(cmd));
-            }
-            if taking_body
-                && let Some((_, rx)) = self.body_chunks.as_mut()
-                && let Poll::Ready(Some(chunk)) = rx.poll_recv(cx)
-            {
-                return Poll::Ready(Event::BodyChunk(chunk));
-            }
-            if let Poll::Ready(Some(ack_tx)) =
-                poll_armed(&mut self.ping_rx, &mut self.ping_armed, cx)
-            {
-                return Poll::Ready(Event::Ping(ack_tx));
+            if let Poll::Ready(input) = self.poll_input(accepting, taking_body, cx) {
+                return Poll::Ready(input);
             }
             if writing
                 && !write_first
@@ -128,6 +116,27 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         .await
     }
 
+    fn poll_input(
+        &mut self,
+        accepting: bool,
+        taking_body: bool,
+        cx: &mut Context<'_>,
+    ) -> Poll<Event> {
+        if let Poll::Ready(Some(ping)) = poll_armed(&mut self.ping_rx, &mut self.ping_armed, cx) {
+            return Poll::Ready(Event::Ping(ping));
+        }
+        if accepting && let Poll::Ready(cmd) = self.command_rx.poll_recv(cx) {
+            return Poll::Ready(Event::Command(cmd));
+        }
+        if taking_body
+            && let Some((_, rx)) = self.body_chunks.as_mut()
+            && let Poll::Ready(Some(chunk)) = rx.poll_recv(cx)
+        {
+            return Poll::Ready(Event::BodyChunk(chunk));
+        }
+        Poll::Pending
+    }
+
     async fn on_event(&mut self, event: Event) -> Result<Option<bool>, H2Error> {
         match event {
             Event::Written(written) => self.output.wrote(written)?,
@@ -136,7 +145,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
             Event::Command(cmd) => self.on_command_received(cmd)?,
             Event::BodyChunk(chunk) => self.on_body_chunk(chunk)?,
-            Event::Ping(ack_tx) => self.on_command(DriverCommand::Ping { ack_tx })?,
+            Event::Ping((ack_tx, deadline)) => {
+                self.on_command(DriverCommand::Ping { ack_tx, deadline })?
+            }
             Event::Sweep => return Ok(Some(true)),
             Event::FlushStalled => self.flush_stalled()?,
         }

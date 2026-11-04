@@ -24,14 +24,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
         match cmd {
-            DriverCommand::Ping { ack_tx } => {
+            DriverCommand::Ping { ack_tx, deadline } => {
                 self.ping_seq = self.ping_seq.wrapping_add(1);
                 let payload = self.ping_seq.to_be_bytes();
                 self.writer.write_frame(&PingFrame {
                     ack: false,
                     payload,
                 })?;
-                self.pings.push_back((payload, ack_tx));
+                self.pings.push_back((payload, ack_tx, deadline));
                 Ok(())
             }
             #[cfg(feature = "websocket")]

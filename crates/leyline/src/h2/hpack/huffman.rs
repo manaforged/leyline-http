@@ -151,4 +151,7 @@ pub fn encoded_len(src: &[u8]) -> usize {
 }
 
 #[cfg(test)]
+#[path = "huffman/rfc_tests.rs"]
+mod rfc_tests;
+#[cfg(test)]
 mod tests;

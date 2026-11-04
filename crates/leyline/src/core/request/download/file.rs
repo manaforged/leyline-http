@@ -3,6 +3,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,6 +13,7 @@ use crate::core::{Error, Kind, Result};
 use crate::util::{atomic, lock};
 
 const CHECKPOINT_BYTES: u64 = 1024 * 1024;
+const CHECKPOINT_EVERY: Duration = Duration::from_secs(1);
 const MAX_METADATA_BYTES: u64 = 16 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -36,6 +38,7 @@ struct Data {
     file: File,
     metadata: Option<Metadata>,
     written: u64,
+    checkpointed: Instant,
 }
 
 impl Partial {
@@ -73,6 +76,7 @@ impl Partial {
                 file,
                 metadata,
                 written,
+                checkpointed: Instant::now(),
             }),
         })
     }
@@ -81,22 +85,20 @@ impl Partial {
         lock(&self.data).metadata.clone()
     }
 
-    pub(super) fn prefix(&self, checksum: bool) -> Result<Sha256> {
+    pub(super) fn prefix(&self) -> Result<Sha256> {
         let mut data = lock(&self.data);
         let mut digest = Sha256::new();
-        if checksum {
-            data.file.rewind()?;
-            let mut bytes = [0u8; 64 * 1024];
-            loop {
-                let n = data.file.read(&mut bytes)?;
-                if n == 0 {
-                    break;
-                }
-                digest.update(&bytes[..n]);
+        data.file.rewind()?;
+        let mut bytes = [0u8; 64 * 1024];
+        loop {
+            let n = data.file.read(&mut bytes)?;
+            if n == 0 {
+                break;
             }
-            let written = data.written;
-            data.file.seek(SeekFrom::Start(written))?;
+            digest.update(&bytes[..n]);
         }
+        let written = data.written;
+        data.file.seek(SeekFrom::Start(written))?;
         Ok(digest)
     }
 
@@ -117,7 +119,9 @@ impl Partial {
         data.file.write_all(bytes)?;
         data.written += bytes.len() as u64;
         let saved = data.metadata.as_ref().map_or(0, |metadata| metadata.offset);
-        if data.written - saved >= CHECKPOINT_BYTES {
+        if data.written - saved >= CHECKPOINT_BYTES
+            && data.checkpointed.elapsed() >= CHECKPOINT_EVERY
+        {
             self.checkpoint_locked(&mut data)?;
         }
         Ok(())
@@ -129,6 +133,7 @@ impl Partial {
 
     fn checkpoint_locked(&self, data: &mut Data) -> Result<()> {
         data.file.sync_all()?;
+        data.checkpointed = Instant::now();
         if let Some(metadata) = &mut data.metadata {
             metadata.offset = data.written;
             let bytes = serde_json::to_vec(metadata).map_err(Error::from_json)?;

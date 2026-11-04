@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use futures_util::StreamExt;
+use futures_util::{FutureExt, StreamExt};
 use http::{Method, StatusCode, header};
 use sha2::{Digest, Sha256};
 
@@ -11,6 +11,9 @@ use crate::core::{Error, Kind, Response, Result};
 use crate::util::atomic::CallerWaits;
 
 mod file;
+#[cfg(test)]
+#[path = "download_tests.rs"]
+mod tests;
 use file::{Metadata, Partial};
 
 type Progress = Arc<dyn Fn(u64, Option<u64>) + Send + Sync>;
@@ -61,7 +64,16 @@ impl RequestBuilder {
             return Err(limit());
         }
         self.resume_headers(old.as_ref())?;
-        let response = self.send().await?;
+        let part = Arc::clone(&partial);
+        let checksum = options.checksum.is_some() && offset > 0;
+        let hashing = async move {
+            if checksum {
+                blocking(move || part.prefix()).await
+            } else {
+                Ok(Sha256::new())
+            }
+        };
+        let (response, digest) = tokio::try_join!(self.send(), hashing)?;
         let (metadata, append) = metadata(&response, key, old.as_ref())?;
         if metadata
             .total
@@ -72,7 +84,8 @@ impl RequestBuilder {
         let copy = metadata.clone();
         let part = Arc::clone(&partial);
         blocking(move || part.begin(copy, append)).await?;
-        transfer(response, partial, metadata, options, caller).await
+        let digest = if append { digest } else { Sha256::new() };
+        transfer(response, partial, (metadata, digest), options, caller).await
     }
 
     fn prepare_download(&mut self) -> Result<[u8; 32]> {
@@ -114,32 +127,40 @@ impl RequestBuilder {
     }
 }
 
+const WRITE_BATCH: usize = 64;
+
 async fn transfer(
     response: Response,
     partial: Arc<Partial>,
-    metadata: Metadata,
+    (metadata, mut digest): (Metadata, Sha256),
     options: Box<Download>,
     caller: CallerWaits,
 ) -> Result<u64> {
     let cap = response.parts.compression.max_body_size as u64;
-    let part = Arc::clone(&partial);
     let checksum = options.checksum.is_some();
-    let mut digest = blocking(move || part.prefix(checksum)).await?;
     let mut written = partial.metadata().map_or(0, |metadata| metadata.offset);
     let mut body = response.bytes_stream()?;
     notify(&options, written, metadata.total);
-    while let Some(chunk) = body.next().await {
+    let complete = metadata.total == Some(written);
+    while !complete && let Some(first) = body.next().await {
+        let mut batch = vec![first];
+        while batch.len() < WRITE_BATCH
+            && let Some(Some(next)) = body.next().now_or_never()
+        {
+            batch.push(next);
+        }
         let remaining = cap.saturating_sub(written).min(
             metadata
                 .total
                 .map_or(u64::MAX, |total| total.saturating_sub(written)),
         );
-        let chunk = append(Arc::clone(&partial), chunk, remaining).await?;
-        if checksum {
-            digest.update(&chunk);
+        for chunk in append(Arc::clone(&partial), batch, remaining).await? {
+            if checksum {
+                digest.update(&chunk);
+            }
+            written += chunk.len() as u64;
+            notify(&options, written, metadata.total);
         }
-        written += chunk.len() as u64;
-        notify(&options, written, metadata.total);
     }
     verify_length(written, metadata.total)?;
     verify_checksum(Arc::clone(&partial), digest, options.checksum).await?;
@@ -151,24 +172,35 @@ async fn transfer(
 
 async fn append(
     partial: Arc<Partial>,
-    chunk: Result<bytes::Bytes>,
+    batch: Vec<Result<bytes::Bytes>>,
     remaining: u64,
-) -> Result<bytes::Bytes> {
-    let chunk = match chunk {
-        Ok(chunk) => chunk,
-        Err(error) => {
-            blocking(move || partial.checkpoint()).await?;
-            return Err(error);
+) -> Result<Vec<bytes::Bytes>> {
+    let mut chunks = Vec::with_capacity(batch.len());
+    let mut failure = None;
+    for chunk in batch {
+        match chunk {
+            Ok(chunk) => chunks.push(chunk),
+            Err(error) => {
+                failure = Some(error);
+                break;
+            }
         }
-    };
-    if chunk.len() as u64 > remaining {
+    }
+    if chunks.iter().map(|chunk| chunk.len() as u64).sum::<u64>() > remaining {
         return Err(limit());
     }
-    blocking(move || {
-        partial.write(&chunk)?;
-        Ok(chunk)
+    let failed = failure.is_some();
+    let chunks = blocking(move || {
+        for chunk in &chunks {
+            partial.write(chunk)?;
+        }
+        if failed {
+            partial.checkpoint()?;
+        }
+        Ok(chunks)
     })
-    .await
+    .await?;
+    failure.map_or(Ok(chunks), Err)
 }
 
 fn verify_length(written: u64, total: Option<u64>) -> Result<()> {
@@ -205,7 +237,7 @@ fn metadata(
         return Err(Error::new(Kind::Body)
             .with_message("resumable download requires identity content encoding"));
     }
-    let etag = response
+    let mut etag = response
         .header(header::ETAG.as_str())
         .filter(|etag| strong_etag(etag))
         .map(str::to_owned);
@@ -214,20 +246,16 @@ fn metadata(
             (response.content_length(), false)
         }
         StatusCode::NOT_MODIFIED => {
-            let old = old
-                .filter(|old| old.offset > 0 && old.total == Some(old.offset))
-                .ok_or_else(bad_range)?;
-            if old.url != response.url().as_str() || etag != old.etag {
-                return Err(bad_range());
-            }
+            let old = saved(old, response, &etag, |old| old.total == Some(old.offset))?;
             (old.total, true)
         }
         StatusCode::PARTIAL_CONTENT => {
-            let old = old.filter(|old| old.offset > 0).ok_or_else(bad_range)?;
-            if old.url != response.url().as_str() || etag != old.etag {
-                return Err(bad_range());
-            }
+            let old = saved(old, response, &etag, |_| true)?;
             (Some(remainder(response, old)?), true)
+        }
+        StatusCode::RANGE_NOT_SATISFIABLE if let Some(old) = complete_prefix(old, response) => {
+            etag.clone_from(&old.etag);
+            (Some(old.offset), true)
         }
         _ => {
             response.error_for_status()?;
@@ -245,6 +273,27 @@ fn metadata(
         },
         append,
     ))
+}
+
+fn saved<'a>(
+    old: Option<&'a Metadata>,
+    response: &Response,
+    etag: &Option<String>,
+    accept: impl Fn(&Metadata) -> bool,
+) -> Result<&'a Metadata> {
+    old.filter(|old| {
+        old.offset > 0 && accept(old) && old.url == response.url().as_str() && *etag == old.etag
+    })
+    .ok_or_else(bad_range)
+}
+
+fn complete_prefix<'a>(old: Option<&'a Metadata>, response: &Response) -> Option<&'a Metadata> {
+    old.filter(|old| {
+        old.offset > 0
+            && old.total.is_none()
+            && old.url == response.url().as_str()
+            && unsatisfied_total(response) == Some(old.offset)
+    })
 }
 
 fn remainder(response: &Response, old: &Metadata) -> Result<u64> {
@@ -276,6 +325,16 @@ fn range(value: &str, offset: u64) -> Option<u64> {
         total.parse::<u64>().ok()?,
     );
     (start == offset && start <= end && end.checked_add(1)? == total).then_some(total)
+}
+
+fn unsatisfied_total(response: &Response) -> Option<u64> {
+    let total = response
+        .header(header::CONTENT_RANGE.as_str())?
+        .strip_prefix("bytes */")?;
+    if total.is_empty() || !total.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    total.parse().ok()
 }
 
 fn strong_etag(value: &str) -> bool {

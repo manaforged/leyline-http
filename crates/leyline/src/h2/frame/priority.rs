@@ -12,9 +12,9 @@ pub(super) fn validate(header: &FrameHeader, payload: &Bytes) -> Result<(), H2Er
         });
     }
     if payload.len() != 5 {
-        return Err(H2Error::Connection {
+        return Err(H2Error::Stream {
+            stream_id: header.stream_id,
             code: ErrorCode::FrameSizeError,
-            reason: format!("PRIORITY must be 5 bytes, got {}", payload.len()),
         });
     }
     Ok(())

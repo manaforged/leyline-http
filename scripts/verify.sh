@@ -259,6 +259,17 @@ g_semver() {
     ok "semver-checks clean"
 }
 
+g_kani() {
+    step "cargo kani: HPACK integer, HTTP/2 frame header, SETTINGS, stream state and flow-window proofs"
+    if ! command -v cargo-kani >/dev/null; then
+        skip "cargo-kani not installed: cargo install --locked kani-verifier && cargo kani setup"
+        return 0
+    fi
+    (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing --jobs --output-format terse) \
+        || fail "a Kani proof failed"
+    ok "Kani proofs verified"
+}
+
 g_external_types() {
     external_types_nightly="nightly-2026-06-20"
     step "cargo check-external-types leyline-http --features full ($external_types_nightly)"
@@ -436,7 +447,7 @@ g_publish() {
 
 gate_order=(
     comments msrv package
-    fmt clippy features doc book links test live deny semver external-types benches
+    fmt clippy features doc book links test kani live deny semver external-types benches
     subcrates release publish
     fuzz-replay fuzz-timed
 )

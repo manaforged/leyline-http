@@ -37,6 +37,9 @@ const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
 const PING_CHANNEL_CAPACITY: usize = 16;
 
+/// A PING's ACK sender and the time by which the ACK must arrive.
+pub(crate) type Ping = (oneshot::Sender<()>, std::time::Instant);
+
 const SWEEP_PERIOD: std::time::Duration = std::time::Duration::from_millis(100);
 
 const FLUSH_PERIOD: std::time::Duration = std::time::Duration::from_millis(1);
@@ -307,7 +310,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     control_flood: RstFloodDetector,
     config: H2Config,
     command_rx: protocol::CommandRx,
-    ping_rx: mpsc::Receiver<oneshot::Sender<()>>,
+    ping_rx: mpsc::Receiver<Ping>,
     ping_armed: bool,
     closed: Arc<AtomicBool>,
     unanswered_timeout: Arc<AtomicBool>,
@@ -319,7 +322,7 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     stalled: usize,
     output: output::OutputState,
     ping_seq: u64,
-    pings: VecDeque<([u8; 8], oneshot::Sender<()>)>,
+    pings: VecDeque<([u8; 8], oneshot::Sender<()>, std::time::Instant)>,
 }
 
 fn send_err_to_sink(sink: ResponseSink, err: H2Error) {

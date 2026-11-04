@@ -162,3 +162,7 @@ impl StreamState {
         }
     }
 }
+
+#[cfg(kani)]
+#[path = "stream_state_proofs.rs"]
+mod proofs;

@@ -47,6 +47,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 
 ### Changed
 
+- A GET or other idempotent request with a replayable body, on an HTTP/2 connection idle past `http2_ping_after_idle`, is sent right after its liveness PING and does not wait a round trip for the ACK. A missing ACK fails the connection at `http2_ping_timeout`, and the request is resent on a new connection. Other requests still wait for the ACK.
 - BoringSSL is pinned to `5b83e5d`, the revision in Chromium's DEPS at tag `157.0.8103.38`, with six carried patches. The CRL security backport is removed because the fix and its cleanup are included upstream.
 - A browser profile id no longer includes `profiles/bare.toml`, so an edit to the bare profile does not change browser profile ids. A saved session from before this change reports a changed profile id.
 - The bare profile advertises a 64 KiB HTTP/2 maximum frame size.
@@ -83,13 +84,20 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 - The HTTP/2 reader builds with the minimum supported `tokio-util` version.
 - Reject malformed HTTP/2 response fields and invalid or repeated Content-Length fields instead of accepting incomplete metadata. Apply the shared field validation to HTTP/3 responses and trailers.
 - Reject HTTP/2 connections whose server preface does not start with SETTINGS, and server push after acknowledgement of disabled push.
+- An HTTP/2 server that sends `SETTINGS_ENABLE_PUSH` with a value other than 0 fails the connection with PROTOCOL_ERROR, as RFC 9113 section 6.5.2 requires.
+- A malformed PRIORITY frame or a zero WINDOW_UPDATE increment on a stream resets only that stream. These errors closed the whole HTTP/2 connection.
+- Concurrent connections to one host and port share a single DNS lookup, including the HTTP/2 and HTTP/3 legs of `Protocol::Race`.
+- `download_to` syncs its resume checkpoint at most once a second, writes every chunk that is already received in one blocking call, and hashes a saved prefix while the resume request is in flight. A 256 MiB download over loopback on an M-series Mac went from about 54 MiB/s to about 1,250 MiB/s.
+- `download_to` finishes a saved prefix of unknown length when the server answers the resume with 416 and `Content-Range: bytes */N` that equals the prefix. It failed with 416 on every retry.
+- An HTTP/2 RST_STREAM or WINDOW_UPDATE overflow that arrives after END_STREAM no longer discards a streamed body that is still queued for the reader.
 - Benchmark clients use rustls 0.23.46, which fixes certificate decompression, session debug, key-exchange hint, and ECH rejection advisories. Leyline's TLS backend remains BoringSSL.
 - `Session::stats()` counts one HTTP/2 or HTTP/3 checkout per request. It counted again when a request opened a connection.
 - The `Debug` output of a response fingerprint printed the `authorization` and `cookie` values it sent. `Fingerprint` prints them as `***`.
 - A zstd body whose frame declares a window over 8 MiB fails to decode, the limit RFC 9659 sets for the `zstd` coding.
 - Cookie `Expires` dates with an hour over 23, a minute or second over 59, or a year before 1601 are ignored, as RFC 6265 requires.
 - HTTP/2 and HTTP/3 fail a response after 16 informational (1xx) responses, as HTTP/1.1 already did.
-- A padded HTTP/2 DATA frame with no pad length, and an HTTP/1.1 chunk size with a sign or other non-hex characters, are protocol errors.
+- An HTTP/1.1 chunk-size line follows RFC 9112 section 7.1: a sign, non-hex characters, whitespace before the size, or anything other than spaces, tabs or `;` after it is a protocol error.
+- A padded HTTP/2 DATA, HEADERS or PUSH_PROMISE frame too short for its fixed fields is a FRAME_SIZE_ERROR, as RFC 9113 section 4.2 requires; padding longer than the rest of the frame is a PROTOCOL_ERROR.
 - `Response::bytes()` on a streamed response decodes each chunk as it arrives, so a corrupt compressed body fails at its first bad chunk.
 
 ## 0.1.6 - 2026-10-23

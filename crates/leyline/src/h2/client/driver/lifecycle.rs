@@ -77,6 +77,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.take_queued_commands()?;
         self.try_drain_pending()?;
         if tick_fired {
+            self.check_ping_deadlines()?;
             self.sweep_cancelled_streams()?;
             self.check_write_stall()?;
         }
@@ -113,7 +114,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         &mut self,
         frame: Result<Option<Frame>, H2Error>,
     ) -> Result<ControlFlow<()>, H2Error> {
-        let Some(frame) = frame? else {
+        let frame = match frame {
+            Err(err @ H2Error::Stream { stream_id, code }) => {
+                self.reset_stream(stream_id, err, code)?;
+                return Ok(ControlFlow::Continue(()));
+            }
+            other => other?,
+        };
+        let Some(frame) = frame else {
             if self.shutdown_started {
                 return Ok(ControlFlow::Break(()));
             }
@@ -151,6 +159,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     fn take_queued_commands(&mut self) -> Result<(), H2Error> {
+        while let Ok((ack_tx, deadline)) = self.ping_rx.try_recv() {
+            self.on_command(DriverCommand::Ping { ack_tx, deadline })?;
+        }
         for _ in 0..self.command_rx.len() {
             if !self.pending.is_empty() || self.writer.congested() {
                 break;
@@ -199,6 +210,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             } else {
                 self.reset_stream(sid, err, ErrorCode::Cancel)?;
             }
+        }
+        Ok(())
+    }
+
+    fn check_ping_deadlines(&self) -> Result<(), H2Error> {
+        let now = std::time::Instant::now();
+        if self.pings.iter().any(|&(_, _, deadline)| deadline <= now) {
+            return Err(H2Error::Connection {
+                code: ErrorCode::NoError,
+                reason: "the peer did not acknowledge a liveness PING in time".into(),
+            });
         }
         Ok(())
     }

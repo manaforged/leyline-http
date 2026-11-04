@@ -3,6 +3,7 @@
     reason = "test harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
 
+use std::future::Future;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -131,6 +132,121 @@ async fn an_interrupted_download_resumes_after_the_server_sets_a_cookie() {
         .map(|request| request.header("range").map(str::to_owned))
         .collect();
     assert_eq!(ranges, [None, Some(format!("bytes={half}-"))]);
+}
+
+fn resumable_server(full: Vec<u8>) -> impl Fn(&Request) -> Response + Send + Sync + 'static {
+    let half = BODY_LEN / 2;
+    move |request: &Request| match request.header("range") {
+        Some(range) if range == format!("bytes={half}-") => Response::new(206)
+            .header("etag", ETAG)
+            .header(
+                "content-range",
+                format!("bytes {half}-{}/{BODY_LEN}", BODY_LEN - 1),
+            )
+            .body(full[half..].to_vec()),
+        _ => Response::new(200)
+            .header("etag", ETAG)
+            .header("content-length", BODY_LEN.to_string())
+            .body(full[..half].to_vec())
+            .close(),
+    }
+}
+
+#[tokio::test]
+async fn a_resumed_download_checks_the_sha256_of_the_whole_file() {
+    use sha2::{Digest, Sha256};
+
+    let full = body();
+    let good: [u8; 32] = Sha256::digest(&full).into();
+    for (checksum, accepted) in [(good, true), ([7; 32], false)] {
+        let server = Server::http(resumable_server(full.clone())).await.unwrap();
+        let session = builder().build().unwrap();
+        let path = scratch(&format!("sha-{accepted}")).join("file.bin");
+        let url = server.url("/file");
+        session
+            .get(&url)
+            .sha256(checksum)
+            .download_to(&path)
+            .await
+            .unwrap_err();
+        let resumed = session.get(&url).sha256(checksum).download_to(&path).await;
+        assert_eq!(resumed.is_ok(), accepted, "{resumed:?}");
+        assert_eq!(std::fs::read(&path).ok(), accepted.then(|| full.clone()));
+        let ranges = server.requests().await;
+        assert_eq!(
+            ranges.last().unwrap().header("range"),
+            Some(format!("bytes={}-", BODY_LEN / 2).as_str())
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_complete_prefix_of_unknown_length_finishes_on_416() {
+    let server = Server::http(|request: &Request| match request.header("range") {
+        Some("bytes=5-") if request.header("if-range") == Some(ETAG) => Response::new(416)
+            .header("content-range", "bytes */5")
+            .body("range not satisfiable"),
+        _ => Response::new(200)
+            .header("etag", ETAG)
+            .header("transfer-encoding", "chunked")
+            .body("5\r\nhello\r\n")
+            .close(),
+    })
+    .await
+    .unwrap();
+    let session = builder().build().unwrap();
+    let path = scratch("prefix-416").join("file.bin");
+    let url = server.url("/file");
+    session.get(&url).download_to(&path).await.unwrap_err();
+    let written = session.get(&url).download_to(&path).await.unwrap();
+    assert_eq!(written, 5);
+    assert_eq!(std::fs::read(&path).unwrap(), b"hello");
+}
+
+struct SlowResolver {
+    addr: std::net::SocketAddr,
+    calls: Arc<AtomicUsize>,
+}
+
+impl leyline::Resolver for SlowResolver {
+    fn resolve<'a>(
+        &'a self,
+        _host: &'a str,
+        port: u16,
+    ) -> std::pin::Pin<
+        Box<dyn Future<Output = std::io::Result<Vec<std::net::SocketAddr>>> + Send + 'a>,
+    > {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let addr = std::net::SocketAddr::new(self.addr.ip(), port);
+        Box::pin(async move {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            Ok(vec![addr])
+        })
+    }
+}
+
+#[tokio::test]
+async fn concurrent_cold_requests_share_one_dns_lookup() {
+    let server = Server::http(|_: &Request| Response::new(200).body("ok"))
+        .await
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let session = builder()
+        .dns_resolver(Arc::new(SlowResolver {
+            addr: server.addr(),
+            calls: Arc::clone(&calls),
+        }))
+        .build()
+        .unwrap();
+    let url = format!("http://burst.test:{}/", server.addr().port());
+    let requests = (0..8).map(|_| {
+        let session = session.clone();
+        let url = url.clone();
+        async move { session.get(url).send().await.unwrap().text().await.unwrap() }
+    });
+    let bodies = futures_util::future::join_all(requests).await;
+    assert_eq!(bodies, ["ok"; 8]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
