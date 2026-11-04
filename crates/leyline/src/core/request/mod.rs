@@ -10,6 +10,8 @@ mod websocket;
 
 pub use compress::Encoding;
 
+use std::borrow::Borrow;
+
 use http::{HeaderName, HeaderValue, Method};
 
 use crate::profile::{HeaderPosition, RequestKind};
@@ -26,39 +28,6 @@ use crate::core::multipart::Form;
 use crate::core::retry::Retry;
 use crate::core::session::Session;
 use crate::core::transport::ResponseMode;
-
-mod sealed {
-    pub trait Sealed {}
-}
-
-/// Converts a value into a name and value string pair.
-pub trait IntoParamPair: sealed::Sealed {
-    /// Returns the pair as owned strings.
-    fn into_param_pair(self) -> (String, String);
-}
-
-impl<K: AsRef<str>, V: AsRef<str>> sealed::Sealed for (K, V) {}
-impl<K: AsRef<str>, V: AsRef<str>> sealed::Sealed for &(K, V) {}
-
-impl<K, V> IntoParamPair for (K, V)
-where
-    K: AsRef<str>,
-    V: AsRef<str>,
-{
-    fn into_param_pair(self) -> (String, String) {
-        (self.0.as_ref().to_string(), self.1.as_ref().to_string())
-    }
-}
-
-impl<K, V> IntoParamPair for &(K, V)
-where
-    K: AsRef<str>,
-    V: AsRef<str>,
-{
-    fn into_param_pair(self) -> (String, String) {
-        (self.0.as_ref().to_string(), self.1.as_ref().to_string())
-    }
-}
 
 #[doc = include_str!("../../../docs/request.md")]
 #[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
@@ -222,10 +191,12 @@ impl RequestBuilder {
     }
 
     /// Encodes `params` as a URL-encoded form body and sets the matching `content-type`.
-    pub fn form<I, P>(mut self, params: I) -> Self
+    pub fn form<I, K, V>(mut self, params: I) -> Self
     where
-        I: IntoIterator<Item = P>,
-        P: IntoParamPair,
+        I: IntoIterator,
+        I::Item: Borrow<(K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
     {
         let pairs = collect_pairs(params);
         let encoded = encode::url_encode_pairs(&pairs);
@@ -259,13 +230,15 @@ impl RequestBuilder {
     }
 
     /// Appends `params` to the URL query string.
-    pub fn query<I, P>(mut self, params: I) -> Self
+    pub fn query<I, K, V>(mut self, params: I) -> Self
     where
-        I: IntoIterator<Item = P>,
-        P: IntoParamPair,
+        I: IntoIterator,
+        I::Item: Borrow<(K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
     {
         for pair in params {
-            self.draft.query_params.push(pair.into_param_pair());
+            self.draft.query_params.push(param_pair(pair));
         }
         self
     }
@@ -373,13 +346,17 @@ impl RequestBuilder {
 #[path = "mod_tests.rs"]
 mod tests;
 
-fn collect_pairs<I, P>(params: I) -> Vec<(String, String)>
+fn collect_pairs<I, K, V>(params: I) -> Vec<(String, String)>
 where
-    I: IntoIterator<Item = P>,
-    P: IntoParamPair,
+    I: IntoIterator,
+    I::Item: Borrow<(K, V)>,
+    K: AsRef<str>,
+    V: AsRef<str>,
 {
-    params
-        .into_iter()
-        .map(IntoParamPair::into_param_pair)
-        .collect()
+    params.into_iter().map(param_pair).collect()
+}
+
+fn param_pair<K: AsRef<str>, V: AsRef<str>>(pair: impl Borrow<(K, V)>) -> (String, String) {
+    let (key, value) = pair.borrow();
+    (key.as_ref().to_owned(), value.as_ref().to_owned())
 }

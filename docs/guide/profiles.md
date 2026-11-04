@@ -4,7 +4,7 @@ A profile is one TOML file under
 `crates/leyline/profiles/<family>/<version>.toml` that describes one browser
 build: its TLS ClientHello, HTTP/2 SETTINGS, HTTP/3 transport, and
 per-platform identity. Leyline compiles the bundled profiles into the crate
-and `SessionBuilder::identity` selects one. This page lists what ships and where each value comes from, then covers
+and `SessionBuilder::browser` selects one. This page lists what ships and where each value comes from, then covers
 profile stability and your own profiles.
 
 ## Bundled profiles
@@ -141,9 +141,20 @@ The facts behind the bundled profiles, from their captures in
   the same Chromium major (145 to 151), `OPR/<major>.0.0.0`, the `Opera`
   brand in `sec-ch-ua`, and `sec-ch-ua-platform: "Linux"`
   (`opera-<version>-linux-headful-run<n>.json`).
-- **Firefox 159.** Firefox 159.0 captured on macOS and Linux with
-  `--headless` on 2026-10-29 sends the same ClientHello, HTTP/2 frames,
-  header order, and HTTP/3 values as Firefox 158.0. No Windows or session
+- **Chrome 157.** Chrome 157.0.8103.38 on Linux and 157.0.8103.39 on macOS
+  and Windows, captured on 2026-11-04 with `--headless=new` and an explicit
+  Chrome user agent. Vendor package or code signatures were checked. Their
+  TLS and HTTP/2 fields match Chrome 156. Each desktop has two HTTP/3
+  captures. After accounting for shuffled transport parameters and GREASE,
+  their HTTP/3 fields agree except for one Windows capture's optional
+  `initial_rtt` estimate of 42,401 microseconds. The profile omits this
+  optional estimate. No Android or session resumption capture of 157 was
+  taken; those values follow Chrome 156 with the version updated.
+- **Firefox 159.** Firefox 159.0 captured on macOS, Linux, and Windows with
+  `--headless` on 2026-10-29 sends the same ClientHello and HTTP/2 frames
+  as Firefox 158.0. Linux HTTP/3 captures agree on JA4, settings, transport
+  parameters, and pseudo-header order; only one reports control-stream
+  GREASE. The profile retains Firefox 158's GREASE behavior. No session
   resumption capture of 159 exists; those values come from Firefox 158.
 - **Firefox 157.** Firefox 157.0 captured on macOS and Linux with
   `--headless` on 2026-10-04 sends the same ClientHello, HTTP/2 frames, and

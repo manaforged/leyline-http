@@ -12,4 +12,19 @@ cd leyline-http
 cargo test -p leyline-http --features full
 ```
 
-`scripts/verify.sh` runs the same gates as CI.
+## Focused checks
+
+If [cargo-nextest](https://nexte.st/docs/running/) is installed, select the cases that cover the change. For example:
+
+```sh
+CARGO_TARGET_DIR=target/verify cargo nextest run --workspace --locked \
+  --features leyline-http/full,leyline-http/bench-internals \
+  --test h1_failures --test h2_stream_state \
+  --ignore-default-filter --no-tests=fail --retries 0
+```
+
+Change the test targets or add a filter for other contracts. An empty selection fails. This command shares the verification build directory and feature selection. Cold builds and source or dependency changes can require compilation. The script's default sanity pass includes packaging; use the focused command during edits.
+
+## Full qualification
+
+Run `scripts/verify.sh --full` before qualifying a candidate. It includes the transport tests, mixed-failure resource workload, packaging, feature checks, and live checks. Focused checks do not replace full qualification. Run mutation testing against the affected functions and their tests when checking test strength, not as a replacement for either command.

@@ -96,7 +96,9 @@ async fn send(session: &Session, url: &str, count: usize, gap: Duration) {
                 .await
                 .unwrap()
         }));
-        tokio::time::sleep(gap).await;
+        if !gap.is_zero() {
+            tokio::time::sleep(gap).await;
+        }
     }
     for request in requests {
         assert_eq!(&request.await.unwrap()[..], b"ok");

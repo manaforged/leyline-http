@@ -343,26 +343,16 @@ fn lines(head: &[u8]) -> impl Iterator<Item = &[u8]> {
     })
 }
 
-fn parse<S: Sink>(head: &[u8], sink: &mut S) -> Result<(u16, u8), Error> {
-    let mut lines = lines(head);
-    let status_line = lines
-        .next()
-        .ok_or_else(|| malformed("missing HTTP/1.1 status line"))?;
-    let shown = || String::from_utf8_lossy(status_line);
-    let mut parts = status_line.splitn(3, |&b| b == b' ');
+fn status_line(line: &[u8]) -> Result<(u16, u8), Error> {
+    let shown = || String::from_utf8_lossy(line);
+    let mut parts = line.splitn(3, |&b| b == b' ');
     let version = parts.next().unwrap_or_default();
-    if !version.starts_with(b"HTTP/1.") {
-        return Err(malformed(format!(
-            "invalid HTTP/1.1 status line: {}",
-            shown()
-        )));
-    }
-    let minor = match version.get(7) {
-        Some(b'0') => 0,
-        Some(b'1') => 1,
+    let minor = match version {
+        b"HTTP/1.0" => 0,
+        b"HTTP/1.1" => 1,
         _ => {
             return Err(malformed(format!(
-                "unknown HTTP/1.x minor version in status line: {}",
+                "invalid HTTP/1.x status line: {}",
                 shown()
             )));
         }
@@ -374,11 +364,21 @@ fn parse<S: Sink>(head: &[u8], sink: &mut S) -> Result<(u16, u8), Error> {
         [a @ b'1'..=b'9', b @ b'0'..=b'9', c @ b'0'..=b'9'] => {
             u16::from(a - b'0') * 100 + u16::from(b - b'0') * 10 + u16::from(c - b'0')
         }
-        _ => String::from_utf8_lossy(code)
-            .parse::<u16>()
-            .map_err(|e| malformed(format!("invalid HTTP status code: {e}")))?,
+        _ => {
+            return Err(malformed(
+                "HTTP status code must contain exactly three digits",
+            ));
+        }
     };
+    Ok((status, minor))
+}
 
+fn parse<S: Sink>(head: &[u8], sink: &mut S) -> Result<(u16, u8), Error> {
+    let mut lines = lines(head);
+    let first = lines
+        .next()
+        .ok_or_else(|| malformed("missing HTTP/1.1 status line"))?;
+    let (status, minor) = status_line(first)?;
     for line in lines {
         match line.first() {
             None => continue,

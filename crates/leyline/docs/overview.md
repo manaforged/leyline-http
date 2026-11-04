@@ -1,10 +1,11 @@
 Leyline is an async HTTP client for Rust that sends the TLS, HTTP/2, HTTP/3, and header fingerprints of real browsers, from captures of shipped Chrome, Firefox, and Safari builds.
 
-Four types do the everyday work. Everything else is a setter on the session or the request, or a value one of them takes.
+Five types cover everyday requests and browsing. Configure them with setters and typed values.
 
 | Type | Get one with | Use it to |
 | --- | --- | --- |
 | `Session` | `Session::new()`, `Session::from(browser)`, `Session::builder()...build()?` | Send requests, and save the session to a file. Clones share the connections and the cookies. The builder's `browser`, `platform`, `languages`, `hello`, and `profile` choose what the server sees |
+| `Tab` | `session.tab()` | Open and follow pages, and submit forms with the page context |
 | `RequestBuilder` | `session.get(url)`, `post`, `put`, `patch`, `delete`, `head` | Add headers, a body, or a timeout, then `send().await?` |
 | `Response` | `send().await?` | Read the status and headers, then `text`, `json`, `bytes`, or `download_to(path)` |
 | `Error` | any `?` | `err.kind()` says what failed |

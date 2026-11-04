@@ -168,6 +168,15 @@ name = "it"
 path = "tests/it/main.rs"
 
 [[test]]
+name = "h1_failures"
+path = "tests/it/h1_failures.rs"
+
+[[test]]
+name = "h2_stream_state"
+path = "tests/it/h2_stream_state.rs"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "tls_trust_scope"
 required-features = ["bench-internals"]
 

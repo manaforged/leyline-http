@@ -178,9 +178,9 @@ pub use http;
 pub use url::Url;
 
 pub use crate::core::{
-    Attempt, Block, Body, Encoding, Error, HostLimits, IntoParamPair, IntoUrl, Kind, Link,
-    Protocol, Proxy, Purpose, Redirect, RequestBuilder, Response, Result, Retry, Robots,
-    RobotsSource, Session, SessionBuilder, Stats, Tab, Timeout, relay_headers,
+    Attempt, Block, Body, Encoding, Error, HostLimits, IntoUrl, Kind, Link, Protocol, Proxy,
+    Purpose, Redirect, RequestBuilder, Response, Result, Retry, Robots, RobotsSource, Session,
+    SessionBuilder, Stats, Tab, Timeout, relay_headers,
 };
 pub(crate) use crate::core::{BodyStream, FetchSite, ResponseTiming};
 #[cfg(feature = "html")]

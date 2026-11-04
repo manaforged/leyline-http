@@ -54,5 +54,8 @@ let again = Session::load("session.json")?.build()?;
 
 ## Read next
 
+- [Breaking changes and upgrades](UPGRADE.md): migration steps and old-to-new API names, grouped by release
+- [Changelog](CHANGELOG.md): release changes and links to migration instructions
+
 - [API reference](https://docs.rs/leyline-http): every public item
 - [User guide](https://manaforged.github.io/leyline-http/): one page per task

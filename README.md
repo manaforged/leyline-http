@@ -56,6 +56,8 @@ include all four workloads, CPU cost, confidence intervals, and limitations.
 
 ## Documentation
 
+- [Upgrading from 0.1 to 0.2](UPGRADE.md)
+
 - [API reference](https://docs.rs/leyline-http)
 - [User guide](https://manaforged.github.io/leyline-http/)
 - [For coding agents](https://github.com/manaforged/leyline-http/blob/main/AGENTS.md)

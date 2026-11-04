@@ -213,15 +213,18 @@ g_book() {
 g_links() {
     step "lychee --offline (README, docs, crate pages)"
     command -v lychee >/dev/null || fail "lychee not found (cargo install --locked lychee)"
-    lychee --offline --no-progress README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md \
+    lychee --offline --no-progress README.md CHANGELOG.md UPGRADE.md CONTRIBUTING.md SECURITY.md \
         BENCHMARKS.md AGENTS.md docs crates/leyline/docs || fail "broken links"
     ok "links resolve"
 }
 
 g_test() {
-    step "cargo test --workspace --exclude leyline-quiche"
-    cargo test --workspace --exclude leyline-quiche \
+    step "cargo test --workspace"
+    cargo test --workspace --locked \
         --features leyline-http/full,leyline-http/bench-internals || fail "tests failed"
+    step "mixed-failure resource qualification"
+    cargo test -p leyline-http --locked --features full,bench-internals --test soak -- --ignored \
+        || fail "mixed-failure resource qualification failed"
     ok "tests pass"
 }
 

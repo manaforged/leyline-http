@@ -60,7 +60,7 @@ impl FrameReader {
 
     fn poll_fill<R: AsyncRead + Unpin + ?Sized>(
         &mut self,
-        io: &mut R,
+        mut io: &mut R,
         cx: &mut Context<'_>,
         want: usize,
     ) -> Poll<Result<bool, H2Error>> {
@@ -68,7 +68,7 @@ impl FrameReader {
             let slack = if want > BULK_AT { BULK_SLACK } else { SLACK };
             self.buf.reserve(want - self.buf.len() + slack);
             let n = ready!(tokio_util::io::poll_read_buf(
-                Pin::new(&mut *io),
+                Pin::new(&mut io),
                 cx,
                 &mut self.buf
             ))

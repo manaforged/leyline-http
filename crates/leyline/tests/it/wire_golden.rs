@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use std::net::SocketAddr;
 
+use futures_util::StreamExt;
 use leyline::{Browser, Platform, Resolver, Session, Tls};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -26,6 +27,7 @@ const END_HEADERS: u8 = 0x4;
 const SERVER_SETTINGS: [u8; 18] = [0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0];
 const ORIGIN: &str = "origin.test";
 const WAIT: Duration = Duration::from_secs(3);
+const CAPTURE_CONCURRENCY: usize = 8;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
@@ -42,8 +44,8 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
                     .map(|_| (browser, platform))
             })
     });
-    let rendered: String = futures_util::future::join_all(cases.map(|(browser, platform)| {
-        tokio::spawn(async move {
+    let rendered: String = futures_util::stream::iter(cases)
+        .map(|(browser, platform)| async move {
             let hello = client_hello(browser, platform).await;
             let hello: String = if browser.profile().tls.permute_extensions {
                 hello
@@ -57,11 +59,10 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
             let opening = h2_opening(browser, platform).await;
             format!("== {} {platform:?}\n{hello}{opening}", browser.id())
         })
-    }))
-    .await
-    .into_iter()
-    .map(Result::unwrap)
-    .collect();
+        .buffered(CAPTURE_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await
+        .concat();
     if std::env::var_os("LEYLINE_BLESS").is_some() {
         std::fs::write(GOLDEN, &rendered).unwrap();
         return;

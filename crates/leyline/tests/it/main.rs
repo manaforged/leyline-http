@@ -43,7 +43,6 @@ mod fingerprint_conformance;
 mod forms_and_relay;
 mod future_size;
 mod h1_error_body;
-mod h1_failures;
 #[cfg(feature = "bench-internals")]
 mod h2_backpressure;
 #[cfg(feature = "bench-internals")]
@@ -96,8 +95,6 @@ mod h2_shutdown_streaming_e2e;
 mod h2_stream_delivery;
 #[cfg(feature = "bench-internals")]
 mod h2_stream_lifecycle;
-#[cfg(feature = "bench-internals")]
-mod h2_stream_state;
 #[cfg(feature = "bench-internals")]
 mod h2_write_batching;
 mod h3_body_cap;

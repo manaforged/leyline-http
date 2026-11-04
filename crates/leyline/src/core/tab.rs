@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::sync::{Arc, Mutex};
 
 use http::Method;
@@ -5,7 +6,7 @@ use url::Url;
 
 use crate::core::error::{Error, Kind, Result};
 use crate::core::into_url::IntoUrl;
-use crate::core::request::{IntoParamPair, RequestBuilder};
+use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
 use crate::core::session::Session;
 use crate::profile::RequestKind;
@@ -93,10 +94,12 @@ impl Tab {
     }
 
     /// Posts `fields` as a URL-encoded form to `url` and navigates the tab to the response.
-    pub async fn submit<I, P>(&self, url: impl IntoUrl, fields: I) -> Result<Response>
+    pub async fn submit<I, K, V>(&self, url: impl IntoUrl, fields: I) -> Result<Response>
     where
-        I: IntoIterator<Item = P>,
-        P: IntoParamPair,
+        I: IntoIterator,
+        I::Item: Borrow<(K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
     {
         let builder = self
             .request(Method::POST, url, RequestKind::FormNavigate)
