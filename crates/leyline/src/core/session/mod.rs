@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 mod builder;
+mod cache;
 pub(crate) mod decompress;
 pub(crate) mod execute;
 mod guard;
@@ -80,6 +81,7 @@ pub(crate) struct SessionInner {
     header_order: Option<Vec<String>>,
     default_headers: Vec<(String, HeaderStr)>,
     bearer: Option<builder::BearerToken>,
+    cache: Option<Arc<cache::Cache>>,
     proxy_config: Proxy,
     proxy_shown: Option<String>,
     timeouts: Timeout,

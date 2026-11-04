@@ -1,3 +1,5 @@
+mod statuses;
+
 #[cfg(feature = "websocket")]
 use std::future::Future;
 use std::sync::Arc;
@@ -11,7 +13,7 @@ pub(crate) use super::host_gate::HostPass;
 use super::host_gate::{Count, Gates, HostGate, acquire};
 pub(crate) use super::origin::Origin;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
 struct Rule {
     max_in_flight: Option<usize>,
     interval: Option<Duration>,
@@ -37,7 +39,7 @@ impl Rule {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum HostPattern {
     Exact(String),
     Subdomains(String),
@@ -64,7 +66,7 @@ impl HostPattern {
 }
 
 /// Per-host concurrency, rate, and pause limits for a session or crawl.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 #[must_use]
 pub struct HostLimits {
@@ -72,12 +74,14 @@ pub struct HostLimits {
     overrides: Vec<(HostPattern, Rule)>,
     max_total: Option<usize>,
     pause: Pause,
+    #[serde(skip)]
     gates: Arc<Gates>,
     floors: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Pause {
+    #[serde(with = "statuses")]
     statuses: Vec<http::StatusCode>,
     invalid: Option<u16>,
     default: Duration,
@@ -185,6 +189,18 @@ impl HostLimits {
     }
 
     pub(crate) fn config_error(&self) -> Option<String> {
+        let invalid_count = |count: Option<usize>| {
+            count.is_some_and(|count| count == 0 || count > tokio::sync::Semaphore::MAX_PERMITS)
+        };
+        if invalid_count(self.max_total)
+            || invalid_count(self.rule.max_in_flight)
+            || self
+                .overrides
+                .iter()
+                .any(|(_, rule)| invalid_count(rule.max_in_flight))
+        {
+            return Some("host concurrency limit is outside the supported range".into());
+        }
         self.pause
             .invalid
             .map(|code| format!("HostLimits::pause_on: {code} is not a valid HTTP status code"))
@@ -211,6 +227,14 @@ impl HostLimits {
         let now = Instant::now();
         let end = now.checked_add(length).unwrap_or(now);
         self.gates.gate(origin, rule.max_in_flight).pause_until(end);
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn pause_until(&self, origin: Origin, until: Instant) {
+        let rule = self.rule_for(&origin.host);
+        self.gates
+            .gate(origin, rule.max_in_flight)
+            .pause_until(until);
     }
 
     pub(crate) fn is_unlimited(&self) -> bool {

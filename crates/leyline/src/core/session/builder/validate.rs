@@ -10,6 +10,11 @@ use super::SessionBuilder;
 impl SessionBuilder {
     pub(super) fn validate(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
         self.check_config()?;
+        if self.refresh_token.is_some() && (self.bearer.is_none() || self.base_url.is_none()) {
+            return Err(Error::config(
+                "refresh_token requires bearer_auth and base_url",
+            ));
+        }
         self.check_proxy_pool()?;
         self.resolve_platform();
         #[cfg(feature = "http3")]

@@ -52,6 +52,13 @@ impl Session {
         if self.inner.https_only && req.url.scheme() != "https" {
             return Err(Error::config("https_only session rejected non-HTTPS URL"));
         }
+        match &self.inner.cache {
+            Some(cache) => self.send_cached(req, cache).await,
+            None => self.send_transport(req).await,
+        }
+    }
+
+    pub(super) async fn send_transport(&self, req: Prepared<'_>) -> Result<TransportResponse> {
         let pool = &self.inner.pool;
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;

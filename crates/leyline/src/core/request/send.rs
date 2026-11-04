@@ -183,7 +183,7 @@ async fn run_attempts(
 }
 
 impl Draft {
-    fn again(&self, body: Body, headers: HeaderList) -> Box<Draft> {
+    pub(super) fn again(&self, body: Body, headers: HeaderList) -> Box<Draft> {
         Box::new(Draft {
             method: self.method.clone(),
             url: self.url.clone(),
@@ -208,6 +208,7 @@ impl Draft {
             body_rules: self.body_rules,
             deadline: self.deadline,
             response: self.response,
+            download: None,
         })
     }
 }

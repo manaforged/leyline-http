@@ -1,4 +1,4 @@
-use std::hash::{DefaultHasher, Hash, Hasher};
+use sha2::{Digest, Sha256};
 
 use http::HeaderMap;
 use url::Url;
@@ -174,6 +174,7 @@ impl Crawl {
     }
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct Held {
     own: String,
     claimed: Option<String>,
@@ -186,9 +187,15 @@ fn uses_ai(purpose: Purpose) -> bool {
 }
 
 fn fingerprint(text: &str) -> u64 {
-    let mut hasher = DefaultHasher::new();
+    let mut hasher = Sha256::new();
     for word in text.split_whitespace() {
-        word.hash(&mut hasher);
+        hasher.update((word.len() as u64).to_be_bytes());
+        hasher.update(word.as_bytes());
     }
-    hasher.finish()
+    let hash = hasher.finalize();
+    u64::from_be_bytes(
+        hash[..8]
+            .try_into()
+            .expect("invariant: SHA-256 has at least eight bytes"),
+    )
 }

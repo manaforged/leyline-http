@@ -47,7 +47,7 @@ pub use crawl::{Crawl, Page, Respect, Scope, SkipReason};
 pub use error::{Error, Kind, Result};
 pub(crate) use fetch_site::FetchSite;
 pub use into_url::IntoUrl;
-pub use request::{Encoding, RequestBuilder};
+pub use request::{Encoding, Event, Events, RequestBuilder};
 
 pub(crate) use response::ResponseTiming;
 #[cfg(feature = "bench-internals")]

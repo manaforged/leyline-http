@@ -1,3 +1,4 @@
+mod checkpoint;
 mod clock;
 mod fetch;
 mod frontier;
@@ -59,7 +60,7 @@ enum Event {
 }
 
 /// Which site signals a crawl obeys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Respect {
     /// Obeys robots.txt rules and noindex directives.
@@ -111,11 +112,17 @@ fn polite_limits() -> HostLimits {
 impl Session {
     /// Starts a lazy crawl from `seed`, resolved against the session's base URL, that respects robots.txt by default.
     pub fn crawl(&self, seed: impl IntoUrl) -> Crawl {
+        Crawl::new(self, vec![seed.into_url_with_base(self.base_url())])
+    }
+}
+
+impl Crawl {
+    fn new(session: &Session, seeds: Vec<Result<Url>>) -> Self {
         Crawl {
-            session: self.clone(),
+            session: session.clone(),
             limits: None,
             pace: HostLimits::new(),
-            seeds: vec![seed.into_url_with_base(self.base_url())],
+            seeds,
             respect: Some(Respect::Robots),
             agent: ANY_AGENT.to_owned(),
             max_body: None,

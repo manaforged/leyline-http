@@ -65,6 +65,8 @@ pub struct SessionBuilder {
     config_error: Option<String>,
     default_headers: Vec<(String, String)>,
     bearer: Option<BearerToken>,
+    refresh_token: Option<bearer::Callback>,
+    cache: usize,
     http_identity: Option<Browser>,
     tls_trust: Tls,
     default_retry: crate::core::retry::Retry,
@@ -106,6 +108,8 @@ impl SessionBuilder {
             config_error: None,
             default_headers: Vec::new(),
             bearer: None,
+            refresh_token: None,
+            cache: 0,
             http_identity: None,
             tls_trust: Tls::default(),
             default_retry: crate::core::retry::Retry::new(0),
@@ -135,6 +139,12 @@ impl SessionBuilder {
     /// Sets the default timeouts for every request.
     pub fn timeout(mut self, config: impl Into<Timeout>) -> Self {
         self.timeouts = config.into();
+        self
+    }
+
+    /// Enables a private in-memory HTTP cache with a byte budget; zero disables caching.
+    pub fn cache(mut self, bytes: usize) -> Self {
+        self.cache = bytes;
         self
     }
 

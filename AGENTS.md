@@ -1,6 +1,6 @@
 # leyline-http for coding agents
 
-Point your coding agent at this file when it writes code that uses Leyline. Leyline is an async HTTP client for Rust that sends the TLS, HTTP/2, HTTP/3, and header fingerprints of real browsers. The package is `leyline-http`, and the library is `leyline`.
+Point your coding agent at this file when it writes code that uses Leyline. Leyline is an async HTTP client for Rust with sessions, crawling, resumable downloads, and optional browser impersonation. The package is `leyline-http`, and the library is `leyline`.
 
 ## Install
 
@@ -18,7 +18,7 @@ The first build compiles BoringSSL and needs a C and C++ compiler and `git`.
 
 | Type | Use it to |
 | --- | --- |
-| `Session` | Send requests. Build one per browser and clone it; clones share connections and cookies. `Session::builder()` sets `browser`, `platform`, `languages`, `hello`, and `profile`. Edge and Opera are `Browser` variants |
+| `Session` | Send requests. Build one per account or application and clone it; clones share connections and cookies. `Session::builder()` sets `browser`, `platform`, `languages`, `hello`, and `profile`. Edge and Opera are `Browser` variants |
 | `Tab` | Browse like one tab: `open` and `follow` pages, `submit` and `submit_form` forms with the page as referer |
 | `RequestBuilder` | Add headers, a body, or a timeout to one request, then `send().await?` |
 | `Response` | Read the status and headers, then `text`, `json`, `bytes`, or `download_to` |
@@ -51,6 +51,11 @@ let again = Session::load("session.json")?.build()?;
 - Match on `err.kind()` or a predicate such as `err.is_retryable()`. Do not parse the error message.
 - Use `session.tab()` when requests belong to a page: each request after `open` sends the current page as its `from_page`, so its headers match the kind of request.
 - Use `session.save(path)` and `Session::load(path)` to keep cookies and the identity across runs.
+- Enable a bounded HTTP cache with `Session::builder().cache(bytes)`; clones share it, and `session.clear_cache()` empties it.
+- Call `request.download_to(path).await?` to resume a download with a strong ETag; `sha256` and `progress` configure verification and reporting.
+- Call `request.events()?` for parsed server-sent events, then await `next()`; `retry` bounds reconnections.
+- Pair `bearer_auth` and `base_url` with `refresh_token` to share an asynchronous token refresh after a 401.
+- Use `crawl.save(path).await?` and `Crawl::load(&session, path)?` to resume pending pages and duplicate history.
 
 ## Read next
 

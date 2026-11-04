@@ -185,11 +185,11 @@ impl Session {
             .iter()
             .map(|(k, v)| (k.as_str(), HeaderStr::from_static(v.as_str())))
             .chain(defaults[..slot].iter().map(pair))
-            .chain(bearer.map(|b| (AUTHORIZATION.as_str(), HeaderStr::from(b.value.as_str()))))
+            .chain(bearer.map(|b| (AUTHORIZATION.as_str(), b.value())))
             .chain(defaults[slot..].iter().map(pair))
     }
 
-    fn bearer_in_scope(&self, target: &Url) -> bool {
+    pub(in crate::core::session) fn bearer_in_scope(&self, target: &Url) -> bool {
         self.inner
             .base_url
             .as_ref()

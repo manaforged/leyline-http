@@ -20,6 +20,12 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 
 ### Added
 
+- Resumable `RequestBuilder::download_to`, strong ETag checks, SHA-256 verification, and download progress callbacks.
+- An opt-in, bounded HTTP cache with conditional revalidation, `Vary` matching, and mutation invalidation.
+- `RequestBuilder::events`, `Events`, and `Event` for parsed SSE with `Last-Event-ID` recovery. The retry policy bounds reconnects in a row; each delivered event resets the count.
+- `SessionBuilder::refresh_token` shares an asynchronous bearer-token refresh after concurrent 401 responses, scoped to the base URL origin.
+- `Crawl::save` and `Crawl::load` preserve pending and buffered pages, duplicate history, crawl policies, and retry waits.
+- `HostLimits`, `Page`, `Respect`, `Scope`, and `SkipReason` implement serde `Serialize` and `Deserialize`.
 - A Chrome 157 profile, `Browser::Chrome157`, from Chrome 157.0.8103.38 on Linux and 157.0.8103.39 on macOS and Windows, with TCP and HTTP/3 captures for each desktop.
 - Edge and Opera are `Browser` variants: `Browser::Edge145` to `Browser::Edge157`, and `Browser::Opera129` to `Browser::Opera139`, on the Chrome captures. `Browser::all()` lists them.
 - A Firefox 159 profile, `Browser::Firefox159`, from captures of Firefox 159.0 on macOS, Linux, and Windows.

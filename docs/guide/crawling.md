@@ -691,6 +691,52 @@ Pin the combined stream with `std::pin::pin!` before you call `.next()`.
 Stream large bodies with `download_to` or `write_to`, so only one chunk is in
 memory.
 
+## Save and resume a crawl
+
+`save(path).await` stops scheduling new work, drains the current fetches, and
+writes an atomic checkpoint. Cancelling before its blocking write starts prevents
+the write; once that atomic write starts, it finishes. The crawl can then continue
+in memory or be dropped
+and loaded with a supplied session:
+
+```rust,no_run
+use leyline::{Crawl, Session};
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::new();
+let mut crawl = session.crawl("https://docs.example/");
+if let Some(page) = crawl.next().await {
+    let page = page?;
+    println!("{}", page.url());
+}
+crawl.save("crawl.json").await?;
+drop(crawl);
+
+let mut crawl = Crawl::load(&session, "crawl.json")?;
+while let Some(page) = crawl.next().await {
+    println!("{}", page?.url());
+}
+# Ok(())
+# }
+```
+
+The checkpoint retains queued URLs, fetched pages not yet yielded, URL and
+text duplicate history, canonical-page dependencies, scope, respect policy,
+agent, page and body limits, host limits, pending sitemaps, counters, and retry
+waits. Limits and counters are cumulative across restarts. Robots.txt is read
+again before new requests, rather than trusting a saved copy.
+
+A saved page is not fetched again. A crash after processing a page but before
+saving a newer checkpoint can replay that work; make downstream writes
+idempotent. Drain buffered crawl errors through `next()` before saving; otherwise
+`save` returns an error and leaves the old checkpoint intact.
+
+Checkpoints are versioned JSON with a 64 MiB size limit, written with mode 0600
+on Unix. They contain URLs and page bodies, so treat them as account data and
+load only files your application wrote. They do not save cookies or application
+callbacks. Use `Session::save` separately and supply the restored session to
+`Crawl::load` when the crawl requires an account.
+
 ## Next
 
 Read [Accounts](accounts.md).

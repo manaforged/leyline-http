@@ -55,9 +55,13 @@ impl Session {
         let redirect_cap = redirect_policy.max_redirects_hint();
         let mut pass = None;
         let mut answered = false;
+        let mut refreshed = false;
         loop {
             drop(pass.take());
             pass = self.admit_host(&journey.url).await;
+            let refresh = self
+                .refresh_version(&journey, digest.as_ref())
+                .filter(|_| !refreshed);
             let headers = self.leg_headers(&journey, preset, header_order);
             journey.authorized = None;
             let audit_headers = self.audit_copy(&headers);
@@ -102,6 +106,24 @@ impl Session {
             #[cfg(not(feature = "http3"))]
             let _ = alt_svc;
 
+            if leg.status == http::StatusCode::UNAUTHORIZED
+                && let Some(version) = refresh
+                && replay_body.is_some()
+            {
+                let token = self
+                    .inner
+                    .bearer
+                    .as_ref()
+                    .expect("invariant: refresh version requires bearer auth");
+                drop(leg);
+                self.unless_shut_down(deadline.total(token.renew(version)))
+                    .await?;
+                journey.body =
+                    replay_body.expect("invariant: replayable body checked before refresh");
+                refreshed = true;
+                continue;
+            }
+
             let next = Turn {
                 code: leg.status.as_u16(),
                 headers: &leg.headers,
@@ -122,6 +144,22 @@ impl Session {
             }
             return Ok(response);
         }
+    }
+
+    pub(crate) fn download_key(&self, draft: &Draft) -> Result<[u8; 32]> {
+        use sha2::{Digest, Sha256};
+        let url = draft
+            .url
+            .as_ref()
+            .expect("invariant: download prepares its URL");
+        let headers: Vec<_> = draft
+            .headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_bytes()))
+            .collect();
+        let bytes = serde_json::to_vec(&(url.as_str(), headers, self.profile_id()))
+            .map_err(Error::from_json)?;
+        Ok(Sha256::digest(bytes).into())
     }
 
     fn session_referer(&self) -> Option<&str> {

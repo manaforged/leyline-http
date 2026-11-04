@@ -1,6 +1,6 @@
 [package]
 name = "leyline-http"
-description = "HTTP client that impersonates Chrome, Firefox, and Safari on the wire: TLS (JA3/JA4), HTTP/2, and HTTP/3 fingerprints"
+description = "Async HTTP client with sessions, crawling, resumable downloads, and browser impersonation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -76,6 +76,7 @@ html = ["multipart"]
 full = ["default", "tower", "socks"]
 
 [dependencies]
+http-cache-semantics = { version = "2.1", default-features = false }
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
 leyline-quiche = { workspace = true, optional = true }

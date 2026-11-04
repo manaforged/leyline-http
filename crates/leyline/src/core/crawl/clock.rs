@@ -20,7 +20,7 @@ pub(super) struct Clock {
     pub(super) stopped: Option<crate::core::session::shutdown::Stopped>,
     alarm: Option<Pin<Box<Sleep>>>,
     alarm_at: Option<Instant>,
-    delayed: Vec<(Instant, Queued)>,
+    pub(super) delayed: Vec<(Instant, Queued)>,
 }
 
 impl Crawl {

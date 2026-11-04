@@ -1,6 +1,8 @@
 One request, built from a [`Session`](crate::Session) and sent with [`send`](crate::RequestBuilder::send).
 
-Request setters override the session for this request only. Nothing is sent until `send().await`.
+Request setters override the session for this request only. Sending is lazy.
+
+`download_to(path).await` sends and saves a resumable download. `events()` returns a lazy SSE stream; awaiting its `next()` sends the request.
 
 ```rust,no_run
 use std::time::Duration;

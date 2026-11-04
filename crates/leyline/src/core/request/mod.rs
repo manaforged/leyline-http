@@ -2,7 +2,10 @@
 mod compress;
 mod context;
 mod debug;
+mod download;
 mod encode;
+mod events;
+pub use events::{Event, Events};
 mod route;
 mod send;
 #[cfg(feature = "websocket")]
@@ -60,6 +63,7 @@ pub(crate) struct Draft {
     pub(crate) body_rules: BodyRules,
     pub(crate) deadline: Deadline,
     pub(crate) response: ResponseMode,
+    download: Option<Box<download::Download>>,
 }
 
 fn default_preset(session: &Session, method: &Method) -> Option<RequestKind> {
@@ -102,6 +106,7 @@ impl RequestBuilder {
                 trusted_origin: None,
                 label: None,
                 status_errors: false,
+                download: None,
                 body_rules: session.body_rules(),
                 deadline: Deadline::default(),
                 response: ResponseMode::Buffered,

@@ -22,6 +22,7 @@ Every target starts with `leyline`.
 | `leyline::profile` | Profile load warnings, for example a missing `captured_against` |
 | `leyline::digest` | Digest authentication |
 | `leyline::trace` | `Log`: one summary per request, the end of each streamed body, and the request phases |
+| `leyline::cache` | A response reused from the session cache |
 
 With a subscriber that reads `RUST_LOG`, this filter shows one line per
 request and the warnings from the rest of the crate. Use

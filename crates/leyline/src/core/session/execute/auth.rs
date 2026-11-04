@@ -93,6 +93,29 @@ impl DigestLeg {
     }
 }
 
+impl super::Session {
+    pub(super) fn refresh_version(
+        &self,
+        journey: &Journey,
+        digest: Option<&DigestLeg>,
+    ) -> Option<u64> {
+        if digest.is_some() {
+            return None;
+        }
+        let version = self.inner.bearer.as_ref()?.version()?;
+        if journey.tainted
+            || !self.bearer_in_scope(&journey.url)
+            || journey
+                .extra
+                .as_ref()
+                .is_some_and(|headers| headers.get("authorization").is_some())
+        {
+            return None;
+        }
+        Some(version)
+    }
+}
+
 fn in_scope(journey: &Journey) -> bool {
     journey.chain.is_empty() || journey.origin_of(&journey.url) == journey.original_origin()
 }

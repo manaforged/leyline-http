@@ -7,10 +7,14 @@ use url::Url;
 use crate::util::redact;
 
 /// A fetched HTML page that a crawl yields.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Page {
     url: Url,
     depth: usize,
+    #[serde(
+        serialize_with = "status_serialize",
+        deserialize_with = "status_deserialize"
+    )]
     status: StatusCode,
     html: String,
     text: String,
@@ -83,7 +87,7 @@ impl Page {
 }
 
 /// Why a crawl skipped a URL.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum SkipReason {
     /// Robots.txt disallows the URL.
@@ -127,12 +131,26 @@ impl SkipReason {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(crate) struct CrawlStats {
     requests: u64,
     pages: u64,
     errors: u64,
     skipped: HashMap<SkipReason, u64>,
+}
+
+fn status_serialize<S: serde::Serializer>(
+    status: &StatusCode,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_u16(status.as_u16())
+}
+
+fn status_deserialize<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<StatusCode, D::Error> {
+    let code = <u16 as serde::Deserialize>::deserialize(deserializer)?;
+    StatusCode::from_u16(code).map_err(serde::de::Error::custom)
 }
 
 impl CrawlStats {
@@ -153,18 +171,19 @@ impl CrawlStats {
     }
 
     pub(super) fn request(&mut self) {
-        self.requests += 1;
+        self.requests = self.requests.saturating_add(1);
     }
 
     pub(super) fn page(&mut self) {
-        self.pages += 1;
+        self.pages = self.pages.saturating_add(1);
     }
 
     pub(super) fn error(&mut self) {
-        self.errors += 1;
+        self.errors = self.errors.saturating_add(1);
     }
 
     pub(super) fn skip(&mut self, reason: SkipReason) {
-        *self.skipped.entry(reason).or_default() += 1;
+        let count = self.skipped.entry(reason).or_default();
+        *count = count.saturating_add(1);
     }
 }

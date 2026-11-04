@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::profile::preset::{HeaderContext, HeaderPlan};
 use crate::tls::FingerprintConnector;
 
+use super::super::cache::Cache;
 use super::super::{Session, SessionInner};
 use super::SessionBuilder;
 use super::derive::DerivedIdentity;
@@ -43,7 +44,10 @@ impl SessionBuilder {
                     .into_iter()
                     .map(|(name, value)| (name, crate::header_str::HeaderStr::from(value)))
                     .collect(),
-                bearer: self.bearer,
+                bearer: self
+                    .bearer
+                    .map(|token| token.refreshing(self.refresh_token)),
+                cache: (self.cache > 0).then(|| Arc::new(Cache::new(self.cache))),
                 proxy_shown: self.proxy_config.primary().map(crate::util::redact),
                 proxy_config: self.proxy_config,
                 timeouts: self.timeouts,

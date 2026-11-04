@@ -1,12 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 
 use tokio::io::AsyncWriteExt;
 
 use super::Response;
 use crate::core::error::{Error, Result};
-use crate::util::atomic;
+use crate::util::atomic::{self, CallerWaits};
 
 struct PartialFile {
     path: PathBuf,
@@ -29,20 +29,6 @@ impl Drop for PartialFile {
         if self.armed {
             drop(std::fs::remove_file(&self.path));
         }
-    }
-}
-
-struct CallerWaits(Arc<AtomicBool>);
-
-impl Default for CallerWaits {
-    fn default() -> Self {
-        Self(Arc::new(AtomicBool::new(true)))
-    }
-}
-
-impl Drop for CallerWaits {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
     }
 }
 
