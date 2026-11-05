@@ -57,63 +57,100 @@ is retained rather than changing either fingerprint for the benchmark.
 
 ### General clients over HTTP/2
 
-A separate three-run comparison disabled browser profiles and required identical
-request-header values, the same verified TLS connection setup, and a 30-second
-request timeout. Each run again used four alternating-order rounds.
+Three independent runs used four alternating-order rounds each, bare profiles,
+identical request-header values, certificate verification against a local test
+CA, a 10-byte response, and a 30-second request timeout. The CPU frequency
+governor was set to `performance`. Leyline is commit `e7379f27`. `Leyline` is the
+default layout: one multi-threaded Tokio runtime and one shared session.
+`Leyline, one runtime per core` is the same client run through
+`SessionBuilder::run_per_core`; for HTTP/2 the harness caps its runtime count at
+the connection count, so every client holds the stated number of connections.
+
+Requests per second, medians over 12 observations:
 
 | Client | Sequential | 1 conn, 64 streams | 8 conns, 8 in flight | 8 conns, 256 in flight |
 | --- | ---: | ---: | ---: | ---: |
-| Leyline | 51,725 | 203,610 | 274,678 | 1,369,390 |
-| hyper-util client | 42,763 | 178,928 | 256,870 | 1,120,893 |
-| reqwest | 34,921 | 177,875 | 223,909 | 854,499 |
-| libcurl (multi) | 41,573 | 96,447 | 214,316 | 672,036 |
-| Go net/http | 38,325 | 102,578 | 239,766 | 547,258 |
-| h2 crate (no client layer) | 51,763 | 165,934 | 281,358 | 1,191,256 |
+| Leyline | 53,256 | 210,127 | 284,188 | 1,397,935 |
+| Leyline, one runtime per core | 52,970 | 166,264 | 320,511 | 1,428,376 |
+| hyper-util client | 43,329 | 183,297 | 276,706 | 1,148,891 |
+| reqwest | 35,733 | 183,052 | 227,841 | 861,386 |
+| libcurl (multi) | 44,041 | 98,864 | 226,377 | 653,651 |
+| Go net/http | 39,955 | 103,903 | 250,234 | 577,833 |
+| h2 crate (no client layer) | 53,344 | 170,783 | 288,118 | 1,225,043 |
 
-Leyline leads all four full-client peers in throughput and client CPU per request
-in all four workloads. All 16
-[paired comparisons](benches/comparison/results/2026-11-03-verified-clients-h2-r1/peer-intervals.txt)
-have throughput intervals above 1 and CPU intervals below 1. Against bare h2,
-sequential and low-concurrency throughput remain unresolved; Leyline uses more
-CPU per request in those two workloads. This is not a win on every metric.
+Paired throughput ratios, Leyline over the peer, with a 95% t-interval across
+the three run means:
 
-The [pooled table](benches/comparison/results/2026-11-03-verified-clients-h2-r1/pooled.txt)
-and raw [run 1](benches/comparison/results/2026-11-03-verified-clients-h2-r1),
-[run 2](benches/comparison/results/2026-11-03-verified-clients-h2-r2), and
-[run 3](benches/comparison/results/2026-11-03-verified-clients-h2-r3)
-include observed connection counts, headers, instructions, CPU, and binary hashes.
+| Workload | hyper | reqwest | h2 crate |
+| --- | ---: | ---: | ---: |
+| Sequential | 1.209 [1.167, 1.253] | 1.489 [1.468, 1.510] | 1.002 [0.969, 1.037] |
+| 1 conn, 64 streams | 1.145 [1.094, 1.198] | 1.147 [1.119, 1.175] | 1.243 [1.197, 1.290] |
+| 8 conns, 8 in flight | 1.009 [0.906, 1.122] | 1.222 [1.106, 1.351] | 0.984 [0.942, 1.027] |
+| 8 conns, 256 in flight | 1.195 [1.098, 1.301] | 1.591 [1.500, 1.688] | 1.112 [1.045, 1.182] |
 
-### HTTP/1.1 baseline
+Leyline is ahead of every full client in every workload except 8 connections
+with 8 in flight, where it ties hyper; at that workload one runtime per core is
+ahead of hyper, 1.136 [1.085, 1.189]. It also leads libcurl and Go net/http in
+every workload. Against the bare h2 crate, which has no pool, headers, or
+timeouts, Leyline ties on sequential requests and at 8 in flight and is ahead
+with 64 streams and at 256 in flight. Leyline uses less client CPU per request
+than every full client in every workload, and slightly more than the bare h2
+crate at sequential and 8 in flight.
 
-The same three-run, four-round method used identical request-header values,
-verified TLS, and a 30-second timeout. The sequential pair used 20,000 and
-40,000 requests; the eight-worker pair used 100,000 and 200,000; the 64-worker
-pair used 200,000 and 400,000.
+With one connection, one runtime per core runs on one core and is behind hyper,
+0.905 [0.885, 0.926], while using 0.272 of its CPU per request. Use the per-core
+layout when a program spreads its requests over at least as many connections as
+cores.
+
+### General clients over HTTP/1.1
+
+The same method ran the HTTP/1.1 clients. `Leyline blocking` is the blocking
+API. Requests per second, medians over 12 observations:
 
 | Client | Sequential | 8 workers | 64 workers |
 | --- | ---: | ---: | ---: |
-| Leyline | 58,534 | 319,933 | 810,948 |
-| Leyline blocking | 58,856 | 370,442 | 772,340 |
-| fasthttp | 58,797 | 325,726 | 904,703 |
-| Go net/http | 41,661 | 348,199 | 557,055 |
-| hyper-util client | 54,433 | 306,256 | 686,334 |
-| reqwest | 37,852 | 239,214 | 581,590 |
-| libcurl (multi) | 50,853 | 101,158 | 98,560 |
-| ureq | 34,293 | 69,410 | 46,265 |
+| Leyline | 60,274 | 325,414 | 812,630 |
+| Leyline, one runtime per core | 59,818 | 368,016 | 943,956 |
+| Leyline blocking | 61,418 | 376,263 | 928,744 |
+| fasthttp | 59,963 | 336,220 | 866,644 |
+| Go net/http | 43,104 | 372,120 | 556,023 |
+| hyper-util client | 56,416 | 321,075 | 729,825 |
+| reqwest | 39,483 | 246,316 | 586,958 |
+| libcurl (multi) | 51,639 | 104,240 | 100,958 |
+| ureq | 34,532 | 68,507 | 46,400 |
 
-This is not an across-the-board throughput lead. Async Leyline is behind
-net/http at eight workers: ratio 0.934 [0.919, 0.948]. Blocking Leyline is behind
-fasthttp at 64 workers: 0.859 [0.741, 0.996], with more client CPU per request.
-Async Leyline's 64-worker comparison with fasthttp remains unresolved:
-0.914 [0.708, 1.180]. The short high-concurrency measurements have substantial
-spread and should not be read as a stable ranking.
+A longer follow-up repeated the 8- and 64-worker workloads for the closest
+clients with 1,000,000 and 2,000,000 requests per pair:
 
-The [pooled table](benches/comparison/results/2026-11-03-verified-clients-h1-r1/pooled.txt)
-and raw [run 1](benches/comparison/results/2026-11-03-verified-clients-h1-r1),
-[run 2](benches/comparison/results/2026-11-03-verified-clients-h1-r2), and
-[run 3](benches/comparison/results/2026-11-03-verified-clients-h1-r3)
-retain the observed connection counts. Workers do not imply identical total TCP
-connection counts: each client manages its own HTTP/1.1 pool.
+| Client | 8 workers | 64 workers |
+| --- | ---: | ---: |
+| Leyline | 327,702 | 797,737 |
+| Leyline, one runtime per core | 364,296 | 917,435 |
+| Leyline blocking | 377,466 | 890,194 |
+| fasthttp | 334,606 | 876,837 |
+| Go net/http | 268,257 | 651,462 |
+| hyper-util client | 305,922 | 664,432 |
+
+Paired throughput ratios against fasthttp, the fastest peer here:
+
+| Workload | Leyline | One runtime per core | Leyline blocking |
+| --- | ---: | ---: | ---: |
+| Sequential | 1.005 [0.969, 1.041] | 0.997 [0.945, 1.051] | 1.032 [0.946, 1.126] |
+| 8 workers | 0.981 [0.892, 1.078] | 1.122 [1.086, 1.160] | 1.133 [1.078, 1.191] |
+| 64 workers | 0.876 [0.630, 1.218] | 1.038 [1.005, 1.072] | 1.016 [0.906, 1.140] |
+| 8 workers, long | 0.987 [0.921, 1.058] | 1.082 [1.053, 1.113] | 1.134 [1.104, 1.164] |
+| 64 workers, long | 0.835 [0.719, 0.969] | 1.042 [0.966, 1.125] | 1.023 [0.935, 1.118] |
+
+This is not an across-the-board HTTP/1.1 lead. One runtime per core and the
+blocking API are ahead of fasthttp at 8 workers and tie or lead it at 64. The
+default shared runtime ties fasthttp at sequential and 8 workers and is behind
+it in the long 64-worker run. At 8 workers it is also behind Go net/http in the
+short run, 0.867 [0.775, 0.970], and ahead of it in the long run,
+1.234 [1.182, 1.289]. Every Leyline layout is ahead of hyper, reqwest, libcurl
+and ureq at every worker count where the interval resolves, and the async
+layouts use less client CPU per request than fasthttp in every workload. Workers
+do not imply identical total TCP connection counts: each client manages its own
+HTTP/1.1 pool, and `conns.txt` in each run records what was observed.
 
 A separate Chrome 146 comparison with tls-client passed the header gate and
 showed a throughput and CPU lead for async and blocking Leyline at all three
@@ -124,96 +161,31 @@ and raw [run 1](benches/comparison/results/2026-11-03-verified-browser-h1-matche
 record the differing observed connection counts. This does not replace the
 excluded wreq comparison or establish an HTTP/1.1 browser-client ranking.
 
-### Longer HTTP/1.1 follow-up
-
-The five closest implementations repeated the eight- and 64-worker cells with
-1,000,000 and 2,000,000 requests per pair. This used the unchanged comparison
-runner and counters, not the additional profiling instrumentation. Three runs
-again used four alternating-order rounds each. The full eight-client baseline
-above is retained; this follow-up is a subset, not a replacement matrix.
-
-| Client | 8 workers | 64 workers |
-| --- | ---: | ---: |
-| Leyline | 317,476 | 763,944 |
-| Leyline blocking | 370,119 | 871,335 |
-| fasthttp | 323,201 | 816,562 |
-| Go net/http | 253,941 | 612,192 |
-| hyper-util client | 292,779 | 717,648 |
-
-Async Leyline now leads net/http at eight workers: 1.244 [1.209, 1.280], showing
-that the short-count ordering does not hold at the longer request count. Its
-comparisons with fasthttp remain unresolved at eight workers,
-0.977 [0.949, 1.007], and at 64 workers, 0.892 [0.788, 1.009]. Blocking Leyline's
-64-worker comparison with fasthttp is also unresolved, 1.044 [0.972, 1.122],
-while using more client CPU per request: ratio 1.118 [1.105, 1.130].
-
-The [pooled table](benches/comparison/results/2026-11-03-verified-h1-long-r1/pooled.txt)
-and raw [run 1](benches/comparison/results/2026-11-03-verified-h1-long-r1),
-[run 2](benches/comparison/results/2026-11-03-verified-h1-long-r2), and
-[run 3](benches/comparison/results/2026-11-03-verified-h1-long-r3) retain all
-observations. Neither HTTP/1.1 run length supports a universal throughput and CPU
-lead. The [diagnostic profiles](benches/comparison/results/2026-11-03-h1-profile)
-include additional counters and different request counts; they are not ranking
-inputs. No production optimization was retained from these profiles.
-
-### One runtime per core
-
-`leyline-cores` is the same Leyline client run through one single-threaded
-Tokio runtime per CPU core, each with its own session, which is what
-`SessionBuilder::run_per_core` sets up. `leyline` is the default layout: one
-multi-threaded runtime and one shared session. For HTTP/2 the harness caps the
-runtime count at the connection count, so every client holds the stated number
-of connections. Three runs used three alternating-order rounds each, bare
-profiles, identical request headers, verified TLS, and a 30-second timeout.
-Leyline is commit `5f7390f9`. Medians over nine observations, in requests per
-second:
-
-HTTP/1.1:
-
-| Client | Sequential | 8 workers | 64 workers |
-| --- | ---: | ---: | ---: |
-| Leyline, one runtime per core | 58,045 | 360,925 | 893,076 |
-| Leyline, shared runtime | 57,743 | 317,929 | 750,612 |
-| Leyline blocking | 59,715 | 367,584 | 897,065 |
-| fasthttp | 59,222 | 326,651 | 861,981 |
-| hyper-util client | 54,711 | 301,084 | 699,383 |
-
-Against fasthttp, one runtime per core is ahead at eight workers, 1.120
-[1.040, 1.206], and uses less client CPU per request at eight and 64 workers,
-0.872 [0.831, 0.915] and 0.906 [0.873, 0.939]. The other throughput comparisons
-with fasthttp are unresolved; at 64 workers the interval is 0.811 to 1.499.
-
-HTTP/2:
-
-| Client | Sequential | 1 conn, 64 streams | 8 conns, 8 in flight | 8 conns, 256 in flight |
-| --- | ---: | ---: | ---: | ---: |
-| Leyline, one runtime per core | 51,344 | 161,661 | 307,787 | 1,398,164 |
-| Leyline, shared runtime | 51,662 | 204,971 | 273,015 | 1,340,776 |
-| h2 crate (no client layer) | 51,439 | 166,907 | 280,332 | 1,191,624 |
-| hyper-util client | 42,640 | 180,184 | 264,200 | 1,130,044 |
-
-Against bare h2, one runtime per core is ahead at eight connections: 1.111
-[1.036, 1.192] at eight in flight and 1.159 [1.118, 1.201] at 256. With one
-connection it runs on one core and is behind, 0.971 [0.960, 0.982], while the
-shared runtime is ahead, 1.228 [1.211, 1.245]. Use the per-core layout when a
-program spreads its requests over at least as many connections as cores.
-
-The pooled tables for [HTTP/1.1](benches/comparison/results/2026-11-05-cores-h1-r1/pooled.txt)
-and [HTTP/2](benches/comparison/results/2026-11-05-cores-h2-r1/pooled.txt) and
-the raw runs under `benches/comparison/results/2026-11-05-cores-*` include
-instructions, CPU, connection counts, and receipts. To reproduce, from
-`benches/comparison`:
+The pooled tables for [HTTP/2](benches/comparison/results/2026-11-05-final-clients-h2-r1/pooled.txt),
+[HTTP/1.1](benches/comparison/results/2026-11-05-final-clients-h1-r1/pooled.txt) and
+the [longer HTTP/1.1 runs](benches/comparison/results/2026-11-05-final-h1-long-r1/pooled.txt),
+and the raw runs under `benches/comparison/results/2026-11-05-final-*`, include
+instructions, CPU, connection counts, header audits, and the command for each
+run. To reproduce, create the certificates in the [reproduction steps](#reproduce),
+set the CPU governor to `performance`, then run from `benches/comparison`:
 
 ```bash
+export CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der
+P="PROFILE=bare ROUNDS=4 TIMEOUT=30s SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31"
 for run in 1 2 3; do
-  TAG=reproduce-cores-h1-r$run PROFILE=bare PROTO=h1 TIMEOUT=30s ROUNDS=3 \
-    LIBS="leyline leyline-cores leyline-blocking fasthttp hyper" \
-    SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
-  TAG=reproduce-cores-h2-r$run PROFILE=bare PROTO=h2 TIMEOUT=30s ROUNDS=3 \
-    LIBS="leyline leyline-cores h2 hyper" \
-    SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
+  env TAG=reproduce-h2-r$run PROTO=h2 $P \
+    LIBS="leyline leyline-cores hyper h2 reqwest curl nethttp" bash libs.sh
+  env TAG=reproduce-h1-r$run PROTO=h1 $P \
+    LIBS="leyline leyline-cores leyline-blocking fasthttp ureq hyper reqwest curl nethttp" bash libs.sh
+  env TAG=reproduce-h1-long-r$run PROTO=h1 $P CELLS="8par:1:8:1000000 64par:1:64:1000000" \
+    LIBS="leyline leyline-cores leyline-blocking fasthttp nethttp hyper" bash libs.sh
 done
+python3 libs-table.py results/reproduce-h2-r{1,2,3}/rows.txt --vs hyper
 ```
+
+`libs.sh` shrinks the request count of a client whose run takes longer than
+`TARGET_MS` (default 1,000 ms) after the first round, so slow clients do not
+dominate the run time; every row records the counts it used.
 
 ### Fresh sessions and closed-loop latency
 

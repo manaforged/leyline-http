@@ -1,0 +1,25 @@
+3 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+8par   lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-blocking     377466    2.8%      23378          -       9.69     12     8
+       leyline-cores       364296    7.7%      26517          -      10.53     12     8
+       fasthttp            334606    4.7%      30382          -      12.06     12     8
+       leyline             327702   12.2%      28499          -      10.68     12     8
+       hyper               305922    6.5%      38999          -      12.83     12 18/20
+       nethttp             268257    5.4%      79329          -      18.86     12 29/25/15
+
+64par  lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-cores       917435    3.8%      26065          -      11.32     12    64
+       leyline-blocking     890194   15.2%      23400          -      13.98     12    64
+       fasthttp            876837   15.1%      26071          -      12.62     12    64
+       leyline             797737   19.4%      26624          -      11.49     12    64
+       hyper               664432   48.1%      37225          -      15.68     12 122/153/128
+       nethttp             651462   10.3%      79502          -      20.77     12 89/87/88
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+8par   leyline           vs fasthttp   req/s 0.987 [0.921, 1.058] tie; CPU/req 0.880 [0.858, 0.902] less CPU; 3 runs
+8par   leyline-cores     vs fasthttp   req/s 1.082 [1.053, 1.113] ahead; CPU/req 0.870 [0.845, 0.896] less CPU; 3 runs
+8par   leyline-blocking  vs fasthttp   req/s 1.134 [1.104, 1.164] ahead; CPU/req 0.801 [0.785, 0.818] less CPU; 3 runs
+64par  leyline           vs fasthttp   req/s 0.835 [0.719, 0.969] behind; CPU/req 0.911 [0.877, 0.946] less CPU; 3 runs
+64par  leyline-cores     vs fasthttp   req/s 1.042 [0.966, 1.125] tie; CPU/req 0.895 [0.873, 0.917] less CPU; 3 runs
+64par  leyline-blocking  vs fasthttp   req/s 1.023 [0.935, 1.118] tie; CPU/req 1.110 [1.098, 1.123] more CPU; 3 runs

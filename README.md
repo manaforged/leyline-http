@@ -47,11 +47,11 @@ better.
 
 | Client | Sequential | 8 connections, 256 in flight |
 | --- | ---: | ---: |
-| **Leyline** | **51,725** | **1,369,390** |
-| hyper-util | 42,763 | 1,120,893 |
-| reqwest | 34,921 | 854,499 |
-| libcurl | 41,573 | 672,036 |
-| Go net/http | 38,325 | 547,258 |
+| **Leyline** | **53,256** | **1,397,935** |
+| hyper-util | 43,329 | 1,148,891 |
+| reqwest | 35,733 | 861,386 |
+| libcurl | 44,041 | 653,651 |
+| Go net/http | 39,955 | 577,833 |
 
 Leyline also uses less client CPU per request than each of them in all four
 measured HTTP/2 workloads. [BENCHMARKS.md](BENCHMARKS.md) has every workload, HTTP/1.1,
@@ -59,8 +59,8 @@ confidence intervals, and the commands to reproduce them.
 
 For the highest request rate, `SessionBuilder::run_per_core` runs one runtime
 and session per CPU core. In that layout Leyline is ahead of fasthttp over
-HTTP/1.1 at eight workers and ahead of the bare h2 crate at eight HTTP/2
-connections.
+HTTP/1.1 at 8 and 64 workers and ahead of the bare h2 crate with 256 requests in
+flight over eight HTTP/2 connections.
 
 ## Browser profiles
 
