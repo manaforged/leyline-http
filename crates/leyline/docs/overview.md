@@ -1,4 +1,4 @@
-Leyline is an async HTTP client for Rust that sends the TLS, HTTP/2, HTTP/3, and header fingerprints of real browsers, from captures of shipped Chrome, Firefox, and Safari builds.
+Leyline is an async HTTP client for Rust with HTTP/1.1, HTTP/2, and HTTP/3. Optional browser profiles send the TLS, HTTP/2, HTTP/3, and header fingerprints of real browsers, from captures of shipped Chrome, Firefox, and Safari builds.
 
 Five types cover everyday requests and browsing. Configure them with setters and typed values.
 
