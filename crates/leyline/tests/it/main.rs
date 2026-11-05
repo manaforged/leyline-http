@@ -36,6 +36,7 @@ mod credentials_hidden;
 mod deadlines_and_lifecycle;
 mod devices;
 mod digest_redirects;
+mod echo;
 mod ergonomics;
 mod error_body_budget;
 #[cfg(feature = "bench-internals")]

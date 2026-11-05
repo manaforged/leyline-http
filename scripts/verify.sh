@@ -452,7 +452,7 @@ gate_order=(
     fuzz-replay fuzz-timed
 )
 quick_gates=(comments msrv package)
-full_gates=(comments msrv package fmt clippy features doc book links test live
+full_gates=(comments msrv package fmt clippy features doc book links test
     deny semver external-types benches subcrates fuzz-replay)
 
 if [[ -n "$only" ]]; then

@@ -26,31 +26,8 @@ fn expected_ja4(browser: Browser) -> Option<String> {
     })
 }
 
-pub(super) const PEET_URL: &str = "https://tls.peet.ws/api/all";
-
 pub(super) async fn peet(session: &leyline::Session) -> Value {
-    let mut last_err = String::new();
-    for attempt in 0..4 {
-        if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
-        }
-        let resp = match session.get(PEET_URL).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                last_err = format!("request error: {e}");
-                continue;
-            }
-        };
-        if resp.status() != 200 {
-            last_err = format!("status {}", resp.status());
-            continue;
-        }
-        match serde_json::from_str(&resp.text().await.unwrap()) {
-            Ok(v) => return v,
-            Err(e) => last_err = format!("non-JSON: {e}"),
-        }
-    }
-    panic!("tls.peet.ws failed after retries: {last_err}");
+    crate::echo::get(session).await
 }
 
 fn live_platform_for(browser: Browser) -> Platform {

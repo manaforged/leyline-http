@@ -9,8 +9,8 @@ use serde_json::Value;
 use super::Result;
 
 const HTTPBIN: &str = "https://httpbin.org";
-pub(super) const HTTPBIN_ATTEMPTS: u32 = 3;
-const HTTPBIN_BACKOFF: Duration = Duration::from_millis(200);
+pub(super) const HTTPBIN_ATTEMPTS: u32 = crate::echo::TRIES;
+const HTTPBIN_BACKOFF: Duration = crate::echo::GAP;
 const HTTPBIN_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Debug)]
