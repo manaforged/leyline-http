@@ -143,7 +143,9 @@ P=${U##*:}; P=${P%/}
 for cell in $CELLS; do IFS=: read -r name conns streams n <<<"$cell"; [ "$name" = seq ] && continue
   for lib in $LIBS; do
     CMP_CONNECTIONS=$conns "${CPIN[@]}" ${CMD[$lib]} "$U" 1 0 100000000 "$streams" </dev/null >/dev/null 2>&1 & X=$!
-    sleep 3; echo "$name $lib $(ss -Htn state established "( dport = :$P )" | wc -l)" >> "$OUT/conns.txt"
+    want=$conns; [ "$PROTO" = h1 ] && want=$streams
+    for _ in $(seq 30); do seen=$(ss -Htn state established "( dport = :$P )" | wc -l); [ "$seen" -ge "$want" ] && break; sleep 0.1; done
+    echo "$name $lib $seen" >> "$OUT/conns.txt"
     pkill -P $X; kill $X; wait $X 2>/dev/null
   done
 done
@@ -158,15 +160,20 @@ run() {
 }
 
 : > "$OUT/rows.txt"
+declare -A SIZED
 for r in $(seq 1 "$R"); do
   for cell in $CELLS; do IFS=: read -r name conns streams n <<<"$cell"; [ "$name" = seq ] && streams=0
     order=$LIBS; (( r % 2 )) || order=$(tr " " "\n" <<<"$LIBS" | tac | tr "\n" " ")
     for lib in $order; do
-      m=$((n / ${DIV[$lib]:-1})); [ "$streams" -gt 0 ] && m=$((m / streams * streams))
+      m=${SIZED[$name.$lib]:-$((n / ${DIV[$lib]:-1}))}; [ "$streams" -gt 0 ] && m=$((m / streams * streams))
       [ "$m" -gt 0 ] || { echo "$name: $lib gets no requests per stream" >&2; exit 1; }
       row="$r $name $lib $m $(run "$lib" "$conns" "$streams" "$m") $((2 * m)) $(run "$lib" "$conns" "$streams" $((2 * m)))"
       [ "$(wc -w <<<"$row")" = 11 ] || { echo "$lib failed in round $r of $name; see $OUT/stderr.$lib" >&2; exit 1; }
       echo "$row" | tee -a "$OUT/rows.txt"
+      read -r -a f <<<"$row"
+      SIZED[$name.$lib]=$(( m * ${TARGET_MS:-1000} * 1000000 / (f[10] - f[6] > 0 ? f[10] - f[6] : 1) ))
+      [ "${SIZED[$name.$lib]}" -gt "$m" ] && SIZED[$name.$lib]=$m
+      [ "${SIZED[$name.$lib]}" -ge "${streams:-1}" ] || SIZED[$name.$lib]=$(( streams > 0 ? streams : 1 ))
     done
   done
 done
