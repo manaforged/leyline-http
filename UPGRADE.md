@@ -7,7 +7,7 @@ This guide maps the 0.1.6 Rust API to 0.2.0. The API changes are breaking. There
 1. Change the `leyline-http` dependency to `"0.2"` and use Rust 1.96 or later.
 2. Find each old name in the table below and update its imports and calls.
 3. Replace typed browser profiles with profile TOML where required.
-4. Check error handling, retries, streaming, and saved-session behavior against the [release notes](CHANGELOG.md#020---2026-11-02).
+4. Check error handling, retries, streaming, and saved-session behavior against the [release notes](CHANGELOG.md#020---2026-11-05).
 5. Run `cargo check` and your application's tests with the features you use.
 
 For new code, start with the [five main types](AGENTS.md#the-five-types). The [user guide](https://manaforged.github.io/leyline-http/) covers current workflows.
