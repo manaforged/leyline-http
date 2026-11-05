@@ -11,7 +11,16 @@ fn style(firefox: bool) -> HeaderStyle {
 }
 
 fn shared(value: &'static str) -> &'static HeaderStr {
-    Box::leak(Box::new(HeaderStr::from_static(value)))
+    static VALUES: std::sync::Mutex<Vec<&'static HeaderStr>> = std::sync::Mutex::new(Vec::new());
+    let mut values = VALUES
+        .lock()
+        .expect("no test panics while holding the value list");
+    if let Some(found) = values.iter().find(|known| known.as_str() == value) {
+        return found;
+    }
+    let made: &'static HeaderStr = Box::leak(Box::new(HeaderStr::from_static(value)));
+    values.push(made);
+    made
 }
 
 fn ctx() -> HeaderContext<'static> {

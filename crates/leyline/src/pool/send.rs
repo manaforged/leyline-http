@@ -3,10 +3,9 @@ use std::time::{Duration, Instant};
 
 use crate::core::Body;
 use crate::core::ResponseMode;
-use crate::core::transport::TransportResponse;
+use crate::core::transport::{H2Parts, Prepared, TransportResponse, h2_parts};
 use crate::h2::client::{H2Client, Head};
 use crate::h2::config::H2Config;
-use crate::h2::connection::{HeaderPair, PseudoHeaders};
 use crate::h2::{ErrorCode, H2Error};
 use crate::tls::FingerprintConnector;
 use crate::trace;
@@ -28,32 +27,33 @@ enum Sent<R> {
     Retry(Body),
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "flat per-request wire fields across one internal call path"
-)]
 pub(crate) async fn send_request(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
     h2_config: &H2Config,
-    (host, port): (&str, u16),
-    pseudo: PseudoHeaders,
-    headers: Vec<HeaderPair>,
-    body: Body,
-    proxy: Option<&crate::core::ProxyUrl>,
-    mode: ResponseMode,
+    req: Prepared<'_>,
     opened: Option<Opened<H2Client>>,
 ) -> Result<TransportResponse, Error> {
-    let started = opened.as_ref().map_or_else(Instant::now, |o| o.started);
+    let H2Parts {
+        host,
+        port,
+        pseudo,
+        headers,
+        body,
+        proxy,
+        mode,
+    } = h2_parts(req)?;
+    let now = Instant::now();
+    let started = opened.as_ref().map_or(now, |o| o.started);
     let head = Arc::new(Head { pseudo, headers });
     let mut key = pool.key(&head.pseudo.scheme, host, port, proxy, Transport::Tcp);
 
     let mut opened = match opened {
         Some(opened) => {
-            pool.evict_idle(Instant::now());
+            pool.evict_idle(now);
             opened
         }
-        None => checkout_h2_opened(pool, connector, h2_config, &mut key)
+        None => checkout_h2_opened(pool, connector, h2_config, &mut key, now)
             .await
             .map_err(|(e, _)| e)?,
     };
@@ -66,15 +66,14 @@ pub(crate) async fn send_request(
         port,
         mode,
         started,
+        now,
     };
     let mut body = body;
     loop {
         match send_on(&ctx, opened, body).await? {
             Sent::Done(done) => return Ok(done),
             Sent::Retry(replay) => {
-                let connect_started = Instant::now();
-                let fresh = open_h2(pool, connector, h2_config, key.clone()).await?;
-                opened = Opened::fresh(fresh, connect_started);
+                opened = open_h2(pool, connector, h2_config, key.clone()).await?;
                 body = replay;
             }
         }
@@ -89,6 +88,7 @@ struct H2Send<'a> {
     port: u16,
     mode: ResponseMode,
     started: Instant,
+    now: Instant,
 }
 
 async fn send_on(
@@ -108,13 +108,18 @@ async fn send_on(
             None
         }
     };
+    let mut send_started = match leg {
+        LegKind::Pooled => ctx.now,
+        LegKind::Fresh => Instant::now(),
+    };
     if let Some(probe) = opened.probe.take()
         && !(replay.is_some() && is_idempotent(&ctx.head.pseudo.method))
-        && !confirm(ctx.pool, ctx.key, probe).await
     {
-        return Ok(Sent::Retry(body));
+        if !confirm(ctx.pool, ctx.key, &opened.conn, probe).await {
+            return Ok(Sent::Retry(body));
+        }
+        send_started = Instant::now();
     }
-    let send_started = Instant::now();
     trace::sent(
         ctx.host,
         ctx.head.pseudo.method.as_str(),
@@ -130,10 +135,12 @@ async fn send_on(
         Ok(resp) => resp,
         Err(e) => {
             return match leg {
-                LegKind::Pooled => resend_after_failure(ctx, e, replay).map(Sent::Retry),
+                LegKind::Pooled => {
+                    resend_after_failure(ctx, &opened.conn, e, replay).map(Sent::Retry)
+                }
                 LegKind::Fresh => {
                     if e.connection_failed() {
-                        ctx.pool.invalidate(ctx.key);
+                        ctx.pool.invalidate(ctx.key, &opened.conn);
                     }
                     Err(Error::from(e))
                 }
@@ -180,12 +187,17 @@ pub(super) fn answered(
     resp
 }
 
-fn resend_after_failure(ctx: &H2Send<'_>, e: H2Error, replay: Option<Body>) -> Result<Body, Error> {
+fn resend_after_failure(
+    ctx: &H2Send<'_>,
+    conn: &H2Client,
+    e: H2Error,
+    replay: Option<Body>,
+) -> Result<Body, Error> {
     if !e.connection_failed() {
         return Err(Error::from(e));
     }
     ctx.pool.stale_hit(ctx.key, http::Version::HTTP_2, &e);
-    ctx.pool.invalidate(ctx.key);
+    ctx.pool.invalidate(ctx.key, conn);
     let refused = matches!(
         &e,
         H2Error::Stream {

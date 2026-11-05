@@ -256,13 +256,19 @@ async fn send_h1_or_upgrade(
     }
 }
 
-pub(crate) async fn send_h2_on(
-    pool: &Arc<Pool>,
-    connector: &FingerprintConnector,
-    h2_config: &H2Config,
-    req: Prepared<'_>,
-    opened: Option<Opened<H2Client>>,
-) -> Result<TransportResponse> {
+pub(crate) use crate::pool::send_request as send_h2_on;
+
+pub(crate) struct H2Parts<'a> {
+    pub(crate) host: &'a str,
+    pub(crate) port: u16,
+    pub(crate) pseudo: crate::h2::connection::PseudoHeaders,
+    pub(crate) headers: Vec<HeaderPair>,
+    pub(crate) body: Body,
+    pub(crate) proxy: Option<&'a crate::core::ProxyUrl>,
+    pub(crate) mode: ResponseMode,
+}
+
+pub(crate) fn h2_parts(req: Prepared<'_>) -> Result<H2Parts<'_>> {
     let Prepared {
         method,
         url,
@@ -273,19 +279,16 @@ pub(crate) async fn send_h2_on(
     } = req;
     let pseudo = h2::request_pseudo(method, url)?;
     strip_connection_specific_headers(&mut headers)?;
-    crate::pool::send_request(
-        pool,
-        connector,
-        h2_config,
-        crate::util::host_port(url)?,
+    let (host, port) = crate::util::host_port(url)?;
+    Ok(H2Parts {
+        host,
+        port,
         pseudo,
         headers,
         body,
         proxy,
-        response,
-        opened,
-    )
-    .await
+        mode: response,
+    })
 }
 
 pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {

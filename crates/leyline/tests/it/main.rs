@@ -155,6 +155,7 @@ mod responses_and_errors;
 mod retry_rules;
 mod retry_unsent_redirect;
 mod robots;
+mod run_per_core;
 mod samesite_cookies;
 mod send_sync;
 mod server_chosen_urls;

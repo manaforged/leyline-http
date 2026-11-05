@@ -29,14 +29,15 @@ async fn open_coalesced<C, Fut>(
     failed: Kind,
     checkout: impl Fn() -> Option<(C, TlsInfo)>,
     open: impl Fn() -> Fut,
-) -> Result<(C, TlsInfo), Error>
+) -> Result<Opened<C>, Error>
 where
     C: Clone + Send + Sync + 'static,
     Fut: Future<Output = Result<(C, TlsInfo), Error>> + Send + 'static,
 {
     if let Some(hit) = checkout() {
-        return Ok(hit);
+        return Ok(Opened::pooled(hit));
     }
+    let started = Instant::now();
     inflight
         .join_or_spawn(
             key,
@@ -51,6 +52,7 @@ where
             },
         )
         .await
+        .map(|opened| Opened::fresh(opened, started))
         .map_err(|e| connect_err(&e))
 }
 
@@ -120,7 +122,7 @@ pub(crate) async fn negotiate(
         return Ok(Negotiated::H1(None));
     }
     let mut key = pool.key("https", host, port, proxy, Transport::Tcp);
-    match checkout_h2_opened(pool, connector, h2_config, &mut key).await {
+    match checkout_h2_opened(pool, connector, h2_config, &mut key, Instant::now()).await {
         Ok(opened) => Ok(Negotiated::H2(opened)),
         Err((e, started)) if e.alpn().is_some() => Ok(Negotiated::H1(
             pool.checkout_h1(&PoolKey { lane: 0, ..key }, started)
@@ -135,8 +137,9 @@ pub(crate) async fn checkout_h2_opened(
     connector: &FingerprintConnector,
     h2_config: &H2Config,
     key: &mut PoolKey,
+    now: Instant,
 ) -> Result<Opened<H2Client>, (Error, Instant)> {
-    let opened = pick_h2_lane(pool, connector, h2_config, key).await;
+    let opened = pick_h2_lane(pool, connector, h2_config, key, now).await;
     let reused = matches!(&opened, Ok(opened) if opened.connect_ms.is_none());
     pool.counters.checkout(Proto::H2, reused);
     opened
@@ -147,8 +150,8 @@ async fn pick_h2_lane(
     connector: &FingerprintConnector,
     h2_config: &H2Config,
     key: &mut PoolKey,
+    now: Instant,
 ) -> Result<Opened<H2Client>, (Error, Instant)> {
-    let now = Instant::now();
     pool.evict_idle(now);
     let lanes = pool.config.h2_lanes();
     loop {
@@ -174,10 +177,8 @@ async fn pick_h2_lane(
         let started = Instant::now();
         match open_h2(pool, connector, h2_config, key.clone()).await {
             Ok(opened) => {
-                if let Some(slot) = opened.0.reserve() {
-                    return Ok(Opened::fresh(opened, started)
-                        .on_lane(lane)
-                        .with_slot(Some(slot)));
+                if let Some(slot) = opened.conn.reserve() {
+                    return Ok(opened.on_lane(lane).with_slot(Some(slot)));
                 }
             }
             Err(e) => match least {
@@ -254,7 +255,7 @@ pub(crate) async fn open_h2(
     connector: &FingerprintConnector,
     h2_config: &H2Config,
     key: PoolKey,
-) -> Result<(H2Client, TlsInfo), Error> {
+) -> Result<Opened<H2Client>, Error> {
     open_coalesced(
         &pool.inflight_h2,
         &key,
@@ -289,11 +290,11 @@ pub async fn checkout_handle(
 ) -> Result<(H2Client, TlsInfo), Error> {
     let mut key = pool.key("https", host, port, proxy, Transport::Tcp);
     loop {
-        let mut opened = checkout_h2_opened(pool, connector, h2_config, &mut key)
+        let mut opened = checkout_h2_opened(pool, connector, h2_config, &mut key, Instant::now())
             .await
             .map_err(|(e, _)| e)?;
         let live = match opened.probe.take() {
-            Some(probe) => confirm(pool, &key, probe).await,
+            Some(probe) => confirm(pool, &key, &opened.conn, probe).await,
             None => true,
         };
         if live {
@@ -340,7 +341,7 @@ pub(crate) async fn open_h3(
     pool: &Arc<Pool>,
     target: &H3Target<'_>,
     key: PoolKey,
-) -> Result<(H3Client, TlsInfo), Error> {
+) -> Result<Opened<H3Client>, Error> {
     open_coalesced(
         &pool.inflight_h3,
         &key,
@@ -389,9 +390,7 @@ pub(crate) async fn checkout_h3_opened(
     if let Some(hit) = hit {
         return Ok(Opened::pooled(hit));
     }
-    let started = Instant::now();
-    let opened = open_h3(pool, target, key).await?;
-    Ok(Opened::fresh(opened, started))
+    open_h3(pool, target, key).await
 }
 
 pub(super) fn connect_err(err: &Error) -> Error {
@@ -422,3 +421,7 @@ pub(super) fn connect_err(err: &Error) -> Error {
     }
     out
 }
+
+#[cfg(test)]
+#[path = "connect_tests.rs"]
+mod tests;

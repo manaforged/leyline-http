@@ -38,11 +38,11 @@ async fn live_session_resumption_pre_shared_key() {
 #[ignore = "live: needs network"]
 async fn live_h2_connection_reuse() {
     let session = leyline::Session::from(Browser::default());
-    let resp1 = session.get(crate::echo::url()).send().await.unwrap();
+    let resp1 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp1.status(), 200);
-    let resp2 = session.get(crate::echo::url()).send().await.unwrap();
+    let resp2 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp2.status(), 200);
-    let resp3 = session.get(crate::echo::url()).send().await.unwrap();
+    let resp3 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp3.status(), 200);
     println!("✓ Three sequential requests succeeded (pool reuse)");
 }
@@ -51,7 +51,7 @@ async fn live_h2_connection_reuse() {
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {
     let session = leyline::Session::from(Browser::default());
-    let resp = session.get(crate::echo::url()).send().await.unwrap();
+    let resp = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp.status(), 200);
     let cert = resp
         .peer_certificate()

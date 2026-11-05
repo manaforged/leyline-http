@@ -76,6 +76,11 @@ pub struct H3Client {
 }
 
 impl H3Client {
+    /// Returns whether both handles drive the same connection.
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.closed, &other.closed)
+    }
+
     pub fn open_streams(&self) -> usize {
         self.open_streams.load(Ordering::Relaxed)
     }

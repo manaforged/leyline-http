@@ -57,6 +57,11 @@ Leyline also uses less client CPU per request than each of them in all four
 measured HTTP/2 workloads. [BENCHMARKS.md](BENCHMARKS.md) has every workload, HTTP/1.1,
 confidence intervals, and the commands to reproduce them.
 
+For the highest request rate, `SessionBuilder::run_per_core` runs one runtime
+and session per CPU core. In that layout Leyline is ahead of fasthttp over
+HTTP/1.1 at eight workers and ahead of the bare h2 crate at eight HTTP/2
+connections.
+
 ## Browser profiles
 
 A browser profile sends the TLS ClientHello, HTTP/2 and HTTP/3 settings, and

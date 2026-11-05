@@ -220,3 +220,31 @@ fn a_failed_http3_origin_is_skipped_until_cleared() {
         Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap())
     ));
 }
+
+async fn h2_client() -> (crate::h2::client::H2Client, tokio::io::DuplexStream) {
+    let (client, server) = tokio::io::duplex(64 * 1024);
+    let config = crate::h2::config::H2Config::from_profile(&crate::Browser::default().profile().h2)
+        .expect("profile");
+    let handle = crate::h2::start(client, config).await.expect("handshake");
+    (handle, server)
+}
+
+#[tokio::test]
+async fn a_failure_on_a_replaced_connection_keeps_the_replacement() {
+    let pool = Pool::new();
+    let key = PoolKey {
+        scheme: "https".into(),
+        port: 443,
+        ..h1_key("replaced.test")
+    };
+    let (old, _old_io) = h2_client().await;
+    let (new, _new_io) = h2_client().await;
+    pool.install_mux(key.clone(), old.clone(), TlsInfo::default());
+    crate::util::write(&pool.inner).remove(&key);
+    pool.install_mux(key.clone(), new.clone(), TlsInfo::default());
+
+    pool.invalidate(&key, &old);
+
+    let pooled = pool.checkout_mux::<crate::h2::client::H2Client>(&key);
+    assert!(pooled.is_some_and(|(conn, _)| conn.same(&new)));
+}

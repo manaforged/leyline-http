@@ -14,7 +14,9 @@ use crate::h2::client::H2Client;
 #[cfg(feature = "http3")]
 use crate::quic::H3Client;
 
-use crate::pool::types::{ConnectionStats, Counter, PoolCounters, PoolKey, PooledConn, Transport};
+use crate::pool::types::{
+    ConnectionStats, Counter, MuxClient, PoolCounters, PoolKey, PooledConn, Transport,
+};
 #[cfg(feature = "bench-internals")]
 use crate::pool::types::{MuxHandle, TlsInfo};
 use crate::util::{lock, write};
@@ -330,9 +332,17 @@ impl Pool {
         );
     }
 
-    pub(crate) fn invalidate(&self, key: &PoolKey) {
+    /// Drops the entry at `key` when it still holds `failed`, so a replacement stays pooled.
+    pub(crate) fn invalidate<C: MuxClient>(&self, key: &PoolKey, failed: &C) {
         let mut map = write(&self.inner);
-        if map.remove(key).is_some() {
+        let holds = match map.get(key) {
+            Some(PooledConn::Mux { handle, .. }) => {
+                C::in_handle(handle).is_some_and(|c| c.same(failed))
+            }
+            _ => false,
+        };
+        if holds {
+            map.remove(key);
             self.counters.add(Counter::EvictionsDead, 1);
         }
     }

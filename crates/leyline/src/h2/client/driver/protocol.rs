@@ -1,11 +1,12 @@
 #[cfg(feature = "websocket")]
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll};
 
 #[cfg(feature = "websocket")]
 use bytes::Bytes;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::core::Body;
 use crate::h2::connection::{HeaderPair, PseudoHeaders};
@@ -59,14 +60,40 @@ const _: () = assert!(
     "the command channel stores a box, not the enum"
 );
 
-#[derive(Clone)]
-pub(crate) struct CommandTx(mpsc::Sender<CommandSlot>);
+#[derive(Default)]
+struct Queue {
+    queued: AtomicUsize,
+    space: Notify,
+}
 
-pub(super) struct CommandRx(mpsc::Receiver<CommandSlot>);
+#[derive(Clone)]
+pub(crate) struct CommandTx {
+    tx: mpsc::UnboundedSender<CommandSlot>,
+    queue: Arc<Queue>,
+    capacity: usize,
+}
+
+pub(super) struct CommandRx {
+    rx: mpsc::UnboundedReceiver<CommandSlot>,
+    queue: Arc<Queue>,
+    capacity: usize,
+}
 
 pub(super) fn command_channel(capacity: usize) -> (CommandTx, CommandRx) {
-    let (tx, rx) = mpsc::channel(capacity);
-    (CommandTx(tx), CommandRx(rx))
+    let (tx, rx) = mpsc::unbounded_channel();
+    let queue = Arc::new(Queue::default());
+    (
+        CommandTx {
+            tx,
+            queue: Arc::clone(&queue),
+            capacity,
+        },
+        CommandRx {
+            rx,
+            queue,
+            capacity,
+        },
+    )
 }
 
 impl CommandTx {
@@ -74,24 +101,48 @@ impl CommandTx {
         &self,
         cmd: DriverCommand,
     ) -> Result<(), mpsc::error::SendError<DriverCommand>> {
-        self.0
-            .send(Box::new(cmd))
-            .await
-            .map_err(|err| mpsc::error::SendError(*err.0))
+        loop {
+            if self.queue.queued.fetch_add(1, Ordering::AcqRel) < self.capacity {
+                return self.tx.send(Box::new(cmd)).map_err(|err| {
+                    self.queue.queued.fetch_sub(1, Ordering::AcqRel);
+                    mpsc::error::SendError(*err.0)
+                });
+            }
+            self.queue.queued.fetch_sub(1, Ordering::AcqRel);
+            if self.tx.is_closed() {
+                return Err(mpsc::error::SendError(cmd));
+            }
+            let space = self.queue.space.notified();
+            tokio::pin!(space);
+            space.as_mut().enable();
+            if self.queue.queued.load(Ordering::Acquire) < self.capacity {
+                continue;
+            }
+            space.await;
+        }
     }
 }
 
 impl CommandRx {
     pub(super) fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<DriverCommand>> {
-        self.0.poll_recv(cx).map(|cmd| cmd.map(|boxed| *boxed))
+        self.rx
+            .poll_recv(cx)
+            .map(|cmd| cmd.map(|boxed| self.taken(*boxed)))
     }
 
     pub(super) fn try_recv(&mut self) -> Result<DriverCommand, mpsc::error::TryRecvError> {
-        self.0.try_recv().map(|boxed| *boxed)
+        self.rx.try_recv().map(|boxed| self.taken(*boxed))
+    }
+
+    fn taken(&self, cmd: DriverCommand) -> DriverCommand {
+        if self.queue.queued.fetch_sub(1, Ordering::AcqRel) >= self.capacity {
+            self.queue.space.notify_one();
+        }
+        cmd
     }
 
     pub(super) fn len(&self) -> usize {
-        self.0.len()
+        self.rx.len()
     }
 }
 

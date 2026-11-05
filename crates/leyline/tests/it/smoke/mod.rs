@@ -60,11 +60,11 @@ async fn smoke_suite() {
             smoke(async {
                 let s = Session::from(Browser::default());
                 let t = Instant::now();
-                let r1 = s.get(crate::echo::url()).send().await?;
+                let r1 = s.get(crate::echo::URL).send().await?;
                 let t1 = t.elapsed();
-                let r2 = s.get(crate::echo::url()).send().await?;
+                let r2 = s.get(crate::echo::URL).send().await?;
                 let t2 = t.elapsed();
-                let r3 = s.get(crate::echo::url()).send().await?;
+                let r3 = s.get(crate::echo::URL).send().await?;
                 let t3 = t.elapsed();
                 ensure(
                     r1.status() == 200 && r2.status() == 200 && r3.status() == 200,
@@ -91,7 +91,7 @@ async fn smoke_suite() {
         || {
             smoke(async {
                 let s = Session::from(Browser::default());
-                let r = s.get(crate::echo::url()).send().await?;
+                let r = s.get(crate::echo::URL).send().await?;
                 let body = r.text().await.unwrap();
                 let _: Value = serde_json::from_str(&body)?;
                 ensure(
@@ -175,11 +175,11 @@ async fn smoke_suite() {
         || {
             smoke(async {
                 let c = Session::from(Browser::default())
-                    .get(crate::echo::url())
+                    .get(crate::echo::URL)
                     .send()
                     .await?;
-                let f = firefox()?.get(crate::echo::url()).send().await?;
-                let s = safari()?.get(crate::echo::url()).send().await?;
+                let f = firefox()?.get(crate::echo::URL).send().await?;
+                let s = safari()?.get(crate::echo::URL).send().await?;
                 let ch: Value = c.json().await?;
                 let fh: Value = f.json().await?;
                 let sh: Value = s.json().await?;

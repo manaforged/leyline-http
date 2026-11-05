@@ -156,6 +156,65 @@ lead. The [diagnostic profiles](benches/comparison/results/2026-11-03-h1-profile
 include additional counters and different request counts; they are not ranking
 inputs. No production optimization was retained from these profiles.
 
+### One runtime per core
+
+`leyline-cores` is the same Leyline client run through one single-threaded
+Tokio runtime per CPU core, each with its own session, which is what
+`SessionBuilder::run_per_core` sets up. `leyline` is the default layout: one
+multi-threaded runtime and one shared session. For HTTP/2 the harness caps the
+runtime count at the connection count, so every client holds the stated number
+of connections. Three runs used three alternating-order rounds each, bare
+profiles, identical request headers, verified TLS, and a 30-second timeout.
+Leyline is commit `5f7390f9`. Medians over nine observations, in requests per
+second:
+
+HTTP/1.1:
+
+| Client | Sequential | 8 workers | 64 workers |
+| --- | ---: | ---: | ---: |
+| Leyline, one runtime per core | 58,045 | 360,925 | 893,076 |
+| Leyline, shared runtime | 57,743 | 317,929 | 750,612 |
+| Leyline blocking | 59,715 | 367,584 | 897,065 |
+| fasthttp | 59,222 | 326,651 | 861,981 |
+| hyper-util client | 54,711 | 301,084 | 699,383 |
+
+Against fasthttp, one runtime per core is ahead at eight workers, 1.120
+[1.040, 1.206], and uses less client CPU per request at eight and 64 workers,
+0.872 [0.831, 0.915] and 0.906 [0.873, 0.939]. The other throughput comparisons
+with fasthttp are unresolved; at 64 workers the interval is 0.811 to 1.499.
+
+HTTP/2:
+
+| Client | Sequential | 1 conn, 64 streams | 8 conns, 8 in flight | 8 conns, 256 in flight |
+| --- | ---: | ---: | ---: | ---: |
+| Leyline, one runtime per core | 51,344 | 161,661 | 307,787 | 1,398,164 |
+| Leyline, shared runtime | 51,662 | 204,971 | 273,015 | 1,340,776 |
+| h2 crate (no client layer) | 51,439 | 166,907 | 280,332 | 1,191,624 |
+| hyper-util client | 42,640 | 180,184 | 264,200 | 1,130,044 |
+
+Against bare h2, one runtime per core is ahead at eight connections: 1.111
+[1.036, 1.192] at eight in flight and 1.159 [1.118, 1.201] at 256. With one
+connection it runs on one core and is behind, 0.971 [0.960, 0.982], while the
+shared runtime is ahead, 1.228 [1.211, 1.245]. Use the per-core layout when a
+program spreads its requests over at least as many connections as cores.
+
+The pooled tables for [HTTP/1.1](benches/comparison/results/2026-11-05-cores-h1-r1/pooled.txt)
+and [HTTP/2](benches/comparison/results/2026-11-05-cores-h2-r1/pooled.txt) and
+the raw runs under `benches/comparison/results/2026-11-05-cores-*` include
+instructions, CPU, connection counts, and receipts. To reproduce, from
+`benches/comparison`:
+
+```bash
+for run in 1 2 3; do
+  TAG=reproduce-cores-h1-r$run PROFILE=bare PROTO=h1 TIMEOUT=30s ROUNDS=3 \
+    LIBS="leyline leyline-cores leyline-blocking fasthttp hyper" \
+    SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
+  TAG=reproduce-cores-h2-r$run PROFILE=bare PROTO=h2 TIMEOUT=30s ROUNDS=3 \
+    LIBS="leyline leyline-cores h2 hyper" \
+    SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
+done
+```
+
 ### Fresh sessions and closed-loop latency
 
 The existing paired runner measured one connection and 64 streams, with 2,000

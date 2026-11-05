@@ -31,4 +31,4 @@ Change the test targets or add a filter for other contracts. An empty selection 
 
 ## Full qualification
 
-Run `scripts/verify.sh --full` before qualifying a candidate. It includes the transport tests, mixed-failure resource workload, packaging, feature checks, and live checks. Focused checks do not replace full qualification. Run mutation testing against the affected functions and their tests when checking test strength, not as a replacement for either command.
+Run `scripts/verify.sh --full` before qualifying a candidate. It includes the transport tests, mixed-failure resource workload, packaging, and feature checks. Focused checks do not replace full qualification. Run mutation testing against the affected functions and their tests when checking test strength, not as a replacement for either command.

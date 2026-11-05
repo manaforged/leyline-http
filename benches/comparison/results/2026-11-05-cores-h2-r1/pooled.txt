@@ -1,0 +1,37 @@
+3 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline              51662    7.9%      35055       -135      10.28      9     -
+       h2                   51439    5.6%      35190         +0      10.32      9     -
+       leyline-cores        51344    3.4%      35057       -133      10.22      9     -
+       hyper                42640    5.8%      53726     +18537      17.78      9     -
+
+1c64   lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline             204971    2.2%      30947        +15       8.05      9     1
+       hyper               180184    3.3%      45906     +14975      17.05      9     1
+       h2                  166907    1.3%      30932         +0      13.55      9     1
+       leyline-cores       161661    1.7%      29182      -1750       4.68      9     1
+
+8c8    lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline-cores       307787    6.2%      33483      -1864      11.91      9     8
+       h2                  280332    3.4%      35347         +0      11.26      9     8
+       leyline             273015    5.5%      35475       +128      11.95      9     8
+       hyper               264200    3.0%      52113     +16765      16.87      9     8
+
+8c256  lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline-cores      1398164    1.8%      26816       -596       4.11      9     8
+       leyline            1340776    3.8%      27659       +248       6.93      9     8
+       h2                 1191624    3.8%      27412         +0      10.17      9     8
+       hyper              1130044    4.0%      40865     +13453      12.00      9     8
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline           vs h2         req/s 1.017 [0.968, 1.068] tie; CPU/req 1.004 [0.988, 1.020] same CPU; 3 runs
+seq    leyline-cores     vs h2         req/s 0.998 [0.987, 1.009] tie; CPU/req 1.001 [0.989, 1.014] same CPU; 3 runs
+1c64   leyline           vs hyper      req/s 1.135 [1.110, 1.161] ahead; CPU/req 0.473 [0.450, 0.496] less CPU; 3 runs
+1c64   leyline           vs h2         req/s 1.228 [1.211, 1.245] ahead; CPU/req 0.596 [0.588, 0.605] less CPU; 3 runs
+1c64   leyline-cores     vs hyper      req/s 0.897 [0.882, 0.913] behind; CPU/req 0.276 [0.268, 0.283] less CPU; 3 runs
+1c64   leyline-cores     vs h2         req/s 0.971 [0.960, 0.982] behind; CPU/req 0.348 [0.342, 0.354] less CPU; 3 runs
+8c8    leyline           vs h2         req/s 0.977 [0.957, 0.996] behind; CPU/req 1.069 [1.026, 1.113] more CPU; 3 runs
+8c8    leyline-cores     vs h2         req/s 1.111 [1.036, 1.192] ahead; CPU/req 1.062 [1.020, 1.106] more CPU; 3 runs
+8c256  leyline           vs h2         req/s 1.119 [1.050, 1.191] ahead; CPU/req 0.681 [0.675, 0.687] less CPU; 3 runs
+8c256  leyline-cores     vs h2         req/s 1.159 [1.118, 1.201] ahead; CPU/req 0.400 [0.384, 0.417] less CPU; 3 runs

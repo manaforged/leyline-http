@@ -167,6 +167,7 @@ impl MuxHandle {
 pub(crate) trait MuxClient: Clone {
     fn into_handle(self) -> MuxHandle;
     fn in_handle(handle: &MuxHandle) -> Option<&Self>;
+    fn same(&self, other: &Self) -> bool;
 }
 
 impl MuxClient for H2Client {
@@ -181,6 +182,10 @@ impl MuxClient for H2Client {
             MuxHandle::H3(_) => None,
         }
     }
+
+    fn same(&self, other: &Self) -> bool {
+        H2Client::same(self, other)
+    }
 }
 
 #[cfg(feature = "http3")]
@@ -194,6 +199,10 @@ impl MuxClient for H3Client {
             MuxHandle::H3(handle) => Some(handle),
             MuxHandle::H2(_) => None,
         }
+    }
+
+    fn same(&self, other: &Self) -> bool {
+        H3Client::same(self, other)
     }
 }
 

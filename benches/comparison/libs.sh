@@ -10,7 +10,7 @@ if [ "$PROFILE" = bare ]; then
 else
   unset CMP_HEADERS
   LIBS=${LIBS:-leyline wreq tlsclient}; kept=""
-  for lib in $LIBS; do case $lib in leyline|leyline-nt|leyline-blocking|leyline-python|leyline-node|wreq|tlsclient) kept="$kept $lib" ;; *) echo "$lib has no browser profile; left out" >&2 ;; esac; done
+  for lib in $LIBS; do case $lib in leyline|leyline-nt|leyline-cores|leyline-blocking|leyline-python|leyline-node|wreq|tlsclient) kept="$kept $lib" ;; *) echo "$lib has no browser profile; left out" >&2 ;; esac; done
   LIBS=${kept# }
   [[ " $LIBS " == *" leyline "* ]] || { echo "PROFILE=$PROFILE needs leyline in LIBS: its headers are the reference" >&2; exit 1; }
 fi
@@ -21,10 +21,10 @@ source_hash() {
 DOTNET=${DOTNET:-dotnet}
 PYTHON=${PYTHON:-python3}
 if [ "$PROTO" = h1 ]; then
-  LIBS=${LIBS:-floor leyline leyline-blocking fasthttp ureq hyper}
+  LIBS=${LIBS:-floor leyline leyline-cores leyline-blocking fasthttp ureq hyper}
   CELLS=${CELLS:-seq:1:1:20000 8par:1:8:100000 64par:1:64:200000}
 else
-  LIBS=${LIBS:-leyline h2 hyper}
+  LIBS=${LIBS:-leyline leyline-cores h2 hyper}
   CELLS=${CELLS:-seq:1:1:20000 1c64:1:64:200000 8c8:8:8:200000 8c256:8:256:400000}
 fi
 if [ "$PROFILE" = bare ]; then
@@ -35,7 +35,7 @@ fi
 if [ "$TIMEOUT" != default ]; then
   for lib in $LIBS; do
     case $lib in
-      leyline|leyline-nt|leyline-blocking|reqwest|hyper|h2|curl|wreq|ureq|nethttp|tlsclient|fasthttp|pingora) ;;
+      leyline|leyline-nt|leyline-cores|leyline-blocking|reqwest|hyper|h2|curl|wreq|ureq|nethttp|tlsclient|fasthttp|pingora) ;;
       floor) [ "$TIMEOUT" = none ] || { echo "floor has no request timeout; it cannot honour TIMEOUT=$TIMEOUT" >&2; exit 1; } ;;
       *) echo "$lib does not read CMP_TIMEOUT; it cannot honour TIMEOUT=$TIMEOUT" >&2; exit 1 ;;
     esac
@@ -49,7 +49,7 @@ if [ "${BUILD:-1}" = 1 ]; then
   (cd .. && cargo build --release -q --example origin && cp target/release/examples/origin comparison/bin/server) || exit 1
   for lib in $LIBS; do
     case $lib in
-      leyline|leyline-nt|leyline-blocking)
+      leyline|leyline-nt|leyline-cores|leyline-blocking)
         (cd leyline-client && cargo build --release -q && cp target/release/leyline-cmp-client ../bin/leyline && cp target/release/leyline-blocking ../bin/leyline-blocking) && source_hash > bin/leyline.source_hash ;;
       reqwest|hyper|h2|curl|wreq|ureq|pingora)
         (cd "$lib-client" && cargo build --release -q && b=$lib-cmp-client && { [ -f "target/release/$b" ] || b=$lib; } && cp "target/release/$b" "../bin/$lib") ;;
@@ -64,7 +64,7 @@ fi
 
 LCH=bare
 if [ "$PROFILE" != bare ]; then
-  versions() { case $1 in leyline|leyline-nt|leyline-blocking) ls "$ROOT/crates/leyline/profiles/chrome" | sed -n 's/^\([0-9]*\)\.toml$/\1/p' ;; leyline-python) "$PYTHON" "$C/python-client/leyline_client.py" profiles ;; leyline-node) node "$C/node-client/leyline.mjs" profiles ;; *) "$C/bin/$1" profiles ;; esac; }
+  versions() { case $1 in leyline|leyline-nt|leyline-cores|leyline-blocking) ls "$ROOT/crates/leyline/profiles/chrome" | sed -n 's/^\([0-9]*\)\.toml$/\1/p' ;; leyline-python) "$PYTHON" "$C/python-client/leyline_client.py" profiles ;; leyline-node) node "$C/node-client/leyline.mjs" profiles ;; *) "$C/bin/$1" profiles ;; esac; }
   if [ "$PROFILE" = chrome ]; then
     N=$(for lib in $LIBS; do versions "$lib" | sort -u; done | sort -n | uniq -c | awk -v n="$(wc -w <<<"$LIBS")" '$1 == n {v = $2} END {print v}')
     [ -n "$N" ] || { echo "no Chrome version is common to: $LIBS" >&2; exit 1; }
@@ -79,7 +79,7 @@ OUT=$C/results/${TAG:-$(date -u +%F)-libs-$PROTO-$PROFILE-timeout-$TIMEOUT}; mkd
 
 CP=$(ls "$C"/java-client/lib/*.jar 2>/dev/null | paste -sd:)
 declare -A CMD=(
-  [leyline]="env LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-nt]="env CMP_TIMEOUT=none LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-blocking]="env LEYLINE_CHROME=$LCH $C/bin/leyline-blocking" [floor]="$C/bin/floor"
+  [leyline]="env LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-nt]="env CMP_TIMEOUT=none LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-cores]="env CMP_CORES=auto LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-blocking]="env LEYLINE_CHROME=$LCH $C/bin/leyline-blocking" [floor]="$C/bin/floor"
   [reqwest]="$C/bin/reqwest" [hyper]="$C/bin/hyper" [pingora]="$C/bin/pingora"
   [h2]="$C/bin/h2" [curl]="$C/bin/curl" [wreq]="$C/bin/wreq" [nethttp]="$C/bin/nethttp" [tlsclient]="$C/bin/tlsclient"
   [undici]="node $C/node-client/undici.mjs" [node-http2]="node $C/node-client/http2.mjs"

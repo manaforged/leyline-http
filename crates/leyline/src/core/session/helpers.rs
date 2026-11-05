@@ -119,7 +119,10 @@ impl Session {
     }
 
     pub(crate) fn without_proxy_pool(&self) -> Self {
-        self.changed(|inner| inner.proxy_pool = None)
+        self.changed(|inner| {
+            inner.proxy_pool = None;
+            std::sync::Arc::make_mut(&mut inner.inputs).proxy_pool = None;
+        })
     }
 
     pub(crate) fn downgrade(&self) -> std::sync::Weak<super::SessionInner> {

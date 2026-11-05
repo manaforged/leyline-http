@@ -35,6 +35,11 @@ pub(super) struct Shared {
 }
 
 impl H2Client {
+    /// Returns whether both handles drive the same connection.
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.shared, &other.shared)
+    }
+
     /// Returns the streams open or reserved on this connection.
     pub fn load(&self) -> usize {
         self.shared.streams.open.load(Ordering::Relaxed)

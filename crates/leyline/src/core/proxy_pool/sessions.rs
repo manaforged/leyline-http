@@ -71,3 +71,7 @@ impl IdentitySessions {
         crate::util::lock(&self.derived)
     }
 }
+
+#[cfg(test)]
+#[path = "sessions_tests.rs"]
+mod tests;

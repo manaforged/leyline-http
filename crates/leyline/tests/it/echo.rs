@@ -10,21 +10,15 @@ pub const GAP: Duration = Duration::from_secs(2);
 /// How many times one live check may ask an endpoint.
 pub const TRIES: u32 = 2;
 
-const PUBLIC: &str = "https://tls.peet.ws/api/all";
+/// The public fingerprint echo endpoint.
+pub const URL: &str = "https://tls.peet.ws/api/all";
 
 static LAST: Mutex<Option<Instant>> = Mutex::const_new(None);
 
-/// The fingerprint echo endpoint: `LEYLINE_ECHO_URL` when set, otherwise the public one.
-pub fn url() -> String {
-    std::env::var("LEYLINE_ECHO_URL").unwrap_or_else(|_| PUBLIC.to_owned())
-}
-
-/// Runs `request` alone, and at least `GAP` after the previous one when the endpoint is public.
+/// Runs `request` alone, and at least `GAP` after the previous one.
 pub async fn paced<T>(request: impl Future<Output = T>) -> T {
     let mut last = LAST.lock().await;
-    if let Some(at) = *last
-        && url() == PUBLIC
-    {
+    if let Some(at) = *last {
         tokio::time::sleep_until((at + GAP).into()).await;
     }
     let out = request.await;
@@ -41,12 +35,12 @@ pub async fn get(session: &leyline::Session) -> Value {
             Err(error) => last_err = error,
         }
     }
-    panic!("{} failed after {TRIES} tries: {last_err}", url());
+    panic!("{URL} failed after {TRIES} tries: {last_err}");
 }
 
 async fn report(session: &leyline::Session) -> Result<Value, String> {
     let resp = session
-        .get(url())
+        .get(URL)
         .send()
         .await
         .map_err(|e| format!("request error: {e}"))?;

@@ -20,6 +20,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 
 ### Added
 
+- `SessionBuilder::run_per_core`, which runs one single-threaded runtime with its own session per CPU core for maximum request rate.
 - Resumable `RequestBuilder::download_to`, strong ETag checks, SHA-256 verification, and download progress callbacks.
 - An opt-in, bounded HTTP cache with conditional revalidation, `Vary` matching, and mutation invalidation.
 - `RequestBuilder::events`, `Events`, and `Event` for parsed SSE with `Last-Event-ID` recovery. The retry policy bounds reconnects in a row; each delivered event resets the count.
@@ -80,6 +81,9 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 
 ### Fixed
 
+- Dropping a session that uses `Proxy::identified` frees the per-proxy identity sessions and their TLS contexts; before, each derived session kept the pool alive through a reference cycle.
+- A connection failure no longer evicts the healthy HTTP/2 or HTTP/3 connection that replaced the failed one in the pool.
+- A retry that reuses a pooled connection is treated as a pooled attempt: it is replayed after a failure and reported as reused.
 - HTTP/1 rejects malformed status-code widths and version tokens, discards the failed connection, and does not replay a malformed response.
 - The HTTP/2 reader builds with the minimum supported `tokio-util` version.
 - Reject malformed HTTP/2 response fields and invalid or repeated Content-Length fields instead of accepting incomplete metadata. Apply the shared field validation to HTTP/3 responses and trailers.

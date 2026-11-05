@@ -28,6 +28,7 @@ const AUTHORIZATION: &str = "authorization";
 mod assemble;
 mod bearer;
 pub(super) mod connect;
+mod cores;
 mod debug;
 pub(super) mod derive;
 mod inherit;
@@ -74,7 +75,7 @@ pub struct SessionBuilder {
     base_url: Option<url::Url>,
     languages: Option<Vec<String>>,
     host_limits: HostLimits,
-    proxy_pool: Option<ProxyPool>,
+    pub(super) proxy_pool: Option<ProxyPool>,
     block_rules: Rules,
     parent: Option<Parent>,
     saved: Option<crate::core::saved::Saved>,

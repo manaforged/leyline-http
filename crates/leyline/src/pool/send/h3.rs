@@ -56,9 +56,7 @@ pub(crate) async fn send_request_h3_pooled(
         match send_on(&ctx, opened, body).await? {
             Sent::Done(done) => return Ok(done),
             Sent::Retry(replay) => {
-                let connect_started = Instant::now();
-                let fresh = open_h3(pool, target, key.clone()).await?;
-                opened = Opened::fresh(fresh, connect_started);
+                opened = open_h3(pool, target, key.clone()).await?;
                 body = replay;
             }
         }
@@ -118,7 +116,7 @@ async fn send_on(
         Err(e) => {
             ctx.pool
                 .stale_hit(ctx.key, http::Version::HTTP_3, &e.message());
-            ctx.pool.invalidate(ctx.key);
+            ctx.pool.invalidate(ctx.key, &opened.conn);
             return resend(
                 replay,
                 true,

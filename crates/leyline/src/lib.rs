@@ -61,6 +61,8 @@ pub mod guide {
     pub struct Testing;
     #[doc = include_str!("../../../docs/guide/service-integration.md")]
     pub struct ServiceIntegration;
+    #[doc = include_str!("../../../docs/guide/throughput.md")]
+    pub struct Throughput;
     #[doc = include_str!("../../../docs/guide/crawling.md")]
     pub struct Crawling;
     #[doc = include_str!("../../../docs/guide/accounts.md")]
