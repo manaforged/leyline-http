@@ -164,21 +164,25 @@ def macos_chromium(family: str) -> Path:
     return app / spec["exe"]
 
 
-def installed(paths: list[str]) -> Path | None:
-    return next((Path(os.path.expandvars(p)) for p in paths if Path(os.path.expandvars(p)).is_file()), None)
+def installed(paths: list[str], family: str, major: int) -> Path | None:
+    for path in paths:
+        binary = Path(os.path.expandvars(path))
+        if binary.is_file() and major_of(chromium_version(family, binary)) == major:
+            return binary
+    return None
 
 
 def windows_chromium(family: str, major: int) -> Path:
     spec = CHROMIUM_BUILDS[family]["windows"]
-    binary = installed(spec["paths"])
-    if binary is None or major_of(chromium_version(family, binary)) != major:
+    binary = installed(spec["paths"], family, major)
+    if binary is None:
         url, sha256 = download_source(family, "windows")
         setup = CACHE / url.rsplit("/", 1)[1]
         verified_download(url, setup, sha256)
         verify_signer(family, setup)
         subprocess.run([part.replace("{installer}", str(setup)) for part in spec["install"]], check=True)
         setup.unlink()
-        binary = installed(spec["paths"])
+        binary = installed(spec["paths"], family, major)
         if binary is None:
             raise SystemExit(f"{CHROMIUM_BUILDS[family]['product']} is not at any of {spec['paths']} after install")
     verify_signer(family, binary)

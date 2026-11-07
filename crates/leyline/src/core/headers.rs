@@ -1,6 +1,6 @@
 use http::{HeaderName, HeaderValue};
 
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::profile::HeaderPosition;
 use crate::profile::preset::HeaderPair;
 
@@ -10,7 +10,7 @@ use crate::profile::preset::HeaderPair;
 )]
 pub(crate) fn name(n: impl TryInto<HeaderName>) -> Result<HeaderName> {
     n.try_into()
-        .map_err(|_| Error::new(Cause::Request).with_message("invalid header name"))
+        .map_err(|_| Error::new(Kind::Request).with_message("invalid header name"))
 }
 
 #[expect(
@@ -19,7 +19,7 @@ pub(crate) fn name(n: impl TryInto<HeaderName>) -> Result<HeaderName> {
 )]
 pub(crate) fn value(v: impl TryInto<HeaderValue>) -> Result<HeaderValue> {
     v.try_into()
-        .map_err(|_| Error::new(Cause::Request).with_message("invalid header value"))
+        .map_err(|_| Error::new(Kind::Request).with_message("invalid header value"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

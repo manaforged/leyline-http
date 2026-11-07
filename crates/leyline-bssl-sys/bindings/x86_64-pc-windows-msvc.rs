@@ -152,10 +152,7 @@ pub const _HAS_CXX17: i32 = 0;
 pub const _HAS_CXX20: i32 = 0;
 pub const _HAS_CXX23: i32 = 0;
 pub const _HAS_CXX26: i32 = 0;
-pub const WCHAR_MIN: i32 = 0;
-pub const WCHAR_MAX: i32 = 65535;
-pub const WINT_MIN: i32 = 0;
-pub const WINT_MAX: i32 = 65535;
+pub const _HAS_NODISCARD: i32 = 0;
 pub const _ARM_WINAPI_PARTITION_DESKTOP_SDK_AVAILABLE: i32 = 1;
 pub const _CRT_BUILD_DESKTOP_APP: i32 = 1;
 pub const _ARGMAX: i32 = 100;
@@ -174,6 +171,10 @@ pub const _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES: i32 = 1;
 pub const _CRT_SECURE_CPP_OVERLOAD_STANDARD_NAMES_MEMORY: i32 = 0;
 pub const _CRT_SECURE_CPP_OVERLOAD_SECURE_NAMES_MEMORY: i32 = 0;
 pub const _STATIC_INLINE_UCRT_FUNCTIONS: i32 = 0;
+pub const WCHAR_MIN: i32 = 0;
+pub const WCHAR_MAX: i32 = 65535;
+pub const WINT_MIN: i32 = 0;
+pub const WINT_MAX: i32 = 65535;
 pub const _MAX_ITOSTR_BASE16_COUNT: i32 = 9;
 pub const _MAX_ITOSTR_BASE10_COUNT: i32 = 12;
 pub const _MAX_ITOSTR_BASE8_COUNT: i32 = 12;
@@ -613,6 +614,7 @@ pub const V_ASN1_EXTERNAL: i32 = 8;
 pub const V_ASN1_REAL: i32 = 9;
 pub const V_ASN1_ENUMERATED: i32 = 10;
 pub const V_ASN1_UTF8STRING: i32 = 12;
+pub const V_ASN1_RELATIVE_OID: i32 = 13;
 pub const V_ASN1_SEQUENCE: i32 = 16;
 pub const V_ASN1_SET: i32 = 17;
 pub const V_ASN1_NUMERICSTRING: i32 = 18;
@@ -868,6 +870,8 @@ pub const ED25519_PUBLIC_KEY_LEN: i32 = 32;
 pub const ED25519_SIGNATURE_LEN: i32 = 64;
 pub const SPAKE2_MAX_MSG_SIZE: i32 = 32;
 pub const SPAKE2_MAX_KEY_SIZE: i32 = 64;
+pub const CPACE_MSG_LEN: i32 = 32;
+pub const CPACE_SHARED_SECRET_LEN: i32 = 64;
 pub const DES_ENCRYPT: i32 = 1;
 pub const DES_DECRYPT: i32 = 0;
 pub const DES_CBC_MODE: i32 = 0;
@@ -3478,6 +3482,7 @@ pub const CBS_ASN1_NULL: i32 = 5;
 pub const CBS_ASN1_OBJECT: i32 = 6;
 pub const CBS_ASN1_ENUMERATED: i32 = 10;
 pub const CBS_ASN1_UTF8STRING: i32 = 12;
+pub const CBS_ASN1_RELATIVE_OID: i32 = 13;
 pub const CBS_ASN1_SEQUENCE: i32 = 536870928;
 pub const CBS_ASN1_SET: i32 = 536870929;
 pub const CBS_ASN1_NUMERICSTRING: i32 = 18;
@@ -4256,8 +4261,6 @@ pub const SSL_ERROR_WANT_PRIVATE_KEY_OPERATION: i32 = 13;
 pub const SSL_ERROR_PENDING_TICKET: i32 = 14;
 pub const SSL_ERROR_EARLY_DATA_REJECTED: i32 = 15;
 pub const SSL_ERROR_WANT_CERTIFICATE_VERIFY: i32 = 16;
-pub const SSL_ERROR_HANDOFF: i32 = 17;
-pub const SSL_ERROR_HANDBACK: i32 = 18;
 pub const SSL_ERROR_WANT_RENEGOTIATE: i32 = 19;
 pub const SSL_ERROR_HANDSHAKE_HINTS_READY: i32 = 20;
 pub const DTLS1_VERSION_MAJOR: i32 = 254;
@@ -4770,6 +4773,7 @@ pub const SSL_R_INVALID_RAW_PUBLIC_KEY: i32 = 336;
 pub const SSL_R_UNUSABLE_ECH_CONFIG_LIST: i32 = 337;
 pub const SSL_R_INVALID_CIPHER_FLAGS: i32 = 338;
 pub const SSL_R_DUPLICATE_CIPHER: i32 = 339;
+pub const SSL_R_INVALID_TRUST_ANCHOR_ID: i32 = 340;
 pub const SSL_R_SSLV3_ALERT_CLOSE_NOTIFY: i32 = 1000;
 pub const SSL_R_SSLV3_ALERT_UNEXPECTED_MESSAGE: i32 = 1010;
 pub const SSL_R_SSLV3_ALERT_BAD_RECORD_MAC: i32 = 1020;
@@ -4821,27 +4825,9 @@ pub const TRUST_TOKEN_R_BAD_VALIDITY_CHECK: i32 = 111;
 pub const TRUST_TOKEN_R_NO_SRR_KEY_CONFIGURED: i32 = 112;
 pub const TRUST_TOKEN_R_INVALID_METADATA_KEY: i32 = 113;
 pub const TRUST_TOKEN_R_INVALID_PROOF: i32 = 114;
-pub type wchar_t = ::std::os::raw::c_ushort;
 pub type va_list = *mut ::std::os::raw::c_char;
 pub type __vcrt_bool = bool;
-pub type int_least8_t = ::std::os::raw::c_schar;
-pub type int_least16_t = ::std::os::raw::c_short;
-pub type int_least32_t = ::std::os::raw::c_int;
-pub type int_least64_t = ::std::os::raw::c_longlong;
-pub type uint_least8_t = ::std::os::raw::c_uchar;
-pub type uint_least16_t = ::std::os::raw::c_ushort;
-pub type uint_least32_t = ::std::os::raw::c_uint;
-pub type uint_least64_t = ::std::os::raw::c_ulonglong;
-pub type int_fast8_t = ::std::os::raw::c_schar;
-pub type int_fast16_t = ::std::os::raw::c_int;
-pub type int_fast32_t = ::std::os::raw::c_int;
-pub type int_fast64_t = ::std::os::raw::c_longlong;
-pub type uint_fast8_t = ::std::os::raw::c_uchar;
-pub type uint_fast16_t = ::std::os::raw::c_uint;
-pub type uint_fast32_t = ::std::os::raw::c_uint;
-pub type uint_fast64_t = ::std::os::raw::c_ulonglong;
-pub type intmax_t = ::std::os::raw::c_longlong;
-pub type uintmax_t = ::std::os::raw::c_ulonglong;
+pub type wchar_t = ::std::os::raw::c_ushort;
 pub type __crt_bool = bool;
 pub type errno_t = ::std::os::raw::c_int;
 pub type wint_t = ::std::os::raw::c_ushort;
@@ -4921,6 +4907,24 @@ const _: () = {
 pub type mbstate_t = _Mbstatet;
 pub type time_t = __time64_t;
 pub type rsize_t = usize;
+pub type int_least8_t = ::std::os::raw::c_schar;
+pub type int_least16_t = ::std::os::raw::c_short;
+pub type int_least32_t = ::std::os::raw::c_int;
+pub type int_least64_t = ::std::os::raw::c_longlong;
+pub type uint_least8_t = ::std::os::raw::c_uchar;
+pub type uint_least16_t = ::std::os::raw::c_ushort;
+pub type uint_least32_t = ::std::os::raw::c_uint;
+pub type uint_least64_t = ::std::os::raw::c_ulonglong;
+pub type int_fast8_t = ::std::os::raw::c_schar;
+pub type int_fast16_t = ::std::os::raw::c_int;
+pub type int_fast32_t = ::std::os::raw::c_int;
+pub type int_fast64_t = ::std::os::raw::c_longlong;
+pub type uint_fast8_t = ::std::os::raw::c_uchar;
+pub type uint_fast16_t = ::std::os::raw::c_uint;
+pub type uint_fast32_t = ::std::os::raw::c_uint;
+pub type uint_fast64_t = ::std::os::raw::c_ulonglong;
+pub type intmax_t = ::std::os::raw::c_longlong;
+pub type uintmax_t = ::std::os::raw::c_ulonglong;
 pub type _CoreCrtSecureSearchSortCompareFunction = ::std::option::Option<
     unsafe extern "C" fn(
         arg1: *mut ::std::os::raw::c_void,
@@ -5209,6 +5213,12 @@ pub struct conf_st {
 }
 pub type CONF = conf_st;
 pub type CONF_VALUE = conf_value_st;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct cpace_ctx_st {
+    _unused: [u8; 0],
+}
+pub type CPACE_CTX = cpace_ctx_st;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct crypto_buffer_pool_st {
@@ -6503,7 +6513,6 @@ impl Default for sha_state_st {
         }
     }
 }
-pub type __gnuc_va_list = __builtin_va_list;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct CRYPTO_dynlock {
@@ -6545,6 +6554,13 @@ impl spake2_role_t {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct spake2_role_t(pub ::std::os::raw::c_int);
+impl cpace_role_t {
+    pub const cpace_role_initiator: cpace_role_t = cpace_role_t(0);
+    pub const cpace_role_responder: cpace_role_t = cpace_role_t(1);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct cpace_role_t(pub ::std::os::raw::c_int);
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct DES_cblock_st {
@@ -8072,7 +8088,6 @@ pub type AUTHORITY_INFO_ACCESS = stack_st_ACCESS_DESCRIPTION;
 pub struct DIST_POINT_NAME_st {
     pub type_: ::std::os::raw::c_int,
     pub name: DIST_POINT_NAME_st__bindgen_ty_1,
-    pub dpname: *mut X509_NAME,
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -8102,14 +8117,12 @@ impl Default for DIST_POINT_NAME_st__bindgen_ty_1 {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of DIST_POINT_NAME_st"][::std::mem::size_of::<DIST_POINT_NAME_st>() - 24usize];
+    ["Size of DIST_POINT_NAME_st"][::std::mem::size_of::<DIST_POINT_NAME_st>() - 16usize];
     ["Alignment of DIST_POINT_NAME_st"][::std::mem::align_of::<DIST_POINT_NAME_st>() - 8usize];
     ["Offset of field: DIST_POINT_NAME_st::type_"]
         [::std::mem::offset_of!(DIST_POINT_NAME_st, type_) - 0usize];
     ["Offset of field: DIST_POINT_NAME_st::name"]
         [::std::mem::offset_of!(DIST_POINT_NAME_st, name) - 8usize];
-    ["Offset of field: DIST_POINT_NAME_st::dpname"]
-        [::std::mem::offset_of!(DIST_POINT_NAME_st, dpname) - 16usize];
 };
 impl Default for DIST_POINT_NAME_st {
     fn default() -> Self {
@@ -10073,6 +10086,24 @@ impl ssl_select_cert_result_t {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ssl_select_cert_result_t(pub ::std::os::raw::c_int);
+impl ssl_compliance_policy_t {
+    pub const ssl_compliance_policy_none: ssl_compliance_policy_t = ssl_compliance_policy_t(0);
+    pub const ssl_compliance_policy_fips_202205: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(1);
+    pub const ssl_compliance_policy_fips_202609: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(2);
+    pub const ssl_compliance_policy_wpa3_192_202304: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(3);
+    pub const ssl_compliance_policy_cnsa_202407: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(4);
+    pub const ssl_compliance_policy_cnsa1_202603: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(5);
+    pub const ssl_compliance_policy_cnsa2_202603: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(6);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct ssl_compliance_policy_t(pub ::std::os::raw::c_int);
 pub type COMP_METHOD = ::std::os::raw::c_void;
 pub type SSL_COMP = ssl_comp_st;
 #[repr(C)]
@@ -10125,24 +10156,6 @@ pub struct ssl_conf_ctx_st {
     _unused: [u8; 0],
 }
 pub type SSL_CONF_CTX = ssl_conf_ctx_st;
-impl ssl_compliance_policy_t {
-    pub const ssl_compliance_policy_none: ssl_compliance_policy_t = ssl_compliance_policy_t(0);
-    pub const ssl_compliance_policy_fips_202205: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(1);
-    pub const ssl_compliance_policy_fips_202609: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(2);
-    pub const ssl_compliance_policy_wpa3_192_202304: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(3);
-    pub const ssl_compliance_policy_cnsa_202407: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(4);
-    pub const ssl_compliance_policy_cnsa1_202603: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(5);
-    pub const ssl_compliance_policy_cnsa2_202603: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(6);
-}
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct ssl_compliance_policy_t(pub ::std::os::raw::c_int);
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct trust_token_st {
@@ -10218,6 +10231,11 @@ unsafe extern "C" {
         _LineNo: ::std::os::raw::c_uint,
         _Reserved: usize,
     ) -> !;
+    pub fn _errno() -> *mut ::std::os::raw::c_int;
+    pub fn _set_errno(_Value: ::std::os::raw::c_int) -> errno_t;
+    pub fn _get_errno(_Value: *mut ::std::os::raw::c_int) -> errno_t;
+    pub fn __threadid() -> ::std::os::raw::c_ulong;
+    pub fn __threadhandle() -> usize;
     pub fn _calloc_base(_Count: usize, _Size: usize) -> *mut ::std::os::raw::c_void;
     pub fn _callnewh(_Size: usize) -> ::std::os::raw::c_int;
     pub fn _expand(
@@ -10594,9 +10612,6 @@ unsafe extern "C" {
     ) -> _invalid_parameter_handler;
     pub fn _get_thread_local_invalid_parameter_handler() -> _invalid_parameter_handler;
     pub fn _set_error_mode(_Mode: ::std::os::raw::c_int) -> ::std::os::raw::c_int;
-    pub fn _errno() -> *mut ::std::os::raw::c_int;
-    pub fn _set_errno(_Value: ::std::os::raw::c_int) -> errno_t;
-    pub fn _get_errno(_Value: *mut ::std::os::raw::c_int) -> errno_t;
     pub fn __doserrno() -> *mut ::std::os::raw::c_ulong;
     pub fn _set_doserrno(_Value: ::std::os::raw::c_ulong) -> errno_t;
     pub fn _get_doserrno(_Value: *mut ::std::os::raw::c_ulong) -> errno_t;
@@ -14310,6 +14325,31 @@ unsafe extern "C" {
         their_msg: *const u8,
         their_msg_len: usize,
     ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_CPACE_CTX_new"]
+    pub fn CPACE_CTX_new(
+        role: cpace_role_t,
+        password: *const u8,
+        password_len: usize,
+        channel_id: *const u8,
+        channel_id_len: usize,
+        assoc_data: *const u8,
+        assoc_data_len: usize,
+        session_id: *const u8,
+        session_id_len: usize,
+    ) -> *mut CPACE_CTX;
+    #[link_name = "\u{1}LEYLINE_CPACE_CTX_free"]
+    pub fn CPACE_CTX_free(ctx: *mut CPACE_CTX);
+    #[link_name = "\u{1}LEYLINE_CPACE_generate_msg"]
+    pub fn CPACE_generate_msg(ctx: *mut CPACE_CTX, out_msg: *mut u8) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_CPACE_process_msg"]
+    pub fn CPACE_process_msg(
+        ctx: *mut CPACE_CTX,
+        in_msg: *const u8,
+        peer_assoc_data: *const u8,
+        peer_assoc_data_len: usize,
+        shared_secret: *mut u8,
+        sid_out: *mut u8,
+    ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_DES_set_key"]
     pub fn DES_set_key(key: *const DES_cblock, schedule: *mut DES_key_schedule);
     #[link_name = "\u{1}LEYLINE_DES_set_odd_parity"]
@@ -15513,6 +15553,8 @@ unsafe extern "C" {
     pub fn DSA_free(dsa: *mut DSA);
     #[link_name = "\u{1}LEYLINE_DSA_up_ref"]
     pub fn DSA_up_ref(dsa: *mut DSA) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_DSA_dup_ref"]
+    pub fn DSA_dup_ref(dsa: *const DSA) -> *mut DSA;
     #[link_name = "\u{1}LEYLINE_DSA_bits"]
     pub fn DSA_bits(dsa: *const DSA) -> ::std::os::raw::c_uint;
     #[link_name = "\u{1}LEYLINE_DSA_get0_pub_key"]
@@ -16013,6 +16055,8 @@ unsafe extern "C" {
     pub fn EC_KEY_dup(src: *const EC_KEY) -> *mut EC_KEY;
     #[link_name = "\u{1}LEYLINE_EC_KEY_up_ref"]
     pub fn EC_KEY_up_ref(key: *mut EC_KEY) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_EC_KEY_dup_ref"]
+    pub fn EC_KEY_dup_ref(key: *const EC_KEY) -> *mut EC_KEY;
     #[link_name = "\u{1}LEYLINE_EC_KEY_is_opaque"]
     pub fn EC_KEY_is_opaque(key: *const EC_KEY) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_EC_KEY_get0_group"]
@@ -17611,6 +17655,8 @@ unsafe extern "C" {
     pub fn CRYPTO_BUFFER_POOL_free(pool: *mut CRYPTO_BUFFER_POOL);
     #[link_name = "\u{1}LEYLINE_CRYPTO_BUFFER_POOL_up_ref"]
     pub fn CRYPTO_BUFFER_POOL_up_ref(pool: *mut CRYPTO_BUFFER_POOL) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_CRYPTO_BUFFER_POOL_dup_ref"]
+    pub fn CRYPTO_BUFFER_POOL_dup_ref(pool: *const CRYPTO_BUFFER_POOL) -> *mut CRYPTO_BUFFER_POOL;
     #[link_name = "\u{1}LEYLINE_CRYPTO_BUFFER_new"]
     pub fn CRYPTO_BUFFER_new(
         data: *const u8,
@@ -17663,6 +17709,8 @@ unsafe extern "C" {
     pub fn RSA_free(rsa: *mut RSA);
     #[link_name = "\u{1}LEYLINE_RSA_up_ref"]
     pub fn RSA_up_ref(rsa: *mut RSA) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_RSA_dup_ref"]
+    pub fn RSA_dup_ref(rsa: *const RSA) -> *mut RSA;
     #[link_name = "\u{1}LEYLINE_RSA_bits"]
     pub fn RSA_bits(rsa: *const RSA) -> ::std::os::raw::c_uint;
     #[link_name = "\u{1}LEYLINE_RSA_get0_n"]
@@ -19255,6 +19303,8 @@ unsafe extern "C" {
     pub fn X509_STORE_new() -> *mut X509_STORE;
     #[link_name = "\u{1}LEYLINE_X509_STORE_up_ref"]
     pub fn X509_STORE_up_ref(store: *mut X509_STORE) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_X509_STORE_dup_ref"]
+    pub fn X509_STORE_dup_ref(store: *const X509_STORE) -> *mut X509_STORE;
     #[link_name = "\u{1}LEYLINE_X509_STORE_free"]
     pub fn X509_STORE_free(store: *mut X509_STORE);
     #[link_name = "\u{1}LEYLINE_X509_STORE_add_cert"]
@@ -21471,6 +21521,8 @@ unsafe extern "C" {
     pub fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
     #[link_name = "\u{1}LEYLINE_SSL_CTX_up_ref"]
     pub fn SSL_CTX_up_ref(ctx: *mut SSL_CTX) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_SSL_CTX_dup_ref"]
+    pub fn SSL_CTX_dup_ref(ctx: *const SSL_CTX) -> *mut SSL_CTX;
     #[link_name = "\u{1}LEYLINE_SSL_CTX_free"]
     pub fn SSL_CTX_free(ctx: *mut SSL_CTX);
     #[link_name = "\u{1}LEYLINE_SSL_new"]
@@ -22112,6 +22164,8 @@ unsafe extern "C" {
     pub fn SSL_SESSION_new(ctx: *const SSL_CTX) -> *mut SSL_SESSION;
     #[link_name = "\u{1}LEYLINE_SSL_SESSION_up_ref"]
     pub fn SSL_SESSION_up_ref(session: *mut SSL_SESSION) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_SSL_SESSION_dup_ref"]
+    pub fn SSL_SESSION_dup_ref(session: *const SSL_SESSION) -> *mut SSL_SESSION;
     #[link_name = "\u{1}LEYLINE_SSL_SESSION_free"]
     pub fn SSL_SESSION_free(session: *mut SSL_SESSION);
     #[link_name = "\u{1}LEYLINE_SSL_SESSION_to_bytes"]
@@ -22655,13 +22709,11 @@ unsafe extern "C" {
         id: *const u8,
         id_len: usize,
     ) -> ::std::os::raw::c_int;
-    #[link_name = "\u{1}LEYLINE_SSL_CREDENTIAL_add1_trust_anchor_group_inclusion"]
-    pub fn SSL_CREDENTIAL_add1_trust_anchor_group_inclusion(
+    #[link_name = "\u{1}LEYLINE_SSL_CREDENTIAL_add1_trust_anchor_group"]
+    pub fn SSL_CREDENTIAL_add1_trust_anchor_group(
         cred: *mut SSL_CREDENTIAL,
-        base: *const u8,
-        base_len: usize,
-        min: u64,
-        max: u64,
+        pattern: *const u8,
+        pattern_len: usize,
     ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_SSL_CTX_set1_requested_trust_anchors"]
     pub fn SSL_CTX_set1_requested_trust_anchors(
@@ -23126,6 +23178,8 @@ unsafe extern "C" {
     pub fn SSL_ECH_KEYS_new() -> *mut SSL_ECH_KEYS;
     #[link_name = "\u{1}LEYLINE_SSL_ECH_KEYS_up_ref"]
     pub fn SSL_ECH_KEYS_up_ref(keys: *mut SSL_ECH_KEYS);
+    #[link_name = "\u{1}LEYLINE_SSL_ECH_KEYS_dup_ref"]
+    pub fn SSL_ECH_KEYS_dup_ref(keys: *const SSL_ECH_KEYS) -> *mut SSL_ECH_KEYS;
     #[link_name = "\u{1}LEYLINE_SSL_ECH_KEYS_free"]
     pub fn SSL_ECH_KEYS_free(keys: *mut SSL_ECH_KEYS);
     #[link_name = "\u{1}LEYLINE_SSL_ECH_KEYS_add"]
@@ -23498,6 +23552,20 @@ unsafe extern "C" {
         tail: *const u16,
         tail_len: usize,
     ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_SSL_copy_traffic_secrets"]
+    pub fn SSL_copy_traffic_secrets(
+        ssl: *const SSL,
+        out_read: *mut u8,
+        out_write: *mut u8,
+        max_len: usize,
+        out_len: *mut usize,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_SSL_process_post_handshake"]
+    pub fn SSL_process_post_handshake(
+        ssl: *mut SSL,
+        msg: *const u8,
+        msg_len: usize,
+    ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_SSL_set_permute_extensions"]
     pub fn SSL_set_permute_extensions(ssl: *mut SSL, enabled: ::std::os::raw::c_int);
     #[link_name = "\u{1}LEYLINE_SSL_max_seal_overhead"]
@@ -23518,6 +23586,26 @@ unsafe extern "C" {
         in_: *const u8,
         len: usize,
     ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_SSL_CTX_set_compliance_policy"]
+    pub fn SSL_CTX_set_compliance_policy(
+        ctx: *mut SSL_CTX,
+        policy: ssl_compliance_policy_t,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_SSL_CTX_get_compliance_policy"]
+    pub fn SSL_CTX_get_compliance_policy(ctx: *const SSL_CTX) -> ssl_compliance_policy_t;
+    #[link_name = "\u{1}LEYLINE_SSL_set_compliance_policy"]
+    pub fn SSL_set_compliance_policy(
+        ssl: *mut SSL,
+        policy: ssl_compliance_policy_t,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}LEYLINE_SSL_get_compliance_policy"]
+    pub fn SSL_get_compliance_policy(ssl: *const SSL) -> ssl_compliance_policy_t;
+    #[link_name = "\u{1}LEYLINE_SSL_set_server_padding_request"]
+    pub fn SSL_set_server_padding_request(ssl: *mut SSL, num_bytes: u16);
+    #[link_name = "\u{1}LEYLINE_SSL_set_server_padding_enabled"]
+    pub fn SSL_set_server_padding_enabled(ssl: *mut SSL, enabled: ::std::os::raw::c_int);
+    #[link_name = "\u{1}LEYLINE_SSL_server_sent_requested_padding"]
+    pub fn SSL_server_sent_requested_padding(ssl: *const SSL) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_SSL_library_init"]
     pub fn SSL_library_init() -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_SSL_CIPHER_description"]
@@ -23917,26 +24005,6 @@ unsafe extern "C" {
     pub fn SSL_CTX_get_security_level(ctx: *const SSL_CTX) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_SSL_CTX_set0_buffer_pool"]
     pub fn SSL_CTX_set0_buffer_pool(ctx: *mut SSL_CTX, pool: *mut CRYPTO_BUFFER_POOL);
-    #[link_name = "\u{1}LEYLINE_SSL_CTX_set_compliance_policy"]
-    pub fn SSL_CTX_set_compliance_policy(
-        ctx: *mut SSL_CTX,
-        policy: ssl_compliance_policy_t,
-    ) -> ::std::os::raw::c_int;
-    #[link_name = "\u{1}LEYLINE_SSL_CTX_get_compliance_policy"]
-    pub fn SSL_CTX_get_compliance_policy(ctx: *const SSL_CTX) -> ssl_compliance_policy_t;
-    #[link_name = "\u{1}LEYLINE_SSL_set_compliance_policy"]
-    pub fn SSL_set_compliance_policy(
-        ssl: *mut SSL,
-        policy: ssl_compliance_policy_t,
-    ) -> ::std::os::raw::c_int;
-    #[link_name = "\u{1}LEYLINE_SSL_get_compliance_policy"]
-    pub fn SSL_get_compliance_policy(ssl: *const SSL) -> ssl_compliance_policy_t;
-    #[link_name = "\u{1}LEYLINE_SSL_set_server_padding_request"]
-    pub fn SSL_set_server_padding_request(ssl: *mut SSL, num_bytes: u16);
-    #[link_name = "\u{1}LEYLINE_SSL_set_server_padding_enabled"]
-    pub fn SSL_set_server_padding_enabled(ssl: *mut SSL, enabled: ::std::os::raw::c_int);
-    #[link_name = "\u{1}LEYLINE_SSL_server_sent_requested_padding"]
-    pub fn SSL_server_sent_requested_padding(ssl: *const SSL) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}LEYLINE_TRUST_TOKEN_experiment_v1"]
     pub fn TRUST_TOKEN_experiment_v1() -> *const TRUST_TOKEN_METHOD;
     #[link_name = "\u{1}LEYLINE_TRUST_TOKEN_experiment_v2_voprf"]

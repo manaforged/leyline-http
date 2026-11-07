@@ -3,11 +3,11 @@ use super::*;
 fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Response {
     Response::from_parts(crate::core::response::Parts {
         status: http::StatusCode::OK,
-        version: HttpVersion::Http2,
+        version: http::Version::HTTP_2,
         headers: http::HeaderMap::new(),
-        trailers: Vec::new(),
+        trailers: None,
         body: ResponseBody::Buffered(Vec::new()),
-        url: Url::parse("https://example.test/").unwrap(),
+        url: std::sync::Arc::new(Url::parse("https://example.test/").unwrap()),
         redirect_chain: Vec::new(),
         request_headers: vec![
             (":method".to_string(), "GET".to_string()),
@@ -176,7 +176,7 @@ async fn bytes_on_a_taken_stream_reports_a_body_error() {
     let err = resp.bytes().await.unwrap_err();
     assert_eq!(
         err.cause(),
-        Cause::Body,
+        Kind::Body,
         "expected a body error, got {err:?}"
     );
     assert!(err.to_string().contains("bytes_stream"), "{err}");
@@ -189,8 +189,9 @@ async fn text_reads_a_buffered_body_and_a_stream() {
     assert_eq!(resp.text().await.unwrap(), "hi");
 
     let mut resp = bare_response(None);
-    resp.parts.body =
-        ResponseBody::Streaming(BodyStream::from_bytes(bytes::Bytes::from_static(b"hi")));
+    resp.parts.body = ResponseBody::Streaming(Box::new(BodyStream::from_bytes(
+        bytes::Bytes::from_static(b"hi"),
+    )));
     assert_eq!(resp.text().await.unwrap(), "hi");
 }
 
@@ -202,4 +203,24 @@ fn timing_add_leg_saturates_not_wraps() {
     assert_eq!(acc.total_ms, u32::MAX);
     assert_eq!(acc.send_ms, u32::MAX);
     assert_eq!(acc.connect_ms, Some(u32::MAX));
+}
+
+#[test]
+fn debug_shows_the_http_version_as_the_wire_name() {
+    let shown = format!("{:?}", bare_response(None));
+    assert!(shown.contains("version: HTTP/2.0"), "{shown}");
+}
+
+#[test]
+fn content_length_reads_only_decimal_digits() {
+    let mut resp = bare_response(None);
+    for (value, expected) in [(" 5 ", Some(5)), ("+5", None), ("5,5", None), ("", None)] {
+        resp.parts.headers = [(
+            http::header::CONTENT_LENGTH,
+            http::HeaderValue::from_static(value),
+        )]
+        .into_iter()
+        .collect();
+        assert_eq!(resp.content_length(), expected, "{value:?}");
+    }
 }

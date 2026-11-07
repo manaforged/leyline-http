@@ -1,0 +1,6 @@
+command BUILD=0 TAG=2026-11-03-verified-browser-h1-r1 LIBS="leyline wreq tlsclient" PROFILE=chrome146 PROTO=h1 ROUNDS=4 TIMEOUT=30s SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
+certificate_environment CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der
+exit 1
+wreq header names differ from leyline chrome146 (< leyline, > wreq):
+> priority
+measurements none

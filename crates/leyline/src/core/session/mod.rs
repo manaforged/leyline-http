@@ -1,11 +1,14 @@
 #![forbid(unsafe_code)]
 mod builder;
+mod cache;
 pub(crate) mod decompress;
 pub(crate) mod execute;
+mod guard;
 mod header_merge;
 mod helpers;
 mod identity;
 mod proxy;
+pub(crate) mod shutdown;
 mod transport_policy;
 #[cfg(feature = "websocket")]
 mod websocket;
@@ -28,7 +31,8 @@ use crate::core::{BodyRules, Proxy, Redirect, Timeout};
 use crate::h2::H2Config;
 use crate::header_str::HeaderStr;
 use crate::pool::Pool;
-use crate::profile::{Browser, ChromiumBrand, HeaderStyle, Platform};
+use crate::profile::preset::HeaderPlan;
+use crate::profile::{Browser, ChromiumBrand, Platform};
 use crate::tls::FingerprintConnector;
 use crate::tls::Tls;
 
@@ -67,7 +71,7 @@ pub struct Session {
 pub(crate) struct SessionInner {
     browser: Option<Browser>,
     impersonates: bool,
-    header_style: HeaderStyle,
+    header_plan: Arc<HeaderPlan>,
     identity: Option<Identity>,
     platform: Platform,
     brand: ChromiumBrand,
@@ -75,8 +79,9 @@ pub(crate) struct SessionInner {
     sec_ch_ua: HeaderStr,
     accept_language: HeaderStr,
     header_order: Option<Vec<String>>,
-    default_headers: Vec<(String, String)>,
+    default_headers: Vec<(String, HeaderStr)>,
     bearer: Option<builder::BearerToken>,
+    cache: Option<Arc<cache::Cache>>,
     proxy_config: Proxy,
     proxy_shown: Option<String>,
     timeouts: Timeout,
@@ -89,7 +94,7 @@ pub(crate) struct SessionInner {
     connector: FingerprintConnector,
     h2_config: H2Config,
     pool: Arc<Pool>,
-    shutdown: tokio_util::sync::CancellationToken,
+    shutdown: Arc<shutdown::Shutdown>,
     writers: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     protocol_policy: Protocol,

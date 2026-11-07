@@ -2,16 +2,18 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use url::{Host, Url};
 
-use crate::cookie::parse::registrable_domain;
 use crate::core::config::{Origin, normalize_host};
+use crate::core::registrable_domain;
 use crate::core::robots::normalize;
 use crate::html::WEB_SCHEMES;
+
+mod queues;
 
 const MAX_URL_BYTES: usize = 2048;
 pub(super) const MAX_DEPTH: usize = 64;
 
 /// Which URLs a crawl follows, relative to the seed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Scope {
     /// Follows URLs on the seed's exact host; the default.
@@ -23,6 +25,7 @@ pub enum Scope {
     Prefix,
 }
 
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 enum Bound {
     Host(String),
     Domain(String),
@@ -82,7 +85,7 @@ impl Bound {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct Queued {
     pub(super) url: Url,
     pub(super) depth: usize,
@@ -115,8 +118,9 @@ impl Queued {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct Frontier {
+    #[serde(with = "queues")]
     queues: HashMap<Origin, VecDeque<Queued>>,
     order: VecDeque<Origin>,
     seen: HashSet<String>,
@@ -201,6 +205,26 @@ impl Frontier {
 
     pub(super) fn in_scope(&self, url: &Url) -> bool {
         self.bounds.iter().any(|bound| bound.holds(url))
+    }
+
+    pub(super) fn validate(&self) -> crate::Result<()> {
+        let order: HashSet<_> = self.order.iter().collect();
+        if order.len() != self.order.len()
+            || order.len() != self.queues.len()
+            || self.queues.keys().any(|origin| !order.contains(origin))
+            || self.queues.values().flatten().any(|queued| {
+                queued.url.as_str().len() > MAX_URL_BYTES
+                    || queued.depth > MAX_DEPTH
+                    || !WEB_SCHEMES.contains(&queued.url.scheme())
+                    || !self.has_seen(&queued.url)
+                    || (!queued.seed && !self.in_scope(&queued.url))
+            })
+        {
+            return Err(crate::Error::config(
+                "checkpoint contains an inconsistent crawl frontier",
+            ));
+        }
+        Ok(())
     }
 
     pub(super) fn known(&self) -> usize {

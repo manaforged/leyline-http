@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{DataFrame, FrameType, HeadersFrame};
 use leyline::h2::hpack;
-use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
@@ -131,7 +131,7 @@ async fn early_hints_103_is_skipped_final_status_wins() {
                 },
                 headers: vec![],
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             false,
         ),
     )
@@ -143,7 +143,7 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         resp.status, 200,
         "1xx Early Hints must be skipped, not returned as the final status"
     );
-    let leyline::h2::ResponseBody::Buffered(body) = resp.body else {
+    let leyline::pool::TransportBody::Buffered(body) = resp.body else {
         panic!("buffered body")
     };
     assert_eq!(body, b"<html>ok</html>");
@@ -216,7 +216,7 @@ async fn endless_early_hints_fail_the_request() {
                 },
                 headers: vec![],
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             false,
         ),
     )

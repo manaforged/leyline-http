@@ -1,6 +1,6 @@
 [package]
 name = "leyline-http"
-description = "HTTP client that impersonates Chrome, Firefox, and Safari on the wire: TLS (JA3/JA4), HTTP/2, and HTTP/3 fingerprints"
+description = "Async HTTP client for APIs, crawlers, monitors, and bots: HTTP/1.1, HTTP/2, HTTP/3, sessions, caching, resumable downloads, and optional browser impersonation"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -76,6 +76,7 @@ html = ["multipart"]
 full = ["default", "tower", "socks"]
 
 [dependencies]
+http-cache-semantics = { version = "2.1", default-features = false }
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
 leyline-quiche = { workspace = true, optional = true }
@@ -96,6 +97,7 @@ toml = { workspace = true }
 # -- networking / TLS
 socket2 = { workspace = true }
 url = { workspace = true, features = ["serde"] }
+percent-encoding = "2.3"
 
 # -- tracing
 tracing = { workspace = true }
@@ -115,6 +117,8 @@ http = "1"
 
 # -- misc
 bytes = { workspace = true }
+memchr = { workspace = true }
+foldhash = { workspace = true }
 encoding_rs = { version = "0.8", optional = true }
 # Mozilla Public Suffix List (compile-time embedded) for cookie
 # registrable-domain + public-suffix checks. Non-optional: the cookie module
@@ -165,6 +169,15 @@ name = "it"
 path = "tests/it/main.rs"
 
 [[test]]
+name = "h1_failures"
+path = "tests/it/h1_failures.rs"
+
+[[test]]
+name = "h2_stream_state"
+path = "tests/it/h2_stream_state.rs"
+required-features = ["bench-internals"]
+
+[[test]]
 name = "tls_trust_scope"
 required-features = ["bench-internals"]
 
@@ -183,7 +196,9 @@ leyline-quiche = { workspace = true, features = ["internal"] }
 # In-test cert generation + a localhost TLS acceptor for the
 # pinning hostname-verification integration test.
 leyline-bssl = { workspace = true }
+leyline-bssl-sys = { workspace = true }
 leyline-bssl-tokio = { workspace = true }
+foreign-types = "0.5"
 tokio = { workspace = true, features = ["full", "test-util"] }
 tokio-util = { workspace = true }
 futures-util = { workspace = true }

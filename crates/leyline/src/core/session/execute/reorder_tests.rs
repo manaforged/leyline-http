@@ -26,12 +26,13 @@ fn firefox_navigate_order_matches_the_live_capture() {
         navigation_site: "none",
         navigation_referer: "",
     };
-    let mut headers =
-        crate::profile::HeaderStyle::Gecko.build_headers(Some(RequestKind::Navigate), &ctx);
-    let order = Browser::Firefox153
-        .profile()
-        .meta
-        .header_style
+    let plan = crate::profile::preset::HeaderPlan::new(
+        Browser::Firefox153.profile().meta.header_style,
+        &ctx,
+        None,
+    );
+    let mut headers = plan.plan(Some(RequestKind::Navigate)).headers(&ctx, true);
+    let order = plan
         .order()
         .expect("firefox header shape declares a request header order");
     reorder_headers(&mut headers, order);

@@ -41,54 +41,7 @@ impl PeerSettings {
     pub(crate) fn apply(&mut self, params: &[(u16, u32)]) -> Result<SettingsApplyResult, H2Error> {
         let old_window = self.initial_window_size;
         for &(id, val) in params {
-            match id {
-                0x1 => self.header_table_size = val,
-                0x2 => {
-                    if val > 1 {
-                        return Err(H2Error::Connection {
-                            code: ErrorCode::ProtocolError,
-                            reason: format!("ENABLE_PUSH value {val} is not 0 or 1"),
-                        });
-                    }
-                    self.enable_push = val != 0;
-                }
-                0x3 => self.max_concurrent_streams = Some(val),
-                0x4 => {
-                    if val > 0x7FFF_FFFF {
-                        return Err(H2Error::Connection {
-                            code: ErrorCode::FlowControlError,
-                            reason: "INITIAL_WINDOW_SIZE exceeds max".into(),
-                        });
-                    }
-                    self.initial_window_size = val;
-                }
-                0x5 => {
-                    if !(DEFAULT_MAX_FRAME_SIZE..=16777215).contains(&val) {
-                        return Err(H2Error::Connection {
-                            code: ErrorCode::ProtocolError,
-                            reason: format!("MAX_FRAME_SIZE {val} out of range"),
-                        });
-                    }
-                    self.max_frame_size = val;
-                }
-                0x6 => self.max_header_list_size = Some(val),
-                0x8 => {
-                    if val > 1 {
-                        return Err(H2Error::Connection {
-                            code: ErrorCode::ProtocolError,
-                            reason: format!("ENABLE_CONNECT_PROTOCOL value {val} is not 0 or 1"),
-                        });
-                    }
-                    if self.enable_connect_protocol && val == 0 {
-                        return Err(H2Error::Connection {
-                            code: ErrorCode::ProtocolError,
-                            reason: "ENABLE_CONNECT_PROTOCOL cannot be reverted to 0".into(),
-                        });
-                    }
-                    self.enable_connect_protocol = val == 1;
-                }
-                _ => {}
-            }
+            self.set(id, val)?;
         }
         let delta = if self.initial_window_size != old_window {
             Some(self.initial_window_size as i64 - old_window as i64)
@@ -98,6 +51,54 @@ impl PeerSettings {
         Ok(SettingsApplyResult {
             window_size_delta: delta,
         })
+    }
+
+    fn set(&mut self, id: u16, val: u32) -> Result<(), H2Error> {
+        match id {
+            0x1 => self.header_table_size = val,
+            0x2 => {
+                if val != 0 {
+                    return Err(H2Error::Connection {
+                        code: ErrorCode::ProtocolError,
+                        reason: format!("server sent ENABLE_PUSH {val}; only 0 is allowed"),
+                    });
+                }
+                self.enable_push = false;
+            }
+            0x3 => self.max_concurrent_streams = Some(val),
+            0x4 => {
+                if val > 0x7FFF_FFFF {
+                    return Err(H2Error::Connection {
+                        code: ErrorCode::FlowControlError,
+                        reason: "INITIAL_WINDOW_SIZE exceeds max".into(),
+                    });
+                }
+                self.initial_window_size = val;
+            }
+            0x5 => {
+                if !(DEFAULT_MAX_FRAME_SIZE..=16777215).contains(&val) {
+                    return Err(H2Error::Connection {
+                        code: ErrorCode::ProtocolError,
+                        reason: format!("MAX_FRAME_SIZE {val} out of range"),
+                    });
+                }
+                self.max_frame_size = val;
+            }
+            0x6 => self.max_header_list_size = Some(val),
+            0x8 => {
+                if val > 1 || (self.enable_connect_protocol && val == 0) {
+                    return Err(H2Error::Connection {
+                        code: ErrorCode::ProtocolError,
+                        reason: format!(
+                            "ENABLE_CONNECT_PROTOCOL {val} is not 0 or 1, or reverts 1 to 0"
+                        ),
+                    });
+                }
+                self.enable_connect_protocol = val == 1;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 }
 
@@ -216,15 +217,18 @@ impl PseudoHeaders {
     }
 }
 
-pub(crate) fn encode_request_pseudos<'a>(
-    encoder: &mut hpack::Encoder,
+pub(crate) fn encode_request_pseudos<'a, 'e>(
+    encoder: &'e mut hpack::Encoder,
     pseudo_list: &[(&'a str, &'a str)],
     headers: &'a [HeaderPair],
-) -> Vec<u8> {
-    let count = pseudo_list.len() + headers.len();
+) -> &'e [u8] {
     let pairs = pseudo_list
         .iter()
         .copied()
         .chain(headers.iter().map(|(n, v)| (n.as_ref(), v.as_ref())));
-    encoder.encode_header_block_iter(pairs, count)
+    encoder.encode_block(pairs)
 }
+
+#[cfg(kani)]
+#[path = "connection_proofs.rs"]
+mod proofs;

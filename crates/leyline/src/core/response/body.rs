@@ -1,21 +1,23 @@
+#[cfg(feature = "charset")]
+use std::future::Future;
+
 use bytes::Bytes;
 use futures_util::{Stream, StreamExt};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::prefix::stop_reason;
 use super::{Response, ResponseBody, StopReason};
+use crate::core::Body;
 use crate::core::body_stream::BodyStream;
 use crate::core::deadline::{Deadline, within};
-use crate::core::error::{Cause, Error, Result};
-use crate::core::session::decompress::{
-    BodyLimit, Decoder, body_read_error, buffer_decoded, content_codings,
-};
+use crate::core::error::{Error, Kind, Result};
+use crate::core::session::decompress::{BodyLimit, Decoder, buffer_decoded, content_codings};
 
 impl Response {
     /// Reads the body as text in the charset from `content-type`, defaulting to UTF-8.
     #[cfg(feature = "charset")]
-    pub async fn text(self) -> crate::core::Result<String> {
-        self.text_with_charset("utf-8").await
+    pub fn text(self) -> impl Future<Output = Result<String>> {
+        self.text_with_charset("utf-8")
     }
 
     /// Reads the body as UTF-8 text and replaces invalid bytes.
@@ -61,16 +63,16 @@ impl Response {
 
     /// Reads the whole decoded body and fails when it exceeds the size limit.
     pub async fn bytes(self) -> crate::core::Result<Bytes> {
-        let encoding = self.content_coding();
         let stream = match self.parts.body {
             ResponseBody::Buffered(b) => return Ok(Bytes::from(b)),
             ResponseBody::Taken => {
-                return Err(Error::new(Cause::Body).with_message(
+                return Err(Error::new(Kind::Body).with_message(
                     "response body stream was taken by `bytes_stream`; read the bytes from that stream",
                 ));
             }
-            ResponseBody::Streaming(s) => s,
+            ResponseBody::Streaming(s) => *s,
         };
+        let encoding = content_codings(self.parts.headers.get_all(http::header::CONTENT_ENCODING));
         let (buf, _) = buffer_decoded(stream, encoding.as_deref(), &self.parts.compression).await?;
         Ok(Bytes::from(buf))
     }
@@ -82,9 +84,9 @@ impl Response {
 
     fn take_stream(mut self) -> Result<BodyStream> {
         match std::mem::replace(&mut self.parts.body, ResponseBody::Taken) {
-            ResponseBody::Streaming(s) => Ok(s),
+            ResponseBody::Streaming(s) => Ok(*s),
             ResponseBody::Buffered(b) => Ok(BodyStream::from_bytes(bytes::Bytes::from(b))),
-            ResponseBody::Taken => Err(Error::new(Cause::Body)
+            ResponseBody::Taken => Err(Error::new(Kind::Body)
                 .with_message("response body has already been taken as a stream")),
         }
     }
@@ -94,12 +96,8 @@ impl Response {
     }
 
     /// Returns the decoded body as a stream and fails when the declared length exceeds the size limit.
-    pub fn bytes_stream(
-        self,
-    ) -> Result<impl Stream<Item = Result<Bytes>> + Send + Unpin + 'static> {
-        Ok(self
-            .body_stream()?
-            .map(|chunk| chunk.map_err(body_read_error)))
+    pub fn bytes_stream(self) -> Result<Body> {
+        Ok(Body::shared(self.body_stream()?))
     }
 
     pub(crate) fn body_stream(self) -> Result<BodyStream> {
@@ -126,7 +124,7 @@ impl Response {
     where
         W: AsyncWrite + Unpin,
     {
-        write_stream(self.body_stream()?, writer, body_read_error).await
+        write_stream(self.body_stream()?, writer, Error::from).await
     }
 
     pub(crate) async fn error_for_status_with_body(self, deadline: &Deadline) -> Result<Self> {

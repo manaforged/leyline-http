@@ -2,9 +2,9 @@ mod akamai;
 mod ja3;
 mod ja4;
 
+use crate::Error;
 use crate::iana::is_grease;
 use crate::profile::{BrowserProfile, TlsProfile};
-use crate::{Cause, Error};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -70,15 +70,15 @@ impl FingerprintSpec {
 }
 
 fn config_error(format: &str, why: impl std::fmt::Display) -> Error {
-    Error::new(Cause::Config).with_message(format!("{format} fingerprint: {why}"))
+    Error::config(format!("{format} fingerprint: {why}"))
 }
 
 impl BrowserProfile {
     pub fn from_fingerprint(spec: FingerprintSpec) -> crate::Result<Self> {
         let base = spec.base.unwrap_or_else(|| (*Self::bare_shared()).clone());
-        let source = base.source().ok_or_else(|| {
-            Error::new(Cause::Config).with_message("fingerprint base profile has no TOML source")
-        })?;
+        let source = base
+            .source()
+            .ok_or_else(|| Error::config("fingerprint base profile has no TOML source"))?;
         Self::from_toml(&format!("{source}{}", spec.layer.to_toml()))
     }
 }

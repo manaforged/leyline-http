@@ -28,6 +28,10 @@ impl<S> AsyncStreamBridge<S> {
         }
     }
 
+    pub(crate) fn into_parts(self) -> (S, Box<[u8]>, std::ops::Range<usize>) {
+        (self.stream, self.inbound, self.start..self.end)
+    }
+
     pub(crate) fn set_waker(&mut self, ctx: Option<&mut Context<'_>>) {
         self.waker = ctx.map(|ctx| ctx.waker().clone());
     }

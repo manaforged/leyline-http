@@ -12,7 +12,7 @@ impl Drop for H3Stream {
 
 impl H3Stream {
     pub(super) fn new(
-        resp_tx: oneshot::Sender<Result<H3Response, H3SendError>>,
+        resp_tx: oneshot::Sender<Result<TransportResponse, H3SendError>>,
         body: Option<Bytes>,
         stream_tx: Option<mpsc::Sender<std::io::Result<Bytes>>>,
         streaming: bool,
@@ -32,10 +32,10 @@ impl H3Stream {
         let terminal = stream_tx.as_ref().and_then(reserve_terminal);
         Self {
             resp_tx: Some(resp_tx),
-            response: H3ResponseState::Initial(0),
-            status: 0,
-            headers: Vec::new(),
-            trailers: Vec::new(),
+            response: ResponseState::Initial(0),
+            status: http::StatusCode::OK,
+            headers: http::HeaderMap::new(),
+            trailers: http::HeaderMap::new(),
             body: Vec::new(),
             mode: ResponseMode::from(stream_tx.is_some()),
             stream_tx,
@@ -77,19 +77,20 @@ impl H3Stream {
         !self.fin_sent
     }
 
-    pub(super) fn headers(&mut self, list: &[(String, String)]) -> Result<(), &'static str> {
+    pub(super) fn headers(&mut self, list: &[quiche::h3::Header]) -> Result<(), &'static str> {
         match self.response.headers(list)? {
             H3HeaderBlock::Informational => {}
-            H3HeaderBlock::Final { status, headers } => {
+            H3HeaderBlock::Final {
+                status,
+                headers,
+                length,
+            } => {
                 self.status = status;
-                if !self.mode.keeps_stream(status) {
+                if !self.mode.keeps_stream(status.as_u16()) {
                     self.stream_tx = None;
                     self.terminal = None;
                 }
-                self.declared_len = headers
-                    .iter()
-                    .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
-                    .and_then(|(_, value)| value.trim().parse().ok());
+                self.declared_len = length;
                 self.headers = headers;
             }
             H3HeaderBlock::Trailers(headers) => self.trailers = headers,
@@ -111,13 +112,25 @@ impl H3Stream {
 
     pub(super) fn length_mismatch(&self) -> bool {
         self.expects_body
-            && !matches!(self.status, 204 | 304)
+            && !matches!(self.status.as_u16(), 204 | 304)
             && self
                 .declared_len
                 .is_some_and(|len| len != self.body_bytes_seen as u64)
     }
 
-    pub(super) fn reply(&mut self, result: Result<H3Response, H3SendError>) {
+    pub(super) fn response(&mut self, body: Vec<u8>) -> TransportResponse {
+        TransportResponse {
+            status: self.status,
+            headers: std::mem::take(&mut self.headers),
+            trailers: crate::core::transport::trailers(std::mem::take(&mut self.trailers)),
+            body: TransportBody::Buffered(body),
+            version: http::Version::HTTP_3,
+            tls: None,
+            timing: crate::core::ResponseTiming::default(),
+        }
+    }
+
+    pub(super) fn reply(&mut self, result: Result<TransportResponse, H3SendError>) {
         if let Some(tx) = self.resp_tx.take() {
             drop(tx.send(result));
         }
@@ -125,12 +138,7 @@ impl H3Stream {
 
     pub(super) fn deliver_head(&mut self) {
         if self.resp_tx.is_some() {
-            let head = H3Response {
-                status: self.status,
-                headers: std::mem::take(&mut self.headers),
-                body: Vec::new(),
-                trailers: Vec::new(),
-            };
+            let head = self.response(Vec::new());
             self.reply(Ok(head));
         }
         self.head_sent = true;

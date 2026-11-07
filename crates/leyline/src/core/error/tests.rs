@@ -1,23 +1,23 @@
-use super::{Cause, Error, Kind};
+use super::{Error, Kind};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 use crate::tls::TlsError;
 
 fn io(kind: std::io::ErrorKind) -> Error {
-    Error::new(Cause::Io).with_source(std::io::Error::new(kind, "io"))
+    Error::new(Kind::Io).with_source(std::io::Error::new(kind, "io"))
 }
 
 fn tls(err: TlsError) -> Error {
-    Error::new(Cause::Tls).with_source(err)
+    Error::new(Kind::Tls).with_source(err)
 }
 
 #[test]
 fn timeout_kind_is_timeout_not_connect() {
-    let err = Error::new(Cause::Timeout);
+    let err = Error::new(Kind::Timeout);
     assert!(err.is_timeout());
     assert!(!err.is_connect());
     assert!(!err.is_status());
-    assert_eq!(err.cause(), Cause::Timeout);
+    assert_eq!(err.cause(), Kind::Timeout);
 }
 
 #[test]
@@ -49,7 +49,7 @@ fn refused_io_is_connect() {
 
 #[test]
 fn connect_kind_is_connect() {
-    assert!(Error::new(Cause::Connect).is_connect());
+    assert!(Error::new(Kind::Connect).is_connect());
 }
 
 #[test]
@@ -85,12 +85,12 @@ fn tls_io_timeout_is_timeout() {
 
 #[test]
 fn h2_goaway_and_refused_stream_are_connection_closed() {
-    let goaway = Error::new(Cause::Http2).with_source(H2Error::Connection {
+    let goaway = Error::new(Kind::Http2).with_source(H2Error::Connection {
         code: ErrorCode::NoError,
         reason: String::new(),
     });
     assert!(goaway.is_connection_closed());
-    let refused = Error::new(Cause::Http2).with_source(H2Error::Stream {
+    let refused = Error::new(Kind::Http2).with_source(H2Error::Stream {
         stream_id: 1,
         code: ErrorCode::RefusedStream,
     });
@@ -99,7 +99,7 @@ fn h2_goaway_and_refused_stream_are_connection_closed() {
 
 #[test]
 fn status_kind_carries_status() {
-    let err = Error::new(Cause::Status).with_status(http::StatusCode::FORBIDDEN);
+    let err = Error::new(Kind::Status).with_status(http::StatusCode::FORBIDDEN);
     assert!(err.is_status());
     assert_eq!(err.status().map(|s| s.as_u16()), Some(403));
     assert!(!err.is_timeout());
@@ -108,7 +108,7 @@ fn status_kind_carries_status() {
 
 #[test]
 fn predicates_are_kind_scoped() {
-    for kind in [Cause::Request, Cause::Config, Cause::Proxy] {
+    for kind in [Kind::Request, Kind::Config, Kind::Proxy] {
         let err = Error::new(kind);
         assert!(!err.is_timeout(), "{kind:?} must not be a timeout");
         assert!(!err.is_connect(), "{kind:?} must not be a connect failure");
@@ -130,23 +130,23 @@ fn source_returns_the_wrapped_error() {
     assert!(plain.source().is_some());
     assert!(plain.io().is_some());
 
-    let url = Error::from_url_parse(url::Url::parse("::").expect_err("not a url"));
-    assert_eq!(url.cause(), Cause::Url);
+    let url = Error::from(url::Url::parse("::").expect_err("not a url"));
+    assert_eq!(url.cause(), Kind::Url);
     assert!(url.source().is_some());
 
     let json = Error::from_json(serde_json::from_str::<u32>("nope").expect_err("not json"));
-    assert_eq!(json.cause(), Cause::Json);
+    assert_eq!(json.cause(), Kind::Json);
     assert!(json.source().is_some());
 
-    assert!(Error::new(Cause::Timeout).source().is_none());
+    assert!(Error::new(Kind::Timeout).source().is_none());
 }
 
 #[test]
 fn display_names_the_kind_and_appends_the_url() {
-    let err = Error::new(Cause::Config).with_message("no host in URL");
+    let err = Error::config("no host in URL");
     assert_eq!(err.to_string(), "config: no host in URL");
 
-    let with_url = Error::new(Cause::Status)
+    let with_url = Error::new(Kind::Status)
         .with_status(http::StatusCode::NOT_FOUND)
         .with_url("https://example.test/a".parse().expect("url"));
     assert_eq!(
@@ -160,7 +160,7 @@ fn display_names_the_kind_and_appends_the_url() {
 
 #[test]
 fn without_url_drops_the_url_from_display() {
-    let err = Error::new(Cause::Request)
+    let err = Error::new(Kind::Request)
         .with_message("boom")
         .with_url("https://example.test/a".parse().expect("url"));
     assert!(err.to_string().contains("example.test"));
@@ -171,7 +171,7 @@ fn without_url_drops_the_url_from_display() {
 
 #[test]
 fn debug_redacts_userinfo() {
-    let err = Error::new(Cause::Request)
+    let err = Error::new(Kind::Request)
         .with_url("https://user:pass@example.test/a".parse().expect("url"));
     let text = format!("{err:?}");
     assert!(!text.contains("user:pass"), "userinfo leaked: {text}");
@@ -194,9 +194,20 @@ impl Error {
 
 #[test]
 fn a_connect_timeout_reads_as_one_timeout_kind() {
-    let err = Error::new(Cause::Connect)
+    let err = Error::new(Kind::Connect)
         .with_source(std::io::Error::new(std::io::ErrorKind::TimedOut, "connect"));
     assert_eq!(err.kind(), Kind::Timeout);
     assert!(err.is_connect());
     assert!(err.to_string().starts_with("timeout"), "{err}");
+}
+
+#[test]
+fn a_body_limit_io_error_keeps_its_limit_message() {
+    let limit = crate::core::session::decompress::BodyLimit::session(64);
+    let err = Error::from(limit.into_io());
+    assert_eq!(err.kind(), Kind::BodyLimit);
+    assert!(
+        err.to_string().contains("max_body_size (64 bytes)"),
+        "{err}"
+    );
 }

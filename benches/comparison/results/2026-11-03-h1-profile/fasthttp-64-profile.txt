@@ -1,0 +1,49 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 1K of event 'cycles:u'
+# Event count (approx.): 11182650470
+#
+# Overhead Symbol IPC [IPC Coverage]
+# ........ ...................................................................... ....................
+#
+ 11.28% [.] runtime.procyieldAsm.abi0 - -
+ 5.40% [.] indexbytebody - -
+ 5.26% [.] runtime.stealWork - -
+ 3.21% [.] runtime.lock2 - -
+ 2.20% [.] runtime.reentersyscall - -
+ 2.17% [.] runtime.runqgrab - -
+ 1.88% [.] <address> - -
+ 1.87% [.] internal/poll.setDeadlineImpl - -
+ 1.86% [.] runtime.findRunnable - -
+ 1.86% [.] github.com/valyala/fasthttp.(*RequestHeader).AppendBytes - -
+ 1.84% [.] internal/sync.(*Mutex).lockSlow - -
+ 1.72% [.] github.com/valyala/fasthttp.(*HostClient).doNonNilReqResp - -
+ 1.62% [.] github.com/valyala/fasthttp.(*HostClient).releaseConn - -
+ 1.60% [.] crypto/tls.(*Conn).Write - -
+ 1.49% [.] crypto/internal/fips140/aes/gcm.gcmAesDec.abi0 - -
+ 1.43% [.] github.com/valyala/fasthttp.(*Client).Do - -
+ 1.38% [.] crypto/internal/fips140/aes/gcm.gcmAesEnc.abi0 - -
+ 1.31% [.] github.com/valyala/fasthttp.normalizeHeaderKey - -
+ 1.23% [.] internal/poll.(*fdMutex).rwlock - -
+ 1.21% [.] github.com/valyala/fasthttp.scanValueLine - -
+ 1.17% [.] runtime.netpollready - -
+ 1.17% [.] runtime.casgstatus - -
+ 1.15% [.] internal/poll.(*fdMutex).rwunlock - -
+ 1.15% [.] crypto/tls.(*Conn).Write.deferwrap2 - -
+ 1.14% [.] github.com/valyala/fasthttp.(*HostClient).AcquireConn - -
+ 1.11% [.] runtime.exitsyscall - -
+ 1.09% [.] sync.(*Pool).Put - -
+ 1.08% [.] github.com/valyala/fasthttp.(*ResponseHeader).tryRead - -
+ 1.07% [.] crypto/tls.(*Conn).readRecordOrCCS - -
+ 1.07% [.] crypto/tls.(*xorNonceAEAD).Open - -
+ 1.03% [.] github.com/valyala/fasthttp.(*HostClient).Do - -
+ 1.02% [.] runtime.memmove - -
+ 1.02% [.] github.com/valyala/fasthttp.(*transport).RoundTrip - -
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

@@ -19,13 +19,12 @@ impl DatagramTransport {
         connector: &FingerprintConnector,
         host: &str,
         port: u16,
-        proxy: Option<&str>,
+        proxy: Option<&crate::core::ProxyUrl>,
     ) -> Result<(Self, SocketAddr), String> {
         match proxy {
             None => Self::open_direct(connector, host, port).await,
             Some(proxy) => {
-                let proxy =
-                    url::Url::parse(proxy).map_err(|e| format!("invalid proxy URL: {e}"))?;
+                let proxy = proxy.url();
                 if !carries_udp(proxy.scheme()) {
                     return Err(format!(
                         "HTTP/3 cannot use a `{}` proxy: QUIC needs a socks5:// or socks5h:// \
@@ -33,7 +32,7 @@ impl DatagramTransport {
                         proxy.scheme()
                     ));
                 }
-                Self::open_socks5(connector, host, port, &proxy).await
+                Self::open_socks5(connector, host, port, proxy).await
             }
         }
     }
@@ -112,8 +111,8 @@ const PROXY_NO_UDP: &str = "HTTP/3 needs a socks5:// or socks5h:// proxy with UD
 const SOCKS_FEATURE_OFF: &str = "HTTP/3 through a SOCKS5 proxy needs the `socks` feature of \
                                  leyline-http; enable it, or use Auto or Http2";
 
-pub(crate) fn h3_proxy_blocker(proxy: Option<&str>) -> Option<&'static str> {
-    let udp = url::Url::parse(proxy?).is_ok_and(|url| carries_udp(url.scheme()));
+pub(crate) fn h3_proxy_blocker(proxy: Option<&crate::core::ProxyUrl>) -> Option<&'static str> {
+    let udp = carries_udp(proxy?.url().scheme());
     match (udp, cfg!(feature = "socks")) {
         (true, true) => None,
         (true, false) => Some(SOCKS_FEATURE_OFF),
@@ -121,6 +120,6 @@ pub(crate) fn h3_proxy_blocker(proxy: Option<&str>) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn proxy_carries_h3(proxy: Option<&str>) -> bool {
+pub(crate) fn proxy_carries_h3(proxy: Option<&crate::core::ProxyUrl>) -> bool {
     h3_proxy_blocker(proxy).is_none()
 }

@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 use crate::tls::HappyEyeballs;
@@ -6,7 +6,6 @@ use crate::tls::HappyEyeballs;
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub(crate) struct SocketOptions {
-    pub(crate) local_address: Option<IpAddr>,
     pub(crate) local_ipv4: Option<Ipv4Addr>,
     pub(crate) local_ipv6: Option<Ipv6Addr>,
     pub(crate) tcp_nodelay: Option<bool>,
@@ -23,7 +22,6 @@ pub(crate) struct SocketOptions {
 impl Default for SocketOptions {
     fn default() -> Self {
         Self {
-            local_address: None,
             local_ipv4: None,
             local_ipv6: None,
             tcp_nodelay: None,

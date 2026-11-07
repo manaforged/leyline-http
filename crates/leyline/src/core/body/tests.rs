@@ -34,3 +34,11 @@ fn stream_with_length() {
     let b = Body::stream(s, Some(3));
     assert_eq!(b.len_hint(), Some(3));
 }
+
+#[test]
+fn a_response_body_is_a_shareable_body() {
+    fn send_sync<T: Send + Sync>() {}
+    send_sync::<Body>();
+    send_sync::<crate::RequestBuilder>();
+    let _: fn(crate::Response) -> crate::Result<Body> = crate::Response::bytes_stream;
+}

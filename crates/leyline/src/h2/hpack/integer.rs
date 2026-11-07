@@ -1,3 +1,4 @@
+#[inline]
 pub fn encode(value: usize, prefix_bits: u8, prefix_pattern: u8, dst: &mut Vec<u8>) {
     let max_prefix = (1 << prefix_bits) - 1;
 
@@ -57,5 +58,7 @@ pub fn decode(
     Ok((result, i - pos))
 }
 
+#[cfg(kani)]
+mod proofs;
 #[cfg(test)]
 mod tests;

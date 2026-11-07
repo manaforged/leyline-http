@@ -2,7 +2,7 @@ use super::connect::connect_err;
 use super::*;
 use crate::h2::{ErrorCode, H2Error};
 use crate::tls::TlsError;
-use crate::{Cause, Error};
+use crate::{Error, Kind};
 
 #[test]
 fn transport_separates_the_keyspace() {
@@ -18,13 +18,19 @@ fn transport_separates_the_keyspace() {
 
     assert_ne!(
         tcp,
-        keys.key("http", "example.com", 443, Some("p:8080"), Transport::Tcp)
+        keys.key(
+            "http",
+            "example.com",
+            443,
+            Some(&crate::core::ProxyUrl::parse("http://p:8080").unwrap()),
+            Transport::Tcp
+        )
     );
 }
 
 #[test]
 fn kinds() {
-    let tcp = Error::new(Cause::Tls).with_source(TlsError::TcpConnect(
+    let tcp = Error::new(Kind::Tls).with_source(TlsError::TcpConnect(
         std::io::ErrorKind::ConnectionRefused.into(),
     ));
     let tcp = connect_err(&tcp);
@@ -33,7 +39,7 @@ fn kinds() {
         Some(TlsError::TcpConnect(err)) if err.kind() == std::io::ErrorKind::ConnectionRefused
     ));
 
-    let handshake = Error::new(Cause::Tls).with_source(TlsError::HandshakeIo(
+    let handshake = Error::new(Kind::Tls).with_source(TlsError::HandshakeIo(
         std::io::ErrorKind::UnexpectedEof.into(),
     ));
     let handshake = connect_err(&handshake);
@@ -42,7 +48,7 @@ fn kinds() {
         Some(TlsError::HandshakeIo(err)) if err.kind() == std::io::ErrorKind::UnexpectedEof
     ));
 
-    let io = Error::new(Cause::Io)
+    let io = Error::new(Kind::Io)
         .with_source(std::io::Error::from(std::io::ErrorKind::ConnectionAborted));
     let io = connect_err(&io);
     assert!(
@@ -53,7 +59,7 @@ fn kinds() {
 
 #[test]
 fn a_joined_connect_error_keeps_its_http2_cause() {
-    let goaway = Error::new(Cause::Http2).with_source(H2Error::Connection {
+    let goaway = Error::new(Kind::Http2).with_source(H2Error::Connection {
         code: ErrorCode::NoError,
         reason: "server shutting down".into(),
     });

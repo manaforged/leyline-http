@@ -9,11 +9,28 @@ use crate::quic::H3Client;
 use crate::pool::h1::H1Io;
 
 #[derive(Debug, Clone, Default)]
+pub struct TlsInfo(std::sync::Arc<TlsFacts>);
+
+#[derive(Debug, Default)]
 #[non_exhaustive]
-pub struct TlsInfo {
+pub struct TlsFacts {
     pub peer_cert_der: Option<Vec<u8>>,
     pub version: Option<String>,
     pub cipher: Option<String>,
+}
+
+impl From<TlsFacts> for TlsInfo {
+    fn from(facts: TlsFacts) -> Self {
+        Self(std::sync::Arc::new(facts))
+    }
+}
+
+impl std::ops::Deref for TlsInfo {
+    type Target = TlsFacts;
+
+    fn deref(&self) -> &TlsFacts {
+        &self.0
+    }
 }
 
 pub(crate) struct Opened<C> {
@@ -23,6 +40,7 @@ pub(crate) struct Opened<C> {
     pub(crate) connect_ms: Option<u32>,
     pub(crate) lane: u8,
     pub(crate) slot: Option<crate::h2::client::Slot>,
+    pub(crate) probe: Option<super::liveness::Probe>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,6 +58,7 @@ impl<C> Opened<C> {
             connect_ms: None,
             lane: 0,
             slot: None,
+            probe: None,
         }
     }
 
@@ -51,11 +70,17 @@ impl<C> Opened<C> {
             connect_ms: Some(crate::ResponseTiming::millis(started)),
             lane: 0,
             slot: None,
+            probe: None,
         }
     }
 
     pub(crate) fn on_lane(mut self, lane: u8) -> Self {
         self.lane = lane;
+        self
+    }
+
+    pub(crate) fn with_probe(mut self, probe: Option<super::liveness::Probe>) -> Self {
+        self.probe = probe;
         self
     }
 
@@ -86,8 +111,8 @@ pub(crate) enum Transport {
 pub(crate) struct PoolKey {
     pub(crate) host: String,
     pub(crate) port: u16,
-    pub(crate) scheme: String,
-    pub(crate) proxy: Option<String>,
+    pub(crate) scheme: std::borrow::Cow<'static, str>,
+    pub(crate) proxy: Option<crate::core::ProxyUrl>,
     pub(crate) transport: Transport,
     pub(crate) partition: u64,
     pub(crate) lane: u8,
@@ -95,6 +120,16 @@ pub(crate) struct PoolKey {
 
 pub struct H1Slot {
     pub(crate) io: Box<dyn H1Io>,
+    pub(crate) buf: Vec<u8>,
+}
+
+impl H1Slot {
+    pub(crate) fn new(io: Box<dyn H1Io>) -> Self {
+        Self {
+            io,
+            buf: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +167,7 @@ impl MuxHandle {
 pub(crate) trait MuxClient: Clone {
     fn into_handle(self) -> MuxHandle;
     fn in_handle(handle: &MuxHandle) -> Option<&Self>;
+    fn same(&self, other: &Self) -> bool;
 }
 
 impl MuxClient for H2Client {
@@ -146,6 +182,10 @@ impl MuxClient for H2Client {
             MuxHandle::H3(_) => None,
         }
     }
+
+    fn same(&self, other: &Self) -> bool {
+        H2Client::same(self, other)
+    }
 }
 
 #[cfg(feature = "http3")]
@@ -159,6 +199,10 @@ impl MuxClient for H3Client {
             MuxHandle::H3(handle) => Some(handle),
             MuxHandle::H2(_) => None,
         }
+    }
+
+    fn same(&self, other: &Self) -> bool {
+        H3Client::same(self, other)
     }
 }
 

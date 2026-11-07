@@ -325,3 +325,28 @@ fn invalid_block_rules_fail_at_build() {
         .unwrap_err();
     assert_eq!(error.kind(), Kind::Config);
 }
+
+#[tokio::test]
+async fn a_body_of_many_full_tls_records_arrives_intact() {
+    let body: Vec<u8> = (0..100_000u32).map(|n| (n % 251) as u8).collect();
+    let served = body.clone();
+    let server = testing::Server::https(move |_| testing::Response::new(200).body(served.clone()))
+        .await
+        .unwrap();
+    let session = Session::builder()
+        .protocol(Protocol::Http1)
+        .tls(server.tls())
+        .build()
+        .unwrap();
+    for _ in 0..2 {
+        let got = session
+            .get(server.url("/"))
+            .send()
+            .await
+            .unwrap()
+            .bytes()
+            .await
+            .unwrap();
+        assert_eq!(got.as_ref(), body.as_slice());
+    }
+}

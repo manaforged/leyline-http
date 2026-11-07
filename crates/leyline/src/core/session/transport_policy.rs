@@ -1,8 +1,6 @@
 use super::{Protocol, Session};
-use crate::core::error::{Cause, Error, Result};
-use crate::core::transport::{
-    Prepared, TransportResponse, send_request_auto, send_request_h1, send_request_h2,
-};
+use crate::core::error::{Error, Result};
+use crate::core::transport::{Prepared, TransportResponse, send_h1, send_h2_on, send_request_auto};
 #[cfg(feature = "http3")]
 use crate::core::transport::{ResponseMode, send_request_h3};
 use crate::core::{Proxy, ProxyUrl};
@@ -13,6 +11,7 @@ use crate::pool::{H3Target, checkout_h3_handle};
 use crate::pool::{OriginFlag, checkout_handle};
 #[cfg(feature = "http3")]
 use crate::quic::{H3Config, h3_proxy_blocker};
+use std::future::Future;
 
 #[cfg(feature = "http3")]
 static RACE_PROXY_FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
@@ -33,12 +32,8 @@ impl Session {
         &'a self,
         url: &url::Url,
         request: Option<&'a Proxy>,
-    ) -> Result<Option<&'a str>> {
-        let proxy = request.unwrap_or(&self.inner.proxy_config).proxy_for(url)?;
-        if let Some(proxy) = proxy {
-            ProxyUrl::parse(proxy)?;
-        }
-        Ok(proxy)
+    ) -> Result<Option<&'a ProxyUrl>> {
+        request.unwrap_or(&self.inner.proxy_config).proxy_for(url)
     }
 
     #[cfg(feature = "http3")]
@@ -55,19 +50,24 @@ impl Session {
         req: Prepared<'a>,
     ) -> Result<TransportResponse> {
         if self.inner.https_only && req.url.scheme() != "https" {
-            return Err(
-                Error::new(Cause::Config).with_message("https_only session rejected non-HTTPS URL")
-            );
+            return Err(Error::config("https_only session rejected non-HTTPS URL"));
         }
+        match &self.inner.cache {
+            Some(cache) => self.send_cached(req, cache).await,
+            None => self.send_transport(req).await,
+        }
+    }
+
+    pub(super) async fn send_transport(&self, req: Prepared<'_>) -> Result<TransportResponse> {
         let pool = &self.inner.pool;
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;
         match self.inner.protocol_policy {
             Protocol::Auto => self.send_auto(req).await,
-            Protocol::Http1 => {
-                Box::pin(send_request_h1(pool, connector, H1Dial::Http1Only, req)).await
-            }
-            Protocol::Http2 => send_request_h2(pool, connector, h2_config, req).await,
+            Protocol::Http1 => send_h1(pool, connector, H1Dial::Http1Only, req, None)
+                .await?
+                .response(),
+            Protocol::Http2 => send_h2_on(pool, connector, h2_config, req, None).await,
             #[cfg(feature = "http3")]
             Protocol::Http3 => self.send_h3_only(req).await,
             #[cfg(feature = "http3")]
@@ -75,24 +75,28 @@ impl Session {
         }
     }
 
-    async fn send_auto(&self, req: Prepared<'_>) -> Result<TransportResponse> {
+    fn send_auto<'a>(
+        &'a self,
+        req: Prepared<'a>,
+    ) -> impl Future<Output = Result<TransportResponse>> + 'a {
         send_request_auto(
             &self.inner.pool,
             &self.inner.connector,
             &self.inner.h2_config,
             req,
         )
-        .await
     }
 
     #[cfg(feature = "http3")]
     async fn send_h3_only(&self, req: Prepared<'_>) -> Result<TransportResponse> {
         if let Some(cause) = h3_proxy_blocker(req.proxy) {
-            return Err(Error::new(Cause::Config).with_message(cause));
+            return Err(Error::config(cause));
         }
-        let h3_config = self.inner.h3_config.as_ref().ok_or_else(|| {
-            Error::new(Cause::Config).with_message("this browser profile has no HTTP/3 fingerprint")
-        })?;
+        let h3_config = self
+            .inner
+            .h3_config
+            .as_ref()
+            .ok_or_else(|| Error::config("this browser profile has no HTTP/3 fingerprint"))?;
         Box::pin(send_request_h3(
             &self.inner.pool,
             &self.h3_target(h3_config),
@@ -195,7 +199,7 @@ impl Session {
 
         match winner {
             Some(Winner::H3) => Box::pin(send_request_h3(pool, &target, req)).await,
-            Some(Winner::H2) => send_request_h2(pool, connector, h2_config, req).await,
+            Some(Winner::H2) => send_h2_on(pool, connector, h2_config, req, None).await,
             None => self.send_auto(req).await,
         }
     }

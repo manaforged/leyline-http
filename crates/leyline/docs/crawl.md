@@ -2,6 +2,8 @@ A crawl from a seed URL that yields pages in order.
 
 [`Session::crawl`](crate::Session::crawl) starts it; call [`next`](crate::Crawl::next) until it returns `None`. A crawl stays inside its [`Scope`](crate::Scope), honors `robots.txt` unless you change [`respect`](crate::Crawl::respect), and keeps per-host rate limits.
 
+`save(path).await` drains current fetches and writes an atomic checkpoint. `Crawl::load(&session, path)` restores queued and buffered pages without replaying completed URLs. Save account cookies separately with `Session::save`.
+
 ```rust,no_run
 use leyline::{Scope, Session};
 

@@ -1,0 +1,65 @@
+Question: do the memory and instruction reductions in d72639e0 produce measured CPU-time, sustained-throughput, or scheduling-corrected latency gains?
+Before: 5d6ddc36, saved executable identified by receipts.txt.
+After: d72639e0, saved executable identified by receipts.txt.
+No library or benchmark source changed for this follow-up.
+
+Fixture:
+Synthetic HTTPS loopback origin and a 10-byte response.
+HTTP/2 bare profile, request-headers.tsv, default request timeout and retry behavior.
+Client affinity: CPU 8; TOKIO_WORKER_THREADS=1.
+Origin affinity: CPUs 0-6,16-22; no client worker-count override inherited by the origin.
+CMP_TLS=matched, using a local test certificate and CMP_CA for certificate verification.
+The temporary ECDSA test private key was deleted after all executions finished.
+The host was shared, not exclusive.
+This is a client/origin fixture, not a complete production application or a minimum-hardware proof.
+
+CPU-time comparison:
+Reuse scale.sh's origins and libs.sh's existing run() function.
+Ten rounds alternate before/after order within each cell.
+Cells: seq=1 connection/sequential/n=30000; 1c64=1 connection/64 in flight/n=200000; 8c8=8 connections/8 in flight/n=100000; 8c256=8 connections/256 in flight/n=200192.
+Measure n and 2*n requests with perf stat -x, -e instructions:u,task-clock, on the same client core.
+cpu-rows.txt uses the existing eleven-column libs.sh format.
+cpu-table.txt is unmodified output from python3 libs-table.py cpu-rows.txt --vs leyline-before.
+Task-clock differences give CPU microseconds per request, removing the shared startup contribution.
+All four CPU-time intervals and all four throughput intervals include 1.
+The formatter's 'same CPU' and 'tie' labels mean unresolved, not equivalence.
+Do not pool these measurements with the earlier multi-worker, unverified-certificate comparison.
+
+Pilot:
+pilot-before.txt and pilot-after.txt are window-mode observations with 64 streams, a 3-second counted window, and 300ms active warmup.
+The baseline pilot measured 185099.3 requests/second.
+The offered-rate sweep was selected from baseline pilot fractions 0.5, 0.8, 1.0, 1.2, 1.5, rounded to the nearest 1000 requests/second.
+Those fractions are experimental load selection, not production limits or pass/fail thresholds.
+
+Sustained window:
+Ten paired rounds alternate executable order.
+Each executes: taskset -c 8 BINARY URL window 3 64.
+window-details.txt preserves each result, including the single worker's busy-duration metric.
+window-rows.txt contains the corresponding request-rate observations.
+Median rates: before 186404.35 requests/second; after 184841.15 requests/second.
+Paired geometric-mean ratio: 1.004 [0.949, 1.061], unresolved.
+The window includes only completions inside its counted interval, excluding active warmup.
+
+Paced load:
+Five paired rounds at each offered rate in settings.txt alternate executable order.
+Each executes: taskset -c 8 BINARY URL paced RATE 3 64.
+The harness assigns each worker a scheduled start per request and records scheduling lag and service duration separately.
+Corrected latency is scheduling lag plus service duration, not service time alone.
+Scheduling lag is producer backlog, not a direct measurement of an internal library queue.
+Workers execute their full planned request count and drain after the nominal scheduling period if behind.
+The exact planned count is floor(RATE * 3 / 64) * 64; therefore completed count can differ slightly from RATE * 3.
+50 of 50 executions exited successfully and completed the exact planned count; every response status and body was checked by the client.
+This does not independently count transport errors hidden by successful retries.
+paced-rows.txt preserves the PACED output and exit status for every execution.
+paced-perf.txt contains task-clock and user-instruction observations from the matching perf stat outputs.
+Paced CPU cost includes warmup, generation, collection, quantile sorting, and reporting; it is not isolated HTTP execution cost.
+
+Analysis:
+load-table.txt uses the existing libs-table.py ratio_ci and show functions unchanged for paired comparisons.
+Latency table entries are medians of per-execution percentiles, not percentiles of pooled request samples.
+Intervals are 95% t-intervals on log ratios across rounds of one run, not independent-run or independent-machine evidence.
+No paced throughput, corrected-tail-latency, or total-harness CPU interval excludes 1.
+Point estimates vary in both directions; in particular, after has worse corrected-tail medians at some loads.
+At 185000 requests/second and above, both versions fall behind their intended schedules and accumulate substantial backlog.
+There is no demonstrated CPU-time, sustained-capacity, or corrected-tail-latency improvement in this fixture.
+The previously measured memory and instruction-count reductions remain distinct findings, not proof of application speed.

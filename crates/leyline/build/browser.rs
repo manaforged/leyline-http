@@ -11,7 +11,7 @@ use crate::{BuildResult, is_ident};
 #[path = "../src/profile/browser/digest.rs"]
 mod digest;
 
-const SHARED_DATA: &[&str] = &["bare.toml", "brands.toml", "headers.toml", "platforms.toml"];
+const SHARED_DATA: &[&str] = &["brands.toml", "headers.toml", "platforms.toml"];
 
 #[derive(Deserialize)]
 pub(crate) struct Families {

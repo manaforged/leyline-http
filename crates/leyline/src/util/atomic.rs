@@ -1,8 +1,24 @@
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::core::{Cause, Error, Result};
+pub(crate) struct CallerWaits(pub(crate) Arc<AtomicBool>);
+
+impl Default for CallerWaits {
+    fn default() -> Self {
+        Self(Arc::new(AtomicBool::new(true)))
+    }
+}
+
+impl Drop for CallerWaits {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+use crate::core::{Error, Kind, Result};
 
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8], mode: FileMode) -> Result<()> {
     let temp = temp_path(path)?;
@@ -35,7 +51,7 @@ fn write_synced(temp: &Path, target: &Path, bytes: &[u8], mode: FileMode) -> Res
 
 pub(crate) fn temp_path(path: &Path) -> Result<PathBuf> {
     let Some(name) = path.file_name() else {
-        return Err(Error::new(Cause::Request).with_message("file path has no file name"));
+        return Err(Error::new(Kind::Request).with_message("file path has no file name"));
     };
     let mut temp_name = std::ffi::OsString::from(".");
     temp_name.push(name);

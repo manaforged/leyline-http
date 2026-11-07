@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use foldhash::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant, SystemTime};
@@ -14,7 +14,9 @@ use crate::h2::client::H2Client;
 #[cfg(feature = "http3")]
 use crate::quic::H3Client;
 
-use crate::pool::types::{ConnectionStats, Counter, PoolCounters, PoolKey, PooledConn, Transport};
+use crate::pool::types::{
+    ConnectionStats, Counter, MuxClient, PoolCounters, PoolKey, PooledConn, Transport,
+};
 #[cfg(feature = "bench-internals")]
 use crate::pool::types::{MuxHandle, TlsInfo};
 use crate::util::{lock, write};
@@ -78,7 +80,13 @@ pub struct Pool {
 }
 
 impl Pool {
-    pub(crate) fn remember(&self, flag: OriginFlag, host: &str, port: u16, proxy: Option<&str>) {
+    pub(crate) fn remember(
+        &self,
+        flag: OriginFlag,
+        host: &str,
+        port: u16,
+        proxy: Option<&crate::core::ProxyUrl>,
+    ) {
         let now = SystemTime::now();
         lock(&self.origin_memory)[flag as usize].insert(
             origin_proxy_key(host, port, proxy),
@@ -92,13 +100,19 @@ impl Pool {
         flag: OriginFlag,
         host: &str,
         port: u16,
-        proxy: Option<&str>,
+        proxy: Option<&crate::core::ProxyUrl>,
     ) -> bool {
         lock(&self.origin_memory)[flag as usize]
             .contains(&origin_proxy_key(host, port, proxy), SystemTime::now())
     }
 
-    pub(crate) fn forget(&self, flag: OriginFlag, host: &str, port: u16, proxy: Option<&str>) {
+    pub(crate) fn forget(
+        &self,
+        flag: OriginFlag,
+        host: &str,
+        port: u16,
+        proxy: Option<&crate::core::ProxyUrl>,
+    ) {
         lock(&self.origin_memory)[flag as usize].remove(&origin_proxy_key(host, port, proxy));
     }
 
@@ -199,14 +213,18 @@ impl Pool {
         scheme: &str,
         host: &str,
         port: u16,
-        proxy: Option<&str>,
+        proxy: Option<&crate::core::ProxyUrl>,
         transport: Transport,
     ) -> PoolKey {
         PoolKey {
-            scheme: scheme.to_string(),
+            scheme: match scheme {
+                "https" => "https".into(),
+                "http" => "http".into(),
+                other => other.to_owned().into(),
+            },
             host: host.to_string(),
             port,
-            proxy: proxy.map(|s| s.to_string()),
+            proxy: proxy.cloned(),
             transport,
             partition: self.partition,
             lane: 0,
@@ -225,8 +243,7 @@ impl Pool {
         }
     }
 
-    pub(crate) fn evict_idle(&self) {
-        let now = Instant::now();
+    pub(crate) fn evict_idle(&self, now: Instant) {
         let now_ms = now.duration_since(self.created).as_millis() as u64;
         if now_ms < self.next_reap_ms.load(Ordering::Relaxed) {
             return;
@@ -298,9 +315,34 @@ impl Pool {
         self.counters.add(Counter::StaleProbed, 1);
     }
 
-    pub(crate) fn invalidate(&self, key: &PoolKey) {
+    pub(crate) fn stale_hit(
+        &self,
+        key: &PoolKey,
+        version: http::Version,
+        error: &dyn std::fmt::Display,
+    ) {
+        tracing::info!(
+            target: "leyline::pool",
+            host = %key.host,
+            port = key.port,
+            proxied = key.proxy.is_some(),
+            version = ?version,
+            error = %error,
+            "pool stale hit -- pooled connection failed, opening fresh"
+        );
+    }
+
+    /// Drops the entry at `key` when it still holds `failed`, so a replacement stays pooled.
+    pub(crate) fn invalidate<C: MuxClient>(&self, key: &PoolKey, failed: &C) {
         let mut map = write(&self.inner);
-        if map.remove(key).is_some() {
+        let holds = match map.get(key) {
+            Some(PooledConn::Mux { handle, .. }) => {
+                C::in_handle(handle).is_some_and(|c| c.same(failed))
+            }
+            _ => false,
+        };
+        if holds {
+            map.remove(key);
             self.counters.add(Counter::EvictionsDead, 1);
         }
     }
@@ -324,13 +366,17 @@ impl Pool {
     #[cfg(feature = "bench-internals")]
     pub fn bench_probe(&self) -> bool {
         let key = self.key("https", "h0.bench", 443, None, Transport::Tcp);
-        self.evict_idle();
+        self.evict_idle(Instant::now());
         self.checkout_mux::<H2Client>(&key).is_some()
     }
 }
 
-fn origin_proxy_key(host: &str, port: u16, proxy: Option<&str>) -> OriginProxyKey {
-    (host.to_string(), port, proxy.map(str::to_string))
+fn origin_proxy_key(
+    host: &str,
+    port: u16,
+    proxy: Option<&crate::core::ProxyUrl>,
+) -> OriginProxyKey {
+    (host.to_string(), port, proxy.map(|p| p.as_str().to_owned()))
 }
 
 impl Default for Pool {

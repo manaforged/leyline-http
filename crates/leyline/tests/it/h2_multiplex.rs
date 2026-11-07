@@ -1,5 +1,6 @@
 use crate::h2_support as support;
 
+use futures_util::StreamExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -10,10 +11,10 @@ use tokio::io::AsyncReadExt;
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FrameType, GoAwayFrame};
-use leyline::h2::{Head, RequestBody, ResponseBody};
 
 fn test_config() -> H2Config {
     H2Config {
@@ -54,8 +55,8 @@ fn head(
     Arc::new(Head { pseudo, headers })
 }
 
-fn buffered(body: ResponseBody) -> Vec<u8> {
-    let ResponseBody::Buffered(body) = body else {
+fn buffered(body: leyline::pool::TransportBody) -> Vec<u8> {
+    let leyline::pool::TransportBody::Buffered(body) = body else {
         panic!("buffered body")
     };
     body
@@ -118,12 +119,12 @@ async fn two_concurrent_requests_respond_out_of_order() {
     let h2_clone = handle.clone();
     let fut_a = tokio::spawn(async move {
         h1_clone
-            .send_shared(head(p1, h1), RequestBody::None, false)
+            .send_shared(head(p1, h1), leyline::Body::default(), false)
             .await
     });
     let fut_b = tokio::spawn(async move {
         h2_clone
-            .send_shared(head(p2, h2), RequestBody::None, false)
+            .send_shared(head(p2, h2), leyline::Body::default(), false)
             .await
     });
 
@@ -234,7 +235,7 @@ async fn parked_stream_does_not_block_others() {
                 },
                 h_a,
             ),
-            RequestBody::from(Some(body_a)),
+            leyline::Body::from(body_a),
             false,
         )
         .await
@@ -248,7 +249,7 @@ async fn parked_stream_does_not_block_others() {
                 },
                 h_b,
             ),
-            RequestBody::from(Some(body_b)),
+            leyline::Body::from(body_b),
             false,
         )
         .await
@@ -329,10 +330,14 @@ async fn reader_eof_fails_pending_requests() {
 
     let ha = handle.clone();
     let hb = handle.clone();
-    let fut_a =
-        tokio::spawn(async move { ha.send_shared(head(p1, h1), RequestBody::None, false).await });
-    let fut_b =
-        tokio::spawn(async move { hb.send_shared(head(p2, h2), RequestBody::None, false).await });
+    let fut_a = tokio::spawn(async move {
+        ha.send_shared(head(p1, h1), leyline::Body::default(), false)
+            .await
+    });
+    let fut_b = tokio::spawn(async move {
+        hb.send_shared(head(p2, h2), leyline::Body::default(), false)
+            .await
+    });
 
     let (a, b) = tokio::time::timeout(Duration::from_secs(3), async { tokio::join!(fut_a, fut_b) })
         .await
@@ -380,10 +385,7 @@ async fn zero_stream_limit_waits_for_peer_update() {
             handle
                 .send_shared(
                     head(pseudo, headers),
-                    RequestBody::Streaming {
-                        stream: Box::pin(empty()),
-                        length_hint: None,
-                    },
+                    leyline::Body::stream(empty(), None),
                     false,
                 )
                 .await
@@ -442,11 +444,11 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
             .expect("response or connection");
         let (pseudo, headers) = get_req("/stream");
         let response = handle
-            .send_shared(head(pseudo, headers), RequestBody::None, true)
+            .send_shared(head(pseudo, headers), leyline::Body::default(), true)
             .await
             .expect("response or connection");
         assert_eq!(response.status, 200);
-        let ResponseBody::Streaming(mut body) = response.body else {
+        let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
             panic!("expected streaming body");
         };
         let (pseudo, headers) = get_req("/blocked");
@@ -454,10 +456,7 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
             handle
                 .send_shared(
                     head(pseudo, headers),
-                    RequestBody::Streaming {
-                        stream: Box::pin(empty()),
-                        length_hint: None,
-                    },
+                    leyline::Body::stream(empty(), None),
                     false,
                 )
                 .await
@@ -475,7 +474,7 @@ async fn closed_stream_with_unread_chunks_releases_peer_capacity() {
         assert_eq!(response.status, 200);
         assert_eq!(buffered(response.body), b"next");
         let mut received = Vec::new();
-        while let Some(chunk) = body.recv().await {
+        while let Some(chunk) = body.next().await {
             received.extend_from_slice(&chunk.expect("response chunk"));
         }
         assert_eq!(received, (0..40u8).collect::<Vec<_>>());
@@ -511,7 +510,8 @@ async fn queued_request_uses_acknowledged_settings() {
         .await
         .expect("start client");
     let (pseudo, headers) = get_req("/");
-    let mut request = Box::pin(handle.send_shared(head(pseudo, headers), RequestBody::None, false));
+    let mut request =
+        Box::pin(handle.send_shared(head(pseudo, headers), leyline::Body::default(), false));
     timeout(Duration::from_millis(10), request.as_mut())
         .await
         .expect_err("expected Err");

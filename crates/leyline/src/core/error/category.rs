@@ -1,6 +1,6 @@
 use http::StatusCode;
 
-use super::{Cause, Error};
+use super::Error;
 use crate::tls::TlsError;
 
 const LABELS: [&str; 18] = [
@@ -132,22 +132,9 @@ impl Error {
 
     fn kind_category(&self) -> Kind {
         match self.inner.kind {
-            Cause::Proxy => Kind::Proxy,
-            Cause::Tls => Kind::Tls,
-            Cause::Connect => Kind::Connect,
+            kind @ (Kind::Proxy | Kind::Tls | Kind::Connect) => kind,
             _ if self.is_socket_unreachable() => Kind::Connect,
-            Cause::Status => Kind::Status,
-            Cause::Body => Kind::Body,
-            Cause::Decode => Kind::Decode,
-            Cause::Json => Kind::Json,
-            Cause::Http2 => Kind::Http2,
-            #[cfg(feature = "http3")]
-            Cause::Http3 => Kind::Http3,
-            Cause::Redirect => Kind::Redirect,
-            Cause::Url => Kind::Url,
-            Cause::Config => Kind::Config,
-            Cause::Request => Kind::Request,
-            _ => Kind::Io,
+            kind => kind,
         }
     }
 }

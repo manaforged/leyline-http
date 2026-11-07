@@ -1,4 +1,5 @@
 pub(crate) mod alpn;
+mod blocking;
 pub(crate) mod builder;
 mod connector;
 pub(crate) mod error;
@@ -16,8 +17,10 @@ pub(crate) mod trust;
 #[cfg(windows)]
 mod windows_trust;
 
+pub(crate) use blocking::{BlockingTcp, probing};
 pub(crate) use error::TlsError;
 pub(crate) use happy_eyeballs::HappyEyeballs;
+pub(crate) use resolver::Coalesced;
 pub use resolver::Resolver;
 pub(crate) use resolver::{ResolveFuture, SystemResolver};
 pub(crate) use trust::Tls;

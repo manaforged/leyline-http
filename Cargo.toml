@@ -17,11 +17,11 @@ rust-version = "1.96" # MSRV: two releases behind stable
 authors = ["Thomas Gardiner <thomas@manaforge.tech>"]
 license = "MIT"
 repository = "https://github.com/manaforged/leyline-http"
-keywords = ["tls", "fingerprint", "http", "browser", "ja4"]
-categories = ["web-programming::http-client", "cryptography"]
+keywords = ["http", "http-client", "http2", "http3", "ja4"]
+categories = ["web-programming::http-client", "network-programming"]
 
 [workspace.lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(leyline_unstable_bssl)"] }
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(leyline_unstable_bssl)", "cfg(kani)"] }
 
 [workspace.lints.clippy]
 undocumented_unsafe_blocks = "deny"
@@ -59,6 +59,8 @@ leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.2.0" }
 leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.2.0" }
 socket2 = { version = "0.6", features = ["all"] }
 bytes = "1.9.0"
+memchr = "2.7"
+foldhash = "0.2"
 tokio-tungstenite = "0.26"
 base64 = "0.22"
 leyline-quiche = { path = "crates/leyline-quiche", version = "=0.2.0", default-features = false, features = ["boringssl-bssl-crate"] }

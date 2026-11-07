@@ -12,10 +12,10 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FrameHeader, FrameType, HeadersFrame, PingFrame};
-use leyline::h2::{Head, RequestBody, ResponseBody};
 
 struct Counted {
     inner: DuplexStream,
@@ -163,7 +163,7 @@ async fn eight_concurrent_requests_share_one_write() {
                     pseudo: p,
                     headers: h,
                 }),
-                RequestBody::None,
+                leyline::Body::default(),
                 false,
             )
         })
@@ -259,7 +259,11 @@ async fn follow_up_requests_share_one_write() {
                 for round in 0..2 {
                     let (pseudo, headers) = get_req(&format!("/{i}/{round}"));
                     let response = handle
-                        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+                        .send_shared(
+                            Arc::new(Head { pseudo, headers }),
+                            leyline::Body::default(),
+                            false,
+                        )
                         .await
                         .expect("response");
                     assert_eq!(response.status, 200);
@@ -341,7 +345,11 @@ async fn requests_queued_at_the_stream_limit_share_writes() {
             tokio::spawn(async move {
                 let (pseudo, headers) = get_req(&format!("/{i}"));
                 let response = handle
-                    .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+                    .send_shared(
+                        Arc::new(Head { pseudo, headers }),
+                        leyline::Body::default(),
+                        false,
+                    )
                     .await
                     .expect("response");
                 assert_eq!(response.status, 200);
@@ -466,14 +474,18 @@ async fn ping_ack_precedes_continuation_wait() {
     let (peer, response) = timeout(Duration::from_secs(2), async {
         tokio::join!(
             server,
-            handle.send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+            handle.send_shared(
+                Arc::new(Head { pseudo, headers }),
+                leyline::Body::default(),
+                false
+            )
         )
     })
     .await
     .expect("request deadline");
     let response = response.expect("response");
     assert_eq!(response.status, 200);
-    let ResponseBody::Buffered(body) = response.body else {
+    let leyline::pool::TransportBody::Buffered(body) = response.body else {
         panic!("buffered body")
     };
     assert!(body.is_empty());

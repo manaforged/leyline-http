@@ -4,6 +4,13 @@ use crate::h2::frame::{Frame, FrameHeader, SettingsFrame};
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+#[test]
+fn small_frames_do_not_reserve_a_tls_record() {
+    let reader = FrameReader::new();
+    assert!(reader.read_capacity() < 4 * 1024);
+    assert!(reader.read_capacity() <= super::reader::SLACK);
+}
+
 #[tokio::test]
 async fn write_and_read_settings() {
     let (client, server) = tokio::io::duplex(4096);
@@ -13,12 +20,18 @@ async fn write_and_read_settings() {
         params: vec![(0x1, 65536), (0x2, 0), (0x4, 6291456)],
     };
 
-    let mut writer = FrameWriter::new(client);
-    writer.write_settings(&frame).await.unwrap();
-    drop(writer);
+    let mut client = client;
+    let mut writer = FrameWriter::new();
+    writer.write_frame(&frame).expect("SETTINGS frame buffers");
+    writer
+        .flush(&mut client)
+        .await
+        .expect("SETTINGS bytes reach the peer");
+    drop(client);
 
-    let mut reader = FrameReader::new(server);
-    let read_frame = reader.next().await.unwrap().unwrap();
+    let mut server = server;
+    let mut reader = FrameReader::new();
+    let read_frame = reader.next(&mut server).await.unwrap().unwrap();
 
     match read_frame {
         Frame::Settings(s) => {
@@ -28,31 +41,35 @@ async fn write_and_read_settings() {
         _ => panic!("expected Settings frame"),
     }
 
-    assert!(reader.next().await.unwrap().is_none());
+    assert!(reader.next(&mut server).await.unwrap().is_none());
 }
 
 #[tokio::test]
 async fn write_and_read_preface_then_settings() {
     let (client, server) = tokio::io::duplex(4096);
 
-    let mut writer = FrameWriter::new(client);
-    writer.write_preface().await.unwrap();
+    let mut client = client;
+    let mut writer = FrameWriter::new();
+    writer.write_preface();
     writer
-        .write_settings(&SettingsFrame {
+        .write_frame(&SettingsFrame {
             ack: false,
             params: vec![(0x4, 6291456)],
         })
+        .expect("SETTINGS frame buffers");
+    writer
+        .flush(&mut client)
         .await
-        .unwrap();
-    drop(writer);
+        .expect("preface and SETTINGS reach the peer");
+    drop(client);
 
     let mut reader_raw = server;
     let mut preface = [0u8; 24];
     reader_raw.read_exact(&mut preface).await.unwrap();
     assert_eq!(&preface, b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
 
-    let mut reader = FrameReader::new(reader_raw);
-    let frame = reader.next().await.unwrap().unwrap();
+    let mut reader = FrameReader::new();
+    let frame = reader.next(&mut reader_raw).await.unwrap().unwrap();
     assert!(matches!(frame, Frame::Settings(_)));
 }
 
@@ -76,11 +93,12 @@ async fn next_resumes_after_cancellation() {
         drop(server);
     });
 
-    let mut reader = FrameReader::new(client);
+    let mut client = client;
+    let mut reader = FrameReader::new();
     let read_frame = loop {
         tokio::select! {
             biased;
-            res = reader.next() => {
+            res = reader.next(&mut client) => {
                 break res.unwrap().unwrap();
             }
             _ = tokio::task::yield_now() => {
@@ -114,7 +132,8 @@ async fn rejects_oversized_frame() {
     writer.write_all(&buf).await.unwrap();
     drop(writer);
 
-    let mut reader = FrameReader::new(server);
-    let result = reader.next().await;
+    let mut server = server;
+    let mut reader = FrameReader::new();
+    let result = reader.next(&mut server).await;
     assert!(matches!(result, Err(H2Error::FrameTooLarge { .. })));
 }

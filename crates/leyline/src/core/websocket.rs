@@ -15,7 +15,7 @@ use crate::profile::preset::HeaderPair;
 use crate::tls::{FingerprintConnector, TlsIo};
 
 use crate::core::config::WebSocketOptions;
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 
 mod debug;
 mod handshake;
@@ -23,8 +23,8 @@ mod split;
 
 use handshake::{
     H2_NO_CONNECT_PROTOCOL, check_subprotocol, check_upgrade_response, handshake_target,
-    is_reserved_ws_header, overlay_headers, random_sec_ws_key, response_header, tungstenite_config,
-    wire_error, ws_header_pair,
+    is_reserved_ws_header, overlay_headers, random_sec_ws_key, tungstenite_config, wire_error,
+    ws_header_pair,
 };
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use split::{WsSink, WsSinkInner, WsStream, WsStreamInner};
@@ -93,7 +93,7 @@ impl WebSocket {
     pub(crate) async fn connect_h1(
         connector: &FingerprintConnector,
         url: &str,
-        proxy: Option<&str>,
+        proxy: Option<&crate::core::ProxyUrl>,
         user_agent: &str,
         origin: &str,
         extra_headers: &[(String, String)],
@@ -103,7 +103,7 @@ impl WebSocket {
         let (parsed, host, port) = handshake_target(url)?;
 
         let mut stream = connector
-            .connect_h1(&host, port, proxy)
+            .connect_h1(&host, port, proxy.map(crate::core::ProxyUrl::url))
             .await
             .map_err(Error::from)?
             .stream;
@@ -121,19 +121,13 @@ impl WebSocket {
         if let Some(order) = header_order {
             reorder(&mut request, order);
         }
-        let request = request
-            .into_iter()
-            .map(|(n, v)| (n.into_owned(), v.to_string()))
-            .collect();
-
         let ((status, headers, _), leftover) =
-            crate::pool::upgrade_on_stream(&mut stream, &parsed, request)
-                .await
-                .map_err(crate::core::transport::h1_error_to_core)?;
+            crate::pool::upgrade_on_stream(&mut stream, &parsed, &request).await?;
+        let headers = crate::core::transport::string_pairs(&headers);
         check_upgrade_response(status, &headers, &sec_key, extra_headers)?;
 
         let protocol =
-            response_header(&headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::to_owned);
+            crate::util::header_first(&headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::to_owned);
         let ws_stream = WebSocketStream::from_partially_read(
             stream,
             leftover,
@@ -158,7 +152,7 @@ impl WebSocket {
         connector: &FingerprintConnector,
         h2_config: &H2Config,
         url: &str,
-        proxy: Option<&str>,
+        proxy: Option<&crate::core::ProxyUrl>,
         user_agent: &str,
         origin: &str,
         extra_headers: &[(String, String)],
@@ -172,7 +166,7 @@ impl WebSocket {
             crate::pool::checkout_handle(pool, connector, h2_config, &host, port, proxy).await?;
 
         if !h2_client.peer_enables_connect_protocol() {
-            return Err(Error::new(Cause::Request).with_message(H2_NO_CONNECT_PROTOCOL));
+            return Err(Error::new(Kind::Request).with_message(H2_NO_CONNECT_PROTOCOL));
         }
 
         for (name, value) in extra_headers
@@ -193,7 +187,7 @@ impl WebSocket {
         let pseudo = PseudoHeaders {
             method: HeaderStr::from_static("CONNECT"),
             scheme: HeaderStr::from_static("https"),
-            authority: HeaderStr::from(authority),
+            authority: HeaderStr::from(authority.as_ref()),
             path: HeaderStr::from(path),
             protocol: Some(HeaderStr::from_static("websocket")),
         };
@@ -209,10 +203,10 @@ impl WebSocket {
                     .collect(),
             )
             .await
-            .map_err(|e| Error::new(Cause::Request).with_message(format!("h2 ws: {e}")))?;
+            .map_err(|e| Error::new(Kind::Request).with_message(format!("h2 ws: {e}")))?;
 
         if stream.status() != 200 {
-            return Err(Error::new(Cause::Request).with_message(format!(
+            return Err(Error::new(Kind::Request).with_message(format!(
                 "ws handshake: h2 extended CONNECT returned :status {}",
                 stream.status()
             )));
@@ -220,8 +214,9 @@ impl WebSocket {
 
         check_subprotocol(stream.response_headers(), extra_headers)?;
 
-        let protocol = response_header(stream.response_headers(), SEC_WEBSOCKET_PROTOCOL.as_str())
-            .map(str::to_owned);
+        let protocol =
+            crate::util::header_first(stream.response_headers(), SEC_WEBSOCKET_PROTOCOL.as_str())
+                .map(str::to_owned);
         let headers = stream.response_headers().to_vec();
 
         let ws_stream = WebSocketStream::from_raw_socket(
@@ -239,7 +234,7 @@ impl WebSocket {
 
     pub(crate) fn is_h2_fallback_trigger(err: &Error) -> bool {
         crate::core::transport::is_h2_alpn_mismatch(err)
-            || err.cause() == Cause::Request
+            || err.cause() == Kind::Request
                 && err
                     .message()
                     .is_some_and(|s| s.contains(H2_NO_CONNECT_PROTOCOL))
@@ -283,10 +278,7 @@ impl WebSocket {
 
     /// Returns the first handshake response header with the given name.
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers
-            .iter()
-            .find(|(n, _)| n.eq_ignore_ascii_case(name))
-            .map(|(_, v)| v.as_str())
+        crate::util::header_first(&self.headers, name)
     }
 
     /// Splits the connection into a message sink and a message stream.

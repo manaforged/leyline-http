@@ -1,6 +1,6 @@
 use std::io;
 
-use super::{Cause, Error, Kind};
+use super::{Error, Kind};
 use crate::core::retry::is_gateway_status;
 use crate::core::session::decompress::BodyLimit;
 use crate::h2::H2Error;
@@ -10,7 +10,7 @@ use crate::tls::error::ProxyReply;
 
 impl Error {
     pub(crate) fn is_timeout(&self) -> bool {
-        self.inner.kind == Cause::Timeout
+        self.inner.kind == Kind::Timeout
             || self
                 .io_cause()
                 .is_some_and(|e| e.kind() == io::ErrorKind::TimedOut)
@@ -22,7 +22,7 @@ impl Error {
             Kind::Connect | Kind::Dns => true,
             Kind::Tls => self.tls().is_some_and(TlsError::is_connect_phase),
             Kind::Timeout => {
-                self.inner.kind == Cause::Connect
+                self.inner.kind == Kind::Connect
                     || self.tls().is_some_and(TlsError::is_connect_phase)
             }
             _ => false,
@@ -42,7 +42,7 @@ impl Error {
     }
 
     pub(crate) fn is_status(&self) -> bool {
-        self.inner.kind == Cause::Status
+        self.inner.kind == Kind::Status
     }
 
     /// Returns true for a timeout, a connect failure, a closed connection, or a transient proxy failure.
@@ -101,7 +101,7 @@ impl Error {
                 code: ErrorCode::RefusedStream,
                 ..
             })
-        ) || self.not_processed()
+        ) || self.source_as::<super::marker::NotProcessed>().is_some()
     }
 
     pub(crate) fn is_body_limit(&self) -> bool {
@@ -142,7 +142,7 @@ impl Error {
     }
 
     pub(crate) fn is_unsent(&self) -> bool {
-        !self.follows_response()
+        !self.inner.after_response
             && (self.is_connect()
                 || matches!(self.kind(), Kind::Proxy | Kind::ProxyTarget)
                 || self.is_refused_stream())

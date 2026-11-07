@@ -1,7 +1,7 @@
 use std::time::Duration;
 
+use crate::Error;
 use crate::h2::frame::StreamDependency;
-use crate::{Cause, Error};
 
 pub(crate) const DEFAULT_WINDOW_SIZE: u32 = 65_535;
 pub(crate) const DEFAULT_MAX_FRAME_SIZE: u32 = 16_384;
@@ -132,10 +132,8 @@ impl H2Config {
             .settings_order
             .iter()
             .map(|s| {
-                SettingId::parse_key(s).ok_or_else(|| {
-                    Error::new(Cause::Config)
-                        .with_message(format!("unknown H2 settings_order key: {s:?}"))
-                })
+                SettingId::parse_key(s)
+                    .ok_or_else(|| Error::config(format!("unknown H2 settings_order key: {s:?}")))
             })
             .collect::<Result<_, _>>()?;
 
@@ -148,8 +146,7 @@ impl H2Config {
 
         let initial_connection_window_size =
             h2.initial_connection_window_size.ok_or_else(|| {
-                Error::new(Cause::Config)
-                    .with_message("H2 profile missing initial_connection_window_size".to_string())
+                Error::config("H2 profile missing initial_connection_window_size".to_string())
             })?;
 
         Ok(Self {
@@ -178,7 +175,7 @@ pub(crate) fn parse_pseudo_order(
     label: &str,
 ) -> Result<[PseudoOrder; 4], Error> {
     if tokens.len() != 4 {
-        return Err(Error::new(Cause::Config).with_message(format!(
+        return Err(Error::config(format!(
             "{label} pseudo_order must have exactly 4 entries, got {}",
             tokens.len()
         )));
@@ -190,14 +187,12 @@ pub(crate) fn parse_pseudo_order(
         PseudoOrder::Path,
     ];
     for (slot, s) in pseudo_order.iter_mut().zip(tokens.iter()) {
-        *slot = PseudoOrder::parse_key(s).ok_or_else(|| {
-            Error::new(Cause::Config)
-                .with_message(format!("unknown {label} pseudo_order token: {s:?}"))
-        })?;
+        *slot = PseudoOrder::parse_key(s)
+            .ok_or_else(|| Error::config(format!("unknown {label} pseudo_order token: {s:?}")))?;
     }
     for i in 1..pseudo_order.len() {
         if pseudo_order[..i].contains(&pseudo_order[i]) {
-            return Err(Error::new(Cause::Config).with_message(format!(
+            return Err(Error::config(format!(
                 "duplicate {label} pseudo_order token: {:?}",
                 tokens[i]
             )));

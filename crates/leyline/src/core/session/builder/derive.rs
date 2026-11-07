@@ -3,7 +3,7 @@ use std::sync::Arc;
 use http::header::USER_AGENT;
 
 use crate::audit::AuditTlsCache;
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Result};
 use crate::core::{BodyRules, Identity};
 use crate::h2::H2Config;
 use crate::profile::{
@@ -90,7 +90,7 @@ impl BrowserProfile {
         brand: ChromiumBrand,
     ) -> Result<BrowserHeaders> {
         self.resolve_identity(platform, brand)
-            .map_err(|e| Error::new(Cause::Config).with_message(e))
+            .map_err(Error::config)
     }
 }
 

@@ -1,3 +1,4 @@
+use std::future::Future;
 use std::time::Instant;
 
 use leyline_bssl::ssl::SslVerifyMode;
@@ -14,28 +15,35 @@ use crate::tls::{TlsIo, TlsStream};
 use crate::trace;
 
 impl FingerprintConnector {
-    pub(crate) async fn tls_handshake(
+    pub(crate) fn tls_handshake(
         &self,
         tcp_stream: TcpStream,
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-    ) -> Result<TlsStream, TlsError> {
-        self.handshake_over(tcp_stream, host, session_key, plan, TlsIo::Boring)
-            .await
+    ) -> impl Future<Output = Result<TlsStream, TlsError>> {
+        let records = self.hello.records();
+        self.handshake_over(tcp_stream, host, session_key, plan, move |stream| {
+            if !records {
+                return TlsIo::Boring(stream);
+            }
+            match stream.into_records() {
+                Ok(stream) => TlsIo::Records(Box::new(stream)),
+                Err(stream) => TlsIo::Boring(stream),
+            }
+        })
     }
 
-    pub(crate) async fn tls_handshake_nested(
+    pub(crate) fn tls_handshake_nested(
         &self,
         inner: TlsIo,
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-    ) -> Result<TlsStream, TlsError> {
+    ) -> impl Future<Output = Result<TlsStream, TlsError>> {
         self.handshake_over(inner, host, session_key, plan, |stream| {
             TlsIo::Nested(Box::new(stream))
         })
-        .await
     }
 
     async fn handshake_over<S>(
@@ -123,6 +131,7 @@ impl FingerprintConnector {
             self.session_cache.attach(&mut ssl, session_key)?;
         }
         self.hello.apply(&mut ssl, plan.alps())?;
+        ssl.shed_handshake_config();
         Ok((ssl, verification_failure))
     }
 }

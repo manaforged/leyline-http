@@ -1,0 +1,102 @@
+{
+ "name": "h2-1c64",
+ "origin": "external",
+ "body_bytes": 10,
+ "connections": 1,
+ "streams": 64,
+ "profile": "bare",
+ "left": "leyline",
+ "right": "reqwest",
+ "left_sha256": "sha256:4014fcd412a09966abac855a706b2ebf0217eca669873b26483039bf67011726",
+ "right_sha256": "sha256:79c1285b318c72b5620174a383119d4aecd0462bf774ab847d73b80e14ddf75b",
+ "warm_count": 2000,
+ "cold_count": 200,
+ "conc_count": 200000,
+ "host": {
+  "leyline_rev": "bde05ee72bc830496a3f0a78d13f81092f1bdaa2",
+  "kernel": "7.0.0-38-generic",
+  "cpu": "AMD Ryzen 9 9950X3D 16-Core Processor",
+  "governor": "performance",
+  "boost": "1",
+  "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)",
+  "server_cpus": "0-6,16-22",
+  "client_cpus": "8-15,24-31",
+  "load_avg_start": "6.95 11.53 12.55 1/3604 261541",
+  "load_avg_end": "6.74 11.33 12.47 1/3602 262440",
+  "wreq": "0.16.3",
+  "reqwest": "0.13.5",
+  "tls_client": "v1.16.0",
+  "go": "go1.27.3",
+  "build_profile": "cargo default release"
+ },
+ "rounds": [
+  {
+   "round": 1,
+   "left": {
+    "conc_rps": 200094.522,
+    "conc_p50_us": 322.0,
+    "conc_p99_us": 565.0,
+    "warm_rps": 52063.038,
+    "cold_rps": 2362.051
+   },
+   "right": {
+    "conc_rps": 176462.941,
+    "conc_p50_us": 354.0,
+    "conc_p99_us": 516.0,
+    "warm_rps": 33900.03,
+    "cold_rps": 2533.134
+   }
+  },
+  {
+   "round": 2,
+   "left": {
+    "conc_rps": 198315.884,
+    "conc_p50_us": 324.0,
+    "conc_p99_us": 578.0,
+    "warm_rps": 51350.935,
+    "cold_rps": 2296.831
+   },
+   "right": {
+    "conc_rps": 176863.832,
+    "conc_p50_us": 353.0,
+    "conc_p99_us": 517.0,
+    "warm_rps": 33460.953,
+    "cold_rps": 1847.998
+   }
+  },
+  {
+   "round": 3,
+   "left": {
+    "conc_rps": 199123.195,
+    "conc_p50_us": 324.0,
+    "conc_p99_us": 563.0,
+    "warm_rps": 51197.558,
+    "cold_rps": 2195.532
+   },
+   "right": {
+    "conc_rps": 176986.37,
+    "conc_p50_us": 353.0,
+    "conc_p99_us": 515.0,
+    "warm_rps": 34342.205,
+    "cold_rps": 2564.165
+   }
+  },
+  {
+   "round": 4,
+   "left": {
+    "conc_rps": 201430.459,
+    "conc_p50_us": 321.0,
+    "conc_p99_us": 547.0,
+    "warm_rps": 51703.893,
+    "cold_rps": 2258.538
+   },
+   "right": {
+    "conc_rps": 177469.062,
+    "conc_p50_us": 351.0,
+    "conc_p99_us": 514.0,
+    "warm_rps": 27563.044,
+    "cold_rps": 2436.995
+   }
+  }
+ ]
+}

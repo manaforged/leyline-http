@@ -1,0 +1,10 @@
+path          instr/req  spread    delta      req/s    delta
+bare-after        34744     383       +0      51071    +0.0%
+bare-before       34508     568       +0      50188    +0.0%
+chrome-after      37411    1221       +0      46527    +0.0%
+chrome-before      37529     620       +0      48330    +0.0%
+8c8-after         35896     146       +0     271006    +0.0%
+8c8-before        35981     287       +0     270890    +0.0%
+8c256-after       27493     207       +0    1338443    +0.0%
+8c256-before      27424     306       +0    1267912    +0.0%
+build 532 ms, total 111397 ms

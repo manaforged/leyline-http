@@ -1,0 +1,16 @@
+8par leyline 8
+8par leyline-blocking 8
+8par fasthttp 8
+8par ureq 8
+8par hyper 21
+8par reqwest 18
+8par curl 8
+8par nethttp 26
+64par leyline 64
+64par leyline-blocking 64
+64par fasthttp 64
+64par ureq 64
+64par hyper 105
+64par reqwest 123
+64par curl 64
+64par nethttp 64

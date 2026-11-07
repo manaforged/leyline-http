@@ -5,7 +5,6 @@ use std::time::Duration;
 
 use futures_util::stream::{FuturesUnordered, Stream, StreamExt};
 use tokio::time::{Instant, Sleep};
-use tokio_util::sync::WaitForCancellationFutureOwned;
 
 use super::frontier::{Queued, page_key};
 use super::{Crawl, Page, SkipReason};
@@ -18,10 +17,10 @@ const ALARM_FLOOR: Duration = Duration::from_millis(10);
 
 #[derive(Default)]
 pub(super) struct Clock {
-    pub(super) stopped: Option<Pin<Box<WaitForCancellationFutureOwned>>>,
+    pub(super) stopped: Option<crate::core::session::shutdown::Stopped>,
     alarm: Option<Pin<Box<Sleep>>>,
     alarm_at: Option<Instant>,
-    delayed: Vec<(Instant, Queued)>,
+    pub(super) delayed: Vec<(Instant, Queued)>,
 }
 
 impl Crawl {

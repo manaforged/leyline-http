@@ -25,28 +25,8 @@ pub type Result<T> = std::result::Result<T, Error>;
 
 type Source = Box<dyn StdError + Send + Sync>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum Cause {
-    Request,
-    Redirect,
-    Status,
-    Body,
-    Decode,
-    Timeout,
-    Connect,
-    Tls,
-    Http2,
-    #[cfg(feature = "http3")]
-    Http3,
-    Proxy,
-    Io,
-    Config,
-    Url,
-    Json,
-}
-
 struct Inner {
-    kind: Cause,
+    kind: Kind,
     source: Option<Source>,
     url: Option<Url>,
     status: Option<StatusCode>,
@@ -67,7 +47,7 @@ pub struct Error {
 }
 
 impl Error {
-    pub(crate) fn new(kind: Cause) -> Self {
+    pub(crate) fn new(kind: Kind) -> Self {
         Self {
             inner: Box::new(Inner {
                 kind,
@@ -85,6 +65,10 @@ impl Error {
                 after_response: false,
             }),
         }
+    }
+
+    pub(crate) fn config(message: impl Into<Cow<'static, str>>) -> Self {
+        Self::new(Kind::Config).with_message(message)
     }
 
     pub(crate) fn with_source(mut self, source: impl Into<Source>) -> Self {
@@ -139,10 +123,6 @@ impl Error {
     pub(crate) fn after_response(mut self) -> Self {
         self.inner.after_response = true;
         self
-    }
-
-    pub(crate) fn follows_response(&self) -> bool {
-        self.inner.after_response
     }
 
     /// Returns the response headers when the error came after a response.
@@ -217,14 +197,21 @@ impl Error {
         None
     }
 
-    pub(crate) fn into_io(self) -> io::Error {
-        match self.body_limit() {
-            Some(limit) => limit.into_io(),
-            None => io::Error::other(self),
+    pub(crate) fn into_io(mut self) -> io::Error {
+        if let Some(limit) = self.body_limit() {
+            return limit.into_io();
         }
+        if self.inner.kind == Kind::Io
+            && self.inner.message.is_none()
+            && self.io().is_some()
+            && let Some(Ok(io)) = self.inner.source.take().map(|source| source.downcast())
+        {
+            return *io;
+        }
+        io::Error::other(self)
     }
 
-    pub(crate) fn cause(&self) -> Cause {
+    pub(crate) fn cause(&self) -> Kind {
         self.inner.kind
     }
 

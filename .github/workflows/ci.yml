@@ -141,7 +141,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-workspace-crates: true
 
-      - name: cargo test
+      - name: workspace and resource qualification
+        if: needs.scope.outputs.api == 'true'
+        env:
+          CARGO_TARGET_DIR: target
+        run: scripts/verify.sh --only test
+
+      - name: affected cargo test
+        if: needs.scope.outputs.api != 'true'
         run: cargo test ${{ needs.scope.outputs.args }} --locked
 
       - name: cargo test (default features)
@@ -178,10 +185,12 @@ jobs:
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: cargo test (full features)
+      - name: workspace and resource qualification
+        shell: bash
         env:
+          CARGO_TARGET_DIR: target
           LEYLINE_BSSL_PREBUILT_NASM_OUT: ${{ runner.os == 'Windows' && format('{0}/crates/leyline-bssl-sys/prebuilt/x86_64-pc-windows-msvc', github.workspace) || '' }}
-        run: cargo test -p leyline-http --locked --features full,bench-internals
+        run: scripts/verify.sh --only test
 
       - name: committed NASM objects are current
         if: runner.os == 'Windows'

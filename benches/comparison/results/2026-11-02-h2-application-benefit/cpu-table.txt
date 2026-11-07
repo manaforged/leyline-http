@@ -1,0 +1,23 @@
+1 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-after        51228    9.5%      32399          -      10.23     10     -
+       leyline-before       50001   19.1%      34516          -      10.50     10     -
+
+1c64   lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-before      175220   22.6%      29169          -       4.62     10     -
+       leyline-after       173012   56.5%      28438          -       4.62     10     -
+
+8c8    lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-after       125771    8.7%      30897          -       7.95     10     -
+       leyline-before      122178   25.1%      32983          -       8.23     10     -
+
+8c256  lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-after       358246   15.5%      25388          -       2.79     10     -
+       leyline-before      350747    9.3%      26124          -       2.85     10     -
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline-after     vs leyline-before req/s 1.008 [0.955, 1.063] tie; CPU/req 0.970 [0.875, 1.076] same CPU; single-run, 10 rounds
+1c64   leyline-after     vs leyline-before req/s 1.007 [0.867, 1.169] tie; CPU/req 0.993 [0.951, 1.036] same CPU; single-run, 10 rounds
+8c8    leyline-after     vs leyline-before req/s 1.039 [0.986, 1.094] tie; CPU/req 0.963 [0.925, 1.002] same CPU; single-run, 10 rounds
+8c256  leyline-after     vs leyline-before req/s 1.010 [0.989, 1.032] tie; CPU/req 0.990 [0.975, 1.005] same CPU; single-run, 10 rounds

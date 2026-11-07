@@ -1,0 +1,66 @@
+Paired ratios use ratio_ci and show from libs-table.py unchanged.
+95% t-intervals across rounds of one run; not independent-run evidence.
+An interval containing 1 is unresolved, not proof of equivalence.
+Lower latency and CPU ratios favor after; higher throughput ratios favor after.
+Paced harness CPU includes warmup, request generation, collection, sorting, and reporting.
+
+offered_rate=93000
+variant median_rps corrected_p99_us corrected_p999_us service_p999_us lag_p999_us total_harness_cpu_us_per_completed
+before 92947.70 2766.00 4464.00 1629.00 4076.00 5.00
+after 92947.90 2174.00 4015.00 797.00 3548.00 4.97
+rps after/before 1.000 [1.000, 1.000] unresolved
+corrected_p99 after/before 0.784 [0.517, 1.190] unresolved
+corrected_p999 after/before 0.901 [0.559, 1.454] unresolved
+service_p999 after/before 0.716 [0.279, 1.836] unresolved
+lag_p999 after/before 0.875 [0.529, 1.449] unresolved
+harness_cpu_us after/before 0.994 [0.976, 1.013] unresolved
+
+offered_rate=148000
+variant median_rps corrected_p99_us corrected_p999_us service_p999_us lag_p999_us total_harness_cpu_us_per_completed
+before 147877.40 3782.00 6368.00 779.00 5936.00 4.76
+after 147880.30 10048.00 13364.00 1151.00 12932.00 4.71
+rps after/before 1.001 [0.999, 1.002] unresolved
+corrected_p99 after/before 2.307 [0.457, 11.650] unresolved
+corrected_p999 after/before 2.252 [0.510, 9.949] unresolved
+service_p999 after/before 1.728 [0.575, 5.197] unresolved
+lag_p999 after/before 2.367 [0.492, 11.379] unresolved
+harness_cpu_us after/before 0.992 [0.983, 1.000] unresolved
+
+offered_rate=185000
+variant median_rps corrected_p99_us corrected_p999_us service_p999_us lag_p999_us total_harness_cpu_us_per_completed
+before 176251.00 144576.00 149336.00 792.00 148991.00 4.64
+after 175353.60 161672.00 165844.00 817.00 165499.00 4.63
+rps after/before 0.993 [0.974, 1.012] unresolved
+corrected_p99 after/before 1.151 [0.788, 1.681] unresolved
+corrected_p999 after/before 1.147 [0.795, 1.655] unresolved
+service_p999 after/before 1.325 [0.495, 3.549] unresolved
+lag_p999 after/before 1.148 [0.795, 1.656] unresolved
+harness_cpu_us after/before 0.994 [0.982, 1.007] unresolved
+
+offered_rate=222000
+variant median_rps corrected_p99_us corrected_p999_us service_p999_us lag_p999_us total_harness_cpu_us_per_completed
+before 174867.00 798966.00 806994.00 908.00 806686.00 4.65
+after 174766.70 800801.00 808882.00 962.00 808577.00 4.62
+rps after/before 0.987 [0.938, 1.039] unresolved
+corrected_p99 after/before 1.101 [0.789, 1.536] unresolved
+corrected_p999 after/before 1.098 [0.793, 1.521] unresolved
+service_p999 after/before 0.738 [0.278, 1.957] unresolved
+lag_p999 after/before 1.098 [0.792, 1.521] unresolved
+harness_cpu_us after/before 0.998 [0.987, 1.009] unresolved
+
+offered_rate=278000
+variant median_rps corrected_p99_us corrected_p999_us service_p999_us lag_p999_us total_harness_cpu_us_per_completed
+before 174308.90 1765200.00 1781028.00 800.00 1780695.00 4.64
+after 177672.60 1673531.00 1690165.00 851.00 1689834.00 4.61
+rps after/before 1.007 [0.895, 1.132] unresolved
+corrected_p99 after/before 0.987 [0.688, 1.417] unresolved
+corrected_p999 after/before 0.988 [0.689, 1.415] unresolved
+service_p999 after/before 1.035 [0.687, 1.558] unresolved
+lag_p999 after/before 0.988 [0.689, 1.415] unresolved
+harness_cpu_us after/before 0.994 [0.972, 1.016] unresolved
+
+closed-loop window: 64 streams, 3-second counted window after 300ms active warmup
+before median_rps=186404.35
+after median_rps=184841.15
+window req/s after/before 1.004 [0.949, 1.061] unresolved
+50/50 paced executions completed the exact planned request count; no client process failed.

@@ -5,10 +5,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody, ResponseBody};
 use support::*;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
@@ -133,10 +133,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
                 },
                 headers: vec![("user-agent".into(), "test".into())],
             }),
-            RequestBody::Streaming {
-                stream: Box::pin(stream),
-                length_hint: None,
-            },
+            leyline::Body::stream(stream, None),
             true,
         )
         .await
@@ -146,11 +143,11 @@ async fn streaming_upload_completes_after_last_handle_drops() {
     drop(handle);
 
     let mut body = match resp.body {
-        ResponseBody::Streaming(rx) => rx,
+        leyline::pool::TransportBody::Streaming(rx) => rx,
         other => panic!("expected streaming body, got {other:?}"),
     };
     let mut got = Vec::new();
-    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(5), body.recv())
+    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(5), body.next())
         .await
         .expect("response stalled: upload never completed during shutdown")
     {
@@ -221,7 +218,7 @@ async fn abandoned_response_is_reset_before_shutdown() {
                 },
                 headers: Vec::new(),
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             true,
         )
         .await

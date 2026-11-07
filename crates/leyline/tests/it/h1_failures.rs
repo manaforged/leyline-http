@@ -84,6 +84,10 @@ async fn a_response_that_breaks_the_wire_format_is_an_invalid_data_io_error() {
         Some(std::io::ErrorKind::InvalidData),
         "{err:?}"
     );
+    assert!(
+        err.to_string().contains("multiple Content-Length"),
+        "the error names the defect: {err}"
+    );
 }
 
 #[tokio::test]
@@ -102,6 +106,37 @@ async fn a_malformed_response_on_a_reused_connection_is_not_sent_again() {
     session.get(&url).send().await.unwrap_err();
     assert_eq!(counts.requests.load(Ordering::SeqCst), 2);
     assert_eq!(counts.connections.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn malformed_status_lines_are_not_replayed_or_reused() {
+    let replies: &[&[u8]] = &[
+        b"HTTP/1.1 +200 OK\r\nContent-Length: 2\r\n\r\nok",
+        b"HTTP/1.1 0200 OK\r\nContent-Length: 2\r\n\r\nok",
+        b"HTTP/1.1 2000 OK\r\nContent-Length: 2\r\n\r\nok",
+        b"HTTP/1.1 20 OK\r\nContent-Length: 2\r\n\r\nok",
+        b"HTTP/1.10 200 OK\r\nContent-Length: 2\r\n\r\nok",
+        b"HTTP/1.1junk 200 OK\r\nContent-Length: 2\r\n\r\nok",
+        b"HTTP/1.01 200 OK\r\nContent-Length: 2\r\n\r\nok",
+    ];
+    for &reply in replies {
+        let (addr, counts) = server(&[Some(OK), Some(reply), Some(OK)]).await;
+        let session = session();
+        let url = format!("http://{addr}/");
+        let first = session.get(&url).send().await.unwrap();
+        assert_eq!(&first.bytes().await.unwrap()[..], b"ok");
+        let err = session
+            .get(&url)
+            .send()
+            .await
+            .expect_err("malformed status line");
+        assert_eq!(err.kind(), Kind::Io, "{reply:?}: {err:?}");
+        assert_eq!(counts.requests.load(Ordering::SeqCst), 2);
+        let next = session.get(&url).send().await.unwrap();
+        assert_eq!(&next.bytes().await.unwrap()[..], b"ok");
+        assert_eq!(counts.requests.load(Ordering::SeqCst), 3);
+        assert_eq!(counts.connections.load(Ordering::SeqCst), 2);
+    }
 }
 
 #[tokio::test]

@@ -1,0 +1,20 @@
+cpu AMD Ryzen 9 9950X3D 16-Core Processor
+logical_cpus 32
+kernel 7.0.0-38-generic
+governor performance
+host_exclusive no
+rustc 1.98.1 (48a229cea 2026-09-01)
+cargo 1.98.1 (797e8a9bc 2026-08-05)
+profile release
+cargo_incremental 1
+protocol h2
+network loopback
+request_headers benches/comparison/request-headers.tsv
+server_cpus 0-6,16-22
+memory_client_cpus 8-15,24-31
+sequential_client_cpus 8
+concurrent_client_cpus 8-15,24-31
+sha256 970fb53281c9d6d3d62b271754a2c78a4e14c7e9cae4736ebfdcb0d114e5dc25 leyline-client/Cargo.lock
+sha256 49bed6081c8fcb9c93dafb7fda772d78eb5d0a8830abf2002614b868289d67db leyline-before
+sha256 99d28a5175af0b323dbbba10c248481c4c9aaec2380cf1f43d1782369659ea58 leyline-after
+sha256 6d089e57fc7b7403e50aafa0b57c10efa6852fd4c3c0d0fa7d796df98b99a22c server

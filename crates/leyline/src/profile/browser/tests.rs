@@ -73,6 +73,36 @@ fn host_resolves_to_the_running_platform() {
 }
 
 #[test]
+fn a_bare_profile_edit_does_not_change_a_browser_profile_id() {
+    let browser = Browser::Chrome146;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles");
+    let shared: Vec<Vec<u8>> = ["brands.toml", "headers.toml", "platforms.toml"]
+        .into_iter()
+        .map(|name| std::fs::read(root.join(name)).unwrap())
+        .collect();
+    let source = browser.profile_source();
+    let mut parts: Vec<&[u8]> = shared.iter().map(Vec::as_slice).collect();
+    parts.push(source.as_bytes());
+    assert_eq!(browser.profile_digest(), super::digest(&parts));
+
+    let bare = std::fs::read(root.join("bare.toml")).unwrap();
+    let mut with_bare = vec![bare.as_slice()];
+    with_bare.extend(parts);
+    assert_ne!(browser.profile_digest(), super::digest(&with_bare));
+}
+
+#[test]
+fn the_bare_profile_advertises_64_kib_http2_frames() {
+    let profile = crate::profile::BrowserProfile::bare_shared();
+    assert_eq!(
+        profile
+            .h2
+            .setting(crate::h2::config::SettingId::MaxFrameSize),
+        Some(65_536)
+    );
+}
+
+#[test]
 fn every_bundled_identity_sends_an_accept_language() {
     let platforms = [
         Platform::Windows,

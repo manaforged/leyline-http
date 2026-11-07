@@ -1,43 +1,10 @@
 use bytes::Bytes;
+use http::HeaderMap;
 
 use crate::core::deadline::{Elapsed, within};
-use crate::header_str::HeaderStr;
+use crate::core::transport::{ResponseHead, response_field};
 
 use super::*;
-
-impl StreamActor {
-    fn pseudo(&mut self, decoded: Vec<(Bytes, Bytes)>) -> Option<u16> {
-        let mut status = None;
-        let mut saw_regular = false;
-        let mut bad_status = false;
-        for (name, value) in decoded {
-            if name.starts_with(b":") {
-                let digits = value.as_ref();
-                if saw_regular
-                    || name.as_ref() != b":status"
-                    || status.is_some()
-                    || digits.len() != 3
-                    || !digits.iter().all(u8::is_ascii_digit)
-                {
-                    bad_status = true;
-                    break;
-                }
-                status = Some(
-                    digits
-                        .iter()
-                        .fold(0_u16, |code, digit| code * 10 + u16::from(*digit - b'0')),
-                );
-            } else {
-                saw_regular = true;
-                self.resp_headers.push((
-                    HeaderStr::from_bytes_lossy(name),
-                    HeaderStr::from_bytes_lossy(value),
-                ));
-            }
-        }
-        status.filter(|status| !bad_status && *status != 101)
-    }
-}
 
 const BODY_RESERVE_CAP: usize = 64 * 1024;
 
@@ -46,11 +13,6 @@ impl StreamActor {
         if self.drop_body {
             return;
         }
-        self.declared_len = self
-            .resp_headers
-            .iter()
-            .find(|(name, _)| name.as_str() == "content-length")
-            .and_then(|(_, value)| value.as_str().parse::<u64>().ok());
         if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
             return;
         }
@@ -65,42 +27,68 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_headers(&mut self, h: HeadersFrame) -> Result<(), H2Error> {
         let full_fragment = self.reassemble(&h).await?;
 
-        let decoded: Vec<(Bytes, Bytes)> = self
-            .decoder
-            .decode_header_block(&full_fragment)
-            .map_err(H2Error::Hpack)?
-            .into_iter()
-            .map(|header| (header.name, header.value))
-            .collect();
-
-        let first = match self.streams.get(h.stream_id) {
-            Some(actor) => !actor.got_headers,
-            None => return Ok(()),
+        let Some(response) = self
+            .streams
+            .get(h.stream_id)
+            .filter(|actor| !actor.state.is_reset_local())
+            .map(|actor| actor.response)
+        else {
+            return self
+                .decoder
+                .decode_block(&full_fragment, |_, _, _| {})
+                .map_err(H2Error::Hpack);
         };
-        if first {
-            self.respond(&h, decoded).await
+        if matches!(response, ResponseState::Initial(_)) {
+            let mut head = ResponseHead::default();
+            let mut malformed = false;
+            self.decoder
+                .decode_block(&full_fragment, |name, value, typed| {
+                    if name.starts_with(b":") {
+                        malformed |= head.pseudo(name, value).is_err();
+                    } else {
+                        malformed |= head.field(response_field(name, value, typed)).is_err();
+                    }
+                })
+                .map_err(H2Error::Hpack)?;
+            let head = if malformed { None } else { head.finish().ok() };
+            self.respond(&h, head)
         } else {
-            self.on_trailers(&h, decoded).await
+            let mut trailers = HeaderMap::new();
+            let mut malformed = false;
+            self.decoder
+                .decode_block(&full_fragment, |name, value, typed| {
+                    if name.starts_with(b":") {
+                        malformed = true;
+                    } else {
+                        match response_field(name, value, typed) {
+                            Ok((name, value)) => {
+                                trailers.append(name, value);
+                            }
+                            Err(_) => malformed = true,
+                        }
+                    }
+                })
+                .map_err(H2Error::Hpack)?;
+            self.on_trailers(&h, trailers, malformed)
         }
     }
 
     async fn reassemble(&mut self, h: &HeadersFrame) -> Result<Bytes, H2Error> {
+        let max_header_block = self.config.max_header_block_bytes;
+        let oversized = || H2Error::Connection {
+            code: ErrorCode::CompressionError,
+            reason: format!("header block exceeds max_header_block_bytes ({max_header_block})"),
+        };
+        if h.fragment.len() > max_header_block {
+            return Err(oversized());
+        }
         if h.end_headers {
             return Ok(h.fragment.clone());
         }
-        let max_header_block = self.config.max_header_block_bytes;
         let reassembly_timeout = self.config.header_block_reassembly_timeout;
         let started = tokio::time::Instant::now();
         let mut assembled = h.fragment.to_vec();
         loop {
-            if assembled.len() > max_header_block {
-                return Err(H2Error::Connection {
-                    code: ErrorCode::CompressionError,
-                    reason: format!(
-                        "header block exceeds max_header_block_bytes ({max_header_block})"
-                    ),
-                });
-            }
             let remaining = reassembly_timeout.saturating_sub(started.elapsed());
             match self
                 .next_continuation(remaining, reassembly_timeout)
@@ -113,6 +101,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 } if stream_id == h.stream_id => {
                     if fragment.is_empty() && !end_headers {
                         self.control_flood.record(std::time::Instant::now())?;
+                    }
+                    if fragment.len() > max_header_block - assembled.len() {
+                        return Err(oversized());
                     }
                     assembled.extend_from_slice(&fragment);
                     if end_headers {
@@ -135,15 +126,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         remaining: std::time::Duration,
         limit: std::time::Duration,
     ) -> Result<Frame, H2Error> {
+        let io = &mut self.io;
         let reader = &mut self.reader;
         let writer = &mut self.writer;
         let output = &mut self.output;
         let read_while_writing = async {
             loop {
-                tokio::select! {
-                    biased;
-                    written = writer.write_some(), if writer.has_output() => output.wrote(written)?,
-                    frame = reader.next(), if !writer.saturated() => return frame,
+                let event = std::future::poll_fn(|cx| {
+                    let (writing, reading) = (writer.has_output(), !writer.saturated());
+                    super::super::event::poll_io(io, writer, reader, writing, reading, cx)
+                })
+                .await;
+                match event {
+                    super::super::event::Io::Written(written) => output.wrote(written)?,
+                    super::super::event::Io::Read(frame) => return frame,
                 }
             }
         };
@@ -159,63 +155,53 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         })
     }
 
-    async fn respond(
+    fn respond(
         &mut self,
         h: &HeadersFrame,
-        decoded: Vec<(Bytes, Bytes)>,
+        head: Option<(http::StatusCode, HeaderMap, Option<u64>)>,
     ) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
         let Some(actor) = self.streams.get_mut(stream_id) else {
             return Ok(());
         };
-        if let Err(e) = actor.state.transition(StreamEvent::RecvHeaders {
-            end_stream: h.end_stream,
-        }) {
-            let err = map_state_err(stream_id, e);
-            self.fail_stream(stream_id, err);
-            if let Err(e) = self
-                .writer
-                .write_frame(&RstStreamFrame {
-                    stream_id,
-                    error_code: ErrorCode::StreamClosed,
-                })
-                .await
-            {
-                tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
-            }
-            return Ok(());
-        }
-        let Some(status) = actor.pseudo(decoded) else {
-            self.fail_stream(
+        let Some((status, headers, length)) = head else {
+            return self.reset_stream(
                 stream_id,
                 H2Error::Stream {
                     stream_id,
                     code: ErrorCode::ProtocolError,
                 },
+                ErrorCode::ProtocolError,
             );
-            return Ok(());
         };
-        actor.status = status;
-        if matches!(actor.status, 100..=199) && actor.status != 101 && !h.end_stream {
-            actor.informational += 1;
-            if actor.informational > crate::util::MAX_INFORMATIONAL {
-                self.fail_stream(
+        if (status.is_informational() && h.end_stream) || actor.response.head(status).is_err() {
+            return self.reset_stream(
+                stream_id,
+                H2Error::Stream {
                     stream_id,
-                    H2Error::Stream {
-                        stream_id,
-                        code: ErrorCode::ProtocolError,
-                    },
-                );
-                return Ok(());
-            }
-            actor.status = 0;
-            actor.resp_headers.clear();
+                    code: ErrorCode::ProtocolError,
+                },
+                ErrorCode::ProtocolError,
+            );
+        }
+        if let Err(error) = actor.state.transition(StreamEvent::RecvHeaders {
+            end_stream: h.end_stream,
+        }) {
+            return self.reset_stream(
+                stream_id,
+                map_state_err(stream_id, error),
+                ErrorCode::StreamClosed,
+            );
+        }
+        if matches!(actor.response, ResponseState::Initial(_)) {
             return Ok(());
         }
-        actor.got_headers = true;
+        actor.status = status;
+        actor.resp_headers = headers;
+        actor.declared_len = length;
         let status = actor.status;
         actor.response_tx = actor.response_tx.take().map(|sink| sink.settle(status));
-        if matches!(actor.status, 204 | 304) {
+        if matches!(actor.status.as_u16(), 204 | 304) {
             actor.drop_body = true;
         }
         actor.reserve_body(self.config.max_response_body_bytes);
@@ -223,43 +209,49 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             actor.deliver_headers_streaming();
         }
         if h.end_stream {
-            self.finish_remote(stream_id).await?;
+            self.finish_remote(stream_id)?;
         }
         Ok(())
     }
 
-    async fn on_trailers(
+    fn on_trailers(
         &mut self,
         h: &HeadersFrame,
-        decoded: Vec<(Bytes, Bytes)>,
+        trailers: HeaderMap,
+        malformed: bool,
     ) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
-        if !h.end_stream || decoded.iter().any(|(name, _)| name.starts_with(b":")) {
-            self.fail_stream(
+        if !h.end_stream || malformed {
+            return self.reset_stream(
                 stream_id,
                 H2Error::Stream {
                     stream_id,
                     code: ErrorCode::ProtocolError,
                 },
+                ErrorCode::ProtocolError,
             );
-            return Ok(());
         }
         let Some(actor) = self.streams.get_mut(stream_id) else {
             return Ok(());
         };
-        if let Err(e) = actor.state.transition(StreamEvent::RecvTrailers) {
-            let err = map_state_err(stream_id, e);
-            self.fail_stream(stream_id, err);
-            return Ok(());
+        if actor.response.trailers().is_err() {
+            return self.reset_stream(
+                stream_id,
+                H2Error::Stream {
+                    stream_id,
+                    code: ErrorCode::ProtocolError,
+                },
+                ErrorCode::ProtocolError,
+            );
         }
-        let mut th = Vec::new();
-        for (name, value) in decoded {
-            th.push((
-                HeaderStr::from_bytes_lossy(name),
-                HeaderStr::from_bytes_lossy(value),
-            ));
+        if let Err(error) = actor.state.transition(StreamEvent::RecvTrailers) {
+            return self.reset_stream(
+                stream_id,
+                map_state_err(stream_id, error),
+                ErrorCode::StreamClosed,
+            );
         }
-        actor.trailers = Some(th);
-        self.finish_remote(stream_id).await
+        actor.trailers = trailers;
+        self.finish_remote(stream_id)
     }
 }

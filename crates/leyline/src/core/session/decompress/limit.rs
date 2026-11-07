@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::core::error::{Cause, Error};
+use crate::core::error::{Error, Kind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Overflow {
@@ -45,7 +45,7 @@ impl BodyLimit {
     }
 
     pub(crate) fn error(self) -> Error {
-        Error::new(Cause::Body)
+        Error::new(Kind::Body)
             .with_message(self.to_string())
             .with_source(self)
     }

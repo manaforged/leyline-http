@@ -117,10 +117,6 @@ pub(crate) fn take_verification_failure(failure: &VerificationFailure) -> Option
     crate::util::lock(failure).take()
 }
 
-fn record_verification_failure(failure: &VerificationFailure, reason: TrustFailure) {
-    *crate::util::lock(failure) = Some(reason);
-}
-
 pub(crate) fn wire_configured_trust(
     builder: &mut SslContextBuilder,
     config: &Tls,
@@ -182,7 +178,7 @@ pub(crate) fn install_verifier(
     let callback_failure = failure.clone();
     ssl.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
         verify(ssl, &host, &pins, system_roots).map_err(|reason| {
-            record_verification_failure(&callback_failure, reason);
+            *crate::util::lock(&callback_failure) = Some(reason);
             SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)
         })
     });

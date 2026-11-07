@@ -1,5 +1,6 @@
 use crate::h2_support as support;
 
+use futures_util::StreamExt as _;
 use std::io;
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,7 +9,7 @@ use bytes::BytesMut;
 use leyline::BrowserProfile;
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::frame::{FrameType, PingFrame, RstStreamFrame};
-use leyline::h2::{ErrorCode, H2Client, H2Config, Head, RequestBody, ResponseBody};
+use leyline::h2::{ErrorCode, H2Client, H2Config, Head};
 use support::{
     read_frame, read_preface, write_data, write_raw_headers, write_response_headers,
     write_server_settings, write_settings_ack,
@@ -24,6 +25,7 @@ enum Ending {
     Complete,
     Trailers,
     Reset,
+    CompleteThenReset,
     Disconnect,
 }
 
@@ -76,16 +78,22 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
         };
         write_response_headers(&mut peer, stream_id).await;
         for (index, chunk) in payload.chunks(16_384).enumerate() {
-            let end = matches!(ending, Ending::Complete) && (index + 1) * 16_384 == SIZE;
+            let end = matches!(ending, Ending::Complete | Ending::CompleteThenReset)
+                && (index + 1) * 16_384 == SIZE;
             write_data(&mut peer, stream_id, chunk, end).await;
         }
         if matches!(ending, Ending::Trailers) {
             write_raw_headers(&mut peer, stream_id, &[("x-complete", "yes")], true).await;
         }
-        if matches!(ending, Ending::Reset) {
+        if matches!(ending, Ending::Reset | Ending::CompleteThenReset) {
+            let error_code = if matches!(ending, Ending::Reset) {
+                ErrorCode::Cancel
+            } else {
+                ErrorCode::NoError
+            };
             let reset = RstStreamFrame {
                 stream_id,
-                error_code: ErrorCode::Cancel,
+                error_code,
             };
             let mut encoded = BytesMut::new();
             reset.encode(&mut encoded);
@@ -118,25 +126,25 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
                 },
                 headers: Vec::new(),
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             true,
         )
         .await
         .expect("response headers");
     assert_eq!(response.status, 200);
-    let ResponseBody::Streaming(mut body) = response.body else {
+    let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
         panic!("streaming body");
     };
     timeout(Duration::from_secs(3), ready_rx)
         .await
         .expect("peer completed frames")
         .expect("peer barrier");
-    if !matches!(ending, Ending::Reset) {
+    if !matches!(ending, Ending::Reset | Ending::CompleteThenReset) {
         closed(&handle).await;
     }
     let mut received = 0;
     let mut failure = None;
-    while let Some(chunk) = timeout(Duration::from_secs(3), body.recv())
+    while let Some(chunk) = timeout(Duration::from_secs(3), body.next())
         .await
         .expect("body delivery")
     {
@@ -150,7 +158,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
             Err(error) => {
                 failure = Some(error);
                 assert!(
-                    timeout(Duration::from_secs(3), body.recv())
+                    timeout(Duration::from_secs(3), body.next())
                         .await
                         .expect("error is terminal")
                         .is_none()
@@ -159,7 +167,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
             }
         }
     }
-    if matches!(ending, Ending::Reset) {
+    if matches!(ending, Ending::Reset | Ending::CompleteThenReset) {
         done_tx.send(()).expect("server waiting");
     }
     server.await.expect("peer task");
@@ -190,6 +198,13 @@ async fn stream_reset_survives_a_full_body_queue() {
 #[tokio::test]
 async fn trailers_preserve_queued_body_data() {
     let (received, failure) = transfer(Ending::Trailers).await;
+    assert!(failure.is_none(), "{failure:?}");
+    assert_eq!(received, SIZE);
+}
+
+#[tokio::test]
+async fn a_reset_after_end_stream_keeps_the_queued_body() {
+    let (received, failure) = transfer(Ending::CompleteThenReset).await;
     assert!(failure.is_none(), "{failure:?}");
     assert_eq!(received, SIZE);
 }

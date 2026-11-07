@@ -61,6 +61,8 @@ pub mod guide {
     pub struct Testing;
     #[doc = include_str!("../../../docs/guide/service-integration.md")]
     pub struct ServiceIntegration;
+    #[doc = include_str!("../../../docs/guide/throughput.md")]
+    pub struct Throughput;
     #[doc = include_str!("../../../docs/guide/crawling.md")]
     pub struct Crawling;
     #[doc = include_str!("../../../docs/guide/accounts.md")]
@@ -91,6 +93,8 @@ macro_rules! bench_pub {
 pub mod audit;
 #[cfg(not(feature = "bench-internals"))]
 pub(crate) mod audit;
+/// Blocking use: a `Session` whose calls run on the calling thread.
+pub mod blocking;
 /// Cookie storage and `Set-Cookie` parsing.
 pub mod cookie;
 #[cfg(feature = "bench-internals")]
@@ -175,10 +179,8 @@ mod util;
 pub use http;
 pub use url::Url;
 
-pub(crate) use crate::core::Cause;
-pub(crate) use crate::core::HttpVersion;
 pub use crate::core::{
-    Attempt, Block, Body, Encoding, Error, HostLimits, IntoParamPair, IntoUrl, Kind, Link,
+    Attempt, Block, Body, Encoding, Error, Event, Events, HostLimits, IntoUrl, Kind, Link,
     Protocol, Proxy, Purpose, Redirect, RequestBuilder, Response, Result, Retry, Robots,
     RobotsSource, Session, SessionBuilder, Stats, Tab, Timeout, relay_headers,
 };

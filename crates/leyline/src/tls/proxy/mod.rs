@@ -33,10 +33,6 @@ pub(crate) enum Tunnel {
     Tls(TlsIo),
 }
 
-pub(crate) fn parse(proxy_url: &str) -> Result<url::Url, TlsError> {
-    url::Url::parse(proxy_url).map_err(|e| TlsError::proxy(format!("invalid proxy URL: {e}")))
-}
-
 pub(crate) async fn open_tunnel(
     connector: &crate::tls::FingerprintConnector,
     host: &str,

@@ -102,8 +102,10 @@ async fn shutdown_ends_a_websocket_handshake_in_flight() {
             let seen_tx = seen_tx.clone();
             async move {
                 let mut head = [0u8; 1024];
-                if let Ok(read) = stream.read(&mut head).await {
-                    seen_tx.send(read).unwrap();
+                if let Ok(read) = stream.read(&mut head).await
+                    && seen_tx.send(read).is_err()
+                {
+                    return;
                 }
                 tokio::time::sleep(Duration::from_secs(30)).await;
                 drop(stream);

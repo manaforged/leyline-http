@@ -1,0 +1,65 @@
+Baseline: 5d6ddc36, h2: allocate upload queues on demand.
+Candidate: baseline plus the synchronous HTTP/2 buffer-emission change in this commit.
+Candidate source patch SHA-256: 4e6baa1f0c8143a845ed3a16e3da55ebf6b06639613c22cfb4ea8eae50a04590.
+The patch hash covers git diff for crates/leyline/src/h2 before these result files were added.
+
+Change:
+FrameWriter::write_frame encodes into its buffer and never waits for I/O.
+Make that operation and its buffer-only callers synchronous.
+Socket reads, writes, flushes, event waits, cooperative yields, upload producers, and CONTINUATION deadlines remain asynchronous.
+No protocol, profile, queue-capacity, flow-control, or public client API settings changed.
+
+layout-before.txt and layout-after.txt:
+Compiler output excerpts from RUSTC_BOOTSTRAP=1 cargo rustc --release --lib -p leyline-http -- -Zprint-type-sizes, in leyline-client with CARGO_INCREMENTAL=1 and CARGO_TARGET_DIR=target-quick.
+A normal cargo build --release followed the diagnostic build; the measured executable has no diagnostic compiler arguments.
+Both use the pinned toolchain and the same dependency lockfile.
+Driver::run future: 4264 -> 3224 bytes.
+Event-loop future: 2080 -> 1040 bytes.
+Allocated task Cell: 4480 -> 3328 bytes.
+
+allocations.txt:
+Massif peak-snapshot excerpts from both saved release executables, with executable paths removed.
+Use --tool=massif --time-unit=B --max-snapshots=30 and client arguments URL 1 0 1000 200.
+CMP_PROTO=h2 CMP_CONNECTIONS=200 CMP_HOST_CONNS=200, bare profile and the same request headers.
+Observed task allocations: 896000 -> 665600 bytes across 200 connections, matching the compiler's 4480 -> 3328 bytes per task.
+
+memory-pairs.txt:
+Reuse scale.sh's build, origins, headers, and CPU affinity with SKIP_CORES=1 SKIP_MEM=1.
+For each saved executable, run fresh processes at 1000 and 5000 sessions/connections.
+CMP_PROTO=h2 CMP_CONNECTIONS=count CMP_HOST_CONNS=count; client arguments: URL 1 0 count*5 count.
+Measure peak RSS using /usr/bin/time -f %M, in KiB.
+Slope = (rss_hi_kb - rss_lo_kb) / 4000.
+Seven rounds alternate before/after order; all seven paired slopes decreased.
+Median slope: 45.469 -> 44.377 KiB, 2.402% lower.
+This topology creates one session per connection with one request in flight each.
+It measures peak process RSS growth, not isolated idle-connection storage.
+
+throughput-rows.txt:
+Reuse quick.sh's build, origins, headers, CPU affinity, and one() measurement function.
+Ten rounds alternate before/after order within each cell.
+Columns: round cell variant n instr_n wall_n_ns instr_2n wall_2n_ns.
+Each executable runs n and 2*n requests; instructions/request = (instr_2n - instr_n) / n; requests/second = n * 1e9 / (wall_2n_ns - wall_n_ns).
+Cells: bare=h2/bare/sequential/1 connection/n=30000; chrome=h2/Chrome156/sequential/1 connection/n=30000; 8c8=h2/bare/8 in flight/8 connections/n=100000; 8c256=h2/bare/256 in flight/8 connections/n=200192.
+The rows are not the eleven-column libs.sh row format; task-clock was not measured.
+table.txt uses the existing libs-table.py ratio_ci and show functions unchanged, on throughput and instruction-count pairs.
+Confidence intervals are across rounds of one run, not independent runs or machines.
+All four instruction-count intervals favor the candidate; all four throughput intervals include 1.
+An interval containing 1 is unresolved, not proof of equivalence.
+
+large-body.txt:
+CMP_BODY=1048576 N=300 REPS=3 KEEP=0 bash quick.sh.
+PATHS selects before and after executables for sequential h2 bare and Chrome156, one connection each.
+These are exploratory medians, not paired confidence-interval verdicts.
+Quick.sh delta columns compare each label with its saved history, not before with after; new labels report zero.
+
+Validation:
+cargo check -p leyline-http: Finished `dev` profile.
+The following existing checks each ran with cargo test -p leyline-http --test it --features bench-internals NAME -- --exact and reported 1 passed; 0 failed:
+h2_flow_control_e2e::large_body_completes_against_flow_control_honouring_server
+h2_backpressure::stalled_upload_stops_polling_the_producer
+h2_continuation_timeout::continuation_reassembly_times_out_on_stall
+h2_write_batching::eight_concurrent_requests_share_one_write
+h2_extended_connect::h2_extended_connect_happy_path_echoes_payload
+h2_flow_overflow::connection_window_update_overflow_kills_connection
+bash scripts/verify.sh --only comments: comment lint ok.
+bash scripts/verify.sh --only fmt: format clean.

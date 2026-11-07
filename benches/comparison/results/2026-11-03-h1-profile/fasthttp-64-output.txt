@@ -1,0 +1,1 @@
+RESULT fasthttp connections=1 warm_rps=30600.692 conc_rps=871016.563 cold_rps=0.000 warm_p50_us=32 warm_p90_us=32 warm_p99_us=32 conc_p50_us=64 conc_p90_us=93 conc_p99_us=446 conc_p999_us=499

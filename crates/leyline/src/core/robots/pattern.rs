@@ -114,11 +114,9 @@ fn encode(text: &str, out: &mut Vec<u8>, escape_specials: bool) {
 }
 
 fn hex_pair(pair: &[u8]) -> Option<u8> {
-    if !pair.iter().all(u8::is_ascii_hexdigit) {
-        return None;
-    }
-    let text = std::str::from_utf8(pair).ok()?;
-    u8::from_str_radix(text, 16).ok()
+    let mut byte = [0u8];
+    hex::decode_to_slice(pair, &mut byte).ok()?;
+    Some(byte[0])
 }
 
 fn unreserved(byte: u8) -> bool {

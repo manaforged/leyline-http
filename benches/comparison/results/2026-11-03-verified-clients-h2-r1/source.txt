@@ -1,0 +1,12 @@
+core_revision bde05ee72bc830496a3f0a78d13f81092f1bdaa2
+adapter_revision 222e83aa
+harness_revision 4c20179a
+rustc rustc 1.98.1 (48a229cea 2026-09-01)
+go go1.27.3
+independent_run 1
+rounds 4
+response_body_bytes 10
+host_exclusive no
+command BUILD=0 TAG=2026-11-03-verified-clients-h2-r1 LIBS="leyline hyper h2 reqwest curl nethttp" PROFILE=bare PROTO=h2 ROUNDS=4 TIMEOUT=30s SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
+certificate_environment CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der
+receipt_normalization trailing-whitespace-only

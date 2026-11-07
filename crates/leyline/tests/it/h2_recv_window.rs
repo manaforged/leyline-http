@@ -4,11 +4,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
+use leyline::h2::Head;
 use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
 use leyline::h2::connection::PseudoHeaders;
 use leyline::h2::error::ErrorCode;
 use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody};
 use support::*;
 use tokio::io::AsyncReadExt;
 
@@ -113,7 +113,7 @@ async fn connection_recv_window_overrun_kills_connection() {
                         pseudo: p,
                         headers: h,
                     }),
-                    RequestBody::None,
+                    leyline::Body::default(),
                     false,
                 )
                 .await
@@ -193,7 +193,7 @@ async fn stream_recv_window_overrun_rsts_stream_and_survives() {
                 pseudo: p,
                 headers: h,
             }),
-            RequestBody::None,
+            leyline::Body::default(),
             false,
         )
         .await;

@@ -4,9 +4,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::types::{CLOSE, CONNECTION, ChunkedBody, Handler, Recorder, Request, Response};
-use crate::pool::H1PooledError;
 use crate::pool::h1::MAX_H1_HEADER_BYTES;
-use crate::pool::h1::parse::{parse_h1_head, read_chunked_body};
+use crate::pool::h1::parse::read_chunked_body;
 
 const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 const HEAD_END: &[u8] = b"\r\n\r\n";
@@ -64,8 +63,11 @@ where
     let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
         return Err(invalid(format!("bad request line: {request_line}")));
     };
-    let (_, headers, _) =
-        parse_h1_head(&format!("HTTP/1.1 200 OK\r\n{header_block}")).map_err(to_io)?;
+    let headers = header_block
+        .split("\r\n")
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.to_owned(), value.trim().to_owned()))
+        .collect();
     let mut request = Request {
         method: method.to_owned(),
         target: target.to_owned(),
@@ -200,6 +202,6 @@ fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn to_io(err: H1PooledError) -> io::Error {
-    invalid(err.to_string())
+fn to_io(err: crate::Error) -> io::Error {
+    err.into_io()
 }

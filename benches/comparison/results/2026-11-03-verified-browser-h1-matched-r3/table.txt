@@ -1,0 +1,24 @@
+1 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-blocking      55336    3.5%      27465          -       9.24      4     -
+       leyline              54402    8.0%      32486          -      10.02      4     -
+       tlsclient            34321    4.2%     179066          -      26.58      4     -
+
+8par   lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline-blocking     336188    8.0%      27756          -      10.40      4     8
+       leyline             292589    3.6%      32866          -      11.38      4     8
+       tlsclient            97992   13.7%     340982          -      44.98      4     3
+
+64par  lib                  req/s  spread  instr/req     over - cpu_us/req rounds conns
+       leyline             798974   45.5%      30904          -      12.33      4    64
+       leyline-blocking     795214   17.1%      27713          -      14.91      4    64
+       tlsclient           263151   21.2%     270488          -      52.50      4    57
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline           vs tlsclient  req/s 1.618 [1.483, 1.765] ahead; CPU/req 0.376 [0.367, 0.385] less CPU; single-run, 4 rounds
+seq    leyline-blocking  vs tlsclient  req/s 1.615 [1.543, 1.691] ahead; CPU/req 0.347 [0.334, 0.361] less CPU; single-run, 4 rounds
+8par   leyline           vs tlsclient  req/s 2.929 [2.665, 3.219] ahead; CPU/req 0.255 [0.238, 0.272] less CPU; single-run, 4 rounds
+8par   leyline-blocking  vs tlsclient  req/s 3.390 [3.024, 3.801] ahead; CPU/req 0.234 [0.210, 0.260] less CPU; single-run, 4 rounds
+64par  leyline           vs tlsclient  req/s 3.013 [2.135, 4.253] ahead; CPU/req 0.230 [0.207, 0.256] less CPU; single-run, 4 rounds
+64par  leyline-blocking  vs tlsclient  req/s 2.982 [2.234, 3.981] ahead; CPU/req 0.276 [0.253, 0.302] less CPU; single-run, 4 rounds

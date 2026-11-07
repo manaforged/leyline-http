@@ -1,10 +1,10 @@
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD;
 use serde::{Deserialize, Serialize};
 
-use crate::util::epoch_plus;
+use crate::util::{epoch_plus, since_epoch};
 
 #[derive(Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
@@ -61,7 +61,7 @@ impl ConnectionState {
                 .map(|(host, port, at)| AltSvcEntry {
                     host,
                     port,
-                    expires: unix_secs(at),
+                    expires: since_epoch(at).as_secs(),
                 })
                 .collect(),
             hsts: parts
@@ -70,7 +70,7 @@ impl ConnectionState {
                 .map(|(host, include_subdomains, at)| HstsEntry {
                     host,
                     include_subdomains,
-                    expires: unix_secs(at),
+                    expires: since_epoch(at).as_secs(),
                 })
                 .collect(),
         }
@@ -105,11 +105,6 @@ impl std::fmt::Debug for ConnectionState {
             .field("hsts", &self.hsts.len())
             .finish()
     }
-}
-
-pub(crate) fn unix_secs(at: SystemTime) -> u64 {
-    at.duration_since(UNIX_EPOCH)
-        .map_or(0, |since| since.as_secs())
 }
 
 fn at_secs(secs: u64) -> Option<SystemTime> {

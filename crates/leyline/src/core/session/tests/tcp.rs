@@ -77,3 +77,26 @@ async fn socket_config_keeps_explicit_buffer() {
     let (_, buffer, _) = limits(Some(session)).await;
     assert_eq!(buffer, socket.recv_buffer_size().expect("receive buffer"));
 }
+
+#[tokio::test]
+async fn each_address_family_keeps_its_own_local_address() {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("loopback socket");
+    let port = listener.local_addr().expect("listener address").port();
+    let session = Session::builder()
+        .local_address(std::net::IpAddr::from([127, 0, 0, 1]))
+        .local_address(std::net::IpAddr::from(std::net::Ipv6Addr::LOCALHOST))
+        .build()
+        .expect("session");
+    let stream = session
+        .inner
+        .connector
+        .dial_tcp("127.0.0.1", port)
+        .await
+        .expect("an IPv4 dial binds the IPv4 address");
+    assert_eq!(
+        stream.local_addr().expect("local address").ip(),
+        std::net::IpAddr::from([127, 0, 0, 1])
+    );
+}

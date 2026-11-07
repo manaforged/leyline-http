@@ -1,0 +1,9 @@
+memory: peak RSS growth per open connection, one request in flight each (KB)
+client          rss_lo_kb  rss_hi_kb  per_conn_kb
+h1-leyline          37072     129724         23.2
+h1-hyper            66520     278120         52.9
+h1-pingora          41368     141564         25.0
+h2-leyline          58624     249336         47.7
+h2-h2               37720     163112         31.3
+h2-hyper            65196     293212         57.0
+h2-pingora         394852    1942164        386.8

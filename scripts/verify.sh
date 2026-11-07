@@ -28,7 +28,6 @@ cd "$repo_root"
 if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
     export PATH="$(cygpath "$USERPROFILE")/.cargo/bin:$PATH"
 fi
-export PATH="$HOME/.cargo/bin:$PATH"
 if ! command -v cargo >/dev/null 2>&1 && command -v cargo.exe >/dev/null 2>&1; then
     cargo() { cargo.exe "$@"; }
 fi
@@ -214,15 +213,18 @@ g_book() {
 g_links() {
     step "lychee --offline (README, docs, crate pages)"
     command -v lychee >/dev/null || fail "lychee not found (cargo install --locked lychee)"
-    lychee --offline --no-progress README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md \
+    lychee --offline --no-progress README.md CHANGELOG.md UPGRADE.md CONTRIBUTING.md SECURITY.md \
         BENCHMARKS.md AGENTS.md docs crates/leyline/docs || fail "broken links"
     ok "links resolve"
 }
 
 g_test() {
-    step "cargo test --workspace --exclude leyline-quiche"
-    cargo test --workspace --exclude leyline-quiche \
+    step "cargo test --workspace"
+    cargo test --workspace --locked \
         --features leyline-http/full,leyline-http/bench-internals || fail "tests failed"
+    step "mixed-failure resource qualification"
+    cargo test -p leyline-http --locked --features full,bench-internals --test soak -- --ignored \
+        || fail "mixed-failure resource qualification failed"
     ok "tests pass"
 }
 
@@ -255,6 +257,17 @@ g_semver() {
         || fail "cargo-semver-checks found a breaking change against the published release"
     semver_status="ran"
     ok "semver-checks clean"
+}
+
+g_kani() {
+    step "cargo kani: HPACK integer, HTTP/2 frame header, SETTINGS, stream state and flow-window proofs"
+    if ! command -v cargo-kani >/dev/null; then
+        skip "cargo-kani not installed: cargo install --locked kani-verifier && cargo kani setup"
+        return 0
+    fi
+    (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing --jobs --output-format terse) \
+        || fail "a Kani proof failed"
+    ok "Kani proofs verified"
 }
 
 g_external_types() {
@@ -434,12 +447,12 @@ g_publish() {
 
 gate_order=(
     comments msrv package
-    fmt clippy features doc book links test live deny semver external-types benches
+    fmt clippy features doc book links test kani live deny semver external-types benches
     subcrates release publish
     fuzz-replay fuzz-timed
 )
 quick_gates=(comments msrv package)
-full_gates=(comments msrv package fmt clippy features doc book links test live
+full_gates=(comments msrv package fmt clippy features doc book links test
     deny semver external-types benches subcrates fuzz-replay)
 
 if [[ -n "$only" ]]; then

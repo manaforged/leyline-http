@@ -1,35 +1,34 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::checkout_live_h1;
 use super::dial::{Dialed, H1Dial, open_new};
-use super::{H1Body, H1PooledError, H1Response, checkout_live_h1};
+use crate::core::Body;
+use crate::core::transport::TransportResponse;
 use crate::h2::client::H2Client;
 use crate::pool::types::{Opened, PoolKey};
 use crate::pool::{H1Slot, Pool, TlsInfo};
 use crate::tls::FingerprintConnector;
-use crate::{Cause, Error};
+use crate::{Error, Kind};
 
 pub(crate) enum H1Outcome {
-    Response(H1Response),
+    Response(TransportResponse),
     Upgraded {
         opened: Opened<H2Client>,
-        body: H1Body,
+        body: Body,
     },
 }
 
 impl H1Outcome {
-    pub(crate) fn upgraded_error() -> H1PooledError {
-        H1PooledError::NotResendable(
-            Error::new(Cause::Http2)
-                .with_message("the origin negotiated HTTP/2 on a new connection")
-                .with_alpn(String::from_utf8_lossy(crate::tls::alpn::H2)),
-        )
+    pub(crate) fn upgraded_error() -> Error {
+        Error::new(Kind::Http2)
+            .with_message("the origin negotiated HTTP/2 on a new connection")
+            .with_alpn(String::from_utf8_lossy(crate::tls::alpn::H2))
     }
 
-    #[cfg(feature = "bench-internals")]
-    pub(super) fn into_response(self) -> Result<H1Response, H1PooledError> {
+    pub(crate) fn response(self) -> Result<TransportResponse, Error> {
         match self {
-            Self::Response(resp) => Ok(resp),
+            Self::Response(response) => Ok(response),
             Self::Upgraded { .. } => Err(Self::upgraded_error()),
         }
     }
@@ -45,6 +44,8 @@ pub(super) fn first_legs(
     pool: &Arc<Pool>,
     key: &PoolKey,
     opened: Option<Opened<H1Slot>>,
+    strict: bool,
+    now: Instant,
 ) -> FirstLegs {
     match opened {
         Some(opened) if opened.connect_ms.is_some() => FirstLegs {
@@ -58,8 +59,8 @@ pub(super) fn first_legs(
             fresh: None,
         },
         None => FirstLegs {
-            started: Instant::now(),
-            pooled: checkout_live_h1(pool, key),
+            started: now,
+            pooled: checkout_live_h1(pool, key, strict, now),
             fresh: None,
         },
     }
@@ -76,13 +77,13 @@ pub(super) async fn fresh_leg(
     connector: &FingerprintConnector,
     dial: H1Dial<'_>,
     fresh: Option<Opened<H1Slot>>,
-) -> Result<Leg, H1PooledError> {
+) -> Result<Leg, Error> {
     if let Some(opened) = fresh {
         return Ok(Leg::H1(opened));
     }
     let started = Instant::now();
     match open_new(pool, key, connector, dial).await? {
-        Dialed::H1(io, tls) => Ok(Leg::H1(Opened::fresh((H1Slot { io }, tls), started))),
+        Dialed::H1(io, tls) => Ok(Leg::H1(Opened::fresh((H1Slot::new(io), tls), started))),
         Dialed::H2(conn, tls) => Ok(Leg::H2(Opened::fresh((conn, tls), started))),
     }
 }

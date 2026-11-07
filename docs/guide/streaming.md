@@ -235,3 +235,89 @@ reader slows the sender instead of growing a buffer.
 
 Dropping the `bytes_stream()` stream before its end stops the transfer. See
 [Cancellation](cancellation.md) for what happens to the connection.
+
+## Resume a download
+
+Call `download_to` on the request, before `send`, to retain a resumable prefix.
+The response method above remains a one-shot atomic download.
+
+```rust,no_run
+use leyline::Session;
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::new();
+let bytes = session.get("https://example.com/archive.tar")
+    .progress(|written, total| println!("{written} of {total:?} bytes"))
+    .download_to("archive.tar").await?;
+# let _ = bytes;
+# Ok(())
+# }
+```
+
+Only GET without a request body or caller range headers is accepted. The
+request uses identity encoding. On a later call with the same target and
+request context, Leyline sends `Range` and `If-Range` only for a saved strong
+ETag. The final URL, validator, byte range, and complete length must agree
+before bytes are appended. A full 200 response restarts the partial file;
+a missing or weak ETag cannot authorize reuse.
+
+`sha256([u8; 32])` checks the complete file, including a resumed prefix, before
+commit. `resume(false)` restarts without reading the saved metadata. The
+progress callback reports bytes written and the optional complete length;
+keep it short because it runs on the requesting task. `max_body_size` caps the
+complete representation, not just the remaining bytes.
+
+The destination keeps its old content until an atomic commit. A partial file
+`<name>.leyline.part` and its `.json` metadata stay beside it after an interrupted
+transfer. An advisory `<name>.leyline.lock` prevents concurrent cooperating
+downloads to that target; the lock file can remain after the handle closes.
+These names are reserved for Leyline. Use a private directory for account data.
+New partial and metadata files have mode 0600 on Unix.
+
+A checkpoint syncs each MiB and on a reported body error. Cancellation or a
+crash may discard bytes after the last durable checkpoint. Repeating the call
+resumes that checkpoint; no extra body-retry loop is started. Metadata is capped
+at 16 KiB. Invalid ranges, validators, sizes, and checksums return an error and
+never replace the destination. The streamed-body `read` and `body` timeouts
+apply as described above.
+
+## Read server-sent events
+
+`events()` returns a lazy `Events` stream. Await `next()` or use the
+`futures_util::Stream` interface to receive parsed `Event` values:
+
+```rust,no_run
+use leyline::{Retry, Session};
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::new();
+let mut events = session.get("https://api.example/events")
+    .events()?
+    .retry(Retry::new(3))
+    .max_event_size(1024 * 1024);
+while let Some(event) = events.next().await {
+    let event = event?;
+    println!("{} {} {}", event.id(), event.event(), event.data());
+}
+# Ok(())
+# }
+```
+
+Event streams require GET without a body and a 200 `text/event-stream`
+response. UTF-8 decoding, an initial BOM, multiline data, comments, and CR,
+LF, or CRLF framing are handled. `event.json::<T>()` deserializes data through
+serde. An incomplete final event is discarded, not emitted.
+
+Reconnects use the last id committed by a complete event block, including
+id-only blocks. An empty id clears `Last-Event-ID`. A 204 response stops the
+stream. The default permits three reconnects in a row; each delivered event resets
+the count, so a long-lived stream survives occasional drops. `retry(0)`
+disables reconnects. The wait is the greater of the server's
+`retry` value and the retry backoff, capped by the retry policy's maximum wait.
+Malformed responses and event-size errors are terminal.
+
+`max_event_size` caps buffered event fields and lines, one MiB by default.
+The request's body-size and streamed-body timeouts still apply to each
+connection. Dropping `Events` closes its body or pending connection; no
+reconnect task runs in the background. Cancelling one `next()` future preserves
+the pending read in `Events` so a later `next()` continues it.

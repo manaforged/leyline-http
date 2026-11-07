@@ -1,3 +1,5 @@
+use std::future::Future;
+
 use http::StatusCode;
 
 use super::{ROBOTS_PATH, Robots, RobotsSource};
@@ -12,8 +14,8 @@ const MAX_BYTES: usize = 512 * 1024;
 
 impl Session {
     /// Fetches and parses the site's robots.txt for `agent`, with 3 retries and up to 5 redirects.
-    pub async fn robots(&self, url: impl IntoUrl, agent: &str) -> Result<Robots> {
-        self.robots_with(url, agent, Retry::new(3), None).await
+    pub fn robots(&self, url: impl IntoUrl, agent: &str) -> impl Future<Output = Result<Robots>> {
+        self.robots_with(url, agent, Retry::new(3), None)
     }
 
     pub(crate) async fn robots_with(
@@ -28,7 +30,7 @@ impl Session {
             .get(target.as_str())
             .redirect(Redirect::limit(MAX_REDIRECTS))
             .retry(retry);
-        builder.trusted_origin = trusted;
+        builder.draft.trusted_origin = trusted;
         let response = match builder.stream().send().await {
             Ok(response) => response,
             Err(err) if err.is_shut_down() => return Err(err),

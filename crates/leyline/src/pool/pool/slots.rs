@@ -11,13 +11,14 @@ use crate::util::{read, write};
 
 impl Pool {
     pub(crate) fn checkout_mux<C: MuxClient>(&self, key: &PoolKey) -> Option<(C, TlsInfo)> {
-        self.checkout_mux_idle(key)
+        self.checkout_mux_idle(key, Instant::now())
             .map(|(conn, tls, _)| (conn, tls))
     }
 
     pub(crate) fn checkout_mux_idle<C: MuxClient>(
         &self,
         key: &PoolKey,
+        now: Instant,
     ) -> Option<(C, TlsInfo, Duration)> {
         let mut dead = false;
         let hit = match read(&self.inner).get(key) {
@@ -29,8 +30,7 @@ impl Pool {
                 handle,
                 last_use,
                 tls,
-            }) => C::in_handle(handle)
-                .map(|conn| (conn.clone(), tls.clone(), last_use.touch(Instant::now()))),
+            }) => C::in_handle(handle).map(|conn| (conn.clone(), tls.clone(), last_use.touch(now))),
             _ => None,
         };
         if dead {
@@ -79,7 +79,7 @@ impl Pool {
         out
     }
 
-    pub(crate) fn checkout_h1(&self, key: &PoolKey) -> Option<(H1Slot, TlsInfo)> {
+    pub(crate) fn checkout_h1(&self, key: &PoolKey, now: Instant) -> Option<(H1Slot, TlsInfo)> {
         let mut map = write(&self.inner);
         let hit = match map.get_mut(key) {
             Some(PooledConn::H1 {
@@ -87,7 +87,7 @@ impl Pool {
                 last_use,
                 tls,
             }) => idle.queue().pop_back().map(|(slot, _returned_at)| {
-                *last_use = Instant::now();
+                *last_use = now;
                 (slot, tls.clone())
             }),
             _ => None,
@@ -96,12 +96,13 @@ impl Pool {
         hit
     }
 
-    pub(crate) fn return_h1(&self, key: PoolKey, slot: H1Slot, tls: TlsInfo) {
+    pub(crate) fn return_h1(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) {
         let mut map = write(&self.inner);
-        match map.get_mut(&key) {
+        match map.get_mut(key) {
             Some(PooledConn::H1 { idle, last_use, .. }) => {
-                idle.queue().push_back((slot, Instant::now()));
-                *last_use = Instant::now();
+                let now = Instant::now();
+                idle.queue().push_back((slot, now));
+                *last_use = now;
                 return;
             }
             Some(PooledConn::Mux { .. }) => return,
@@ -114,7 +115,7 @@ impl Pool {
         let mut idle = H1Idle::default();
         idle.queue().push_back((slot, Instant::now()));
         map.insert(
-            key,
+            key.clone(),
             PooledConn::H1 {
                 idle,
                 last_use: Instant::now(),
@@ -127,13 +128,20 @@ impl Pool {
         let max_per_host = self.config.max_h1_conns_per_host;
         let sem = {
             let mut permits = crate::util::lock(&self.h1_permits);
-            permits
-                .entry(PoolKey {
-                    partition: 0,
-                    ..key.clone()
-                })
-                .or_insert_with(|| Arc::new(Semaphore::new(max_per_host)))
-                .clone()
+            let found = if key.partition == 0 {
+                permits.get(key).cloned()
+            } else {
+                None
+            };
+            found.unwrap_or_else(|| {
+                permits
+                    .entry(PoolKey {
+                        partition: 0,
+                        ..key.clone()
+                    })
+                    .or_insert_with(|| Arc::new(Semaphore::new(max_per_host)))
+                    .clone()
+            })
         };
         sem.acquire_owned()
             .await

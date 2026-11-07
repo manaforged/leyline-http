@@ -201,7 +201,7 @@ fn on_body_read_error(
 }
 
 fn caller_gone(
-    resp_tx: Option<&oneshot::Sender<Result<H3Response, H3SendError>>>,
+    resp_tx: Option<&oneshot::Sender<Result<TransportResponse, H3SendError>>>,
     stream_tx: Option<&mpsc::Sender<std::io::Result<Bytes>>>,
 ) -> bool {
     match resp_tx {

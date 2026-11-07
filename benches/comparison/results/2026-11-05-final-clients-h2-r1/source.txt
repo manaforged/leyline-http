@@ -1,0 +1,10 @@
+core_revision e7379f27
+harness_revision bc9d4b48
+rustc rustc 1.99.1 (58cf8f9c3 2026-10-13)
+go go1.27.1
+independent_run 1
+rounds 4
+response_body_bytes 10
+governor performance
+command BUILD=0 TAG=2026-11-05-final-clients-h2-r1 LIBS="leyline leyline-cores hyper h2 reqwest curl nethttp" PROTO=h2 PROFILE=bare ROUNDS=4 TIMEOUT=30s SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
+certificate_environment CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der

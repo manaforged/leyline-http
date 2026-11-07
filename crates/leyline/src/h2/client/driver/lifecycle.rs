@@ -4,9 +4,10 @@ use std::sync::atomic::Ordering;
 use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::h2::error::{ErrorCode, H2Error};
-use crate::h2::stream_state::StreamState;
+use crate::h2::stream_state::{StreamEvent, StreamState};
 
 use super::*;
+use crate::core::deadline::Tick;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn run(mut self) -> Result<(), H2Error> {
@@ -40,18 +41,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) async fn event_loop(&mut self) -> Result<(), H2Error> {
-        let mut sweep_tick = tokio::time::interval(std::time::Duration::from_millis(100));
-        sweep_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-        let mut flush_tick = tokio::time::interval(std::time::Duration::from_millis(1));
-        flush_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        let mut sweep_tick = Tick::every(SWEEP_PERIOD);
+        let mut flush_tick = Tick::every(FLUSH_PERIOD);
         loop {
-            if self.shutdown_started && self.streams.is_empty() && self.goaway_drained().await? {
+            if self.shutdown_started && self.streams.is_empty() && self.goaway_drained()? {
                 return Ok(());
             }
             if self.read_buffered_frames().await?.is_break() {
                 return Ok(());
             }
-            self.run_ready_work().await?;
+            self.run_ready_work()?;
             if self
                 .output
                 .coalesce(self.writer.has_output() && self.streams.len() > 1)
@@ -62,34 +61,35 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let Some(tick_fired) = self.wait_event(&mut sweep_tick, &mut flush_tick).await? else {
                 return Ok(());
             };
-            self.after_event(tick_fired).await?;
+            self.after_event(tick_fired)?;
         }
     }
 
-    async fn run_ready_work(&mut self) -> Result<(), H2Error> {
-        self.take_queued_commands().await?;
-        self.take_queued_body_chunks().await?;
-        self.drain_pending().await?;
-        self.try_drain_pending().await?;
+    fn run_ready_work(&mut self) -> Result<(), H2Error> {
+        self.take_queued_commands()?;
+        self.take_queued_body_chunks()?;
+        self.drain_pending()?;
+        self.try_drain_pending()?;
         Ok(())
     }
 
-    async fn after_event(&mut self, tick_fired: bool) -> Result<(), H2Error> {
-        self.take_queued_commands().await?;
-        self.try_drain_pending().await?;
+    fn after_event(&mut self, tick_fired: bool) -> Result<(), H2Error> {
+        self.take_queued_commands()?;
+        self.try_drain_pending()?;
         if tick_fired {
-            self.sweep_cancelled_streams().await?;
+            self.check_ping_deadlines()?;
+            self.sweep_cancelled_streams()?;
             self.check_write_stall()?;
         }
         Ok(())
     }
 
-    pub(super) async fn on_command_received(
+    pub(super) fn on_command_received(
         &mut self,
         cmd: Option<DriverCommand>,
     ) -> Result<(), H2Error> {
         match cmd {
-            Some(cmd) => self.on_command(cmd).await,
+            Some(cmd) => self.on_command(cmd),
             None => {
                 self.shutdown_started = true;
                 Ok(())
@@ -102,7 +102,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if !self.reader.buffered() || self.writer.saturated() {
                 break;
             }
-            let frame = self.reader.next().await;
+            let frame = self.reader.next(&mut self.io).await;
             if self.on_read(frame).await?.is_break() {
                 return Ok(ControlFlow::Break(()));
             }
@@ -114,7 +114,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         &mut self,
         frame: Result<Option<Frame>, H2Error>,
     ) -> Result<ControlFlow<()>, H2Error> {
-        let Some(frame) = frame? else {
+        let frame = match frame {
+            Err(err @ H2Error::Stream { stream_id, code }) => {
+                self.reset_stream(stream_id, err, code)?;
+                return Ok(ControlFlow::Continue(()));
+            }
+            other => other?,
+        };
+        let Some(frame) = frame else {
             if self.shutdown_started {
                 return Ok(ControlFlow::Break(()));
             }
@@ -124,19 +131,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             });
         };
         self.on_inbound_frame(frame).await?;
-        self.drain_pending().await?;
+        self.drain_pending()?;
         Ok(ControlFlow::Continue(()))
     }
 
-    async fn take_queued_body_chunks(&mut self) -> Result<(), H2Error> {
-        for _ in 0..self.body_chunk_rx.len() {
+    fn take_queued_body_chunks(&mut self) -> Result<(), H2Error> {
+        let queued = self.body_chunks.as_ref().map_or(0, |(_, rx)| rx.len());
+        for _ in 0..queued {
             if self.writer.congested() {
                 break;
             }
-            let Ok(chunk) = self.body_chunk_rx.try_recv() else {
+            let Some((_, rx)) = self.body_chunks.as_mut() else {
                 break;
             };
-            self.on_body_chunk(chunk).await?;
+            let Ok(chunk) = rx.try_recv() else {
+                break;
+            };
+            self.on_body_chunk(chunk)?;
         }
         Ok(())
     }
@@ -147,7 +158,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             && (!self.writer.congested() || self.output.stalled())
     }
 
-    async fn take_queued_commands(&mut self) -> Result<(), H2Error> {
+    fn take_queued_commands(&mut self) -> Result<(), H2Error> {
+        while let Ok((ack_tx, deadline)) = self.ping_rx.try_recv() {
+            self.on_command(DriverCommand::Ping { ack_tx, deadline })?;
+        }
         for _ in 0..self.command_rx.len() {
             if !self.pending.is_empty() || self.writer.congested() {
                 break;
@@ -155,24 +169,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let Ok(next) = self.command_rx.try_recv() else {
                 break;
             };
-            self.on_command(next).await?;
+            self.on_command(next)?;
         }
         Ok(())
     }
 
-    pub(super) async fn sweep_cancelled_streams(&mut self) -> Result<(), H2Error> {
+    pub(super) fn sweep_cancelled_streams(&mut self) -> Result<(), H2Error> {
         self.pending.retain(|cmd| !cmd.is_cancelled());
         let to_cancel: Vec<(u32, bool)> = self
             .streams
             .iter()
             .filter(|(_, actor)| {
-                !actor.state.is_closed()
-                    && actor
-                        .response_tx
-                        .as_ref()
-                        .is_some_and(ResponseSink::is_cancelled)
+                actor
+                    .response_tx
+                    .as_ref()
+                    .is_some_and(ResponseSink::is_cancelled)
             })
-            .map(|(id, actor)| (id, actor.got_headers))
+            .map(|(id, actor)| (id, !matches!(actor.response, ResponseState::Initial(_))))
             .collect();
         if to_cancel.iter().any(|&(_, answered)| !answered) {
             self.unanswered_timeout.store(true, Ordering::Release);
@@ -184,17 +197,30 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 stream_id = sid,
                 "caller cancelled — RST_STREAM(CANCEL) to release the slot"
             );
-            self.writer
-                .write_frame(&RstStreamFrame {
-                    stream_id: sid,
-                    error_code: ErrorCode::Cancel,
-                })
-                .await?;
             let err = H2Error::Stream {
                 stream_id: sid,
                 code: ErrorCode::Cancel,
             };
-            self.fail_stream(sid, err);
+            if self
+                .streams
+                .get(sid)
+                .is_some_and(|actor| actor.state.is_closed())
+            {
+                self.fail_stream(sid, err);
+            } else {
+                self.reset_stream(sid, err, ErrorCode::Cancel)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn check_ping_deadlines(&self) -> Result<(), H2Error> {
+        let now = std::time::Instant::now();
+        if self.pings.iter().any(|&(_, _, deadline)| deadline <= now) {
+            return Err(H2Error::Connection {
+                code: ErrorCode::NoError,
+                reason: "the peer did not acknowledge a liveness PING in time".into(),
+            });
         }
         Ok(())
     }
@@ -262,25 +288,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    pub(super) async fn finish_remote(&mut self, stream_id: u32) -> Result<(), H2Error> {
+    pub(super) fn finish_remote(&mut self, stream_id: u32) -> Result<(), H2Error> {
         if self
             .streams
             .get(stream_id)
-            .is_some_and(StreamActor::length_mismatch)
+            .is_some_and(|actor| actor.response.finish().is_err() || actor.length_mismatch())
         {
-            self.writer
-                .write_frame(&RstStreamFrame {
-                    stream_id,
-                    error_code: ErrorCode::ProtocolError,
-                })
-                .await?;
-            self.fail_stream(
+            self.reset_stream(
                 stream_id,
                 H2Error::Stream {
                     stream_id,
                     code: ErrorCode::ProtocolError,
                 },
-            );
+                ErrorCode::ProtocolError,
+            )?;
             return Ok(());
         }
         let local_open = self
@@ -288,12 +309,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .get(stream_id)
             .is_some_and(|a| !a.state.is_closed());
         if local_open {
-            self.writer
-                .write_frame(&RstStreamFrame {
-                    stream_id,
-                    error_code: ErrorCode::NoError,
-                })
-                .await?;
+            self.writer.write_frame(&RstStreamFrame {
+                stream_id,
+                error_code: ErrorCode::NoError,
+            })?;
+            if let Some(actor) = self.streams.get_mut(stream_id) {
+                actor
+                    .state
+                    .transition(StreamEvent::SendRstStream(ErrorCode::NoError))
+                    .map_err(|error| map_state_err(stream_id, error))?;
+                actor.cancel_upload();
+            }
+            self.buffered_pending.retain(|&id| id != stream_id);
         }
         if let Some(actor) = self.streams.get_mut(stream_id)
             && !actor.stalled.is_empty()
@@ -305,11 +332,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(super) fn has_stalled(&self) -> bool {
-        self.stalled > 0
-    }
-
-    pub(super) async fn flush_stalled(&mut self) -> Result<(), H2Error> {
+    pub(super) fn flush_stalled(&mut self) -> Result<(), H2Error> {
         let mut drained = Vec::new();
         for (sid, actor) in self.streams.iter_mut() {
             let Some(ResponseSink::StreamingEx { body_tx, .. }) = actor.response_tx.as_ref() else {
@@ -335,7 +358,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if done {
                 self.complete_stream(sid);
             } else {
-                self.maybe_top_up_stream_window(sid).await?;
+                self.maybe_top_up_stream_window(sid)?;
             }
         }
         Ok(())
@@ -347,6 +370,26 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             actor.deliver_ok();
         }
         self.buffered_pending.retain(|&s| s != stream_id);
+    }
+
+    pub(super) fn reset_stream(
+        &mut self,
+        stream_id: u32,
+        err: H2Error,
+        code: ErrorCode,
+    ) -> Result<(), H2Error> {
+        if let Some(actor) = self.streams.get_mut(stream_id) {
+            actor
+                .state
+                .transition(StreamEvent::SendRstStream(code))
+                .map_err(|error| map_state_err(stream_id, error))?;
+        }
+        self.writer.write_frame(&RstStreamFrame {
+            stream_id,
+            error_code: code,
+        })?;
+        self.fail_stream(stream_id, err);
+        Ok(())
     }
 
     pub(super) fn fail_stream(&mut self, stream_id: u32, err: H2Error) {

@@ -1,5 +1,5 @@
 use super::super::Session;
-use crate::Cause;
+use crate::Kind;
 use crate::core::Identity;
 use crate::profile::{Browser, Platform};
 
@@ -43,7 +43,7 @@ fn an_identity_with_no_profile_for_the_platform_fails_at_build() {
         .identity(Identity::new(Browser::Safari18, Platform::Windows))
         .build()
         .expect_err("safari has no windows identity");
-    assert_eq!(err.cause(), Cause::Config, "expected Config, got {err}");
+    assert_eq!(err.cause(), Kind::Config, "expected Config, got {err}");
 }
 
 #[test]
@@ -51,7 +51,7 @@ fn rotate_tls_rejects_other_family() {
     let err = Identity::new(Browser::Chrome150, Platform::Windows)
         .rotate_tls(Browser::Firefox152)
         .expect_err("chrome → firefox is not a legal rotate");
-    assert_eq!(err.cause(), Cause::Config, "expected Config, got {err}");
+    assert_eq!(err.cause(), Kind::Config, "expected Config, got {err}");
     let message = err.message().expect("config errors carry a message");
     assert!(
         message.contains("not the same family"),

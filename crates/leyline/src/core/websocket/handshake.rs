@@ -8,22 +8,22 @@ use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
 use crate::core::config::WebSocketOptions;
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::header_str::HeaderStr;
 use crate::profile::preset::HeaderPair;
 
 pub(super) const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
 
 pub(super) fn handshake_target(url: &str) -> Result<(url::Url, String, u16)> {
-    let mut parsed = url::Url::parse(url).map_err(Error::from_url_parse)?;
+    let mut parsed = url::Url::parse(url).map_err(Error::from)?;
     let host = parsed
         .host_str()
-        .ok_or_else(|| Error::new(Cause::Config).with_message("no host in WebSocket URL"))?
+        .ok_or_else(|| Error::config("no host in WebSocket URL"))?
         .to_owned();
     let port = parsed.port_or_known_default().unwrap_or(443);
     parsed
         .set_scheme("https")
-        .map_err(|()| Error::new(Cause::Config).with_message("WebSocket URL must use wss://"))?;
+        .map_err(|()| Error::config("WebSocket URL must use wss://"))?;
     Ok((parsed, host, port))
 }
 
@@ -69,8 +69,8 @@ pub(super) fn tungstenite_config(
 
 pub(super) fn wire_error(op: &'static str, e: WireError) -> Error {
     let kind = match &e {
-        WireError::Capacity(_) | WireError::Protocol(_) | WireError::Utf8 => Cause::Body,
-        _ => Cause::Io,
+        WireError::Capacity(_) | WireError::Protocol(_) | WireError::Utf8 => Kind::Body,
+        _ => Kind::Io,
     };
     let err = Error::new(kind).with_message(format!("{op}: {e}"));
     match e {
@@ -81,12 +81,12 @@ pub(super) fn wire_error(op: &'static str, e: WireError) -> Error {
 
 pub(super) fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, HeaderValue)> {
     let hn = HeaderName::from_bytes(name.as_bytes()).map_err(|e| {
-        Error::new(Cause::Request)
+        Error::new(Kind::Request)
             .with_message(format!("invalid websocket header name: {name}"))
             .with_source(e)
     })?;
     let hv = HeaderValue::from_str(value).map_err(|e| {
-        Error::new(Cause::Request)
+        Error::new(Kind::Request)
             .with_message(format!("invalid websocket header value for {name}"))
             .with_source(e)
     })?;
@@ -106,26 +106,8 @@ pub(super) fn is_reserved_ws_header(name: &str) -> bool {
     )
 }
 
-fn header_values<'a>(headers: &'a [(String, String)], name: &str) -> impl Iterator<Item = &'a str> {
-    headers
-        .iter()
-        .filter(move |(n, _)| n.eq_ignore_ascii_case(name))
-        .map(|(_, v)| v.as_str())
-}
-
-pub(super) fn response_header<'a>(headers: &'a [(String, String)], name: &str) -> Option<&'a str> {
-    header_values(headers, name).next()
-}
-
-pub(super) fn has_token(headers: &[(String, String)], name: &str, token: &str) -> bool {
-    response_header(headers, name).is_some_and(|v| {
-        v.split(',')
-            .any(|part| part.trim().eq_ignore_ascii_case(token))
-    })
-}
-
 fn fail(m: String) -> Result<()> {
-    Err(Error::new(Cause::Request).with_message(format!("ws handshake: {m}")))
+    Err(Error::new(Kind::Request).with_message(format!("ws handshake: {m}")))
 }
 
 pub(super) fn check_upgrade_response(
@@ -137,15 +119,17 @@ pub(super) fn check_upgrade_response(
     if status != 101 {
         return fail(format!("expected 101 Switching Protocols, got {status}"));
     }
-    if !has_token(headers, "upgrade", "websocket") || !has_token(headers, "connection", "upgrade") {
+    if !crate::util::header_contains_token(headers, "upgrade", "websocket")
+        || !crate::util::header_contains_token(headers, "connection", "upgrade")
+    {
         return fail("missing Upgrade: websocket or Connection: Upgrade".into());
     }
-    if response_header(headers, "sec-websocket-accept")
+    if crate::util::header_first(headers, "sec-websocket-accept")
         != Some(&derive_accept_key(sec_key.as_bytes()))
     {
         return fail("Sec-WebSocket-Accept does not match the key".into());
     }
-    if response_header(headers, "sec-websocket-extensions").is_some() {
+    if crate::util::header_first(headers, "sec-websocket-extensions").is_some() {
         return fail("server selected an extension the client did not offer".into());
     }
     check_subprotocol(headers, request)
@@ -155,12 +139,13 @@ pub(super) fn check_subprotocol(
     headers: &[(String, String)],
     request: &[(String, String)],
 ) -> Result<()> {
-    let offered: Vec<&str> = header_values(request, SEC_WEBSOCKET_PROTOCOL.as_str())
+    let offered: Vec<&str> = crate::util::header_values(request, SEC_WEBSOCKET_PROTOCOL.as_str())
         .flat_map(|line| line.split(','))
         .map(str::trim)
         .filter(|token| !token.is_empty())
         .collect();
-    let mut selected = header_values(headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::trim);
+    let mut selected =
+        crate::util::header_values(headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::trim);
     match (selected.next(), selected.next()) {
         (Some(_), Some(_)) => fail("server sent more than one subprotocol".into()),
         (Some(chosen), None) if !offered.contains(&chosen) => fail(format!(
@@ -174,8 +159,5 @@ pub(super) fn check_subprotocol(
 }
 
 pub(super) fn random_sec_ws_key() -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 16];
-    rand::rng().fill_bytes(&mut bytes);
-    BASE64_STANDARD.encode(bytes)
+    BASE64_STANDARD.encode(crate::util::random_bytes(16))
 }

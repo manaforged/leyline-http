@@ -11,17 +11,14 @@ use crate::core::Session;
 use crate::core::deadline::Deadline;
 use crate::core::error::Result;
 use crate::core::response::Response;
-use crate::core::saved::{ConnectionState, StateParts, unix_secs};
+use crate::core::saved::{ConnectionState, StateParts};
 use crate::core::transport::{ResponseMode, TransportResponse};
 use crate::util::lock;
+use crate::util::since_epoch;
 
 impl Session {
-    pub(super) fn store_cookies(
-        &self,
-        resp_headers: &[(http::HeaderName, http::HeaderValue)],
-        url: &Url,
-    ) {
-        let set_cookies: Vec<&str> = header_values(resp_headers, "set-cookie")
+    pub(super) fn store_cookies(&self, resp_headers: &http::HeaderMap, url: &Url) {
+        let set_cookies: Vec<&str> = header_values(resp_headers, http::header::SET_COOKIE)
             .filter_map(|v| v.to_str().ok())
             .collect();
         if !set_cookies.is_empty() {
@@ -36,7 +33,7 @@ impl Session {
     fn connection_state(&self) -> ConnectionState {
         let now = SystemTime::now();
         ConnectionState::from_parts(StateParts {
-            tls_sessions: self.inner.connector.session_cache().export(unix_secs(now)),
+            tls_sessions: self.inner.connector.session_cache().export(since_epoch(now).as_secs()),
             #[cfg(feature = "http3")]
             alt_svc: self.inner.pool.alt_svc_entries(),
             #[cfg(not(feature = "http3"))]
@@ -57,48 +54,44 @@ impl Session {
         self.inner
             .connector
             .session_cache()
-            .import(&parts.tls_sessions, unix_secs(now));
+            .import(&parts.tls_sessions, since_epoch(now).as_secs());
         #[cfg(feature = "http3")]
         self.inner.pool.restore_alt_svc(&parts.alt_svc);
         lock(&self.inner.pool.hsts).import(&parts.hsts, now);
     }
 
-    pub(super) fn note_hsts(
-        &self,
-        url: &Url,
-        resp_headers: &[(http::HeaderName, http::HeaderValue)],
-    ) {
+    pub(super) fn note_hsts(&self, url: &Url, resp_headers: &http::HeaderMap) {
         if self.inner.tls_trust.accepts_invalid_certs() {
             return;
         }
-        let values: Vec<&str> = header_values(resp_headers, "strict-transport-security")
-            .filter_map(|v| v.to_str().ok())
-            .collect();
+        let values: Vec<&str> =
+            header_values(resp_headers, http::header::STRICT_TRANSPORT_SECURITY)
+                .filter_map(|v| v.to_str().ok())
+                .collect();
         if !values.is_empty() {
             lock(&self.inner.pool.hsts).note(url, &values, SystemTime::now());
         }
     }
 
     pub(in crate::core::session) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
+        if !crate::core::hsts::HstsStore::applies(url) {
+            return Arc::clone(url);
+        }
         lock(&self.inner.pool.hsts)
             .upgrade(url, SystemTime::now())
             .map_or_else(|| Arc::clone(url), Arc::new)
     }
 
     #[cfg(feature = "http3")]
-    pub(super) fn note_alt_svc(
-        &self,
-        url: &Url,
-        resp_headers: &[(http::HeaderName, http::HeaderValue)],
-    ) {
-        let owned: Vec<String> = header_values(resp_headers, "alt-svc")
+    pub(super) fn note_alt_svc(&self, url: &Url, resp_headers: &http::HeaderMap) {
+        let owned: Vec<String> = header_values(resp_headers, http::header::ALT_SVC)
             .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
             .collect();
         let fields: Vec<&str> = owned.iter().map(String::as_str).collect();
         if fields.is_empty() {
             return;
         }
-        let age = header_values(resp_headers, "age")
+        let age = header_values(resp_headers, http::header::AGE)
             .next()
             .and_then(|v| v.to_str().ok())
             .and_then(|v| crate::util::delta_seconds(v.split(',').next().unwrap_or_default()))
@@ -124,7 +117,6 @@ impl Session {
             headers,
             trailers,
             body,
-            final_url,
             version,
             tls,
             ..
@@ -143,16 +135,16 @@ impl Session {
         audit_headers.retain(|(name, value)| crate::core::transport::sent_on(version, name, value));
         let mut response = Response::from_parts(crate::core::response::Parts {
             status,
-            headers: headers.into_iter().collect(),
+            headers,
             body,
-            url: final_url,
+            url: journey.url,
             redirect_chain: journey.chain,
             version,
             trailers,
             request_headers: audit_headers,
             tls,
             request_method: if audited {
-                journey.method
+                journey.method.to_string()
             } else {
                 String::new()
             },
@@ -171,14 +163,11 @@ impl Session {
     pub(super) async fn finalize_response_body(
         &self,
         resp_body_shape: crate::core::transport::TransportBody,
-        resp_headers: Vec<(http::HeaderName, http::HeaderValue)>,
+        resp_headers: http::HeaderMap,
         keep_stream: bool,
         rules: &BodyRules,
         deadline: &Deadline,
-    ) -> Result<(
-        crate::core::response::ResponseBody,
-        Vec<(http::HeaderName, http::HeaderValue)>,
-    )> {
+    ) -> Result<(crate::core::response::ResponseBody, http::HeaderMap)> {
         Ok(match resp_body_shape {
             crate::core::transport::TransportBody::Streaming(mut bs) if keep_stream => {
                 bs.set_read_timeout(deadline.read());
@@ -190,7 +179,8 @@ impl Session {
                     resp_headers,
                 )
             }
-            crate::core::transport::TransportBody::Streaming(mut bs) => {
+            crate::core::transport::TransportBody::Streaming(bs) => {
+                let mut bs = *bs;
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
                 let (buf, resp_headers) = buffer_and_strip(bs, resp_headers, rules).await?;
@@ -206,7 +196,12 @@ impl Session {
                     bs.stop_on(&self.inner.shutdown);
                     bs.watch_end();
                     (
-                        crate::core::response::ResponseBody::Streaming(bs),
+                        crate::core::response::ResponseBody::Streaming(Box::new(bs)),
+                        resp_headers,
+                    )
+                } else if !resp_headers.contains_key(http::header::CONTENT_ENCODING) {
+                    (
+                        crate::core::response::ResponseBody::Buffered(buf),
                         resp_headers,
                     )
                 } else {

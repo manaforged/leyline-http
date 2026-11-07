@@ -19,6 +19,7 @@ impl Session {
         let mut builder = (*self.inner.inputs).clone();
         builder.layered = false;
         builder.cookie_jar = Some(self.inner.cookie_jar.clone());
+        builder.bearer = self.inner.bearer.clone();
         builder.parent = Some(Parent {
             session: self.clone(),
             own_pool: false,

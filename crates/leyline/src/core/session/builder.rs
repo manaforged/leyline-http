@@ -28,6 +28,7 @@ const AUTHORIZATION: &str = "authorization";
 mod assemble;
 mod bearer;
 pub(super) mod connect;
+mod cores;
 mod debug;
 pub(super) mod derive;
 mod inherit;
@@ -65,6 +66,8 @@ pub struct SessionBuilder {
     config_error: Option<String>,
     default_headers: Vec<(String, String)>,
     bearer: Option<BearerToken>,
+    refresh_token: Option<bearer::Callback>,
+    cache: usize,
     http_identity: Option<Browser>,
     tls_trust: Tls,
     default_retry: crate::core::retry::Retry,
@@ -72,7 +75,7 @@ pub struct SessionBuilder {
     base_url: Option<url::Url>,
     languages: Option<Vec<String>>,
     host_limits: HostLimits,
-    proxy_pool: Option<ProxyPool>,
+    pub(super) proxy_pool: Option<ProxyPool>,
     block_rules: Rules,
     parent: Option<Parent>,
     saved: Option<crate::core::saved::Saved>,
@@ -106,6 +109,8 @@ impl SessionBuilder {
             config_error: None,
             default_headers: Vec::new(),
             bearer: None,
+            refresh_token: None,
+            cache: 0,
             http_identity: None,
             tls_trust: Tls::default(),
             default_retry: crate::core::retry::Retry::new(0),
@@ -135,6 +140,12 @@ impl SessionBuilder {
     /// Sets the default timeouts for every request.
     pub fn timeout(mut self, config: impl Into<Timeout>) -> Self {
         self.timeouts = config.into();
+        self
+    }
+
+    /// Enables a private in-memory HTTP cache with a byte budget; zero disables caching.
+    pub fn cache(mut self, bytes: usize) -> Self {
+        self.cache = bytes;
         self
     }
 
@@ -567,6 +578,11 @@ impl SessionBuilder {
                 }
             }
         }
+        self
+    }
+
+    pub(crate) fn blocking_io(mut self) -> Self {
+        self.pool_config.blocking = Some(None);
         self
     }
 

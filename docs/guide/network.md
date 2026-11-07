@@ -85,8 +85,7 @@ connects.
 | `tcp_keepalive_retries` | 3 | Failed probes before the socket closes |
 | `tcp_user_timeout` | unset | `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged (Linux, Android) |
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
-| `local_address` | unset | Source IP to bind |
-| `local_ipv4`, `local_ipv6` | unset | Source IP to bind for that address family |
+| `local_address` | unset | Source IP to bind for that IP's address family; call it once per family |
 | `strict_socket_options` | `false` | Fail when the platform does not support an option |
 
 The timing and size setters take a value or `None`, which clears it. Leyline

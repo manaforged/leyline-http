@@ -1,11 +1,12 @@
 use crate::h2_support as support;
 
+use futures_util::StreamExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
 use leyline::BrowserProfile;
 use leyline::h2::frame::FrameType;
-use leyline::h2::{ErrorBudget, H2Client, H2Config, RequestBody, ResponseBody, ResponseMode};
+use leyline::h2::{ErrorBudget, H2Client, H2Config, ResponseMode};
 use support::{
     get_head, read_frame, read_preface, write_data, write_raw_headers, write_server_settings,
     write_settings_ack,
@@ -50,7 +51,7 @@ async fn an_error_prefix_success_is_buffered_with_its_trailers() {
         Duration::from_secs(5),
         handle.send_shared(
             Arc::new(get_head("/")),
-            RequestBody::None,
+            leyline::Body::default(),
             ResponseMode::ErrorPrefix(ErrorBudget::new(Duration::from_secs(5), 64 * 1024)),
         ),
     )
@@ -59,12 +60,12 @@ async fn an_error_prefix_success_is_buffered_with_its_trailers() {
     .expect("response");
 
     assert!(
-        matches!(&response.body, ResponseBody::Buffered(body) if body == b"ok"),
+        matches!(&response.body, leyline::pool::TransportBody::Buffered(body) if body == b"ok"),
         "{:?}",
         response.body
     );
-    let trailers = response.trailers.expect("trailers kept");
-    assert_eq!(trailers[0].0.as_str(), "grpc-status");
+    let trailers = response.trailers;
+    assert!(trailers.is_some_and(|t| t.contains_key("grpc-status")));
     drop(server);
 }
 
@@ -84,7 +85,7 @@ async fn an_error_prefix_error_streams_before_the_body_ends() {
         Duration::from_secs(2),
         handle.send_shared(
             Arc::new(get_head("/")),
-            RequestBody::None,
+            leyline::Body::default(),
             ResponseMode::ErrorPrefix(ErrorBudget::new(Duration::from_secs(5), 64 * 1024)),
         ),
     )
@@ -93,10 +94,10 @@ async fn an_error_prefix_error_streams_before_the_body_ends() {
     .expect("response");
 
     assert_eq!(response.status, 500);
-    let ResponseBody::Streaming(mut body) = response.body else {
+    let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
         panic!("an error response must stream");
     };
-    let first = timeout(Duration::from_secs(2), body.recv())
+    let first = timeout(Duration::from_secs(2), body.next())
         .await
         .expect("first chunk in time")
         .expect("a chunk")

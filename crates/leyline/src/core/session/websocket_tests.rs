@@ -46,5 +46,5 @@ async fn an_invalid_header_fails_before_the_connection_opens() {
         .websocket()
         .await
         .unwrap_err();
-    assert_eq!(err.cause(), crate::Cause::Request, "{err:?}");
+    assert_eq!(err.cause(), crate::Kind::Request, "{err:?}");
 }

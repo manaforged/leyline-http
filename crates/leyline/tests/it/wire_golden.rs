@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use std::net::SocketAddr;
 
+use futures_util::StreamExt;
 use leyline::{Browser, Platform, Resolver, Session, Tls};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -26,22 +27,34 @@ const END_HEADERS: u8 = 0x4;
 const SERVER_SETTINGS: [u8; 18] = [0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0];
 const ORIGIN: &str = "origin.test";
 const WAIT: Duration = Duration::from_secs(3);
+const CAPTURE_CONCURRENCY: usize = 8;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
     let cases = Browser::all().iter().flat_map(|&browser| {
-        Platform::all().iter().filter_map(move |&platform| {
-            Session::builder()
-                .browser(browser)
-                .platform(platform)
-                .build()
-                .ok()
-                .map(|_| (browser, platform))
-        })
+        Platform::all()
+            .iter()
+            .filter(|&&platform| platform != Platform::Host)
+            .filter_map(move |&platform| {
+                Session::builder()
+                    .browser(browser)
+                    .platform(platform)
+                    .build()
+                    .ok()
+                    .map(|_| (browser, platform))
+            })
     });
-    let rendered: String = futures_util::future::join_all(cases.map(|(browser, platform)| {
-        tokio::spawn(async move {
-            let hello = client_hello(browser, platform).await;
+    let rendered: String = futures_util::stream::iter(cases)
+        .map(|(browser, platform)| async move {
+            let record = client_hello(browser, platform).await;
+            let wire_ja4 = ja4(&record);
+            let saved = saved_ja4(browser, platform);
+            assert!(
+                saved.as_ref().is_none_or(|saved| *saved == wire_ja4),
+                "{} {platform:?}: JA4 on the wire {wire_ja4}, saved {saved:?}",
+                browser.id()
+            );
+            let hello = describe_client_hello(&record);
             let hello: String = if browser.profile().tls.permute_extensions {
                 hello
                     .lines()
@@ -54,11 +67,10 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
             let opening = h2_opening(browser, platform).await;
             format!("== {} {platform:?}\n{hello}{opening}", browser.id())
         })
-    }))
-    .await
-    .into_iter()
-    .map(Result::unwrap)
-    .collect();
+        .buffered(CAPTURE_CONCURRENCY)
+        .collect::<Vec<_>>()
+        .await
+        .concat();
     if std::env::var_os("LEYLINE_BLESS").is_some() {
         std::fs::write(GOLDEN, &rendered).unwrap();
         return;
@@ -74,7 +86,7 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
     assert_eq!(golden, rendered, "profile set changed");
 }
 
-async fn client_hello(browser: Browser, platform: Platform) -> String {
+async fn client_hello(browser: Browser, platform: Platform) -> Vec<u8> {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let server = tokio::spawn(async move {
@@ -93,7 +105,106 @@ async fn client_hello(browser: Browser, platform: Platform) -> String {
             .send()
             .await,
     );
-    describe_client_hello(&server.await.unwrap())
+    server.await.unwrap()
+}
+
+fn saved_ja4(browser: Browser, platform: Platform) -> Option<String> {
+    let profile = browser.for_platform(platform).branded_profile();
+    let saved = profile.tls.fingerprint.as_ref()?;
+    saved
+        .platforms
+        .get(platform.identity_key())
+        .and_then(|own| own.ja4.clone())
+        .or_else(|| saved.ja4.clone())
+}
+
+/// JA4 (FoxIO) computed from a captured ClientHello record, independent of the profile code.
+fn ja4(record: &[u8]) -> String {
+    let hello = &record[9..];
+    let mut at = 34;
+    at += 1 + usize::from(hello[at]);
+    let ciphers_len = usize::from(u16_at(hello, at));
+    let mut ciphers: Vec<u16> = (0..ciphers_len / 2)
+        .map(|i| u16_at(hello, at + 2 + 2 * i))
+        .filter(|&c| !is_grease(c))
+        .collect();
+    at += 2 + ciphers_len;
+    at += 1 + usize::from(hello[at]);
+    let end = at + 2 + usize::from(u16_at(hello, at));
+    at += 2;
+    let (mut extensions, mut sigalgs, mut alpn, mut version) =
+        (Vec::new(), Vec::new(), "00".to_owned(), 0);
+    while at + 4 <= end {
+        let kind = u16_at(hello, at);
+        let body = &hello[at + 4..at + 4 + usize::from(u16_at(hello, at + 2))];
+        at += 4 + body.len();
+        if is_grease(kind) {
+            continue;
+        }
+        extensions.push(kind);
+        match kind {
+            0x000d => {
+                sigalgs = (1..=usize::from(u16_at(body, 0)) / 2)
+                    .map(|i| u16_at(body, 2 * i))
+                    .filter(|&alg| !is_grease(alg))
+                    .collect()
+            }
+            0x0010 => {
+                let first = &body[3..3 + usize::from(body[2])];
+                alpn = format!(
+                    "{}{}",
+                    char::from(first[0]),
+                    char::from(first[first.len() - 1])
+                );
+            }
+            0x002b => {
+                version = (0..usize::from(body[0]) / 2)
+                    .map(|i| u16_at(body, 1 + 2 * i))
+                    .filter(|&v| !is_grease(v))
+                    .max()
+                    .unwrap_or(0);
+            }
+            _ => {}
+        }
+    }
+    let version = match version {
+        0x0304 => "13",
+        0x0303 => "12",
+        _ => "00",
+    };
+    let sni = if extensions.contains(&0x0000) {
+        'd'
+    } else {
+        'i'
+    };
+    let a = format!(
+        "t{version}{sni}{:02}{:02}{alpn}",
+        ciphers.len().min(99),
+        extensions.len().min(99)
+    );
+    ciphers.sort_unstable();
+    let mut sorted: Vec<u16> = extensions
+        .into_iter()
+        .filter(|&e| e != 0x0000 && e != 0x0010)
+        .collect();
+    sorted.sort_unstable();
+    let joined = |ids: &[u16]| {
+        ids.iter()
+            .map(|id| format!("{id:04x}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    };
+    let c = if sigalgs.is_empty() {
+        joined(&sorted)
+    } else {
+        format!("{}_{}", joined(&sorted), joined(&sigalgs))
+    };
+    format!("{a}_{}_{}", hash12(&joined(&ciphers)), hash12(&c))
+}
+
+fn hash12(text: &str) -> String {
+    use sha2::{Digest, Sha256};
+    hex(&Sha256::digest(text.as_bytes()))[..12].to_owned()
 }
 
 async fn h2_opening(browser: Browser, platform: Platform) -> String {

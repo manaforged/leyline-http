@@ -1,0 +1,10 @@
+Environment: CMP_CHROME=147 CMP_PROTO=h2 CMP_TLS=matched CMP_CONNECTIONS=1 CMP_CA=<local-test-ca-der>
+Python: installed wheel in the selected interpreter; comparison requirements installed.
+Node: installed main and platform tarballs resolved through NODE_PATH.
+Alternating order over 10 rounds, using these existing runner commands:
+python python-client/leyline_client.py <origin-url> 2000 200 20000 64
+node node-client/leyline.mjs <origin-url> 2000 200 20000 64
+Both adapters first run with <origin-url> equiv against the header-logging origin.
+Before timing, each adapter separately ran with <origin-url> 1 0 1000000 64; lsof observed one established connection on the origin. These preflight clients were terminated before the timed rounds.
+Origin: release/examples/origin 127.0.0.1:0, CMP_CERT/CMP_KEY point to the local test certificate and key in DER format.
+Private test keys deleted after completion.

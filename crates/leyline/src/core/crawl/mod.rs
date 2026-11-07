@@ -1,3 +1,4 @@
+mod checkpoint;
 mod clock;
 mod fetch;
 mod frontier;
@@ -7,7 +8,7 @@ mod sites;
 mod visit;
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::Future;
+use std::future::{Future, poll_fn};
 use std::pin::Pin;
 
 use futures_util::stream::{FuturesUnordered, Stream};
@@ -23,7 +24,7 @@ use sites::{Site, SitemapFile};
 use visit::Held;
 
 use crate::core::config::{HostLimits, Origin};
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Result};
 use crate::core::into_url::IntoUrl;
 use crate::core::retry::Retry;
 use crate::core::robots::{Purpose, Robots};
@@ -59,7 +60,7 @@ enum Event {
 }
 
 /// Which site signals a crawl obeys.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 pub enum Respect {
     /// Obeys robots.txt rules and noindex directives.
@@ -108,18 +109,20 @@ fn polite_limits() -> HostLimits {
         .pause_on(PAUSE_STATUSES)
 }
 
-fn inherited(session: &Session) -> HostLimits {
-    session.host_limits().clone().filled_from(&polite_limits())
-}
-
 impl Session {
     /// Starts a lazy crawl from `seed`, resolved against the session's base URL, that respects robots.txt by default.
     pub fn crawl(&self, seed: impl IntoUrl) -> Crawl {
+        Crawl::new(self, vec![seed.into_url_with_base(self.base_url())])
+    }
+}
+
+impl Crawl {
+    fn new(session: &Session, seeds: Vec<Result<Url>>) -> Self {
         Crawl {
-            session: self.clone(),
+            session: session.clone(),
             limits: None,
             pace: HostLimits::new(),
-            seeds: vec![seed.into_url_with_base(self.base_url())],
+            seeds,
             respect: Some(Respect::Robots),
             agent: ANY_AGENT.to_owned(),
             max_body: None,
@@ -211,7 +214,7 @@ impl Crawl {
 
     /// Returns the next crawled page or error, or `None` when the crawl is done.
     pub async fn next(&mut self) -> Option<Result<Page>> {
-        std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
+        poll_fn(move |cx| Pin::new(&mut *self).poll_next(cx)).await
     }
 
     fn purpose(&self) -> Option<Purpose> {
@@ -228,14 +231,19 @@ impl Crawl {
         let pace = match self.limits.take() {
             Some(limits) => match limits.config_error() {
                 Some(message) => {
-                    let error = Error::new(Cause::Config).with_message(message);
+                    let error = Error::config(message);
                     self.ready.push_back(Err(error));
                     self.seeds.clear();
                     return;
                 }
                 None => limits.armed(),
             },
-            None => self.session.crawl_limits(|| inherited(&self.session)),
+            None => self.session.crawl_limits(|| {
+                self.session
+                    .host_limits()
+                    .clone()
+                    .filled_from(&polite_limits())
+            }),
         };
         let pace = match self.respect {
             Some(_) => pace,
@@ -247,7 +255,7 @@ impl Crawl {
             .default_retry()
             .clone()
             .or(Retry::new(PAGE_RETRIES));
-        self.clock.stopped = Some(Box::pin(self.session.shut_down_signal()));
+        self.clock.stopped = Some(self.session.stopped());
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {
             match seed {

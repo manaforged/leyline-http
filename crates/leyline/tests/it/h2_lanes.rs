@@ -96,7 +96,9 @@ async fn send(session: &Session, url: &str, count: usize, gap: Duration) {
                 .await
                 .unwrap()
         }));
-        tokio::time::sleep(gap).await;
+        if !gap.is_zero() {
+            tokio::time::sleep(gap).await;
+        }
     }
     for request in requests {
         assert_eq!(&request.await.unwrap()[..], b"ok");
@@ -162,7 +164,10 @@ async fn the_pool_counts_one_checkout_per_request() {
     send(&session, &url, 1, Duration::ZERO).await;
     assert_eq!(connections.load(Ordering::SeqCst), 2);
     let stats = session.stats();
-    assert_eq!(stats.h2_hits() + stats.h2_misses(), 3);
+    assert_eq!(
+        stats.hits(leyline::http::Version::HTTP_2) + stats.misses(leyline::http::Version::HTTP_2),
+        3
+    );
 }
 
 #[tokio::test]

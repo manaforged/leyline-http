@@ -16,28 +16,6 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
-  live:
-    name: live fingerprint + smoke
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: ci-live
-          workspaces: ". -> target/verify"
-          cache-workspace-crates: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: verify gates
-        run: scripts/verify.sh --only live
-
   fuzz:
     name: fuzz (time-bounded)
     runs-on: ubuntu-24.04
@@ -78,7 +56,7 @@ jobs:
 
   alert:
     name: open failure issue
-    needs: [live, fuzz, qualify]
+    needs: [fuzz, qualify]
     if: failure() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 5

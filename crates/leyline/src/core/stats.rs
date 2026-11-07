@@ -38,40 +38,24 @@ impl Stats {
         self.pool.max_connections
     }
 
-    /// Returns how many HTTP/2 checkouts reused a connection.
+    /// Returns how many checkouts on `version` reused a pooled connection.
     #[must_use]
-    pub fn h2_hits(&self) -> u64 {
-        self.pool.h2_hits
+    pub fn hits(&self, version: http::Version) -> u64 {
+        match version {
+            http::Version::HTTP_2 => self.pool.h2_hits,
+            http::Version::HTTP_3 => self.pool.h3_hits,
+            _ => self.pool.h1_hits,
+        }
     }
 
-    /// Returns how many HTTP/2 checkouts opened a connection.
+    /// Returns how many checkouts on `version` opened a connection.
     #[must_use]
-    pub fn h2_misses(&self) -> u64 {
-        self.pool.h2_misses
-    }
-
-    /// Returns how many HTTP/1 checkouts reused a connection.
-    #[must_use]
-    pub fn h1_hits(&self) -> u64 {
-        self.pool.h1_hits
-    }
-
-    /// Returns how many HTTP/1 checkouts opened a connection.
-    #[must_use]
-    pub fn h1_misses(&self) -> u64 {
-        self.pool.h1_misses
-    }
-
-    /// Returns how many HTTP/3 checkouts reused a connection.
-    #[must_use]
-    pub fn h3_hits(&self) -> u64 {
-        self.pool.h3_hits
-    }
-
-    /// Returns how many HTTP/3 checkouts opened a connection.
-    #[must_use]
-    pub fn h3_misses(&self) -> u64 {
-        self.pool.h3_misses
+    pub fn misses(&self, version: http::Version) -> u64 {
+        match version {
+            http::Version::HTTP_2 => self.pool.h2_misses,
+            http::Version::HTTP_3 => self.pool.h3_misses,
+            _ => self.pool.h1_misses,
+        }
     }
 
     /// Returns how many connections the pool closed for idling too long.

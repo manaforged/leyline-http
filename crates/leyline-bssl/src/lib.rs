@@ -31,11 +31,14 @@ pub mod dsa;
 pub mod ec;
 pub mod error;
 pub mod ex_data;
+mod handshake_shed;
 pub mod hash;
 pub mod hmac;
 pub mod hpke;
 pub mod nid;
 pub mod pkey;
+/// TLS 1.3 record protection that a caller runs after the handshake.
+pub mod records;
 pub mod rsa;
 pub mod srtp;
 pub mod ssl;

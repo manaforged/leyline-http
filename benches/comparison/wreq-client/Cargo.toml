@@ -7,6 +7,7 @@ publish = false
 [workspace]
 
 [dependencies]
-wreq = "=0.16.3"
-wreq-util = "=0.2.0"
+wreq = { version = "=0.16.3", features = ["gzip", "brotli", "zstd", "deflate"] }
+wreq-util = { version = "=0.2.0", features = ["emulation-serde", "emulation-compression"] }
+serde = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

@@ -84,7 +84,7 @@ pub(super) fn request(
         .get(url.as_str())
         .redirect(Redirect::none())
         .retry(retry);
-    builder.trusted_origin = trusted;
+    builder.draft.trusted_origin = trusted;
     builder
 }
 

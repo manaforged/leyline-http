@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::core::{Cause, Error, Result};
+use crate::core::{Error, Kind, Result};
 use crate::util::lock;
 
 pub(crate) struct SaveJob {
@@ -178,7 +178,7 @@ impl Autosave {
 }
 
 pub(crate) fn stopped(label: &str) -> Error {
-    Error::new(Cause::Io).with_message(format!("{label} autosave task stopped"))
+    Error::new(Kind::Io).with_message(format!("{label} autosave task stopped"))
 }
 
 async fn run<T: SaveTarget>(mut guard: Guard<T>, schedule: Schedule) {

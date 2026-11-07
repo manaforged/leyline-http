@@ -46,10 +46,11 @@ impl SessionBuilder {
     }
 
     pub(super) fn build_pool(&self) -> Pool {
-        Pool::from_config(
-            self.pool_config.resolved(self.impersonates()),
-            self.compression.max_body_size,
-        )
+        let mut config = self.pool_config.resolved(self.impersonates());
+        if config.blocking.is_some() {
+            config.blocking = Some(self.timeouts.read_limit().or(self.timeouts.total_limit()));
+        }
+        Pool::from_config(config, self.compression.max_body_size)
     }
 }
 

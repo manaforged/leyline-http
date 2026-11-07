@@ -11,17 +11,21 @@ mod pool;
 mod send;
 mod types;
 
+#[cfg(feature = "bench-internals")]
+pub use crate::core::ProxyUrl;
+#[cfg(feature = "bench-internals")]
+pub use crate::core::transport::{TransportBody, TransportResponse};
 pub use connect::checkout_handle;
 #[cfg(feature = "http3")]
 pub(crate) use connect::{H3Target, checkout_h3_handle};
 pub(crate) use connect::{Negotiated, negotiate};
+pub use h1::H1Target;
 #[cfg(feature = "bench-internals")]
-pub use h1::H1Response;
+pub use h1::floor;
 #[cfg(feature = "bench-internals")]
 pub use h1::send_request_h1_pooled;
 #[cfg(feature = "websocket")]
 pub(crate) use h1::upgrade_on_stream;
-pub use h1::{H1Body, H1PooledError, H1ResponseBody, H1Target};
 pub(crate) use liveness::checkout_live_h2;
 pub use liveness::{DEFAULT_H2_PING_AFTER_IDLE, DEFAULT_H2_PING_TIMEOUT};
 pub(crate) use pool::OriginFlag;
@@ -33,6 +37,8 @@ pub(crate) use send::send_request;
 #[cfg(feature = "http3")]
 pub(crate) use send::{H3Request, send_request_h3_pooled};
 pub(crate) use types::Opened;
+#[cfg(feature = "http3")]
+pub(crate) use types::TlsFacts;
 pub(crate) use types::TlsInfo;
 pub use types::{ConnectionStats, H1Slot};
 

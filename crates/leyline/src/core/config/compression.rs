@@ -44,22 +44,12 @@ impl BodyRules {
         }
     }
 
-    pub(crate) fn accept_encoding(&self) -> Option<String> {
-        let codecs = [
-            ("gzip", self.gzip && cfg!(feature = "compression-gzip")),
-            (
-                "deflate",
-                self.deflate && cfg!(feature = "compression-deflate"),
-            ),
-            ("br", self.brotli && cfg!(feature = "compression-brotli")),
-            ("zstd", self.zstd && cfg!(feature = "compression-zstd")),
-        ];
-        let enabled: Vec<&str> = codecs
-            .iter()
-            .filter(|(_, on)| *on)
-            .map(|(name, _)| *name)
-            .collect();
-        (!enabled.is_empty()).then(|| enabled.join(", "))
+    pub(crate) fn accept_encoding(&self) -> Option<&'static str> {
+        let mask = usize::from(self.gzip && cfg!(feature = "compression-gzip"))
+            | usize::from(self.deflate && cfg!(feature = "compression-deflate")) << 1
+            | usize::from(self.brotli && cfg!(feature = "compression-brotli")) << 2
+            | usize::from(self.zstd && cfg!(feature = "compression-zstd")) << 3;
+        (mask != 0).then(|| CODEC_LISTS[mask])
     }
 
     pub(crate) fn allows(&self, encoding: &str) -> bool {
@@ -74,3 +64,22 @@ impl BodyRules {
         }
     }
 }
+
+const CODEC_LISTS: [&str; 16] = [
+    "",
+    "gzip",
+    "deflate",
+    "gzip, deflate",
+    "br",
+    "gzip, br",
+    "deflate, br",
+    "gzip, deflate, br",
+    "zstd",
+    "gzip, zstd",
+    "deflate, zstd",
+    "gzip, deflate, zstd",
+    "br, zstd",
+    "gzip, br, zstd",
+    "deflate, br, zstd",
+    "gzip, deflate, br, zstd",
+];

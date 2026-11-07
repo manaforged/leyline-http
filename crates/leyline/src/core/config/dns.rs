@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use crate::tls::{Resolver, SystemResolver};
+use crate::tls::{Coalesced, Resolver, SystemResolver};
 
 use super::host::normalize_host;
 
@@ -51,11 +51,12 @@ impl DnsConfig {
     }
 
     pub(crate) fn into_resolver(self) -> Arc<dyn Resolver> {
+        let resolver = Arc::new(Coalesced::new(self.resolver));
         if self.overrides.is_empty() {
-            self.resolver
+            resolver
         } else {
             Arc::new(LayeredResolver {
-                resolver: self.resolver,
+                resolver,
                 overrides: self.overrides,
             })
         }

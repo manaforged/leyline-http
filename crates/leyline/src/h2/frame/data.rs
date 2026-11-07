@@ -31,7 +31,7 @@ impl DataFrame {
 
         if padded && payload.is_empty() {
             return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
+                code: ErrorCode::FrameSizeError,
                 reason: "padded DATA frame has no pad length".into(),
             });
         }

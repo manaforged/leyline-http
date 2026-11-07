@@ -1,11 +1,12 @@
-use std::sync::{Arc, Mutex, PoisonError};
+use std::borrow::Borrow;
+use std::sync::{Arc, Mutex};
 
 use http::Method;
 use url::Url;
 
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::core::into_url::IntoUrl;
-use crate::core::request::{IntoParamPair, RequestBuilder};
+use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
 use crate::core::session::Session;
 use crate::profile::RequestKind;
@@ -40,15 +41,12 @@ impl Tab {
 
     /// Returns the URL of the page the tab has open.
     pub fn current(&self) -> Option<Url> {
-        self.page
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        crate::util::lock(&self.page).clone()
     }
 
     /// Sets the page URL the tab treats as open, or clears it with `None`.
     pub fn set_current(&self, page: Option<Url>) {
-        *self.page.lock().unwrap_or_else(PoisonError::into_inner) = page;
+        *crate::util::lock(&self.page) = page;
     }
 
     pub(crate) fn request(
@@ -74,7 +72,7 @@ impl Tab {
         let mut builder = self.request(method, url, preset);
         if self.current().is_none() {
             builder.fail(
-                Error::new(Cause::Request).with_message("the tab has no page; open one first"),
+                Error::new(Kind::Request).with_message("the tab has no page; open one first"),
             );
         }
         builder
@@ -96,10 +94,12 @@ impl Tab {
     }
 
     /// Posts `fields` as a URL-encoded form to `url` and navigates the tab to the response.
-    pub async fn submit<I, P>(&self, url: impl IntoUrl, fields: I) -> Result<Response>
+    pub async fn submit<I, K, V>(&self, url: impl IntoUrl, fields: I) -> Result<Response>
     where
-        I: IntoIterator<Item = P>,
-        P: IntoParamPair,
+        I: IntoIterator,
+        I::Item: Borrow<(K, V)>,
+        K: AsRef<str>,
+        V: AsRef<str>,
     {
         let builder = self
             .request(Method::POST, url, RequestKind::FormNavigate)
@@ -148,7 +148,7 @@ impl Tab {
     }
 
     fn trusted(&self, mut builder: RequestBuilder) -> RequestBuilder {
-        builder.trusted_origin = self.current();
+        builder.draft.trusted_origin = self.current();
         builder
     }
 

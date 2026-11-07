@@ -11,9 +11,7 @@ impl BrowserProfile {
             .ok_or_else(|| format!("no {platform} identity for {}", self.meta.name))?
             .clone();
         if identity.accept_language.is_none() {
-            identity.accept_language = BrowserProfile::bare_shared()
-                .identity_for(platform)
-                .and_then(|bare| bare.accept_language.clone());
+            identity.accept_language = platform.default_accept_language().map(str::to_owned);
         }
         if brand == ChromiumBrand::Chrome {
             return Ok(identity);

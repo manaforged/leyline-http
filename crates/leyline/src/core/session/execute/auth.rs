@@ -1,10 +1,7 @@
-use http::{HeaderName, HeaderValue};
-
 use super::super::helpers::header_values;
 use super::journey::Journey;
-use super::url_origin;
 use crate::core::digest::{self, Challenge, DigestAuth};
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
 use crate::util::request_target;
 
@@ -38,12 +35,12 @@ impl DigestLeg {
     pub(super) fn answer(
         &mut self,
         journey: &Journey,
-        headers: &[(HeaderName, HeaderValue)],
+        headers: &http::HeaderMap,
     ) -> Result<Option<HeaderList>> {
         if !in_scope(journey) {
             return Ok(None);
         }
-        let challenges: Vec<Challenge> = header_values(headers, "www-authenticate")
+        let challenges: Vec<Challenge> = header_values(headers, http::header::WWW_AUTHENTICATE)
             .filter_map(|v| v.to_str().ok())
             .filter_map(|v| digest::parse_challenge(v).ok())
             .collect();
@@ -72,18 +69,18 @@ impl DigestLeg {
     }
 
     fn authorized_headers(&self, journey: &Journey, challenge: &Challenge) -> Result<HeaderList> {
-        let cnonce = digest::generate_cnonce();
+        let cnonce = crate::util::random_hex_token(8);
         let nc = digest::next_nc_for_nonce(&challenge.nonce);
         let header = challenge
             .build_auth_header(
                 &self.auth,
-                &journey.method,
+                journey.method.as_str(),
                 request_target(&journey.url),
                 nc,
                 &cnonce,
             )
             .ok_or_else(|| {
-                Error::new(Cause::Request).with_message(
+                Error::new(Kind::Request).with_message(
                     "digest auth: server offered only qop=auth-int, \
                  which Leyline does not implement (RFC 7616 §3.4.3 \
                  requires the entity-body hash in HA2). Pass through \
@@ -96,8 +93,31 @@ impl DigestLeg {
     }
 }
 
+impl super::Session {
+    pub(super) fn refresh_version(
+        &self,
+        journey: &Journey,
+        digest: Option<&DigestLeg>,
+    ) -> Option<u64> {
+        if digest.is_some() {
+            return None;
+        }
+        let version = self.inner.bearer.as_ref()?.version()?;
+        if journey.tainted
+            || !self.bearer_in_scope(&journey.url)
+            || journey
+                .extra
+                .as_ref()
+                .is_some_and(|headers| headers.get("authorization").is_some())
+        {
+            return None;
+        }
+        Some(version)
+    }
+}
+
 fn in_scope(journey: &Journey) -> bool {
-    journey.chain.is_empty() || url_origin(&journey.url) == journey.original_origin
+    journey.chain.is_empty() || journey.origin_of(&journey.url) == journey.original_origin()
 }
 
 impl Challenge {
@@ -109,7 +129,7 @@ impl Challenge {
 }
 
 pub(super) fn unreplayable_body() -> Error {
-    Error::new(Cause::Request).with_message(
+    Error::new(Kind::Request).with_message(
         "digest auth: cannot replay streaming request body. \
          Buffer the body into bytes before sending.",
     )

@@ -1,0 +1,42 @@
+date_utc 2026-11-05T19:31:04Z
+kernel 7.0.0-38-generic
+loadavg_before 13.61 13.73 12.34
+loadavg_after 17.96 14.02 12.58
+governor performance
+cpu AMD Ryzen 9 9950X3D 16-Core Processor
+server_cpus 0-6,16-22 client_cpus 8-15,24-31
+server_addr 127.0.0.1:0 netns none link loopback
+leyline_source_hash b59e0a40deaf1465f1dbe95a09d0b217a586c470e1fb40f9bca64c2ca3e3b1a2
+profile bare
+timeout 30s
+leyline_chrome bare
+tls matched
+certificate_verification trusted-ca
+ca_sha256 dd07e021b5c5be33955db37198b5761c27cc75a03bb476297c9c251db489c165
+curl-client/Cargo.lock name = "curl-sys" version = "0.4.91+curl-8.22.0"
+floor-client/Cargo.lock name = "leyline-http" version = "0.2.0"
+h2-client/Cargo.lock name = "h2" version = "0.4.20"
+hyper-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.21"
+leyline-client/Cargo.lock name = "leyline-http" version = "0.2.0"
+pingora-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "pingora-core" version = "0.9.0"
+reqwest-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.20" -- name = "reqwest" version = "0.13.5"
+ureq-client/Cargo.lock 
+wreq-client/Cargo.lock name = "wreq" version = "0.16.3"
+go go version go1.27.1 linux/amd64
+node v22.19.0 undici 
+python Python 3.12.3 httpcore==1.0.9 httpx==0.28.1
+java openjdk version "21.0.12.1" 2026-08-18
+okhttp 
+dotnet 
+proto h1
+c5bfcd8ccb37fcce09916dae50f682a42ec1a3f481d4a3c968565fdc710ac041  server
+baa7ae87d50a1897b3545ed31f99973477381346d0f0cdc250fc8802ea192c26  floor
+0141c1583a1f6793b7d3b3ac557eb07741d7b8d7accf2197731c20bcc5402925  leyline
+3d0cd1d1c06f736f8160ecec228d00a00fb30a052dd71e2605ef95e6f3bf5002  leyline-blocking
+2d2a0c2dc66e125e8898b2bf37b91e323396fedfcd1de9b4bb0e08968c913d79  reqwest
+ef604bae6ca4a2cbd0ca87b19046ed5e32cdf7d19ca4460cc5a7acfc91d15780  hyper
+60678fdba0f156075485447548366c8aea6a6827a363e779816247fe6fb9c823  h2
+dc4c8d7bee7311fa78e29d2a969a68024a3942cc903d71c34249f97a3967dce1  curl
+e18b9f399df5b70e2f63891cada9a3b3f3a10dd22ba11e8f92780e13e71f7a66  ureq
+f2bcd587d702d0ab4b9998da677b0e867de07861a3c2c1d30a2da099849fd0e2  nethttp
+00b5a86c84d6fbfadf789bf18a883b8b373c7d0b108bf3d4e0f7a6a9e19a0ad5  fasthttp

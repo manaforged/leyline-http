@@ -9,7 +9,7 @@ use crate::pool::TlsInfo;
 use crate::quic::config::H3Config;
 use crate::quic::connection::connect_and_handshake;
 use crate::tls::{FingerprintConnector, Tls, TlsError};
-use crate::{Cause, Error};
+use crate::{Error, Kind};
 
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
 
@@ -21,7 +21,7 @@ pub(crate) async fn open_fresh_h3(
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
-    proxy: Option<&str>,
+    proxy: Option<&crate::core::ProxyUrl>,
 ) -> Result<(H3Client, TlsInfo), Error> {
     let handshake = connect_and_handshake(h3_cfg, trust, connector, host, port, proxy);
     let established = connector
@@ -31,7 +31,7 @@ pub(crate) async fn open_fresh_h3(
             Error::from(timeout)
                 .with_message(format!("h3 handshake to {host}:{port}: connect timeout"))
         })?
-        .map_err(|message| Error::new(Cause::Http3).with_message(message))?;
+        .map_err(|message| Error::new(Kind::Http3).with_message(message))?;
     let tls = established.tls.clone();
 
     let (tx, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);

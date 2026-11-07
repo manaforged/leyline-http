@@ -294,3 +294,19 @@ async fn a_smaller_max_body_size_bounds_the_error_read() {
         started.elapsed()
     );
 }
+
+#[tokio::test]
+async fn a_non_utf8_header_value_reaches_the_response_byte_exact() {
+    static REPLIES: &[&[u8]] = &[b"HTTP/1.1 200 OK\r\nX: a\xff\r\nContent-Length: 2\r\n\r\nok"];
+    let (port, _) = stalling_server(REPLIES).await;
+    let response = session(Duration::from_secs(5))
+        .get(format!("http://127.0.0.1:{port}/"))
+        .send()
+        .await
+        .unwrap();
+    let value = response
+        .headers()
+        .get("x")
+        .map(|value| value.as_bytes().to_vec());
+    assert_eq!(value, Some(vec![b'a', 0xff]));
+}

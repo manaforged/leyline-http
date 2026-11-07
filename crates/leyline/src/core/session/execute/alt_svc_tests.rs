@@ -14,14 +14,14 @@ fn alt_svc_older_than_its_max_age_is_not_cached() {
             HeaderValue::from_static("120"),
         ),
     ];
-    session.note_alt_svc(&url, &headers);
+    session.note_alt_svc(&url, &headers.into_iter().collect());
     assert!(!session.inner.pool.knows_h3("example.com", 443));
 }
 
 fn noted(fields: &[(&'static str, &'static str)]) -> bool {
     let session = crate::Session::builder().build().unwrap();
     let url = url::Url::parse("https://example.com/").unwrap();
-    let headers: Vec<(HeaderName, HeaderValue)> = fields
+    let headers: http::HeaderMap = fields
         .iter()
         .map(|(name, value)| {
             (
@@ -72,14 +72,18 @@ fn alt_svc_clear_survives_non_ascii_bytes() {
         &[(
             HeaderName::from_static("alt-svc"),
             HeaderValue::from_static("h3=\":443\"; ma=3600"),
-        )],
+        )]
+        .into_iter()
+        .collect(),
     );
     session.note_alt_svc(
         &url,
         &[(
             HeaderName::from_static("alt-svc"),
             HeaderValue::from_bytes(b"clear, x=\"caf\xc3\xa9\"").unwrap(),
-        )],
+        )]
+        .into_iter()
+        .collect(),
     );
     assert!(!session.inner.pool.knows_h3("example.com", 443));
 }

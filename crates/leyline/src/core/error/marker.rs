@@ -1,6 +1,6 @@
 use std::fmt;
 
-use super::{Cause, Error};
+use super::{Error, Kind};
 
 #[derive(Debug)]
 pub(crate) struct ShutDown;
@@ -28,7 +28,7 @@ const SHUT_DOWN_MESSAGE: &str = "session shut down";
 
 impl Error {
     pub(crate) fn shut_down() -> Error {
-        Error::new(Cause::Request)
+        Error::new(Kind::Request)
             .with_message(SHUT_DOWN_MESSAGE)
             .with_source(ShutDown)
     }
@@ -36,9 +36,5 @@ impl Error {
     /// Returns true when the request failed because the session shut down.
     pub fn is_shut_down(&self) -> bool {
         self.source_as::<ShutDown>().is_some()
-    }
-
-    pub(crate) fn not_processed(&self) -> bool {
-        self.source_as::<NotProcessed>().is_some()
     }
 }

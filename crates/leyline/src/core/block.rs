@@ -3,7 +3,7 @@ use std::sync::{Arc, LazyLock};
 use http::{HeaderName, StatusCode};
 use serde::Deserialize;
 
-use crate::core::error::{Cause, Error, Result};
+use crate::core::error::{Error, Result};
 use crate::core::response::Response;
 
 const STATUS_VENDOR: &str = "status";
@@ -80,7 +80,7 @@ impl Rules {
 
     pub(crate) fn from_toml(source: &str) -> Result<Self> {
         let file: RulesFile =
-            toml::from_str(source).map_err(|e| Error::new(Cause::Config).with_source(e))?;
+            toml::from_str(source).map_err(|e| Error::new(crate::Kind::Config).with_source(e))?;
         let rules = file
             .rule
             .into_iter()
@@ -124,7 +124,7 @@ impl TryFrom<RuleEntry> for BlockRule {
     type Error = Error;
 
     fn try_from(entry: RuleEntry) -> Result<Self> {
-        let invalid = |message: String| Error::new(Cause::Config).with_message(message);
+        let invalid = |message: String| Error::config(message);
         if entry.status.is_none() && entry.header.is_none() {
             return Err(invalid(format!(
                 "block rule for {} needs a status or a header",
@@ -141,12 +141,12 @@ impl TryFrom<RuleEntry> for BlockRule {
             .status
             .map(StatusCode::from_u16)
             .transpose()
-            .map_err(|e| Error::new(Cause::Config).with_source(e))?;
+            .map_err(|e| Error::new(crate::Kind::Config).with_source(e))?;
         let header = entry
             .header
             .map(|name| HeaderName::from_bytes(name.as_bytes()))
             .transpose()
-            .map_err(|e| Error::new(Cause::Config).with_source(e))?;
+            .map_err(|e| Error::new(crate::Kind::Config).with_source(e))?;
         Ok(Self {
             vendor: entry.vendor,
             kind: entry.kind,

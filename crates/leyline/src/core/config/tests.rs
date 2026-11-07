@@ -76,19 +76,26 @@ fn cfg_with_env_no_proxy(patterns: &str) -> Proxy {
 fn env_no_proxy_never_bypasses_explicit_proxies() {
     let url = url::Url::parse("https://target.test/x").unwrap();
     assert_eq!(
-        Proxy::from("http://req:1").proxy_for(&url).unwrap(),
+        Proxy::from("http://req:1")
+            .proxy_for(&url)
+            .unwrap()
+            .map(crate::core::ProxyUrl::as_str),
         Some("http://req:1"),
         "env NO_PROXY bypassed a per-request proxy override"
     );
     let sess = cfg_with_env_no_proxy("target.test").set_default_proxy("http://sess:1");
     assert_eq!(
-        sess.proxy_for(&url).unwrap(),
+        sess.proxy_for(&url)
+            .unwrap()
+            .map(crate::core::ProxyUrl::as_str),
         Some("http://sess:1"),
         "env NO_PROXY bypassed an explicit session proxy"
     );
     let cfg = cfg_with_env_no_proxy("target.test").all("http://rule:1");
     assert_eq!(
-        cfg.proxy_for(&url).unwrap(),
+        cfg.proxy_for(&url)
+            .unwrap()
+            .map(crate::core::ProxyUrl::as_str),
         Some("http://rule:1"),
         "env NO_PROXY bypassed an explicit proxy rule"
     );
@@ -100,16 +107,31 @@ fn env_no_proxy_bypasses_env_derived_proxy() {
         .set_default_proxy("http://env:1")
         .set_from_env();
     let url = url::Url::parse("https://target.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&url).unwrap(), None);
+    assert_eq!(
+        cfg.proxy_for(&url)
+            .unwrap()
+            .map(crate::core::ProxyUrl::as_str),
+        None
+    );
     let other = url::Url::parse("https://other.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&other).unwrap(), Some("http://env:1"));
+    assert_eq!(
+        cfg.proxy_for(&other)
+            .unwrap()
+            .map(crate::core::ProxyUrl::as_str),
+        Some("http://env:1")
+    );
 }
 
 #[test]
 fn explicit_no_proxy_bypasses_all_proxies() {
     let cfg = Proxy::new().no_proxy(["target.test"]);
     let url = url::Url::parse("https://target.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&url).unwrap(), None);
+    assert_eq!(
+        cfg.proxy_for(&url)
+            .unwrap()
+            .map(crate::core::ProxyUrl::as_str),
+        None
+    );
     assert_eq!(
         cfg.clone()
             .set_default_proxy("http://sess:1")
@@ -117,7 +139,13 @@ fn explicit_no_proxy_bypasses_all_proxies() {
             .unwrap(),
         None
     );
-    assert_eq!(cfg.all("http://rule:1").proxy_for(&url).unwrap(), None);
+    assert_eq!(
+        cfg.all("http://rule:1")
+            .proxy_for(&url)
+            .unwrap()
+            .map(crate::core::ProxyUrl::as_str),
+        None
+    );
 }
 
 #[test]
@@ -164,4 +192,13 @@ fn proxy_debug_redacts_password() {
     let url = ProxyUrl::parse("http://u:secret@h:8080").unwrap();
     assert!(!format!("{url:?}").contains("secret"));
     assert_eq!(url.as_str(), "http://u:secret@h:8080");
+}
+
+#[test]
+fn a_padded_proxy_url_is_shown_as_parsed() {
+    let session = crate::Session::builder()
+        .proxy(" http://proxy.example:8080 ")
+        .build()
+        .unwrap();
+    assert_eq!(session.proxy(), Some("http://proxy.example:8080"));
 }

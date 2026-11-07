@@ -401,3 +401,58 @@ fn profile_toml_and_fingerprint_strings_are_session_setters() {
     assert_eq!(headers[0].0, "user-agent");
     assert!(headers.iter().any(|(name, _)| *name == "sec-ch-ua"));
 }
+
+#[tokio::test]
+async fn each_url_string_reaches_its_own_target() {
+    let server = testing::Server::http(|_| testing::Response::new(200))
+        .await
+        .unwrap();
+    let session = Session::new();
+    let base = server.url("/");
+    let upper = base.replace("http://", "HTTP://");
+    for (sent, target, url) in [
+        (format!("{base}a"), "/a", format!("{base}a")),
+        (format!("{base}a"), "/a", format!("{base}a")),
+        (format!("{base}b"), "/b", format!("{base}b")),
+        (format!("{upper}c"), "/c", format!("{base}c")),
+        (format!("{base}c"), "/c", format!("{base}c")),
+        (format!("{upper}c?q"), "/c?q", format!("{base}c?q")),
+    ] {
+        let response = session.get(sent.as_str()).send().await.unwrap();
+        assert_eq!(response.url().as_str(), url);
+        assert_eq!(server.next_request().await.unwrap().target, target);
+    }
+}
+
+#[derive(Default)]
+struct Browsers(Mutex<Vec<Option<Browser>>>);
+
+impl Trace for Browsers {
+    fn event(&self, event: &Event<'_>) {
+        if let Event::Summary { browser, .. } = event {
+            self.0.lock().unwrap().push(*browser);
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_trace_names_the_browser_the_session_sends_as() {
+    let browsers = Browser::all();
+    let server = testing::Server::http(queue(
+        browsers
+            .iter()
+            .map(|_| testing::Response::new(200).body("ok")),
+    ))
+    .await
+    .unwrap();
+    for &browser in browsers {
+        let hook = Arc::new(Browsers::default());
+        let session = Session::builder()
+            .browser(browser)
+            .trace(Arc::clone(&hook))
+            .build()
+            .unwrap();
+        session.get(server.url("/")).send().await.unwrap();
+        assert_eq!(*hook.0.lock().unwrap(), [session.browser()], "{browser}");
+    }
+}

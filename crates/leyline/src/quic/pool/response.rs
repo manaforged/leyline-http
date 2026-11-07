@@ -1,91 +1,73 @@
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum H3ResponseState {
-    Initial(usize),
-    Final,
-    Trailers,
-}
+use bytes::Bytes;
+use leyline_quiche as quiche;
+use quiche::h3::NameValue;
 
-pub(super) type H3Headers = Vec<(String, String)>;
+use http::HeaderMap;
+
+use crate::core::transport::{ResponseHead, ResponseState, response_field};
 
 pub(super) enum H3HeaderBlock {
     Informational,
-    Final { status: u16, headers: H3Headers },
-    Trailers(H3Headers),
+    Final {
+        status: http::StatusCode,
+        headers: http::HeaderMap,
+        length: Option<u64>,
+    },
+    Trailers(http::HeaderMap),
 }
 
-impl H3ResponseState {
+impl ResponseState {
     pub(super) fn headers(
         &mut self,
-        list: &[(String, String)],
+        list: &[quiche::h3::Header],
     ) -> Result<H3HeaderBlock, &'static str> {
         match self {
-            Self::Initial(informational) => {
-                let (status, headers) = parse_response_head(list)?;
-                if (100..200).contains(&status) {
-                    *informational += 1;
-                    if *informational > crate::util::MAX_INFORMATIONAL {
-                        return Err("h3: too many informational responses");
-                    }
+            Self::Initial(_) => {
+                let (status, headers, length) = response_head(list)?;
+                self.head(status)?;
+                if status.is_informational() {
                     Ok(H3HeaderBlock::Informational)
                 } else {
-                    *self = Self::Final;
-                    Ok(H3HeaderBlock::Final { status, headers })
+                    Ok(H3HeaderBlock::Final {
+                        status,
+                        headers,
+                        length,
+                    })
                 }
             }
             Self::Final => {
-                if list.iter().any(|(name, _)| name.starts_with(':')) {
+                if list.iter().any(|header| header.name().starts_with(b":")) {
                     return Err("h3: trailers must not contain pseudo-headers");
                 }
-                *self = Self::Trailers;
-                Ok(H3HeaderBlock::Trailers(list.to_vec()))
+                self.trailers()?;
+                Ok(H3HeaderBlock::Trailers(
+                    list.iter().map(header_pair).collect::<Result<_, _>>()?,
+                ))
             }
             Self::Trailers => Err("h3: response contains headers after trailers"),
         }
     }
-
-    pub(super) fn data(self) -> Result<(), &'static str> {
-        match self {
-            Self::Final => Ok(()),
-            Self::Initial(_) => Err("h3: response DATA arrived before a final response head"),
-            Self::Trailers => Err("h3: response DATA arrived after trailers"),
-        }
-    }
-
-    pub(super) fn finish(self) -> Result<(), &'static str> {
-        match self {
-            Self::Initial(_) => Err("h3: response ended before a final response head"),
-            Self::Final | Self::Trailers => Ok(()),
-        }
-    }
 }
 
-fn parse_response_head(list: &[(String, String)]) -> Result<(u16, H3Headers), &'static str> {
-    let mut status = None;
-    let mut headers = Vec::with_capacity(list.len());
-    let mut regular = false;
+fn header_pair(
+    header: &quiche::h3::Header,
+) -> Result<(http::HeaderName, http::HeaderValue), &'static str> {
+    let typed = http::HeaderName::from_bytes(header.name())
+        .ok()
+        .zip(http::HeaderValue::from_maybe_shared(Bytes::copy_from_slice(header.value())).ok());
+    response_field(header.name(), header.value(), typed)
+}
 
-    for (name, value) in list {
-        if name.starts_with(':') {
-            if regular || name != ":status" || status.is_some() {
-                return Err("h3: response contains malformed pseudo-headers");
-            }
-            if value.len() != 3 || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Err("h3: response contains malformed :status pseudo-header");
-            }
-            let code = value
-                .bytes()
-                .fold(0, |status, byte| status * 10 + u16::from(byte - b'0'));
-            if code == 101 {
-                return Err("h3: status 101 is forbidden");
-            }
-            status = Some(code);
+fn response_head(
+    list: &[quiche::h3::Header],
+) -> Result<(http::StatusCode, HeaderMap, Option<u64>), &'static str> {
+    let mut head = ResponseHead::default();
+    for header in list {
+        if header.name().starts_with(b":") {
+            head.pseudo(header.name(), header.value())?;
         } else {
-            regular = true;
-            headers.push((name.clone(), value.clone()));
+            head.field(header_pair(header))?;
         }
     }
-
-    status
-        .map(|status| (status, headers))
-        .ok_or("h3: response missing :status pseudo-header")
+    head.finish()
 }

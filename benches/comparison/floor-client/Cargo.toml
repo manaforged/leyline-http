@@ -1,0 +1,15 @@
+[package]
+name = "floor-cmp-client"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "floor"
+path = "src/main.rs"
+
+[dependencies]
+leyline = { package = "leyline-http", path = "../../../crates/leyline", features = ["bench-internals"] }
+url = "2"

@@ -7,7 +7,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 #[cfg(feature = "websocket")]
 use tokio::sync::mpsc;
 
-use crate::h2::client::RequestBody;
+use crate::core::{Body, BodyKind};
 use crate::h2::connection::PseudoHeaders;
 use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
@@ -15,7 +15,7 @@ use crate::h2::stream_state::StreamEvent;
 use super::*;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    pub(super) async fn on_command(&mut self, cmd: DriverCommand) -> Result<(), H2Error> {
+    pub(super) fn on_command(&mut self, cmd: DriverCommand) -> Result<(), H2Error> {
         if cmd.is_cancelled() {
             return Ok(());
         }
@@ -24,22 +24,19 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             return Ok(());
         }
         match cmd {
-            DriverCommand::Ping { ack_tx } => {
+            DriverCommand::Ping { ack_tx, deadline } => {
                 self.ping_seq = self.ping_seq.wrapping_add(1);
                 let payload = self.ping_seq.to_be_bytes();
-                self.writer
-                    .write_frame(&PingFrame {
-                        ack: false,
-                        payload,
-                    })
-                    .await?;
-                self.pings.push_back((payload, ack_tx));
+                self.writer.write_frame(&PingFrame {
+                    ack: false,
+                    payload,
+                })?;
+                self.pings.push_back((payload, ack_tx, deadline));
                 Ok(())
             }
             #[cfg(feature = "websocket")]
             DriverCommand::OpenConnect {
-                pseudo,
-                headers,
+                head,
                 write_rx,
                 sink,
             } => {
@@ -61,8 +58,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     send_err_to_sink(sink, e);
                     return Ok(());
                 }
-                self.start_extended_connect(&pseudo, &headers, write_rx, sink)
-                    .await
+                self.start_extended_connect(&head.pseudo, &head.headers, write_rx, sink)
             }
             DriverCommand::SendRequest {
                 head,
@@ -83,9 +79,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     send_err_to_sink(sink, e);
                     return Ok(());
                 }
-                let started = self
-                    .start_request_ex(&head.pseudo, &head.headers, body, sink)
-                    .await;
+                let started = self.start_request_ex(&head.pseudo, &head.headers, body, sink);
                 drop(slot);
                 started
             }
@@ -102,7 +96,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         )
     }
 
-    pub(super) async fn drain_pending(&mut self) -> Result<(), H2Error> {
+    pub(super) fn drain_pending(&mut self) -> Result<(), H2Error> {
         while !self.pending.is_empty() && self.peer_ready() {
             if let Err(e) = self.admit_new_stream()
                 && Self::deferrable_capacity_error(&e)
@@ -112,27 +106,30 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let Some(cmd) = self.pending.pop_front() else {
                 break;
             };
-            self.on_command(cmd).await?;
+            self.on_command(cmd)?;
         }
         Ok(())
     }
 
-    fn start_upload(&mut self, stream_id: u32, body: crate::util::upload::BodyStream) {
+    fn start_upload(&mut self, stream_id: u32, body: crate::core::BoxedStream) {
         let Some(actor) = self.streams.get_mut(stream_id) else {
             return;
         };
+        let (tx, _) = self
+            .body_chunks
+            .get_or_insert_with(|| tokio::sync::mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4));
         let credit = crate::util::upload::upload_credit();
         let pump = tokio::spawn(crate::util::upload::pump_request_body(
             stream_id,
             body,
-            self.body_chunk_tx.clone(),
+            tx.clone(),
             Arc::clone(&credit),
         ));
         actor.upload_credit = Some(credit);
         actor.pump = Some(pump.abort_handle());
     }
 
-    pub(super) async fn start_request(
+    pub(super) fn start_request(
         &mut self,
         pseudo: &PseudoHeaders,
         headers: &[crate::h2::connection::HeaderPair],
@@ -170,21 +167,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
         self.streams.insert(stream_id, actor);
 
-        if let Err(e) = self
-            .write_headers_block(
-                stream_id,
-                end_stream_on_headers,
-                (&pseudo_list[..pseudo_len], headers),
-                true,
-            )
-            .await
-        {
+        if let Err(e) = self.write_headers_block(
+            stream_id,
+            end_stream_on_headers,
+            (&pseudo_list[..pseudo_len], headers),
+            true,
+        ) {
             self.fail_stream(stream_id, e);
             return Ok(());
         }
 
         if let Some(body) = body
-            && let Err(e) = self.write_body_or_park(stream_id, body).await
+            && let Err(e) = self.write_body_or_park(stream_id, body)
         {
             self.fail_stream(stream_id, e);
         }
@@ -192,20 +186,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(super) async fn start_request_ex(
+    pub(super) fn start_request_ex(
         &mut self,
         pseudo: &PseudoHeaders,
         headers: &[crate::h2::connection::HeaderPair],
-        body: RequestBody,
+        body: Body,
         sink: ResponseSink,
     ) -> Result<(), H2Error> {
-        match body {
-            RequestBody::None => self.start_request(pseudo, headers, None, sink).await,
-            RequestBody::Buffered(b) => {
+        match body.0 {
+            BodyKind::Empty => self.start_request(pseudo, headers, None, sink),
+            BodyKind::Bytes(b) => {
                 let body = if b.is_empty() { None } else { Some(b) };
-                self.start_request(pseudo, headers, body, sink).await
+                self.start_request(pseudo, headers, body, sink)
             }
-            RequestBody::Streaming { stream: body, .. } => {
+            BodyKind::Stream { stream: body, .. } => {
                 let stream_id = self.alloc_stream_id();
                 let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
 
@@ -242,15 +236,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
                 self.streams.insert(stream_id, actor);
 
-                if let Err(e) = self
-                    .write_headers_block(
-                        stream_id,
-                        false,
-                        (&pseudo_list[..pseudo_len], headers),
-                        true,
-                    )
-                    .await
-                {
+                if let Err(e) = self.write_headers_block(
+                    stream_id,
+                    false,
+                    (&pseudo_list[..pseudo_len], headers),
+                    true,
+                ) {
                     self.fail_stream(stream_id, e);
                     return Ok(());
                 }
@@ -262,7 +253,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     #[cfg(feature = "websocket")]
-    pub(super) async fn start_extended_connect(
+    pub(super) fn start_extended_connect(
         &mut self,
         pseudo: &PseudoHeaders,
         headers: &[crate::h2::connection::HeaderPair],
@@ -303,15 +294,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
         self.streams.insert(stream_id, actor);
 
-        if let Err(e) = self
-            .write_headers_block(
-                stream_id,
-                false,
-                (&pseudo_list[..pseudo_len], headers),
-                true,
-            )
-            .await
-        {
+        if let Err(e) = self.write_headers_block(
+            stream_id,
+            false,
+            (&pseudo_list[..pseudo_len], headers),
+            true,
+        ) {
             self.fail_stream(stream_id, e);
             return Ok(());
         }

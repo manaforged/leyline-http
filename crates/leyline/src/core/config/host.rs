@@ -35,6 +35,17 @@ pub(super) fn pattern_matches(host: &str, raw: &str) -> bool {
         pat.truncate(idx);
     }
     let pat = normalize_host(&pat);
-    let needle = pat.strip_prefix('.').unwrap_or(&pat);
-    host == needle || host.ends_with(&format!(".{needle}"))
+    domain_match(host, pat.strip_prefix('.').unwrap_or(&pat))
+}
+
+pub(crate) fn domain_match(host: &str, domain: &str) -> bool {
+    let Some(rest) = host.len().checked_sub(domain.len()) else {
+        return false;
+    };
+    host.as_bytes()[rest..].eq_ignore_ascii_case(domain.as_bytes())
+        && (rest == 0 || host.as_bytes()[rest - 1] == b'.')
+}
+
+pub(crate) fn registrable_domain(host: &str) -> Option<String> {
+    psl::domain(host.as_bytes()).map(|d| String::from_utf8_lossy(d.as_bytes()).into_owned())
 }

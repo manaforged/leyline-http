@@ -26,27 +26,29 @@ mod service;
 pub(crate) mod session;
 mod stats;
 mod tab;
-mod transport;
+pub(crate) mod transport;
 #[cfg(feature = "websocket")]
 mod websocket;
 
 pub use attempt::Attempt;
 pub use block::Block;
 pub use body::Body;
+pub(crate) use body::{BodyKind, BoxedStream};
 pub(crate) use body_stream::BodyStream;
-pub(crate) use config::ProxyUrl;
+pub use config::ProxyUrl;
 pub(crate) use config::{BodyRules, DnsConfig, PoolConfig};
 pub(crate) use config::{DEFAULT_MAX_BODY_SIZE, DEFAULT_MAX_HEADER_LIST_BYTES};
 pub use config::{HostLimits, Proxy, Redirect, Timeout};
 pub(crate) use config::{SocketOptions, WebSocketOptions};
+pub(crate) use config::{domain_match, registrable_domain};
 #[cfg(feature = "html")]
 pub use crawl::{Crawl, Page, Respect, Scope, SkipReason};
-pub(crate) use error::Cause;
+
 pub use error::{Error, Kind, Result};
 pub(crate) use fetch_site::FetchSite;
 pub use into_url::IntoUrl;
-pub use request::{Encoding, IntoParamPair, RequestBuilder};
-pub(crate) use response::HttpVersion;
+pub use request::{Encoding, Event, Events, RequestBuilder};
+
 pub(crate) use response::ResponseTiming;
 #[cfg(feature = "bench-internals")]
 pub(crate) use response::parse_links;
@@ -59,7 +61,6 @@ pub(crate) use session::Identity;
 pub use session::{Protocol, Session, SessionBuilder};
 pub use stats::Stats;
 pub use tab::Tab;
-pub(crate) use transport::header_map;
 pub use transport::{ErrorBudget, ResponseMode};
 #[cfg(feature = "websocket")]
 pub use websocket::{Message, WebSocket};
