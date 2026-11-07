@@ -54,7 +54,9 @@ better.
 | Go net/http | 39,955 | 577,833 |
 
 Leyline also uses less client CPU per request than each of them in all four
-measured HTTP/2 workloads. [BENCHMARKS.md](BENCHMARKS.md) has every workload, HTTP/1.1,
+measured HTTP/2 workloads. At a fixed offered rate of 50,000 HTTP/2 requests per
+second, its p99 latency is 124 µs, against 139 µs for hyper-util and 148 µs for
+reqwest; libcurl's is lower at 88 µs. [BENCHMARKS.md](BENCHMARKS.md) has every workload, HTTP/1.1,
 confidence intervals, and the commands to reproduce them.
 
 For the highest request rate, `SessionBuilder::run_per_core` runs one runtime
@@ -88,6 +90,7 @@ times those of tls-client at 256 in flight.
 - [API reference](https://docs.rs/leyline-http)
 - [Upgrading from 0.1](UPGRADE.md)
 - [Changelog](CHANGELOG.md)
+- [Qualification](QUALIFICATION.md): what is proved, tested and measured under failure and load
 - [For coding agents](AGENTS.md)
 
 ## License

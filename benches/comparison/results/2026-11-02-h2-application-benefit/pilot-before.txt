@@ -1,1 +1,0 @@
-WINDOW rps=185099.3 tasks=64 task_min=8664 task_max=8695 worker_busy_ms=2495

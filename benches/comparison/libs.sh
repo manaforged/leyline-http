@@ -150,12 +150,14 @@ run() {
   local st=$OUT/stat.$$ w0 w1 args=("$U" 1 0 "$4" "$3")
   [ "$3" = 0 ] && args=("$U" "$4" 0 1 1)
   w0=$(date +%s%N)
-  CMP_CONNECTIONS=$2 timeout 900 perf stat -x, -e instructions:u,task-clock -o "$st" "${CPIN[@]}" ${CMD[$1]} "${args[@]}" </dev/null >/dev/null 2>>"$OUT/stderr.$1" || return
+  CMP_CONNECTIONS=$2 timeout 900 perf stat -x, -e instructions:u,task-clock -o "$st" "${CPIN[@]}" /usr/bin/time -f %M -o "$st.rss" ${CMD[$1]} "${args[@]}" </dev/null >/dev/null 2>>"$OUT/stderr.$1" || return
   w1=$(date +%s%N)
+  [ -n "${r:-}" ] && echo "$r $name $1 $(tail -1 "$st.rss")" >> "$OUT/rss.txt"
   echo "$(grep instructions "$st" | cut -d, -f1) $(grep task-clock "$st" | cut -d, -f1) $((w1 - w0))"
 }
 
 : > "$OUT/rows.txt"
+: > "$OUT/rss.txt"
 declare -A SIZED
 busy_percent() {
   local a b c d e f g h t1 i1 t2 i2
@@ -185,6 +187,26 @@ calibrate() {
   [ "$m" -gt "$limit" ] && m=$limit
   SIZED[$name.$lib]=$(( m > 0 ? m : 1 ))
 }
+paced() {
+  local st=$OUT/stat.$$ line
+  line=$(CMP_CONNECTIONS=$2 timeout 900 perf stat -x, -e task-clock -o "$st" "${CPIN[@]}" /usr/bin/time -f %M -o "$st.rss" ${CMD[$1]} "$U" paced "$4" "$PACED_SECONDS" "$3" </dev/null 2>>"$OUT/stderr.$1" | grep '^PACED ') || return
+  field() { sed -n "s/.* $1=\([0-9.]*\).*/\1/p" <<<"$line"; }
+  echo "$4 $PACED_SECONDS $(field completed) $(field rps) $(field corrected_p50_us) $(field corrected_p99_us) $(field corrected_p999_us) $(field service_p50_us) $(field service_p99_us) $(field service_p999_us) $(tail -1 "$st.rss") $(grep task-clock "$st" | cut -d, -f1)"
+}
+PACED_SECONDS=${PACED_SECONDS:-10}
+if [ "${MODE:-throughput}" = paced ]; then
+  for r in $(seq 1 "$R"); do
+    for cell in $CELLS; do IFS=: read -r name conns workers rate <<<"$cell"
+      order=$LIBS; (( r % 2 )) || order=$(tr " " "\n" <<<"$LIBS" | tac | tr "\n" " ")
+      for lib in $order; do
+        idle_gate
+        row="$r $name $lib $(paced "$lib" "$conns" "$workers" "$rate")"
+        [ "$(wc -w <<<"$row")" = 15 ] || { echo "$lib failed in paced round $r of $name; see $OUT/stderr.$lib" >&2; exit 1; }
+        echo "$row" | tee -a "$OUT/rows.txt"
+      done
+    done
+  done
+else
 declare -A DECIDED
 for cell in $CELLS; do IFS=: read -r name conns streams n <<<"$cell"; [ "$name" = seq ] && streams=0
   for lib in $LIBS; do calibrate "$lib" "$name" "$conns" "$streams" $((n / ${DIV[$lib]:-1})); done
@@ -210,6 +232,7 @@ for r in $(seq 1 "$R"); do
     while read -r name lib; do [ -n "$name" ] && DECIDED[$name.$lib]=1; done < <(python3 "$C/libs-stop.py" "$OUT/rows.txt" "$STOP_REF")
   fi
 done
+fi
 
 {
   echo "stop_ref ${STOP_REF:-none} stop_min_rounds ${STOP_MIN_ROUNDS:-3} stop_margin ${STOP_MARGIN:-0.05}"
@@ -243,7 +266,7 @@ done
     (cd "$C/node-client" && node -e 'const fs=require("node:fs"),crypto=require("node:crypto"),p=require("leyline-http"),digest=name=>crypto.createHash("sha256").update(fs.readFileSync(name)).digest(); console.log("leyline_node_version",p.version()); const native=Object.keys(require.cache).filter(n=>n.endsWith(".node")); for(const name of native) console.log("leyline_node_native_sha256",digest(name).toString("hex")); console.log("leyline_node_artifact_sha256",crypto.createHash("sha256").update(Buffer.concat([...native,require.resolve("leyline-http"),...process.argv.slice(1)].map(digest))).digest("hex"))' "$C/node-client/leyline.mjs" "$C/node-client/harness.mjs")
   fi
   echo "java $(java -version 2>&1 | head -1)"; echo "okhttp $(ls java-client/lib | paste -sd' ')"
-  echo "dotnet $($DOTNET --version 2>/dev/null)"; echo "proto $PROTO"
+  echo "dotnet $($DOTNET --version 2>/dev/null)"; echo "proto $PROTO"; echo "mode ${MODE:-throughput} paced_seconds $PACED_SECONDS"
   (cd bin && sha256sum server floor leyline leyline-blocking reqwest hyper h2 curl wreq ureq nethttp tlsclient fasthttp pingora 2>/dev/null)
 } > "$OUT/receipts.txt"
 python3 "$C/libs-table.py" "$OUT/rows.txt" | tee "$OUT/table.txt"

@@ -1,3 +1,8 @@
+#[path = "../../paced.rs"]
+mod paced;
+#[path = "../../paced_tokio.rs"]
+mod paced_tokio;
+
 use std::env;
 use std::fs;
 use std::sync::Arc;
@@ -233,6 +238,25 @@ async fn run() {
             fnv1a(&body),
             body.len()
         );
+        return;
+    }
+
+    if let Some(plan) = paced::Plan::from_args(&args) {
+        let mut sends = Vec::new();
+        for _ in 0..paced::connections() {
+            let conn = connect(&tls, &uri).await;
+            sends.push(check(conn.send.clone(), &uri, &expected).await);
+        }
+        let sends = Arc::new(sends);
+        let rows = paced_tokio::run_tasks(plan, move |worker| {
+            let send = sends[worker % sends.len()].clone();
+            let (uri, expected) = (uri.clone(), Arc::clone(&expected));
+            async move {
+                check(send, &uri, &expected).await;
+            }
+        })
+        .await;
+        paced::report(&plan, rows);
         return;
     }
 

@@ -31,7 +31,11 @@ struct Run {
 }
 
 async fn exchange(session: Session, url: String, id: u64) -> Result<String, leyline::Error> {
-    let response = session.get(&url).header(ID_HEADER, id.to_string()).send().await?;
+    let response = session
+        .get(&url)
+        .header(ID_HEADER, id.to_string())
+        .send()
+        .await?;
     response.text().await
 }
 
@@ -63,8 +67,13 @@ async fn checked(run: &Run, id: u64, verdict: &Verdict) {
         Ok(text) if text == body_for(id) => {
             run.completed.fetch_add(1, Ordering::Relaxed);
         }
-        Ok(text) => verdict.fail(format!("cross-talk: id={id} received {text:?} after cancellations")),
-        Err(error) => verdict.fail(format!("id={id} failed after cancellations: {:?}", error.kind())),
+        Ok(text) => verdict.fail(format!(
+            "cross-talk: id={id} received {text:?} after cancellations"
+        )),
+        Err(error) => verdict.fail(format!(
+            "id={id} failed after cancellations: {:?}",
+            error.kind()
+        )),
     }
 }
 
@@ -93,7 +102,9 @@ async fn permits_survive(run: &Arc<Run>, verdict: &Verdict) -> u128 {
     for task in tasks {
         let done = tokio::time::timeout(Duration::from_secs(5), task).await;
         if !matches!(done, Ok(Ok(Ok(_)))) {
-            verdict.fail(format!("permits: a request could not finish after the storm: {done:?}"));
+            verdict.fail(format!(
+                "permits: a request could not finish after the storm: {done:?}"
+            ));
         }
     }
     start.elapsed().as_millis()
@@ -121,7 +132,13 @@ pub async fn run(options: &Options, verdict: &Verdict) -> Value {
     let shared = Arc::new(Verdict::default());
     let stop = Arc::new(AtomicBool::new(false));
     let workers: Vec<_> = (0..options.concurrency)
-        .map(|_| tokio::spawn(worker(Arc::clone(&run), Arc::clone(&shared), Arc::clone(&stop))))
+        .map(|_| {
+            tokio::spawn(worker(
+                Arc::clone(&run),
+                Arc::clone(&shared),
+                Arc::clone(&stop),
+            ))
+        })
         .collect();
     tokio::time::sleep(Duration::from_secs(options.seconds)).await;
     stop.store(true, Ordering::Relaxed);
@@ -133,7 +150,9 @@ pub async fn run(options: &Options, verdict: &Verdict) -> Value {
     let end_levels = probe::levels();
     let open = origin.state.open.load(Ordering::SeqCst);
     if open != 0 {
-        shared.fail(format!("leak: origin still sees {open} open connections after the idle timeout"));
+        shared.fail(format!(
+            "leak: origin still sees {open} open connections after the idle timeout"
+        ));
     }
     if run.completed.load(Ordering::Relaxed) == 0 || run.cancelled.load(Ordering::Relaxed) == 0 {
         shared.fail("the run proved nothing: no requests completed or none were cancelled".into());

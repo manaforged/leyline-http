@@ -13,6 +13,7 @@ use tokio::runtime::Builder;
 use tokio_rustls::TlsAcceptor;
 use tokio_rustls::server::TlsStream;
 
+use crate::probe::{cpu_seconds, rss_kib};
 use crate::{Options, Verdict, number};
 
 const PREFACE_LEN: usize = 24;
@@ -69,11 +70,17 @@ const ATTACKS: [(&str, Attack); 13] = [
 ];
 
 fn attack_named(name: &str) -> Attack {
-    ATTACKS.iter().find(|(held, _)| *held == name).map_or_else(|| panic!("unknown attack {name}"), |(_, attack)| *attack)
+    ATTACKS
+        .iter()
+        .find(|(held, _)| *held == name)
+        .map_or_else(|| panic!("unknown attack {name}"), |(_, attack)| *attack)
 }
 
 pub fn text<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
-    args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).map(String::as_str)
+    args.iter()
+        .position(|a| a == name)
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
 }
 
 pub fn frame(kind: u8, flags: u8, stream: u32, payload: &[u8]) -> Vec<u8> {
@@ -137,13 +144,25 @@ async fn on_first_request(attack: Attack, reader: Reader, mut writer: Writer, st
         Attack::SettingsFlood => flood(writer, frame(SETTINGS, 0, 0, &[])).await,
         Attack::EmptyData => {
             tokio::spawn(drain(reader));
-            drop(writer.write_all(&frame(HEADERS, END_HEADERS, stream, &[STATUS_200])).await);
+            drop(
+                writer
+                    .write_all(&frame(HEADERS, END_HEADERS, stream, &[STATUS_200]))
+                    .await,
+            );
             flood(writer, empty).await;
         }
         Attack::EmptyContinuation | Attack::GrowingContinuation => {
             tokio::spawn(drain(reader));
-            drop(writer.write_all(&frame(HEADERS, 0, stream, &[STATUS_200])).await);
-            let chunk = if attack == Attack::EmptyContinuation { vec![] } else { vec![0x40; 16_384] };
+            drop(
+                writer
+                    .write_all(&frame(HEADERS, 0, stream, &[STATUS_200]))
+                    .await,
+            );
+            let chunk = if attack == Attack::EmptyContinuation {
+                vec![]
+            } else {
+                vec![0x40; 16_384]
+            };
             flood(writer, frame(CONTINUATION, 0, stream, &chunk)).await;
         }
         Attack::WindowFlood => {
@@ -159,14 +178,26 @@ async fn on_first_request(attack: Attack, reader: Reader, mut writer: Writer, st
             let first = chunks.next().unwrap_or_default();
             drop(writer.write_all(&frame(HEADERS, 0, stream, first)).await);
             for chunk in chunks {
-                drop(writer.write_all(&frame(CONTINUATION, 0, stream, chunk)).await);
+                drop(
+                    writer
+                        .write_all(&frame(CONTINUATION, 0, stream, chunk))
+                        .await,
+                );
             }
-            drop(writer.write_all(&frame(CONTINUATION, END_HEADERS, stream, &[])).await);
+            drop(
+                writer
+                    .write_all(&frame(CONTINUATION, END_HEADERS, stream, &[]))
+                    .await,
+            );
             tokio::time::sleep(Duration::from_secs(60)).await;
         }
         Attack::SlowBody => {
             tokio::spawn(drain(reader));
-            drop(writer.write_all(&frame(HEADERS, END_HEADERS, stream, &[STATUS_200])).await);
+            drop(
+                writer
+                    .write_all(&frame(HEADERS, END_HEADERS, stream, &[STATUS_200]))
+                    .await,
+            );
             let drip = frame(DATA, 0, stream, b"x");
             while writer.write_all(&drip).await.is_ok() {
                 tokio::time::sleep(Duration::from_millis(10)).await;
@@ -174,7 +205,11 @@ async fn on_first_request(attack: Attack, reader: Reader, mut writer: Writer, st
         }
         Attack::DataFlood => {
             tokio::spawn(drain(reader));
-            drop(writer.write_all(&frame(HEADERS, END_HEADERS, stream, &[STATUS_200])).await);
+            drop(
+                writer
+                    .write_all(&frame(HEADERS, END_HEADERS, stream, &[STATUS_200]))
+                    .await,
+            );
             flood(writer, frame(DATA, 0, stream, &[0x61; 16_384])).await;
         }
         Attack::ZeroWindow => {
@@ -208,7 +243,9 @@ async fn serve_requests(attack: Attack, mut reader: Reader, mut writer: Writer) 
 
 async fn connection(acceptor: TlsAcceptor, socket: TcpStream, attack: Attack) {
     drop(socket.set_nodelay(true));
-    let Ok(mut stream) = acceptor.accept(socket).await else { return };
+    let Ok(mut stream) = acceptor.accept(socket).await else {
+        return;
+    };
     let mut preface = [0u8; PREFACE_LEN];
     if stream.read_exact(&mut preface).await.is_err() {
         return;
@@ -231,11 +268,15 @@ async fn listen(acceptor: TlsAcceptor, port: u16, attack: Attack) {
 
 pub fn acceptor(ca_path: &str) -> TlsAcceptor {
     drop(rustls::crypto::aws_lc_rs::default_provider().install_default());
-    let issued = rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).expect("certificate");
+    let issued =
+        rcgen::generate_simple_self_signed(vec!["127.0.0.1".to_owned()]).expect("certificate");
     let cert: CertificateDer<'static> = issued.cert.der().clone();
     std::fs::write(ca_path, &cert).expect("write certificate");
     let key = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(issued.signing_key.serialize_der()));
-    let mut config = rustls::ServerConfig::builder().with_no_client_auth().with_single_cert(vec![cert], key).expect("tls config");
+    let mut config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert], key)
+        .expect("tls config");
     config.alpn_protocols = vec![b"h2".to_vec()];
     TlsAcceptor::from(Arc::new(config))
 }
@@ -244,7 +285,11 @@ pub fn serve(args: &[String]) -> ! {
     let attack = attack_named(text(args, "--attack").unwrap_or("none"));
     let port: u16 = number(args, "--port", 8443);
     let threads: usize = number(args, "--origin-threads", 4);
-    let runtime = Builder::new_multi_thread().worker_threads(threads).enable_all().build().expect("runtime");
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(threads)
+        .enable_all()
+        .build()
+        .expect("runtime");
     let tls = acceptor(text(args, "--ca").expect("--ca path"));
     runtime.spawn(listen(tls.clone(), port, Attack::None));
     runtime.block_on(listen(tls, port + 1, attack));
@@ -267,7 +312,13 @@ pub fn latency() -> Histogram<u64> {
     Histogram::new_with_bounds(1, 60_000_000, 3).expect("histogram")
 }
 
-async fn healthy_one(shared: Arc<Shared>, session: Session, url: Arc<str>, under_attack: bool, scheduled: Instant) {
+async fn healthy_one(
+    shared: Arc<Shared>,
+    session: Session,
+    url: Arc<str>,
+    under_attack: bool,
+    scheduled: Instant,
+) {
     let failure = match session.get(&*url).send().await {
         Ok(response) if response.status() != 200 => Some(format!("status {}", response.status())),
         Ok(response) => match response.bytes().await {
@@ -285,17 +336,37 @@ async fn healthy_one(shared: Arc<Shared>, session: Session, url: Arc<str>, under
             shared.healthy_failed.fetch_add(1, Ordering::Relaxed);
             shared.first_error.lock().unwrap().get_or_insert(message);
             let due = (scheduled - shared.start).as_secs_f64();
-            shared.failed_at.lock().unwrap().push((due, scheduled.elapsed().as_secs_f64()));
+            shared
+                .failed_at
+                .lock()
+                .unwrap()
+                .push((due, scheduled.elapsed().as_secs_f64()));
         }
     }
-    let held = if under_attack { &shared.during } else { &shared.before };
-    held.lock().unwrap().saturating_record(scheduled.elapsed().as_micros() as u64);
+    let held = if under_attack {
+        &shared.during
+    } else {
+        &shared.before
+    };
+    held.lock()
+        .unwrap()
+        .saturating_record(scheduled.elapsed().as_micros() as u64);
 }
 
-async fn hostile_one(shared: Arc<Shared>, session: Session, url: Arc<str>, upload: bool, limit: Duration) {
+async fn hostile_one(
+    shared: Arc<Shared>,
+    session: Session,
+    url: Arc<str>,
+    upload: bool,
+    limit: Duration,
+) {
     let began = Instant::now();
     let sent = if upload {
-        session.post(&*url).body(Body::from(vec![0u8; 1 << 16])).send().await
+        session
+            .post(&*url)
+            .body(Body::from(vec![0u8; 1 << 16]))
+            .send()
+            .await
     } else {
         session.get(&*url).send().await
     };
@@ -328,17 +399,6 @@ pub async fn pace<F: FnMut(Instant)>(start: Instant, rate: u64, from: f64, to: f
     }
 }
 
-pub fn rss_kib() -> u64 {
-    let text = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
-    text.split_whitespace().nth(1).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0) * 4
-}
-
-pub fn cpu_seconds() -> f64 {
-    let text = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
-    let fields: Vec<&str> = text.rsplit(')').next().unwrap_or("").split_whitespace().collect();
-    [11, 12].iter().filter_map(|&i| fields.get(i)?.parse::<f64>().ok()).sum::<f64>() / 100.0
-}
-
 struct Usage {
     cpu_before: f64,
     cpu_during: f64,
@@ -365,22 +425,40 @@ async fn watch(start: Instant, quiet: f64, seconds: f64) -> Usage {
 fn judge(shared: &Shared, usage: &Usage, ratio: f64, verdict: &Verdict) {
     let failed = shared.healthy_failed.load(Ordering::Relaxed);
     if failed > 0 {
-        let first = shared.first_error.lock().unwrap().clone().unwrap_or_default();
-        verdict.fail(format!("isolation: {failed} healthy requests failed, first: {first}"));
+        let first = shared
+            .first_error
+            .lock()
+            .unwrap()
+            .clone()
+            .unwrap_or_default();
+        verdict.fail(format!(
+            "isolation: {failed} healthy requests failed, first: {first}"
+        ));
     }
     let outlived = shared.outlived.load(Ordering::Relaxed);
     if outlived > 0 {
-        verdict.fail(format!("deadline: {outlived} hostile requests outlived their deadline"));
+        verdict.fail(format!(
+            "deadline: {outlived} hostile requests outlived their deadline"
+        ));
     }
-    let (before, during) = (shared.before.lock().unwrap().value_at_quantile(0.99), shared.during.lock().unwrap().value_at_quantile(0.99));
+    let (before, during) = (
+        shared.before.lock().unwrap().value_at_quantile(0.99),
+        shared.during.lock().unwrap().value_at_quantile(0.99),
+    );
     if during as f64 > before as f64 * ratio {
         verdict.fail(format!("isolation: healthy p99 {during} us under attack, {before} us before, ratio limit {ratio}"));
     }
     if usage.rss_peak_kib > usage.rss_at_attack_kib + MAX_RSS_GROWTH_KIB {
-        verdict.fail(format!("memory: RSS {} KiB under attack, {} KiB before", usage.rss_peak_kib, usage.rss_at_attack_kib));
+        verdict.fail(format!(
+            "memory: RSS {} KiB under attack, {} KiB before",
+            usage.rss_peak_kib, usage.rss_at_attack_kib
+        ));
     }
     if usage.cpu_during > usage.cpu_before + MAX_EXTRA_CPUS {
-        verdict.fail(format!("cpu: {:.2} logical CPUs under attack, {:.2} before", usage.cpu_during, usage.cpu_before));
+        verdict.fail(format!(
+            "cpu: {:.2} logical CPUs under attack, {:.2} before",
+            usage.cpu_during, usage.cpu_before
+        ));
     }
 }
 
@@ -404,7 +482,10 @@ pub fn run(options: &Options, args: &[String], verdict: &Verdict) -> Value {
         before: Mutex::new(latency()),
         during: Mutex::new(latency()),
     });
-    let runtime = Builder::new_multi_thread().enable_all().build().expect("runtime");
+    let runtime = Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("runtime");
     let usage = runtime.block_on(async {
         let session = Session::builder()
             .protocol(Protocol::Http2)
@@ -418,20 +499,38 @@ pub fn run(options: &Options, args: &[String], verdict: &Verdict) -> Value {
         let start = shared.start;
         let watching = tokio::spawn(watch(start, quiet, seconds));
         for _ in 0..number::<u64>(args, "--burst", 0) {
-            tokio::spawn(healthy_one(Arc::clone(&shared), session.clone(), Arc::clone(&healthy_url), false, start));
+            tokio::spawn(healthy_one(
+                Arc::clone(&shared),
+                session.clone(),
+                Arc::clone(&healthy_url),
+                false,
+                start,
+            ));
         }
         let healthy = {
             let (shared, session) = (Arc::clone(&shared), session.clone());
             pace(start, rate, 0.0, seconds, move |at| {
                 let under_attack = (at - start).as_secs_f64() >= quiet;
-                tokio::spawn(healthy_one(Arc::clone(&shared), session.clone(), Arc::clone(&healthy_url), under_attack, at));
+                tokio::spawn(healthy_one(
+                    Arc::clone(&shared),
+                    session.clone(),
+                    Arc::clone(&healthy_url),
+                    under_attack,
+                    at,
+                ));
             })
         };
         let hostile = {
             let (shared, session) = (Arc::clone(&shared), session.clone());
             let upload = attack == Attack::ZeroWindow;
             pace(start, HOSTILE_RATE, quiet, seconds, move |_| {
-                tokio::spawn(hostile_one(Arc::clone(&shared), session.clone(), Arc::clone(&hostile_url), upload, limit));
+                tokio::spawn(hostile_one(
+                    Arc::clone(&shared),
+                    session.clone(),
+                    Arc::clone(&hostile_url),
+                    upload,
+                    limit,
+                ));
             })
         };
         tokio::join!(healthy, hostile);

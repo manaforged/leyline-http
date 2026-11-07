@@ -1,0 +1,25 @@
+LISTENING https://127.0.0.1:45255/
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS host: 127.0.0.1:45255user-agent: bench/1.0accept: */*accept-encoding: gzip, deflate, br, zstdconnection: keep-alive
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS user-agent: bench/1.0accept: */*accept-encoding: gzip, deflate, br, zstdhost: 127.0.0.1:45255
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS accept: */*user-agent: bench/1.0accept-encoding: gzip, deflate, br, zstdhost: 127.0.0.1:45255
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS user-agent: bench/1.0accept: */*accept-encoding: gzip, deflate, br, zstdhost: 127.0.0.1:45255
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS host: 127.0.0.1:45255user-agent: bench/1.0accept: */*accept-encoding: gzip, deflate, br, zstd
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS host: 127.0.0.1:45255user-agent: bench/1.0accept: */*accept-encoding: gzip, deflate, br, zstd
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS host: 127.0.0.1:45255user-agent: bench/1.0accept: */*accept-encoding: gzip, deflate, br, zstd
+TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+PROTO HTTP/1.1
+HEADERS user-agent: bench/1.0host: 127.0.0.1:45255accept: */*accept-encoding: gzip, deflate, br, zstd

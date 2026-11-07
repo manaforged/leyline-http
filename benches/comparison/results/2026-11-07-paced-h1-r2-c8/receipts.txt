@@ -1,0 +1,45 @@
+stop_ref none stop_min_rounds 3 stop_margin 0.05
+date_utc 2026-11-07T21:02:47Z
+kernel 7.0.0-38-generic
+loadavg_before 0.13 0.19 0.28
+loadavg_after 0.21 0.18 0.25
+governor performance
+cpu AMD Ryzen 9 9950X3D 16-Core Processor
+server_cpus 0-6,16-22 client_cpus 8-15,24-31
+server_addr 127.0.0.1:0 netns none link loopback
+leyline_source_hash 3bdc1179faaada904ee9e2add69fe71bc5080e72e92a3f5019dd831d9bf4d90b
+leyline_commit 783a10c9
+profile bare
+timeout 30s
+leyline_chrome bare
+tls matched
+certificate_verification trusted-ca
+ca_sha256 dd07e021b5c5be33955db37198b5761c27cc75a03bb476297c9c251db489c165
+curl-client/Cargo.lock name = "curl-sys" version = "0.4.91+curl-8.22.0"
+h2-client/Cargo.lock name = "h2" version = "0.4.20"
+hyper-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.21"
+leyline-client/Cargo.lock name = "leyline-http" version = "0.2.0"
+pingora-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "pingora-core" version = "0.9.0"
+reqwest-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.20" -- name = "reqwest" version = "0.13.5"
+runtime-client/Cargo.lock 
+ureq-client/Cargo.lock 
+wreq-client/Cargo.lock name = "wreq" version = "0.16.3"
+go go version go1.27.1 linux/amd64
+node v22.19.0 builtin_undici 6.21.2 undici 8.12.3 axios 1.21.0 got 16.2.0
+python Python 3.12.3 httpcore==1.0.9 httpx==0.28.1 requests==2.31.0 urllib3==2.0.7 
+java openjdk version "21.0.12.1" 2026-08-18
+okhttp 
+dotnet 
+proto h1
+mode paced paced_seconds 10
+6be65da18b4ff474cf7fe54b1b90f92449c604c36e9036651d59b2dc4073093a  server
+5acbd639bedd73f693a49197d1347acb1679857ae68f9c5087262ee99b63a467  leyline
+4efdb759c9e418aedb3e16c01893b2cf5aa6d83d3271c2a7c6d01a99e0d50cb4  leyline-blocking
+a99a876f2d62c63e5901e69d897a94ed203338d33c4bcd26057e80badfa35d2e  reqwest
+c1a6e3b1e52c853997ea383d9b73016ad3a4bfbcc635b7de9342410e4dcd82f9  hyper
+c45f0fb14a64b0e3e1c47aebeba10bb443e3ae626f439a1d3137b9a4f2437461  h2
+c56115e44492fc50ff2bcefbb7e6cf715395695fda77d9b329d383b3b1c0de04  curl
+eb37401ee2ccb8f35a43ace572980d90fa38e206de5b908029ec984c96943cb1  wreq
+ef323e69c85bd56481feeaf5c94f5cb7b462f09a006ba9406792e8c6c11fc57c  ureq
+bd44fe8745939f0d1eb68730e5246b68c4ca7942e488bf8e42c2f42b204080f1  nethttp
+6659c341108c2920e84e58c9bbca92033f22f37a1d4529e622fbf90d97651f83  fasthttp

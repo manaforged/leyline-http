@@ -108,7 +108,11 @@ impl Origin {
             runtime.spawn(accept(accepting, Arc::clone(&state), Arc::clone(&planner)));
         }
         let url = format!("http://{bound}/");
-        Self { url, state, runtime: Some(runtime) }
+        Self {
+            url,
+            state,
+            runtime: Some(runtime),
+        }
     }
 }
 
@@ -122,7 +126,9 @@ impl Drop for Origin {
 
 async fn accept(listener: TcpListener, state: Arc<State>, planner: Planner) {
     loop {
-        let Ok((stream, _)) = listener.accept().await else { continue };
+        let Ok((stream, _)) = listener.accept().await else {
+            continue;
+        };
         stream.set_nodelay(true).expect("nodelay");
         state.accepted.fetch_add(1, Ordering::Relaxed);
         state.open.fetch_add(1, Ordering::SeqCst);
@@ -136,7 +142,10 @@ async fn admit(capacity: &Capacity) -> bool {
         capacity.queued.fetch_sub(1, Ordering::Relaxed);
         return false;
     }
-    let busy = Arc::clone(&capacity.permits).acquire_owned().await.expect("capacity");
+    let busy = Arc::clone(&capacity.permits)
+        .acquire_owned()
+        .await
+        .expect("capacity");
     capacity.queued.fetch_sub(1, Ordering::Relaxed);
     tokio::time::sleep(capacity.service).await;
     drop(busy);
@@ -144,13 +153,17 @@ async fn admit(capacity: &Capacity) -> bool {
 }
 
 fn head_end(buffer: &[u8]) -> Option<usize> {
-    buffer.windows(4).position(|w| w == b"\r\n\r\n").map(|at| at + 4)
+    buffer
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|at| at + 4)
 }
 
 fn field(head: &str, name: &str) -> Option<u64> {
     head.lines().find_map(|line| {
         let (key, value) = line.split_once(':')?;
-        key.eq_ignore_ascii_case(name).then(|| value.trim().parse().ok())?
+        key.eq_ignore_ascii_case(name)
+            .then(|| value.trim().parse().ok())?
     })
 }
 
@@ -199,7 +212,12 @@ async fn read_request(stream: &mut TcpStream, buffer: &mut Vec<u8>) -> Option<As
     buffer.drain(..end + length);
     let control = control_of(&head);
     let id = field(&head, ID_HEADER).or(control.map(|_| 0))?;
-    Some(Asked { id, size: field(&head, SIZE_HEADER).unwrap_or(0) as usize, closing: false, control })
+    Some(Asked {
+        id,
+        size: field(&head, SIZE_HEADER).unwrap_or(0) as usize,
+        closing: false,
+        control,
+    })
 }
 
 fn answer_control(state: &State, control: Control) -> String {
@@ -214,7 +232,10 @@ fn answer_control(state: &State, control: Control) -> String {
         state.served.load(Ordering::Relaxed),
         state.open.load(Ordering::SeqCst)
     );
-    format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}", text.len())
+    format!(
+        "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{text}",
+        text.len()
+    )
 }
 
 async fn serve(mut stream: TcpStream, guard: Open, planner: Planner) {
@@ -237,7 +258,11 @@ async fn serve(mut stream: TcpStream, guard: Open, planner: Planner) {
             None => false,
         };
         let faults = state.faults_on.load(Ordering::SeqCst);
-        let attempt = if state.track_attempts { state.attempt(asked.id) } else { 1 };
+        let attempt = if state.track_attempts {
+            state.attempt(asked.id)
+        } else {
+            1
+        };
         let fault = match (shed, faults) {
             (true, _) => Fault::Busy,
             (false, true) => planner(asked.id, ip).applies(attempt),
@@ -284,8 +309,14 @@ static PADDING: [u8; 1 << 20] = [b'.'; 1 << 20];
 
 async fn sized(stream: &mut TcpStream, id: &str, asked: &Asked) -> bool {
     let total = asked.size.max(id.len());
-    let close = if asked.closing { "connection: close\r\n" } else { "" };
-    let first = format!("HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n{close}content-length: {total}\r\n\r\n{id}");
+    let close = if asked.closing {
+        "connection: close\r\n"
+    } else {
+        ""
+    };
+    let first = format!(
+        "HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\n{close}content-length: {total}\r\n\r\n{id}"
+    );
     write(stream, first.as_bytes()).await && write(stream, &PADDING[..total - id.len()]).await
 }
 
@@ -325,7 +356,13 @@ async fn respond(stream: &mut TcpStream, asked: &Asked, fault: Fault) -> bool {
             write(stream, whole.as_bytes()).await;
             false
         }
-        Fault::Busy => write(stream, b"HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\n\r\n").await,
+        Fault::Busy => {
+            write(
+                stream,
+                b"HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\n\r\n",
+            )
+            .await
+        }
         Fault::Delay(wait) => {
             tokio::time::sleep(wait).await;
             write(stream, whole.as_bytes()).await

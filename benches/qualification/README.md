@@ -38,6 +38,16 @@ go build -o target/go-differential differential/client.go
 python3 differential.py --go-client target/go-differential --corpus ../../fuzz/corpus
 ```
 
+## Release gate
+
+`qualify.sh` reruns the evidence behind [QUALIFICATION.md](../../QUALIFICATION.md): the full tier, the parser differential, every fuzz target for `FUZZ_SECONDS` (1800 by default), and the 1-hour soak. Run it before a qualification claim changes; a release does not run it. Arguments go to `run.py`, so pass the CPU sets and allocator there. It writes every log and receipt to `results/qualify/<commit>/` and exits 1 when a step fails:
+
+```
+./qualify.sh --origin-cpus 3-7,19-23 --client-cpus 8-15,24-31 --preload /usr/lib/x86_64-linux-gnu/libjemalloc.so.2
+```
+
+The quick tier is the check for each change: `python3 run.py` takes about 40 seconds.
+
 A scenario that gave the expected result is skipped until the binary or the scenario changes, so a stopped run resumes where it ended. Each scenario runs in its own network namespace when `sudo -n` and `unshare` allow it. Receipts and logs go to `results/<tier>/`.
 
 ## Edge scenarios

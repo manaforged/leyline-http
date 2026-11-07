@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
+use leyline::Body;
 use leyline::internals::h2::connection::PseudoHeaders;
 use leyline::internals::h2::{H2Client, H2Config, Head, start};
 use leyline::internals::pool::TransportBody;
-use leyline::Body;
 use libfuzzer_sys::fuzz_target;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, duplex, sink, split};
 use tokio::runtime::Builder;
@@ -68,12 +68,21 @@ async fn session(data: Vec<u8>) {
     };
     let tasks = REQUESTS.map(|streamed| tokio::spawn(exchange(client.clone(), streamed)));
     for task in tasks {
-        timeout(HANG, task).await.expect("a request hung after the peer closed").expect("request task");
+        timeout(HANG, task)
+            .await
+            .expect("a request hung after the peer closed")
+            .expect("request task");
     }
-    timeout(HANG, exchange(client, false)).await.expect("a request hung on a closed connection");
+    timeout(HANG, exchange(client, false))
+        .await
+        .expect("a request hung on a closed connection");
 }
 
 fuzz_target!(|data: &[u8]| {
-    let runtime = Builder::new_current_thread().enable_time().start_paused(true).build().expect("runtime");
+    let runtime = Builder::new_current_thread()
+        .enable_time()
+        .start_paused(true)
+        .build()
+        .expect("runtime");
     runtime.block_on(session(data.to_vec()));
 });

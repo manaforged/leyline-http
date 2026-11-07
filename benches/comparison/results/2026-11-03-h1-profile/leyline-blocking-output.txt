@@ -1,1 +1,0 @@
-RESULT leyline-blocking connections=1 warm_rps=58792.398 conc_rps=13885.225 cold_rps=0.000 warm_p50_us=16 warm_p90_us=17 warm_p99_us=20 conc_p50_us=29 conc_p90_us=29 conc_p99_us=29 conc_p999_us=29

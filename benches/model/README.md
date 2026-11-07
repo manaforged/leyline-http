@@ -10,6 +10,7 @@ cargo test --release
 | --- | --- | --- |
 | `command_queue` | A sender waits for room in the HTTP/2 command queue | `h2/client/driver/protocol.rs` |
 | `room` | A blocked caller waits for host limit room | `core/config/host_gate.rs` |
+| `reaper` | The idle reaper retires while connections return to the pool | `pool/pool.rs` |
 
 `the_earlier_wake_rule_loses_a_sender` keeps the protocol as it was before a fix, to show that the model finds that bug. Loom aborts the process on the deadlock, so the test is ignored by default:
 

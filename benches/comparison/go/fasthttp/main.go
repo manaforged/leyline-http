@@ -14,6 +14,7 @@ import (
 	"github.com/valyala/fasthttp"
 
 	"leyline-comparison/cmpheaders"
+	"leyline-comparison/cmppaced"
 	"leyline-comparison/cmptimeout"
 )
 
@@ -155,6 +156,11 @@ func main() {
 	for i := range clients {
 		clients[i] = newClient()
 		do(clients[i], url)
+	}
+
+	if plan, ok := cmppaced.FromArgs(os.Args); ok {
+		plan.Run(func(w int) { do(clients[w%connections], url) })
+		return
 	}
 
 	warm := make([]int64, 0, warmN)

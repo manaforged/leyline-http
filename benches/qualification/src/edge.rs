@@ -12,9 +12,14 @@ use tokio::runtime::Builder;
 use tokio::sync::Semaphore;
 
 use crate::origin::{Capacity, Origin, Planner};
-use crate::rival::Rival;
 use crate::plan::{Fault, ID_HEADER, Planned, SIZE_HEADER, body_for, mix, stall, sticky_fault};
+use crate::probe::{cpu_ticks, open_fds, rss_kib, tcp_counter};
+use crate::rival::Rival;
 use crate::{Options, Verdict, number};
+
+mod judge;
+
+use judge::{Limits, judge, merged, reuse, summary, tail_growth};
 
 const SHARDS: usize = 16;
 const MIN_REUSE: f64 = 0.999;
@@ -49,6 +54,7 @@ const PHASES: [(Phase, &str); 4] = [
 ];
 
 struct Layout {
+    origin: Option<std::net::Ipv4Addr>,
     port: u16,
     hosts: u32,
     bad_first: u32,
@@ -77,7 +83,11 @@ impl Layout {
             return plain;
         }
         let inside = (sent as f64 - self.rate * from) / (self.rate * self.shock);
-        if inside <= to - from { from + inside } else { plain - (to - from) * (self.shock - 1.0) }
+        if inside <= to - from {
+            from + inside
+        } else {
+            plain - (to - from) * (self.shock - 1.0)
+        }
     }
 
     fn phase_at(&self, elapsed: f64) -> Phase {
@@ -111,7 +121,10 @@ pub fn serve_origin(args: &[String]) -> ! {
     let planner: Planner = Arc::new(move |id, ip| match rank_of(ip) {
         Some(rank) if rank >= first && rank < first + count && stall_only => stall(),
         Some(rank) if rank >= first && rank < first + count => sticky_fault(seed, id),
-        _ => Planned { fault: Fault::None, sticky: false },
+        _ => Planned {
+            fault: Fault::None,
+            sticky: false,
+        },
     });
     let origin = Origin::listen(threads, &format!("0.0.0.0:{port}"), planner);
     let permits: usize = number(args, "--capacity-permits", 0);
@@ -123,32 +136,48 @@ pub fn serve_origin(args: &[String]) -> ! {
             queued: Arc::default(),
         });
     }
-    origin.state.close_every.store(number(args, "--close-every", 0), Ordering::Relaxed);
-    origin.state.close_silently.store(args.iter().any(|a| a == "--close-silently"), Ordering::Relaxed);
+    origin
+        .state
+        .close_every
+        .store(number(args, "--close-every", 0), Ordering::Relaxed);
+    origin.state.close_silently.store(
+        args.iter().any(|a| a == "--close-silently"),
+        Ordering::Relaxed,
+    );
     println!("READY {}", origin.url);
     loop {
         std::thread::park();
     }
 }
 
-fn control(port: u16, path: &str) -> (u64, u64, u64) {
+fn control(ip: std::net::Ipv4Addr, port: u16, path: &str) -> (u64, u64, u64) {
     for _ in 0..CONTROL_ATTEMPTS {
-        if let Ok(fields) = control_once(port, path) {
+        if let Ok(fields) = control_once(ip, port, path) {
             return fields;
         }
     }
     panic!("origin control failed {CONTROL_ATTEMPTS} times");
 }
 
-fn control_once(port: u16, path: &str) -> std::io::Result<(u64, u64, u64)> {
-    let mut stream = TcpStream::connect(("127.0.0.1", port))?;
+fn control_once(ip: std::net::Ipv4Addr, port: u16, path: &str) -> std::io::Result<(u64, u64, u64)> {
+    let mut stream = TcpStream::connect((ip, port))?;
     stream.set_read_timeout(Some(CONTROL_TIMEOUT))?;
-    write!(stream, "GET {path} HTTP/1.1\r\nhost: control\r\nconnection: close\r\n\r\n")?;
+    write!(
+        stream,
+        "GET {path} HTTP/1.1\r\nhost: control\r\nconnection: close\r\n\r\n"
+    )?;
     let mut text = String::new();
     stream.read_to_string(&mut text)?;
     let body = text.rsplit("\r\n\r\n").next().unwrap_or_default();
-    let mut fields = body.split_whitespace().map(|f| f.parse().map_err(|_| std::io::Error::other("control field")));
-    let mut next = || fields.next().unwrap_or_else(|| Err(std::io::Error::other("short control answer")));
+    let mut fields = body.split_whitespace().map(|f| {
+        f.parse()
+            .map_err(|_| std::io::Error::other("control field"))
+    });
+    let mut next = || {
+        fields
+            .next()
+            .unwrap_or_else(|| Err(std::io::Error::other("short control answer")))
+    };
     Ok((next()?, next()?, next()?))
 }
 
@@ -246,13 +275,19 @@ struct Failed {
 
 impl From<leyline::Error> for Failed {
     fn from(error: leyline::Error) -> Self {
-        Self { overloaded: error.kind() == Kind::Overloaded, message: format!("kind={:?} {error}", error.kind()) }
+        Self {
+            overloaded: error.kind() == Kind::Overloaded,
+            message: format!("kind={:?} {error}", error.kind()),
+        }
     }
 }
 
 impl From<String> for Failed {
     fn from(message: String) -> Self {
-        Self { overloaded: false, message }
+        Self {
+            overloaded: false,
+            message,
+        }
     }
 }
 
@@ -264,7 +299,11 @@ struct Call<'a> {
     size: usize,
 }
 
-async fn fetch(session: &Session, rival: Option<&Rival>, call: &Call<'_>) -> Result<(u16, Vec<u8>), Failed> {
+async fn fetch(
+    session: &Session,
+    rival: Option<&Rival>,
+    call: &Call<'_>,
+) -> Result<(u16, Vec<u8>), Failed> {
     if let Some(rival) = rival {
         let answer = rival.get(call.ip, call.port, call.id, call.size).await?;
         return Ok((answer.status, answer.body.to_vec()));
@@ -279,31 +318,63 @@ async fn fetch(session: &Session, rival: Option<&Rival>, call: &Call<'_>) -> Res
     Ok((status, response.bytes().await?.to_vec()))
 }
 
-async fn exchange(session: &Session, rival: Option<&Rival>, call: &Call<'_>, bad: bool, shed: bool) -> Result<Reply, Failed> {
+async fn exchange(
+    session: &Session,
+    rival: Option<&Rival>,
+    call: &Call<'_>,
+    bad: bool,
+    shed: bool,
+) -> Result<Reply, Failed> {
     let (id, size) = (call.id, call.size);
     let (status, body) = fetch(session, rival, call).await?;
     let expected = body_for(id);
     if status != 200 {
-        return Ok(if bad || (shed && status == 503) { Reply::Refused } else { Reply::Wrong });
+        return Ok(if bad || (shed && status == 503) {
+            Reply::Refused
+        } else {
+            Reply::Wrong
+        });
     }
     let whole = body.len() == size.max(expected.len()) || bad;
-    Ok(if body.starts_with(expected.as_bytes()) && whole { Reply::Right } else { Reply::Wrong })
+    Ok(if body.starts_with(expected.as_bytes()) && whole {
+        Reply::Right
+    } else {
+        Reply::Wrong
+    })
 }
 
 async fn one(shared: Arc<Shared>, session: Session, id: u64, scheduled: Instant) {
     let roll = mix(shared.seed ^ mix(id));
     let rank = shared.zipf.pick(roll);
     let bad = shared.layout.is_bad(rank);
-    let ip = std::net::Ipv4Addr::from(host_ip(rank));
+    let ip = shared
+        .layout
+        .origin
+        .unwrap_or_else(|| std::net::Ipv4Addr::from(host_ip(rank)));
     let url = format!("http://{ip}:{}/", shared.layout.port);
-    let phase = shared.layout.phase_at((scheduled - shared.start).as_secs_f64());
+    let phase = shared
+        .layout
+        .phase_at((scheduled - shared.start).as_secs_f64());
     if !shared.visited[rank as usize].swap(true, Ordering::Relaxed) {
         shared.cold.fetch_add(1, Ordering::Relaxed);
     }
     let polled = Instant::now();
     let result = {
-        let call = Call { url: &url, ip, port: shared.layout.port, id, size: size_of(roll >> 7) };
-        exchange(&session, shared.rival.as_ref(), &call, bad, shared.layout.overload).await
+        let call = Call {
+            url: &url,
+            ip,
+            port: shared.layout.port,
+            id,
+            size: size_of(roll >> 7),
+        };
+        exchange(
+            &session,
+            shared.rival.as_ref(),
+            &call,
+            bad,
+            shared.layout.overload,
+        )
+        .await
     };
     if polled.elapsed() > shared.limit + DEADLINE_SLACK {
         shared.outlived.fetch_add(1, Ordering::Relaxed);
@@ -325,7 +396,10 @@ async fn one(shared: Arc<Shared>, session: Session, id: u64, scheduled: Instant)
         Err(error) if error.overloaded && phase == Phase::Warm => {
             shared.cold_shed.fetch_add(1, Ordering::Relaxed);
         }
-        Err(error) => shared.fail(format!("healthy host failed: id={id} host={ip} {}", error.message)),
+        Err(error) => shared.fail(format!(
+            "healthy host failed: id={id} host={ip} {}",
+            error.message
+        )),
     }
     shared.completed.fetch_add(1, Ordering::Relaxed);
     shared.in_flight.fetch_sub(1, Ordering::Relaxed);
@@ -357,7 +431,10 @@ async fn pacer(shared: Arc<Shared>, session: Session, share: f64) {
 }
 
 fn retry_policy(args: &[String]) -> Retry {
-    let backoff = (Duration::from_millis(number(args, "--backoff-min-ms", 5)), Duration::from_millis(number(args, "--backoff-max-ms", 20)));
+    let backoff = (
+        Duration::from_millis(number(args, "--backoff-min-ms", 5)),
+        Duration::from_millis(number(args, "--backoff-max-ms", 20)),
+    );
     let retry = Retry::new(number(args, "--retries", 1)).backoff(backoff.0, backoff.1);
     match number(args, "--retry-budget", 0.0) {
         0.0 => retry,
@@ -367,15 +444,26 @@ fn retry_policy(args: &[String]) -> Retry {
 
 fn builder(args: &[String]) -> leyline::SessionBuilder {
     let mut builder = Session::builder().retry(retry_policy(args));
-    match args.iter().position(|a| a == "--max-pending").and_then(|i| args.get(i + 1)).map(String::as_str) {
+    match args
+        .iter()
+        .position(|a| a == "--max-pending")
+        .and_then(|i| args.get(i + 1))
+        .map(String::as_str)
+    {
         Some("none") => builder = builder.max_pending_per_host(None),
-        Some(_) => builder = builder.max_pending_per_host(number::<usize>(args, "--max-pending", 0)),
+        Some(_) => {
+            builder = builder.max_pending_per_host(number::<usize>(args, "--max-pending", 0))
+        }
         None => {}
     }
     let builder = builder
         .max_connections(number(args, "--max-connections", 2048))
         .host_limits(total_limit(args))
-        .timeout(Timeout::new().total(Duration::from_millis(number(args, "--deadline-ms", DEADLINE.as_millis() as u64))));
+        .timeout(Timeout::new().total(Duration::from_millis(number(
+            args,
+            "--deadline-ms",
+            DEADLINE.as_millis() as u64,
+        ))));
     match number::<u64>(args, "--max-lifetime-ms", 0) {
         0 => builder,
         lifetime => builder.pool_max_lifetime(Duration::from_millis(lifetime)),
@@ -385,8 +473,13 @@ fn builder(args: &[String]) -> leyline::SessionBuilder {
 fn drive(mode: Mode, shared: &Arc<Shared>, args: &[String]) {
     match mode {
         Mode::Shared => {
-            let runtime = Builder::new_multi_thread().enable_all().build().expect("runtime");
-            let session = runtime.block_on(async { builder(args).build() }).expect("session");
+            let runtime = Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            let session = runtime
+                .block_on(async { builder(args).build() })
+                .expect("session");
             runtime.block_on(pacer(Arc::clone(shared), session, 1.0));
             runtime.shutdown_timeout(Duration::from_secs(1));
         }
@@ -397,31 +490,6 @@ fn drive(mode: Mode, shared: &Arc<Shared>, args: &[String]) {
                 .expect("per-core run");
         }
     }
-}
-
-fn rss_kib() -> u64 {
-    let text = std::fs::read_to_string("/proc/self/statm").unwrap_or_default();
-    text.split_whitespace().nth(1).and_then(|p| p.parse::<u64>().ok()).unwrap_or(0) * 4
-}
-
-fn cpu_ticks() -> u64 {
-    let text = std::fs::read_to_string("/proc/self/stat").unwrap_or_default();
-    let fields: Vec<&str> = text.rsplit(')').next().unwrap_or("").split_whitespace().collect();
-    [11, 12].iter().filter_map(|&i| fields.get(i)?.parse::<u64>().ok()).sum()
-}
-
-fn open_fds() -> u64 {
-    std::fs::read_dir("/proc/self/fd").map_or(0, |d| d.count() as u64)
-}
-
-fn tcp_counter(name: &str) -> u64 {
-    let text = std::fs::read_to_string("/proc/net/netstat").unwrap_or_default();
-    let mut lines = text.lines().filter(|line| line.starts_with("TcpExt:"));
-    let (Some(names), Some(values)) = (lines.next(), lines.next()) else { return 0 };
-    names.split_whitespace().zip(values.split_whitespace())
-        .find(|(held, _)| *held == name)
-        .and_then(|(_, value)| value.parse().ok())
-        .unwrap_or(0)
 }
 
 struct Timeline {
@@ -436,19 +504,36 @@ fn conductor(shared: &Arc<Shared>, timeline: &Arc<Timeline>) -> std::thread::Joi
     let counting = Arc::clone(&timeline);
     std::thread::spawn(move || {
         while !counting.stop.load(Ordering::Relaxed) {
-            counting.fds.store(open_fds(), Ordering::Relaxed);
+            counting
+                .fds
+                .store(open_fds().unwrap_or(0) as u64, Ordering::Relaxed);
             std::thread::sleep(Duration::from_millis(250));
         }
     });
     std::thread::spawn(move || {
         let (port, seconds) = (shared.layout.port, shared.layout.seconds);
-        let marks = [(0.1, None), (0.4, Some("/__faults/on")), (0.7, Some("/__faults/off")), (1.0, None)];
+        let control_ip = shared
+            .layout
+            .origin
+            .unwrap_or(std::net::Ipv4Addr::LOCALHOST);
+        let marks = [
+            (0.1, None),
+            (0.4, Some("/__faults/on")),
+            (0.7, Some("/__faults/off")),
+            (1.0, None),
+        ];
         let mut next = 0;
         while !timeline.stop.load(Ordering::Relaxed) {
             let at = shared.start.elapsed().as_secs_f64();
-            timeline.samples.lock().unwrap().push((at, rss_kib(), timeline.fds.load(Ordering::Relaxed), cpu_ticks()));
+            timeline.samples.lock().unwrap().push((
+                at,
+                rss_kib(),
+                timeline.fds.load(Ordering::Relaxed),
+                cpu_ticks(),
+            ));
             while next < marks.len() && at >= marks[next].0 * seconds {
-                let (accepted, served, _) = control(port, marks[next].1.unwrap_or("/__stats"));
+                let (accepted, served, _) =
+                    control(control_ip, port, marks[next].1.unwrap_or("/__stats"));
                 let reconnects = accepted.saturating_sub(shared.cold.load(Ordering::Relaxed));
                 timeline.windows.lock().unwrap().push((reconnects, served));
                 next += 1;
@@ -456,37 +541,6 @@ fn conductor(shared: &Arc<Shared>, timeline: &Arc<Timeline>) -> std::thread::Joi
             std::thread::sleep(Duration::from_millis(250));
         }
     })
-}
-
-fn merged(shards: &[Latency]) -> Histogram<u64> {
-    let mut all = Histogram::new_with_bounds(1, 60_000_000, 3).expect("histogram");
-    for shard in shards {
-        all.add(&*shard.lock().unwrap()).expect("merge");
-    }
-    all
-}
-
-fn summary(h: &Histogram<u64>) -> Value {
-    json!({"count": h.len(), "p50_us": h.value_at_quantile(0.5), "p99_us": h.value_at_quantile(0.99),
-           "p999_us": h.value_at_quantile(0.999), "max_us": h.max()})
-}
-
-fn reuse(windows: &[(u64, u64)], from: usize, to: usize) -> Option<f64> {
-    let (a, b) = (windows.get(from)?, windows.get(to)?);
-    let served = b.1.checked_sub(a.1)?;
-    (served > 0).then(|| 1.0 - (b.0 - a.0) as f64 / served as f64)
-}
-
-fn tail_growth(samples: &[(f64, u64, u64, u64)], seconds: f64) -> Option<f64> {
-    let mean = |from: f64, to: f64| {
-        let picked: Vec<u64> = samples
-            .iter()
-            .filter(|s| s.0 >= from * seconds && s.0 < to * seconds)
-            .map(|s| s.1)
-            .collect();
-        (!picked.is_empty()).then(|| picked.iter().sum::<u64>() as f64 / picked.len() as f64)
-    };
-    Some(mean(0.85, 1.0)? / mean(0.75, 0.85)?)
 }
 
 fn total_limit(args: &[String]) -> HostLimits {
@@ -498,73 +552,18 @@ fn total_limit(args: &[String]) -> HostLimits {
     }
 }
 
-struct Limits {
-    ratio: f64,
-    min_reuse: f64,
-    min_goodput: f64,
-    max_rss_kib: u64,
-    max_rss_growth: f64,
-}
-
-fn judge_goodput(shared: &Shared, limits: &Limits, verdict: &Verdict) {
-    let window = 0.3 * shared.layout.seconds;
-    for (phase, name) in [(Phase::Fault, "during load"), (Phase::After, "after load")] {
-        let rate = shared.good[phase as usize].load(Ordering::Relaxed) as f64 / window;
-        if rate == 0.0 || rate < limits.min_goodput {
-            verdict.fail(format!("goodput: {rate:.0} good req/s {name}, floor {:.0}", limits.min_goodput));
-        }
-    }
-}
-
-fn judge_shock(shared: &Shared, seconds: [f64; 2], verdict: &Verdict) {
-    let [before, after] = [Phase::Before, Phase::After].map(|p| shared.good[p as usize].load(Ordering::Relaxed) as f64);
-    let (before_rate, after_rate) = (before / seconds[0], after / seconds[1]);
-    if after_rate < before_rate * MIN_RECOVERY {
-        verdict.fail(format!("recovery: {after_rate:.0} good req/s after the shock, {before_rate:.0} before it"));
-    }
-}
-
-fn judge(shared: &Shared, limits: &Limits, achieved: f64, before_reuse: Option<f64>, growth: Option<f64>, rss_peak: u64, verdict: &Verdict) {
-    let ratio = limits.ratio;
-    let layout = &shared.layout;
-    for message in shared.failures.lock().unwrap().iter() {
-        verdict.fail(message.clone());
-    }
-    let outlived = shared.outlived.load(Ordering::Relaxed);
-    if outlived > 0 {
-        verdict.fail(format!("deadline: {outlived} requests outlived their deadline"));
-    }
-    if limits.max_rss_kib > 0 && rss_peak > limits.max_rss_kib {
-        verdict.fail(format!("memory: RSS peak {rss_peak} KiB, limit {} KiB", limits.max_rss_kib));
-    }
-    if layout.overload {
-        judge_goodput(shared, limits, verdict);
-        judge_shock(shared, [0.3 * layout.seconds, 0.3 * layout.seconds], verdict);
-        return;
-    }
-    if achieved < layout.rate * MIN_ACHIEVED {
-        verdict.fail(format!("rate: achieved {achieved:.0} req/s of {:.0} offered; this run says nothing about that rate", layout.rate));
-    }
-    if before_reuse.is_some_and(|r| r < limits.min_reuse) {
-        verdict.fail(format!("reuse: {:.4} before faults, floor {}", before_reuse.unwrap_or(0.0), limits.min_reuse));
-    }
-    let before = merged(&shared.healthy[Phase::Before as usize]).value_at_quantile(0.99);
-    let during = merged(&shared.healthy[Phase::Fault as usize]).value_at_quantile(0.99);
-    if during as f64 > before as f64 * ratio {
-        verdict.fail(format!("isolation: healthy p99 {during} us during faults, {before} us before, ratio limit {ratio}"));
-    }
-    let after = merged(&shared.healthy[Phase::After as usize]).value_at_quantile(0.99);
-    if after as f64 > before as f64 * ratio {
-        verdict.fail(format!("recovery: healthy p99 {after} us after faults, {before} us before, ratio limit {ratio}"));
-    }
-    if growth.is_some_and(|g| g > limits.max_rss_growth) {
-        verdict.fail(format!("memory: RSS grew {:.3}x over the last 25% of the run", growth.unwrap_or(0.0)));
-    }
-}
-
 pub fn run(options: &Options, args: &[String], verdict: &Verdict) -> Value {
-    let mode = if args.iter().any(|a| a == "cores") { Mode::Cores } else { Mode::Shared };
+    let mode = if args.iter().any(|a| a == "cores") {
+        Mode::Cores
+    } else {
+        Mode::Shared
+    };
     let layout = Layout {
+        origin: args
+            .iter()
+            .position(|a| a == "--origin-ip")
+            .and_then(|i| args.get(i + 1))
+            .map(|ip| ip.parse().expect("--origin-ip")),
         port: number(args, "--port", 8000),
         hosts: number(args, "--hosts", 2000),
         bad_first: number(args, "--bad-first", 20),
@@ -587,34 +586,49 @@ pub fn run(options: &Options, args: &[String], verdict: &Verdict) -> Value {
         healthy: shards(),
         bad: shards(),
         good: std::array::from_fn(|_| AtomicU64::new(0)),
-        visited: (0..number(args, "--hosts", 2000)).map(|_| AtomicBool::new(false)).collect(),
+        visited: (0..number(args, "--hosts", 2000))
+            .map(|_| AtomicBool::new(false))
+            .collect(),
         cold: AtomicU64::new(0),
         cold_shed: AtomicU64::new(0),
         outlived: AtomicU64::new(0),
         limit: Duration::from_millis(number(args, "--deadline-ms", DEADLINE.as_millis() as u64)),
         rival: args.iter().any(|a| a == "pingora").then(|| {
-            let deadline = Duration::from_millis(number(args, "--deadline-ms", DEADLINE.as_millis() as u64));
+            let deadline =
+                Duration::from_millis(number(args, "--deadline-ms", DEADLINE.as_millis() as u64));
             Rival::new(number(args, "--max-connections", 2048), deadline)
         }),
-        seconds: (0..options.seconds as usize + 15).map(|_| latency()).collect(),
+        seconds: (0..options.seconds as usize + 15)
+            .map(|_| latency())
+            .collect(),
         failures: Mutex::default(),
         wrong: AtomicU64::new(0),
     });
     let overflows_at_start = tcp_counter("ListenOverflows");
     let retransmits_at_start = tcp_counter("TCPSynRetrans");
-    let timeline = Arc::new(Timeline { stop: AtomicBool::new(false), fds: AtomicU64::new(0), samples: Mutex::default(), windows: Mutex::default() });
+    let timeline = Arc::new(Timeline {
+        stop: AtomicBool::new(false),
+        fds: AtomicU64::new(0),
+        samples: Mutex::default(),
+        windows: Mutex::default(),
+    });
     let conducting = conductor(&shared, &timeline);
     drive(mode, &shared, args);
     let achieved = shared.completed.load(Ordering::Relaxed) as f64 / shared.layout.seconds;
     timeline.stop.store(true, Ordering::Relaxed);
     conducting.join().expect("conductor");
-    let (samples, windows) = (timeline.samples.lock().unwrap(), timeline.windows.lock().unwrap());
+    let (samples, windows) = (
+        timeline.samples.lock().unwrap(),
+        timeline.windows.lock().unwrap(),
+    );
     let before_reuse = reuse(&windows, 0, 1);
     let growth = tail_growth(&samples, shared.layout.seconds);
     let overflows = tcp_counter("ListenOverflows").saturating_sub(overflows_at_start);
     let syn_retransmits = tcp_counter("TCPSynRetrans").saturating_sub(retransmits_at_start);
     if overflows > 0 {
-        verdict.fail(format!("rig: void run, {overflows} accept queue overflows on this machine"));
+        verdict.fail(format!(
+            "rig: void run, {overflows} accept queue overflows on this machine"
+        ));
     }
     let limits = Limits {
         ratio: number(args, "--p99-ratio", 1.5),
@@ -629,7 +643,15 @@ pub fn run(options: &Options, args: &[String], verdict: &Verdict) -> Value {
     if fds_peak > max_fds {
         verdict.fail(format!("fds: {fds_peak} open at peak, limit {max_fds}"));
     }
-    judge(&shared, &limits, achieved, before_reuse, growth, rss_peak, verdict);
+    judge(
+        &shared,
+        &limits,
+        achieved,
+        before_reuse,
+        growth,
+        rss_peak,
+        verdict,
+    );
     let groups: serde_json::Map<String, Value> = PHASES
         .iter()
         .map(|&(phase, name)| {

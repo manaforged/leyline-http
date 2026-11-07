@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::io;
 use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -13,12 +13,12 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::runtime::Builder;
 use tokio::sync::watch;
-use tokio_rustls::TlsAcceptor;
-use tokio_rustls::rustls;
-use tokio_rustls::rustls::pki_types::{PrivateKeyDer, PrivatePkcs8KeyDer};
 
-use crate::hostile::{acceptor, rss_kib};
+use crate::hostile::acceptor;
+use crate::probe::rss_kib;
 use crate::{Options, Verdict, number};
+
+mod rotation;
 
 const ACCEPT_BACKLOG: u32 = 65535;
 const SPREAD_SHARE: u64 = 16;
@@ -28,19 +28,22 @@ const FNV_START: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 const SIZES: [u64; 3] = [MIB, 64 * MIB, 1024 * MIB];
 const STREAM_RSS_LIMIT_KIB: u64 = 64 * 1024;
-const ROTATED_HOST: &str = "origin.test";
-const REQUESTS_PER_ROTATED_CONNECTION: u32 = 20;
 
 fn hold(args: &[String]) -> Duration {
     Duration::from_millis(number(args, "--hold-ms", 3_000))
 }
 
 fn digest(state: u64, bytes: &[u8]) -> u64 {
-    bytes.iter().fold(state, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME))
+    bytes.iter().fold(state, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(FNV_PRIME)
+    })
 }
 
 fn pattern() -> Arc<[u8]> {
-    (0..CHUNK).map(|i| (i % 251) as u8).collect::<Vec<u8>>().into()
+    (0..CHUNK)
+        .map(|i| (i % 251) as u8)
+        .collect::<Vec<u8>>()
+        .into()
 }
 
 fn pattern_digest(size: u64) -> u64 {
@@ -80,7 +83,8 @@ async fn read_head(stream: &mut TcpStream) -> Option<Head> {
     let path = line.split_whitespace().nth(1)?;
     let length = text.lines().find_map(|l| {
         let (key, value) = l.split_once(':')?;
-        key.eq_ignore_ascii_case("content-length").then(|| value.trim().parse().ok())?
+        key.eq_ignore_ascii_case("content-length")
+            .then(|| value.trim().parse().ok())?
     });
     Some(Head {
         post: line.starts_with("POST"),
@@ -92,7 +96,9 @@ async fn read_head(stream: &mut TcpStream) -> Option<Head> {
 
 async fn write_sized(stream: &mut TcpStream, size: u64) -> io::Result<()> {
     let block = pattern();
-    stream.write_all(format!("HTTP/1.1 200 OK\r\ncontent-length: {size}\r\n\r\n").as_bytes()).await?;
+    stream
+        .write_all(format!("HTTP/1.1 200 OK\r\ncontent-length: {size}\r\n\r\n").as_bytes())
+        .await?;
     let mut left = size;
     while left > 0 {
         let take = left.min(CHUNK as u64) as usize;
@@ -125,7 +131,15 @@ async fn serve_one(mut stream: TcpStream, served: Arc<AtomicU64>) {
             match read_upload(&mut stream, &head).await {
                 Ok(state) => {
                     let body = state.to_string();
-                    stream.write_all(format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}", body.len()).as_bytes()).await
+                    stream
+                        .write_all(
+                            format!(
+                                "HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n{body}",
+                                body.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await
                 }
                 Err(error) => Err(error),
             }
@@ -140,7 +154,12 @@ async fn serve_one(mut stream: TcpStream, served: Arc<AtomicU64>) {
 
 async fn start_origin(host: &str, served: Arc<AtomicU64>) -> SocketAddr {
     let wanted: SocketAddr = format!("{host}:0").parse().expect("origin address");
-    let socket = if wanted.is_ipv4() { TcpSocket::new_v4() } else { TcpSocket::new_v6() }.expect("socket");
+    let socket = if wanted.is_ipv4() {
+        TcpSocket::new_v4()
+    } else {
+        TcpSocket::new_v6()
+    }
+    .expect("socket");
     socket.bind(wanted).expect("bind");
     let listener = socket.listen(ACCEPT_BACKLOG).expect("listen");
     let address = listener.local_addr().expect("address");
@@ -169,11 +188,18 @@ async fn upload_digest(session: &Session, url: &str, size: u64) -> leyline::Resu
     let block = pattern();
     let chunks = (size / CHUNK as u64) as usize;
     let tail = (size % CHUNK as u64) as usize;
-    let stream = futures_util::stream::iter((0..chunks + usize::from(tail > 0)).map(move |index| {
-        let take = if index == chunks { tail } else { CHUNK };
-        Ok::<_, io::Error>(bytes::Bytes::copy_from_slice(&block[..take]))
-    }));
-    session.post(url).body(Body::stream(stream, Some(size))).send().await?.text().await
+    let stream =
+        futures_util::stream::iter((0..chunks + usize::from(tail > 0)).map(move |index| {
+            let take = if index == chunks { tail } else { CHUNK };
+            Ok::<_, io::Error>(bytes::Bytes::copy_from_slice(&block[..take]))
+        }));
+    session
+        .post(url)
+        .body(Body::stream(stream, Some(size)))
+        .send()
+        .await?
+        .text()
+        .await
 }
 
 async fn bodies(args: &[String], verdict: &Verdict) -> Value {
@@ -194,21 +220,29 @@ async fn bodies(args: &[String], verdict: &Verdict) -> Value {
         let began = Instant::now();
         let down = download_digest(&session, &url, Duration::ZERO).await;
         let down_seconds = began.elapsed().as_secs_f64();
-        let down_growth = peak.swap(rss_kib(), Ordering::Relaxed).saturating_sub(start_rss);
+        let down_growth = peak
+            .swap(rss_kib(), Ordering::Relaxed)
+            .saturating_sub(start_rss);
         let up = upload_digest(&session, &url, size).await;
         watching.abort();
         match &down {
             Ok(state) if *state == expected => {}
-            other => verdict.fail(format!("download {size}: digest {other:?}, expected {expected}")),
+            other => verdict.fail(format!(
+                "download {size}: digest {other:?}, expected {expected}"
+            )),
         }
         match &up {
             Ok(text) if *text == expected.to_string() => {}
-            other => verdict.fail(format!("upload {size}: digest {other:?}, expected {expected}")),
+            other => verdict.fail(format!(
+                "upload {size}: digest {other:?}, expected {expected}"
+            )),
         }
         let up_growth = peak.load(Ordering::Relaxed).saturating_sub(start_rss);
         for (direction, growth) in [("download", down_growth), ("upload", up_growth)] {
             if growth > STREAM_RSS_LIMIT_KIB {
-                verdict.fail(format!("memory: {growth} KiB over a {size} byte streamed {direction}"));
+                verdict.fail(format!(
+                    "memory: {growth} KiB over a {size} byte streamed {direction}"
+                ));
             }
         }
         rows.push(json!({"bytes": size, "download_rss_growth_kib": down_growth, "upload_rss_growth_kib": up_growth, "download_seconds": down_seconds}));
@@ -257,7 +291,9 @@ async fn slow_readers(args: &[String], verdict: &Verdict) -> Value {
     watching.abort();
     let failed = wrong.load(Ordering::Relaxed);
     if failed > 0 {
-        verdict.fail(format!("{failed} of {readers} slow readers failed or saw a wrong digest"));
+        verdict.fail(format!(
+            "{failed} of {readers} slow readers failed or saw a wrong digest"
+        ));
     }
     let growth = peak.load(Ordering::Relaxed).saturating_sub(start_rss);
     json!({"readers": readers, "bytes_each": size, "failed": failed, "rss_growth_kib": growth,
@@ -287,7 +323,9 @@ async fn stalled_origin() -> SocketAddr {
 }
 
 async fn failures(args: &[String], verdict: &Verdict) -> Value {
-    let ca_path = crate::hostile::text(args, "--ca").unwrap_or("life-ca.der").to_owned();
+    let ca_path = crate::hostile::text(args, "--ca")
+        .unwrap_or("life-ca.der")
+        .to_owned();
     let tls = acceptor(&ca_path);
     drop(std::fs::remove_file(&ca_path));
     let tls_listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
@@ -310,10 +348,26 @@ async fn failures(args: &[String], verdict: &Verdict) -> Value {
         .build()
         .expect("session");
     let cases: [(&str, String, &str); 5] = [
-        ("dns failure", "http://no-such-host.invalid/".to_owned(), Kind::Dns.as_str()),
-        ("connection refused", format!("http://{refused}/"), Kind::Connect.as_str()),
-        ("untrusted certificate", format!("https://{tls_address}/"), Kind::Tls.as_str()),
-        ("no response before the deadline", format!("http://{stalled}/"), Kind::Timeout.as_str()),
+        (
+            "dns failure",
+            "http://no-such-host.invalid/".to_owned(),
+            Kind::Dns.as_str(),
+        ),
+        (
+            "connection refused",
+            format!("http://{refused}/"),
+            Kind::Connect.as_str(),
+        ),
+        (
+            "untrusted certificate",
+            format!("https://{tls_address}/"),
+            Kind::Tls.as_str(),
+        ),
+        (
+            "no response before the deadline",
+            format!("http://{stalled}/"),
+            Kind::Timeout.as_str(),
+        ),
         ("healthy host", format!("http://{healthy}/size/16"), "ok"),
     ];
     let mut rows = BTreeMap::new();
@@ -350,7 +404,10 @@ async fn dns_move(args: &[String], verdict: &Verdict) -> Value {
     let (old_served, new_served) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
     let old = start_origin("127.0.0.1", Arc::clone(&old_served)).await;
     let new = start_origin("127.0.0.2", Arc::clone(&new_served)).await;
-    let flip = Arc::new(Flip { next: AtomicU8::new(0), addresses: [old, new] });
+    let flip = Arc::new(Flip {
+        next: AtomicU8::new(0),
+        addresses: [old, new],
+    });
     let mut builder = Session::builder().dns_resolver(flip.clone() as Arc<dyn Resolver>);
     if lifetime > 0 {
         builder = builder.pool_max_lifetime(Duration::from_millis(lifetime));
@@ -375,10 +432,16 @@ async fn dns_move(args: &[String], verdict: &Verdict) -> Value {
     tokio::time::sleep(hold).await;
     flip.next.store(1, Ordering::Relaxed);
     tokio::time::sleep(settle).await;
-    let (old_mark, new_mark) = (old_served.load(Ordering::Relaxed), new_served.load(Ordering::Relaxed));
+    let (old_mark, new_mark) = (
+        old_served.load(Ordering::Relaxed),
+        new_served.load(Ordering::Relaxed),
+    );
     tokio::time::sleep(hold).await;
     traffic.abort();
-    let (old_tail, new_tail) = (old_served.load(Ordering::Relaxed) - old_mark, new_served.load(Ordering::Relaxed) - new_mark);
+    let (old_tail, new_tail) = (
+        old_served.load(Ordering::Relaxed) - old_mark,
+        new_served.load(Ordering::Relaxed) - new_mark,
+    );
     if old_tail > 0 {
         verdict.fail(format!("stale: {old_tail} requests still reached the old address {settle:?} after the DNS change, {new_tail} reached the new one"));
     }
@@ -437,11 +500,19 @@ struct Steady {
 
 impl Steady {
     fn snapshot(&self) -> (u64, u64) {
-        (self.good.load(Ordering::Relaxed), self.failed.load(Ordering::Relaxed))
+        (
+            self.good.load(Ordering::Relaxed),
+            self.failed.load(Ordering::Relaxed),
+        )
     }
 }
 
-fn steady_traffic(session: Session, url: String, every: Duration, tally: Arc<Steady>) -> tokio::task::JoinHandle<()> {
+fn steady_traffic(
+    session: Session,
+    url: String,
+    every: Duration,
+    tally: Arc<Steady>,
+) -> tokio::task::JoinHandle<()> {
     let url = Arc::new(url);
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(every);
@@ -456,7 +527,11 @@ fn steady_traffic(session: Session, url: String, every: Duration, tally: Arc<Ste
                     }
                     Err(error) => {
                         tally.failed.fetch_add(1, Ordering::Relaxed);
-                        tally.first_failure.lock().unwrap().get_or_insert_with(|| format!("{error:?}"));
+                        tally
+                            .first_failure
+                            .lock()
+                            .unwrap()
+                            .get_or_insert_with(|| format!("{error:?}"));
                     }
                 }
             });
@@ -480,10 +555,20 @@ async fn capacity_loss(args: &[String], verdict: &Verdict) -> Value {
         .build()
         .expect("session");
     let tally = Arc::new(Steady::default());
-    let traffic = steady_traffic(session, "http://origin.test/size/16".to_owned(), Duration::from_micros(500), Arc::clone(&tally));
+    let traffic = steady_traffic(
+        session,
+        "http://origin.test/size/16".to_owned(),
+        Duration::from_micros(500),
+        Arc::clone(&tally),
+    );
     tokio::time::sleep(hold).await;
     let before = tally.snapshot();
-    let counts = |served: &[Arc<AtomicU64>]| served.iter().map(|c| c.load(Ordering::Relaxed)).collect::<Vec<u64>>();
+    let counts = |served: &[Arc<AtomicU64>]| {
+        served
+            .iter()
+            .map(|c| c.load(Ordering::Relaxed))
+            .collect::<Vec<u64>>()
+    };
     let served_before = counts(&served);
     for origin in &origins[..2] {
         let _ = origin.1.send(true);
@@ -498,146 +583,53 @@ async fn capacity_loss(args: &[String], verdict: &Verdict) -> Value {
     let (lost_at_change, lost_after) = (settled.1 - before.1, after.1 - settled.1);
     let survivors: u64 = (2..4).map(|i| served_after[i] - served_settled[i]).sum();
     if lost_after > 0 {
-        verdict.fail(format!("{lost_after} requests failed {settle:?} or more after losing 2 of 4 addresses"));
+        verdict.fail(format!(
+            "{lost_after} requests failed {settle:?} or more after losing 2 of 4 addresses"
+        ));
     }
     if lost_at_change > 0 {
-        verdict.fail(format!("{lost_at_change} requests failed when 2 of 4 addresses went away, first: {:?}", tally.first_failure.lock().unwrap()));
+        verdict.fail(format!(
+            "{lost_at_change} requests failed when 2 of 4 addresses went away, first: {:?}",
+            tally.first_failure.lock().unwrap()
+        ));
     }
     if survivors == 0 {
         verdict.fail("no request reached the surviving addresses".to_owned());
     }
     let total_before: u64 = served_before.iter().sum();
-    if served_before.iter().any(|&served| served * SPREAD_SHARE < total_before) {
+    if served_before
+        .iter()
+        .any(|&served| served * SPREAD_SHARE < total_before)
+    {
         verdict.fail(format!("spread: addresses served {served_before:?} before the loss, each needs 1/{SPREAD_SHARE} of the load"));
     }
     json!({"before": before, "good_after_settle": after.0 - settled.0, "lost_at_change": lost_at_change,
            "lost_after_settle": lost_after, "served_before": served_before, "served_after": served_after})
 }
 
-struct Authority {
-    params: rcgen::CertificateParams,
-    key: rcgen::KeyPair,
-    der: Vec<u8>,
-}
-
-fn authority() -> Authority {
-    let mut params = rcgen::CertificateParams::new(Vec::<String>::new()).expect("params");
-    params.is_ca = rcgen::IsCa::Ca(rcgen::BasicConstraints::Unconstrained);
-    params.key_usages = vec![rcgen::KeyUsagePurpose::KeyCertSign, rcgen::KeyUsagePurpose::CrlSign];
-    params.distinguished_name.push(rcgen::DnType::CommonName, "qualification authority");
-    let key = rcgen::KeyPair::generate().expect("key");
-    let der = params.self_signed(&key).expect("authority").der().to_vec();
-    Authority { params, key, der }
-}
-
-fn leaf(authority: &Authority) -> TlsAcceptor {
-    let key = rcgen::KeyPair::generate().expect("key");
-    let params = rcgen::CertificateParams::new(vec![ROTATED_HOST.to_owned()]).expect("params");
-    let issuer = rcgen::Issuer::from_params(&authority.params, &authority.key);
-    let cert = params.signed_by(&key, &issuer).expect("leaf");
-    let private = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key.serialize_der()));
-    let mut config = rustls::ServerConfig::builder()
-        .with_no_client_auth()
-        .with_single_cert(vec![cert.der().clone()], private)
-        .expect("server config");
-    config.alpn_protocols = vec![b"http/1.1".to_vec()];
-    TlsAcceptor::from(Arc::new(config))
-}
-
-struct Rotating {
-    current: AtomicUsize,
-    acceptors: [TlsAcceptor; 3],
-    handshakes: [AtomicU64; 3],
-}
-
-async fn serve_rotating(stream: TcpStream, rotating: Arc<Rotating>) {
-    let generation = rotating.current.load(Ordering::Relaxed);
-    let Ok(mut tls) = rotating.acceptors[generation].accept(stream).await else { return };
-    rotating.handshakes[generation].fetch_add(1, Ordering::Relaxed);
-    let mut seen = Vec::new();
-    for answered in 1..=REQUESTS_PER_ROTATED_CONNECTION {
-        while !seen.windows(4).any(|w| w == b"\r\n\r\n") {
-            let mut more = [0u8; 1024];
-            match tls.read(&mut more).await {
-                Ok(read) if read > 0 => seen.extend_from_slice(&more[..read]),
-                _ => return,
-            }
-        }
-        seen.clear();
-        let close = if answered == REQUESTS_PER_ROTATED_CONNECTION { "connection: close\r\n" } else { "" };
-        let reply = format!("HTTP/1.1 200 OK\r\n{close}content-length: 2\r\n\r\nok");
-        if tls.write_all(reply.as_bytes()).await.is_err() {
-            return;
-        }
-    }
-    drop(tls.shutdown().await);
-}
-
-async fn certificate_rotation(args: &[String], verdict: &Verdict) -> Value {
-    let hold = hold(args);
-    drop(rustls::crypto::aws_lc_rs::default_provider().install_default());
-    let (trusted, stranger) = (authority(), authority());
-    let rotating = Arc::new(Rotating {
-        current: AtomicUsize::new(0),
-        acceptors: [leaf(&trusted), leaf(&trusted), leaf(&stranger)],
-        handshakes: std::array::from_fn(|_| AtomicU64::new(0)),
-    });
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind");
-    let address = listener.local_addr().expect("address");
-    let accepting = Arc::clone(&rotating);
-    tokio::spawn(async move {
-        while let Ok((stream, _)) = listener.accept().await {
-            tokio::spawn(serve_rotating(stream, Arc::clone(&accepting)));
-        }
-    });
-    let session = Session::builder()
-        .dns_resolver(Arc::new(Fixed(vec![address])) as Arc<dyn Resolver>)
-        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(trusted.der.clone()))
-        .timeout(Timeout::new().total(Duration::from_secs(5)))
-        .build()
-        .expect("session");
-    let tally = Arc::new(Steady::default());
-    let url = format!("https://{ROTATED_HOST}:{}/", address.port());
-    let every = Duration::from_micros(number(args, "--every-us", 1000));
-    let traffic = steady_traffic(session, url, every, Arc::clone(&tally));
-    tokio::time::sleep(hold).await;
-    rotating.current.store(1, Ordering::Relaxed);
-    tokio::time::sleep(hold).await;
-    let rotated = tally.snapshot();
-    rotating.current.store(2, Ordering::Relaxed);
-    tokio::time::sleep(hold).await;
-    let refusing = tally.snapshot();
-    tokio::time::sleep(hold).await;
-    traffic.abort();
-    let last = tally.snapshot();
-    let shakes: Vec<u64> = rotating.handshakes.iter().map(|h| h.load(Ordering::Relaxed)).collect();
-    if rotated.1 > 0 {
-        verdict.fail(format!("{} requests failed across a rotation under the same authority, first: {:?}", rotated.1, tally.first_failure.lock().unwrap()));
-    }
-    if shakes[0] == 0 || shakes[1] == 0 {
-        verdict.fail(format!("the run did not reach both certificates: {shakes:?}"));
-    }
-    if shakes[2] > 0 {
-        verdict.fail(format!("{} handshakes completed with a certificate from an untrusted authority", shakes[2]));
-    }
-    let accepted_late = last.0 - refusing.0;
-    if accepted_late > 0 {
-        verdict.fail(format!("{accepted_late} requests succeeded {hold:?} after the certificate became untrusted"));
-    }
-    json!({"good_before_stranger": rotated.0, "failed_before_stranger": rotated.1, "handshakes": shakes,
-           "refused_after_stranger": last.1 - rotated.1, "accepted_late": accepted_late})
-}
-
 async fn shutdown_under_load(args: &[String], verdict: &Verdict) -> Value {
     let hold = hold(args);
     let address = start_origin("127.0.0.1", Arc::default()).await;
-    let session = Session::builder().timeout(Timeout::new().total(Duration::from_secs(10))).build().expect("session");
+    let session = Session::builder()
+        .timeout(Timeout::new().total(Duration::from_secs(10)))
+        .build()
+        .expect("session");
     let expected = pattern_digest(MIB);
     let url = Arc::new(format!("http://{address}/size/{MIB}"));
-    let (finished, refused, wrong) = (Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)), Arc::new(AtomicU64::new(0)));
+    let (finished, refused, wrong) = (
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+        Arc::new(AtomicU64::new(0)),
+    );
     let mut tasks = Vec::new();
     for _ in 0..2000 {
-        let (session, url, finished, refused, wrong) = (session.clone(), Arc::clone(&url), Arc::clone(&finished), Arc::clone(&refused), Arc::clone(&wrong));
+        let (session, url, finished, refused, wrong) = (
+            session.clone(),
+            Arc::clone(&url),
+            Arc::clone(&finished),
+            Arc::clone(&refused),
+            Arc::clone(&wrong),
+        );
         tasks.push(tokio::spawn(async move {
             loop {
                 match download_digest(&session, &url, Duration::ZERO).await {
@@ -660,7 +652,10 @@ async fn shutdown_under_load(args: &[String], verdict: &Verdict) -> Value {
     let began = Instant::now();
     session.shutdown().await;
     for task in tasks {
-        if tokio::time::timeout(Duration::from_secs(5), task).await.is_err() {
+        if tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .is_err()
+        {
             verdict.fail("a request outlived shutdown by 5 s".to_owned());
             break;
         }
@@ -678,9 +673,15 @@ async fn shutdown_under_load(args: &[String], verdict: &Verdict) -> Value {
 }
 
 pub fn run(options: &Options, args: &[String], verdict: &Verdict) -> Value {
-    let case = crate::hostile::text(args, "--case").unwrap_or("bodies").to_owned();
+    let case = crate::hostile::text(args, "--case")
+        .unwrap_or("bodies")
+        .to_owned();
     let threads = options.client_threads;
-    let runtime = Builder::new_multi_thread().worker_threads(threads).enable_all().build().expect("runtime");
+    let runtime = Builder::new_multi_thread()
+        .worker_threads(threads)
+        .enable_all()
+        .build()
+        .expect("runtime");
     let detail = runtime.block_on(async {
         match case.as_str() {
             "bodies" => bodies(args, verdict).await,
@@ -688,7 +689,7 @@ pub fn run(options: &Options, args: &[String], verdict: &Verdict) -> Value {
             "failures" => failures(args, verdict).await,
             "dns-move" => dns_move(args, verdict).await,
             "capacity-loss" => capacity_loss(args, verdict).await,
-            "certificate-rotation" => certificate_rotation(args, verdict).await,
+            "certificate-rotation" => rotation::certificate_rotation(args, verdict).await,
             "shutdown" => shutdown_under_load(args, verdict).await,
             other => panic!("unknown case {other}"),
         }

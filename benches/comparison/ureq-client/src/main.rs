@@ -1,3 +1,8 @@
+#[path = "../../paced.rs"]
+mod paced;
+#[path = "../../paced_threads.rs"]
+mod paced_threads;
+
 use std::env;
 use std::fs;
 use std::sync::Arc;
@@ -170,6 +175,20 @@ fn main() {
             counts.iter().min().copied().unwrap_or(0),
             counts.iter().max().copied().unwrap_or(0)
         );
+        return;
+    }
+
+    if let Some(plan) = paced::Plan::from_args(&args) {
+        let agents: Vec<Agent> = (0..paced::connections().max(plan.workers))
+            .map(|_| build(ca.as_deref(), plan.workers))
+            .collect();
+        for agent in &agents {
+            check(agent, &url, &expected);
+        }
+        let rows = paced_threads::run_threads(&plan, |worker| {
+            check(&agents[worker % agents.len()], &url, &expected)
+        });
+        paced::report(&plan, rows);
         return;
     }
 

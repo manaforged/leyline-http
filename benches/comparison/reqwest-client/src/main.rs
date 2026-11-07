@@ -1,3 +1,8 @@
+#[path = "../../paced.rs"]
+mod paced;
+#[path = "../../paced_tokio.rs"]
+mod paced_tokio;
+
 use std::env;
 use std::fs;
 use std::sync::Arc;
@@ -131,82 +136,33 @@ async fn main() {
         return;
     }
 
-    if args.get(2).map(|s| s.as_str()) == Some("paced") {
-        let rate: u64 = args.get(3).and_then(|s| s.parse().ok()).expect("rate");
-        let seconds: u64 = args.get(4).and_then(|s| s.parse().ok()).expect("seconds");
-        let concurrency: usize = args
-            .get(5)
-            .and_then(|s| s.parse().ok())
-            .expect("concurrency");
-        assert!(rate > 0 && seconds > 0 && concurrency > 0);
-        let client = build(ca.as_deref());
-        let response = client.get(url.as_str()).send().await.expect("paced warmup");
-        assert_eq!(response.status().as_u16(), 200);
-        assert!(
-            &response.bytes().await.expect("paced warmup body")[..] == expected.as_ref(),
-            "response body mismatch"
-        );
-        let start = tokio::time::Instant::now() + std::time::Duration::from_millis(50);
-        let per = rate.saturating_mul(seconds) / concurrency as u64;
-        let gap = std::time::Duration::from_secs_f64(concurrency as f64 / rate as f64);
-        let mut handles = Vec::with_capacity(concurrency);
-        for worker in 0..concurrency {
-            let c = client.clone();
-            let u = url.clone();
-            let expected = Arc::clone(&expected);
-            let offset = gap.mul_f64(worker as f64 / concurrency as f64);
-            handles.push(tokio::spawn(async move {
-                let mut rows = Vec::with_capacity(per as usize);
-                for i in 0..per {
-                    let intended = start + offset + gap.mul_f64(i as f64);
-                    tokio::time::sleep_until(intended).await;
-                    let actual = tokio::time::Instant::now();
-                    let resp = c.get(u.as_str()).send().await.expect("paced req");
-                    assert_eq!(resp.status().as_u16(), 200);
-                    assert!(
-                        &resp.bytes().await.expect("paced body")[..] == expected.as_ref(),
-                        "response body mismatch"
-                    );
-                    let done = tokio::time::Instant::now();
-                    rows.push((
-                        intended.duration_since(start).as_micros() as u32,
-                        actual.duration_since(intended).as_micros() as u32,
-                        done.duration_since(actual).as_micros() as u32,
-                    ));
-                }
-                rows
-            }));
+    if let Some(plan) = paced::Plan::from_args(&args) {
+        let clients: Vec<Client> = (0..paced::connections())
+            .map(|_| build(ca.as_deref()))
+            .collect();
+        for client in &clients {
+            let resp = client.get(url.as_str()).send().await.expect("paced warmup");
+            assert_eq!(resp.status().as_u16(), 200);
+            assert!(
+                &resp.bytes().await.expect("paced warmup body")[..] == expected.as_ref(),
+                "response body mismatch"
+            );
         }
-        let mut rows: Vec<(u32, u32, u32)> = Vec::new();
-        for handle in handles {
-            rows.extend(handle.await.expect("join"));
-        }
-        let elapsed = start.elapsed().as_secs_f64();
-        let pct = |values: &mut Vec<u32>, p: f64| {
-            values.sort_unstable();
-            values[((values.len() - 1) as f64 * p).round() as usize]
-        };
-        let mut service: Vec<u32> = rows.iter().map(|r| r.2).collect();
-        let mut lag: Vec<u32> = rows.iter().map(|r| r.1).collect();
-        let mut corrected: Vec<u32> = rows.iter().map(|r| r.1 + r.2).collect();
-        println!(
-            "PACED rate={rate} completed={} elapsed_s={elapsed:.3} rps={:.1} service_p50_us={} service_p99_us={} service_p999_us={} service_max_us={} lag_p50_us={} lag_p999_us={} corrected_p50_us={} corrected_p99_us={} corrected_p999_us={}",
-            rows.len(),
-            rows.len() as f64 / elapsed,
-            pct(&mut service, 0.50),
-            pct(&mut service, 0.99),
-            pct(&mut service, 0.999),
-            pct(&mut service, 1.0),
-            pct(&mut lag, 0.50),
-            pct(&mut lag, 0.999),
-            pct(&mut corrected, 0.50),
-            pct(&mut corrected, 0.99),
-            pct(&mut corrected, 0.999),
-        );
-        rows.sort_unstable_by_key(|r| std::cmp::Reverse(r.2));
-        for r in rows.iter().take((rows.len() / 1000).max(1)) {
-            println!("SLOW at_us={} service_us={} lag_us={}", r.0, r.2, r.1);
-        }
+        let clients = Arc::new(clients);
+        let rows = paced_tokio::run_tasks(plan, move |worker| {
+            let client = clients[worker % clients.len()].clone();
+            let (url, expected) = (url.clone(), Arc::clone(&expected));
+            async move {
+                let resp = client.get(url.as_str()).send().await.expect("paced req");
+                assert_eq!(resp.status().as_u16(), 200);
+                assert!(
+                    &resp.bytes().await.expect("paced body")[..] == expected.as_ref(),
+                    "response body mismatch"
+                );
+            }
+        })
+        .await;
+        paced::report(&plan, rows);
         return;
     }
 

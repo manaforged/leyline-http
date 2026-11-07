@@ -297,7 +297,7 @@ g_benches() {
     fi
 }
 
-FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack html link)
+FUZZ_TARGETS=($(sed -n 's/^name = "\(.*\)"$/\1/p' fuzz/Cargo.toml 2>/dev/null | grep -v '^leyline-fuzz$'))
 
 fuzz_run() {
     local host

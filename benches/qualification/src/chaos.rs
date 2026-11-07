@@ -29,7 +29,7 @@ struct Tally {
 enum Outcome {
     Body(u16, String),
     Timeout,
-    Failure(String),
+    Failure,
     Hang,
 }
 
@@ -43,7 +43,11 @@ struct Run {
 
 async fn fetch(run: &Run, id: u64, post: bool) -> Outcome {
     let url = run.origin.url.as_str();
-    let request = if post { run.session.post(url).body("payload") } else { run.session.get(url) };
+    let request = if post {
+        run.session.post(url).body("payload")
+    } else {
+        run.session.get(url)
+    };
     let exchange = async {
         let response = request.header(ID_HEADER, id.to_string()).send().await?;
         let status = response.status().as_u16();
@@ -54,18 +58,26 @@ async fn fetch(run: &Run, id: u64, post: bool) -> Outcome {
         Err(_) => Outcome::Hang,
         Ok(Ok((status, text))) => Outcome::Body(status, text),
         Ok(Err(error)) if error.is_timeout() => Outcome::Timeout,
-        Ok(Err(error)) => Outcome::Failure(format!("{:?}", error.kind())),
+        Ok(Err(_)) => Outcome::Failure,
     }
 }
 
 fn judge(run: &Run, id: u64, post: bool, faulted: bool, outcome: &Outcome, verdict: &Verdict) {
     let planned = chaos_plan(run.options.seed, id, run.options.fault_percent);
-    if post && faulted && matches!(outcome, Outcome::Failure(_)) && run.origin.state.attempts(id) == 0 {
+    if post && faulted && matches!(outcome, Outcome::Failure) && run.origin.state.attempts(id) == 0
+    {
         run.tally.stale_posts.fetch_add(1, Ordering::Relaxed);
         return;
     }
-    let want = if faulted { expected(planned) } else { Expected::Success };
-    let tag = format!("id={id} post={post} fault={:?} sticky={} want={want:?}", planned.fault, planned.sticky);
+    let want = if faulted {
+        expected(planned)
+    } else {
+        Expected::Success
+    };
+    let tag = format!(
+        "id={id} post={post} fault={:?} sticky={} want={want:?}",
+        planned.fault, planned.sticky
+    );
     let good = match (outcome, want) {
         (Outcome::Hang, _) => {
             run.tally.hung.fetch_add(1, Ordering::Relaxed);
@@ -79,7 +91,7 @@ fn judge(run: &Run, id: u64, post: bool, faulted: bool, outcome: &Outcome, verdi
         (Outcome::Body(200, _), Expected::Success | Expected::Either) => true,
         (Outcome::Body(503, _), Expected::Status503 | Expected::Either) => true,
         (Outcome::Timeout, Expected::Timeout | Expected::Either) => true,
-        (Outcome::Failure(_), Expected::Failure | Expected::Either) => true,
+        (Outcome::Failure, Expected::Failure | Expected::Either) => true,
         _ => false,
     };
     if !good {
@@ -89,7 +101,11 @@ fn judge(run: &Run, id: u64, post: bool, faulted: bool, outcome: &Outcome, verdi
 
 fn check_attempts(run: &Run, id: u64, post: bool, verdict: &Verdict) {
     let seen = run.origin.state.attempts(id);
-    let limit = if post { 1 } else { 1 + run.options.retries + STALE_RESEND };
+    let limit = if post {
+        1
+    } else {
+        1 + run.options.retries + STALE_RESEND
+    };
     if seen > limit {
         let planned = chaos_plan(run.options.seed, id, run.options.fault_percent);
         verdict.fail(format!(
@@ -103,7 +119,7 @@ fn count(run: &Run, outcome: &Outcome) {
     let counter = match outcome {
         Outcome::Body(..) => &run.tally.ok,
         Outcome::Timeout => &run.tally.timed_out,
-        Outcome::Failure(_) => &run.tally.failed,
+        Outcome::Failure => &run.tally.failed,
         Outcome::Hang => return,
     };
     counter.fetch_add(1, Ordering::Relaxed);
@@ -127,7 +143,13 @@ async fn phase(run: &Arc<Run>, verdict: &Arc<Verdict>, seconds: u64) -> f64 {
     let before = run.tally.ok.load(Ordering::Relaxed);
     let start = Instant::now();
     let workers: Vec<_> = (0..run.options.concurrency)
-        .map(|_| tokio::spawn(worker(Arc::clone(run), Arc::clone(verdict), Arc::clone(&stop))))
+        .map(|_| {
+            tokio::spawn(worker(
+                Arc::clone(run),
+                Arc::clone(verdict),
+                Arc::clone(&stop),
+            ))
+        })
         .collect();
     tokio::time::sleep(Duration::from_secs(seconds)).await;
     stop.store(true, Ordering::Relaxed);
@@ -139,7 +161,10 @@ async fn phase(run: &Arc<Run>, verdict: &Arc<Verdict>, seconds: u64) -> f64 {
 
 fn session(options: &Options) -> Session {
     Session::builder()
-        .retry(Retry::new(options.retries).backoff(Duration::from_millis(5), Duration::from_millis(20)))
+        .retry(
+            Retry::new(options.retries)
+                .backoff(Duration::from_millis(5), Duration::from_millis(20)),
+        )
         .timeout(Timeout::new().total(options.deadline))
         .pool_idle_timeout(Duration::from_secs(1))
         .build()
@@ -168,10 +193,14 @@ pub async fn run(options: &Options, verdict: &Verdict) -> Value {
     let end_levels = probe::levels();
     let open = run.origin.state.open.load(Ordering::SeqCst);
     if recovery < baseline * MIN_RECOVERY {
-        shared.fail(format!("recovery: {recovery:.0} req/s after faults, baseline {baseline:.0}"));
+        shared.fail(format!(
+            "recovery: {recovery:.0} req/s after faults, baseline {baseline:.0}"
+        ));
     }
     if open != 0 {
-        shared.fail(format!("leak: origin still sees {open} open connections after the idle timeout"));
+        shared.fail(format!(
+            "leak: origin still sees {open} open connections after the idle timeout"
+        ));
     }
     for wrong in probe::drift(start_levels, end_levels, FD_SLACK, TASK_SLACK) {
         shared.fail(wrong);

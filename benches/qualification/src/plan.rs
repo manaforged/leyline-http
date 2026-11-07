@@ -46,7 +46,10 @@ pub struct Planned {
 pub fn chaos_plan(seed: u64, id: u64, percent: u64) -> Planned {
     let roll = mix(seed ^ mix(id));
     if roll % 100 >= percent {
-        return Planned { fault: Fault::None, sticky: false };
+        return Planned {
+            fault: Fault::None,
+            sticky: false,
+        };
     }
     Planned {
         fault: FAULTS[((roll >> 8) % FAULTS.len() as u64) as usize],
@@ -55,16 +58,26 @@ pub fn chaos_plan(seed: u64, id: u64, percent: u64) -> Planned {
 }
 
 pub fn stall() -> Planned {
-    Planned { fault: Fault::Stall, sticky: true }
+    Planned {
+        fault: Fault::Stall,
+        sticky: true,
+    }
 }
 
 pub fn sticky_fault(seed: u64, id: u64) -> Planned {
-    Planned { fault: FAULTS[(mix(seed ^ mix(id)) % FAULTS.len() as u64) as usize], sticky: true }
+    Planned {
+        fault: FAULTS[(mix(seed ^ mix(id)) % FAULTS.len() as u64) as usize],
+        sticky: true,
+    }
 }
 
 impl Planned {
     pub fn applies(self, attempt: u32) -> Fault {
-        if self.sticky || attempt == 1 { self.fault } else { Fault::None }
+        if self.sticky || attempt == 1 {
+            self.fault
+        } else {
+            Fault::None
+        }
     }
 }
 
@@ -79,7 +92,9 @@ pub enum Expected {
 
 pub fn expected(planned: Planned) -> Expected {
     match (planned.fault, planned.sticky) {
-        (Fault::None | Fault::SlowDrip | Fault::CloseAfterResponse | Fault::Delay(_), _) => Expected::Success,
+        (Fault::None | Fault::SlowDrip | Fault::CloseAfterResponse | Fault::Delay(_), _) => {
+            Expected::Success
+        }
         (Fault::Busy, true) => Expected::Status503,
         (Fault::Stall, true) => Expected::Timeout,
         (_, true) => Expected::Failure,

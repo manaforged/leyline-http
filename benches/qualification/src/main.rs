@@ -7,8 +7,8 @@ mod life;
 mod mux;
 mod origin;
 mod plan;
-mod rival;
 mod probe;
+mod rival;
 
 use std::fs;
 use std::process::ExitCode;
@@ -54,7 +54,13 @@ impl Verdict {
     }
 
     fn report(&self) -> Vec<String> {
-        self.failures.lock().unwrap().iter().take(Self::SHOWN).cloned().collect()
+        self.failures
+            .lock()
+            .unwrap()
+            .iter()
+            .take(Self::SHOWN)
+            .cloned()
+            .collect()
     }
 }
 
@@ -62,7 +68,11 @@ pub fn number<T: std::str::FromStr>(args: &[String], name: &str, default: T) -> 
     args.iter()
         .position(|a| a == name)
         .and_then(|i| args.get(i + 1))
-        .map_or(default, |v| v.parse().ok().unwrap_or_else(|| panic!("bad value for {name}")))
+        .map_or(default, |v| {
+            v.parse()
+                .ok()
+                .unwrap_or_else(|| panic!("bad value for {name}"))
+        })
 }
 
 fn options(args: &[String]) -> Options {
@@ -76,7 +86,11 @@ fn options(args: &[String]) -> Options {
         fault_percent: number(args, "--fault-percent", 30),
         client_threads: number(args, "--client-threads", cores),
         origin_threads: number(args, "--origin-threads", 2),
-        out: args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).cloned(),
+        out: args
+            .iter()
+            .position(|a| a == "--out")
+            .and_then(|i| args.get(i + 1))
+            .cloned(),
     }
 }
 
@@ -116,7 +130,9 @@ fn main() -> ExitCode {
         Some("chaos") => Scenario::Chaos,
         Some("cancel") => Scenario::Cancel,
         _ => {
-            eprintln!("usage: qualify chaos|cancel|differential|origin|edge|hostile-origin|hostile|mux-origin|reconnect|idle|life [--seed N] [--seconds N] [--out PATH]");
+            eprintln!(
+                "usage: qualify chaos|cancel|differential|origin|edge|hostile-origin|hostile|mux-origin|reconnect|idle|life [--seed N] [--seconds N] [--out PATH]"
+            );
             return ExitCode::from(2);
         }
     };

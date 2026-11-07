@@ -1,3 +1,6 @@
+#[path = "../../paced.rs"]
+mod paced;
+
 use std::env;
 use std::fs;
 use std::sync::Arc;
@@ -158,6 +161,98 @@ fn drive(m: &Multi, setup: &Setup, workers: usize, per: usize) -> Vec<u32> {
     lat
 }
 
+fn drive_paced(
+    m: &Multi,
+    setup: &Setup,
+    plan: &paced::Plan,
+    start: Instant,
+    workers: &[usize],
+) -> Vec<paced::Row> {
+    let per = plan.per_worker();
+    let total = workers.len() * per as usize;
+    let mut idle: Vec<Option<Easy2<Collector>>> =
+        workers.iter().map(|_| Some(easy(setup))).collect();
+    let mut flying: Vec<Option<(Easy2Handle<Collector>, Instant, Instant, Instant)>> =
+        workers.iter().map(|_| None).collect();
+    let mut next = vec![0u64; workers.len()];
+    let mut ready = vec![start; workers.len()];
+    let mut rows = Vec::with_capacity(total);
+    let mut done = Vec::new();
+    while rows.len() < total {
+        let now = Instant::now();
+        let mut wake = now + Duration::from_millis(100);
+        for (slot, &worker) in workers.iter().enumerate() {
+            if next[slot] >= per || flying[slot].is_some() {
+                continue;
+            }
+            let intended = plan.intended(start, worker, next[slot]);
+            if intended > now {
+                wake = wake.min(intended);
+                continue;
+            }
+            let e = idle[slot].take().expect("idle transfer");
+            let mut h = m.add2(e).expect("add transfer");
+            h.set_token(slot).expect("token");
+            flying[slot] = Some((h, ready[slot], intended, Instant::now()));
+            next[slot] += 1;
+        }
+        m.perform().expect("multi perform");
+        m.messages(|msg| {
+            if let Some(result) = msg.result() {
+                done.push((msg.token().expect("token"), result));
+            }
+        });
+        let finished_any = !done.is_empty();
+        for (slot, result) in done.drain(..) {
+            result.expect("transfer");
+            let (h, was_ready, intended, sent) = flying[slot].take().expect("in-flight transfer");
+            let mut e = m.remove2(h).expect("remove transfer");
+            let finished = Instant::now();
+            check(&mut e, setup);
+            rows.push(paced::Row {
+                ready: was_ready,
+                intended,
+                sent,
+                done: finished,
+            });
+            ready[slot] = finished;
+            idle[slot] = Some(e);
+        }
+        if !finished_any && rows.len() < total {
+            let micros = wake.saturating_duration_since(Instant::now()).as_micros() as u64;
+            let timeout = Duration::from_millis(micros.div_ceil(1000).min(100));
+            m.poll(&mut [], timeout).expect("multi poll");
+        }
+    }
+    rows
+}
+
+fn paced_lanes(setup: &Arc<Setup>, plan: paced::Plan) -> Vec<paced::Row> {
+    let lanes = paced::connections();
+    let ready = std::sync::Barrier::new(lanes);
+    let start = std::sync::OnceLock::new();
+    thread::scope(|scope| {
+        let handles: Vec<_> = (0..lanes)
+            .map(|lane| {
+                let (setup, ready, start) = (setup.as_ref(), &ready, &start);
+                scope.spawn(move || {
+                    let m = multi(setup.h1);
+                    drive(&m, setup, 1, 1);
+                    ready.wait();
+                    let start = *start.get_or_init(|| plan.start());
+                    let workers: Vec<usize> =
+                        (0..plan.workers).filter(|w| w % lanes == lane).collect();
+                    drive_paced(&m, setup, &plan, start, &workers)
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|h| h.join().expect("paced lane"))
+            .collect()
+    })
+}
+
 fn connection(setup: Arc<Setup>, jobs: Receiver<(usize, usize)>, results: Sender<Vec<u32>>) {
     let m = multi(setup.h1);
     for (workers, per) in jobs {
@@ -232,6 +327,15 @@ fn main() {
             fnv1a(body),
             body.len()
         );
+        return;
+    }
+
+    if let Some(plan) = paced::Plan::from_args(&args) {
+        let rows = paced_lanes(&setup, plan);
+        paced::report(&plan, rows);
+        if let Some(file) = &setup.ca_file {
+            drop(fs::remove_file(file));
+        }
         return;
     }
 

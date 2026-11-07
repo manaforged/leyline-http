@@ -21,15 +21,21 @@ if "--vs" in args:
     i=args.index("--vs")
     if i+1>=len(args): sys.exit("--vs needs a library name")
     vs=args[i+1]; del args[i:i+2]
-runs=[];dirs=[]
+runs=[];dirs=[];paced_runs=[]
 for path in args:
-    run=collections.defaultdict(dict)
+    run=collections.defaultdict(dict); paced=collections.defaultdict(dict)
     for l in open(path):
         p=l.split()
+        if len(p)==15:
+            r,cell,lib,rate,secs,done,rps,c50,c99,c999,_,_,_,kib,task=p
+            sent=int(rate)*(int(secs)+1)
+            paced[(cell,lib)][r]=(float(c50),float(c99),float(c999),float(task)*1000/sent,float(rps)/int(rate),int(kib)/1024,int(rate))
+            continue
         if len(p)!=11: continue
         r,cell,lib,m,ia,ca,wa,m2,ib,cb,wb=p; dn=int(m2)-int(m)
         run[(cell,lib)][r]=(dn*1e9/(int(wb)-int(wa)),(float(ib)-float(ia))/dn,(float(cb)-float(ca))*1000/dn)
-    if run: runs.append(run); dirs.append(path)
+    if paced: paced_runs.append(paced)
+    if run or paced: runs.append(run); dirs.append(path)
     else: print(f"{path}: no rows; left out",file=sys.stderr)
 if not runs: sys.exit("no rows")
 if len(runs)>1:
@@ -53,6 +59,15 @@ for path in dirs:
         for l in open(cpath):
             c,lib,k=l.split()
             if k not in conns[(c,lib)]: conns[(c,lib)].append(k)
+peak=collections.defaultdict(dict)
+for n,path in enumerate(dirs):
+    rpath=os.path.join(os.path.dirname(path),"rss.txt")
+    if os.path.exists(rpath):
+        for l in open(rpath):
+            r,c,lib,kib=l.split()
+            key=(n,r)
+            peak[(c,lib)][key]=max(peak[(c,lib)].get(key,0),int(kib))
+rss=lambda k:f"{st.median(peak[k].values())/1024:8.1f}" if peak.get(k) else f"{'-':>8}"
 keys=list(dict.fromkeys(k for run in runs for k in run))
 cells=list(dict.fromkeys(c for c,_ in keys))
 pooled={k:[v for run in runs for v in run.get(k,{}).values()] for k in keys}
@@ -60,18 +75,18 @@ med=lambda k,i:st.median(x[i] for x in pooled[k])
 def spread(k):
     s=[100*(max(v)-min(v))/st.median(v) for v in ([x[0] for x in run[k].values()] for run in runs if k in run)]
     return st.median(s)
-print(f"{len(runs)} runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median")
+if keys: print(f"{len(runs)} runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median")
 for c in cells:
     libs=[l for (cc,l) in keys if cc==c]
     base="h2" if (c,"h2") in pooled else "floor" if (c,"floor") in pooled else None
     floor=med((c,base),1) if base else None
-    print(f"\n{c:6} {'lib':15} {'req/s':>10} {'spread':>7} {'instr/req':>10} {'over '+(base or '-'):>10} {'cpu_us/req':>10} {'rounds':>6} {'conns':>5}")
+    print(f"\n{c:6} {'lib':15} {'req/s':>10} {'spread':>7} {'instr/req':>10} {'over '+(base or '-'):>10} {'cpu_us/req':>10} {'rss_MiB':>8} {'rounds':>6} {'conns':>5}")
     for l in sorted(libs,key=lambda l:-med((c,l),0)):
         v=pooled[(c,l)]; ins=med((c,l),1)
         over=f"{ins-floor:+10.0f}" if base else f"{'-':>10}"
-        print(f"{'':6} {l:15} {med((c,l),0):10.0f} {spread((c,l)):6.1f}% {ins:10.0f} {over} {med((c,l),2):10.2f} {len(v):6} {'/'.join(conns.get((c,l),['-'])):>5}")
+        print(f"{'':6} {l:15} {med((c,l),0):10.0f} {spread((c,l)):6.1f}% {ins:10.0f} {over} {med((c,l),2):10.2f} {rss((c,l))} {len(v):6} {'/'.join(conns.get((c,l),['-'])):>5}")
 
-def ratio_ci(ours,theirs,i):
+def ratio_ci(ours,theirs,i,runs=runs):
     logs=[[math.log(run[ours][r][i]/run[theirs][r][i]) for r in run[ours] if r in run[theirs]] for run in runs if ours in run and theirs in run]
     logs=[p for p in logs if p]
     if not logs: return None
@@ -87,7 +102,7 @@ def show(r,up,down,same):
     if lo is None: return f"{g:.3f} [no interval]"
     return f"{g:.3f} [{lo:.3f}, {hi:.3f}] "+(up if lo>1 else down if hi<1 else same)
 
-print("\ngeometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)")
+if keys: print("\ngeometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)")
 for c in cells:
     libs=[l for (cc,l) in keys if cc==c]
     rivals=[l for l in libs if not l.startswith("leyline") and l!="floor"]
@@ -98,3 +113,23 @@ for c in cells:
             rps=ratio_ci((c,l),(c,name),0); cpu=ratio_ci((c,l),(c,name),2)
             if rps is None: print(f"{c:6} {l:17} vs {name:10} no paired rounds"); continue
             print(f"{c:6} {l:17} vs {name:10} req/s {show(rps,'ahead','behind','tie')}; CPU/req {show(cpu,'more CPU','less CPU','same CPU')}; {rps[3]}")
+
+if paced_runs:
+    pk=list(dict.fromkeys(k for run in paced_runs for k in run))
+    pp={k:[v for run in paced_runs for v in run.get(k,{}).values()] for k in pk}
+    pmed=lambda k,i:st.median(x[i] for x in pp[k])
+    print("\nopen-loop cells: latency from the scheduled send time when the worker was behind it (coordinated omission), else from the send; first second left out; CPU per request at the same offered rate; medians over runs and rounds; lower is better")
+    for c in dict.fromkeys(c for c,_ in pk):
+        libs=[l for (cc,l) in pk if cc==c]
+        print(f"\n{c:8} {'lib':15} {'rate':>8} {'achieved':>8} {'p50_us':>8} {'p99_us':>8} {'p999_us':>8} {'cpu_us/req':>10} {'rss_MiB':>8} {'rounds':>6}")
+        for l in sorted(libs,key=lambda l:pmed((c,l),1)):
+            k=(c,l); short=" short" if pmed(k,4)<0.95 else ""
+            print(f"{'':8} {l:15} {pmed(k,6):8.0f} {pmed(k,4):8.3f} {pmed(k,0):8.0f} {pmed(k,1):8.0f} {pmed(k,2):8.0f} {pmed(k,3):10.2f} {pmed(k,5):8.1f} {len(pp[k]):6}{short}")
+    print("\nopen-loop paired ratio, leyline over rival (same run, same round); 95% t-interval on log ratio; below 1 means leyline is lower")
+    for c in dict.fromkeys(c for c,_ in pk):
+        libs=[l for (cc,l) in pk if cc==c]
+        for l in [l for l in libs if l.startswith("leyline")]:
+            for name in [n for n in libs if not n.startswith("leyline")]:
+                p99=ratio_ci((c,l),(c,name),1,paced_runs); cpu=ratio_ci((c,l),(c,name),3,paced_runs)
+                if p99 is None: continue
+                print(f"{c:8} {l:17} vs {name:10} p99 {show(p99,'higher','lower','tie')}; CPU/req {show(cpu,'more CPU','less CPU','same CPU')}; {p99[3]}")

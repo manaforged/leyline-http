@@ -1,4 +1,0 @@
-before: connections=200 driver_task_bytes=896000 bytes_per_connection=4480
-n1: 896000 0x492D68: <tokio::runtime::task::core::Cell<<leyline::h2::client::driver::Driver<leyline::tls::stream::TlsIo>>::run::{closure#0}, alloc::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle>>>::new
-after: connections=200 driver_task_bytes=665600 bytes_per_connection=3328
-n1: 665600 0x482EE9: <tokio::runtime::task::core::Cell<<leyline::h2::client::driver::Driver<leyline::tls::stream::TlsIo>>::run::{closure#0}, alloc::sync::Arc<tokio::runtime::scheduler::multi_thread::handle::Handle>>>::new

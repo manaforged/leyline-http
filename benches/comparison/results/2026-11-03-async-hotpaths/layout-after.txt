@@ -1,3 +1,0 @@
-print-type-size type: `{async fn body of h2::client::driver::lifecycle::<impl h2::client::driver::Driver<tls::stream::TlsIo>>::run()}`: 3232 bytes, alignment: 8 bytes
-print-type-size type: `{async fn body of h2::client::driver::lifecycle::<impl h2::client::driver::Driver<tls::stream::TlsIo>>::event_loop()}`: 1048 bytes, alignment: 8 bytes
-print-type-size type: `{async fn body of core::response::body::<impl core::response::Response>::text_with_charset()}`: 1016 bytes, alignment: 8 bytes

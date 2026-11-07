@@ -1,3 +1,8 @@
+#[path = "../../paced.rs"]
+mod paced;
+#[path = "../../paced_tokio.rs"]
+mod paced_tokio;
+
 use std::env;
 use std::fs;
 use std::sync::Arc;
@@ -218,6 +223,28 @@ async fn run() {
             fnv1a(&body),
             body.len()
         );
+        return;
+    }
+
+    if let Some(plan) = paced::Plan::from_args(&args) {
+        let version = if h1() {
+            Version::HTTP_11
+        } else {
+            Version::HTTP_2
+        };
+        let connections = paced::connections();
+        let clients: Vec<Http> = (0..connections).map(|_| build(ca.as_deref())).collect();
+        for client in &clients {
+            check(client, &uri, &expected, version).await;
+        }
+        let clients = Arc::new(clients);
+        let rows = paced_tokio::run_tasks(plan, move |worker| {
+            let client = clients[worker % clients.len()].clone();
+            let (uri, expected) = (uri.clone(), Arc::clone(&expected));
+            async move { check(&client, &uri, &expected, version).await }
+        })
+        .await;
+        paced::report(&plan, rows);
         return;
     }
 

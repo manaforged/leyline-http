@@ -60,7 +60,7 @@ is retained rather than changing either fingerprint for the benchmark.
 Three independent runs used four alternating-order rounds each, bare profiles,
 identical request-header values, certificate verification against a local test
 CA, a 10-byte response, and a 30-second request timeout. The CPU frequency
-governor was set to `performance`. Leyline is commit `ccd20c60`. `Leyline` is the
+governor was set to `performance`. Leyline is commit `5bc5331b`. `Leyline` is the
 default layout: one multi-threaded Tokio runtime and one shared session.
 `Leyline, one runtime per core` is the same client run through
 `SessionBuilder::run_per_core`; for HTTP/2 the harness caps its runtime count at
@@ -226,6 +226,122 @@ done
 python3 libs-table.py results/reproduce-browser-h2-r{1,2,3}/rows.txt --vs tlsclient
 ```
 
+### Open-loop latency
+
+Every client got the same offered rate for 10 seconds after a 1-second warm-up,
+as the [method](#method) describes. Three independent runs used three
+alternating-order rounds each, bare profiles, identical request headers, a
+10-byte response, verified TLS against a local test CA, and a 30-second timeout.
+The runs used the whole host on 2026-11-07, with the server on CPUs 0-6 and
+16-22 and the clients on CPUs 8-15 and 24-31. The Leyline library source is
+identical to v0.2.0 (`leyline_source_hash` `3bdc1179` in every receipt). Every
+client completed at least 99.9% of its offered requests in every cell.
+
+Latency is in microseconds, CPU is client CPU time per request, and memory is
+peak RSS. Each value is the median of 9 observations; lower is better.
+
+HTTP/1.1, 8 connections, 2,000 requests per second:
+
+| Client | p50 | p99 | p99.9 | CPU µs | RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Leyline** | 17 | 36 | 45 | 11.40 | 13.4 |
+| hyper-util | 18 | 36 | 46 | 13.62 | 8.1 |
+| reqwest | 22 | 43 | 52 | 17.55 | 8.7 |
+| wreq | 21 | 41 | 51 | 15.99 | 9.6 |
+| ureq | 26 | 43 | 50 | 21.69 | 10.0 |
+| libcurl | 21 | 28 | 52 | 10.53 | 10.6 |
+| Go net/http | 22 | 49 | 147 | 22.73 | 18.4 |
+| fasthttp | 18 | 38 | 44 | 13.17 | 18.0 |
+
+HTTP/1.1, 64 connections, 20,000 requests per second:
+
+| Client | p50 | p99 | p99.9 | CPU µs | RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Leyline** | 33 | 69 | 84 | 9.74 | 29.5 |
+| hyper-util | 35 | 71 | 85 | 11.74 | 25.8 |
+| reqwest | 37 | 73 | 89 | 17.48 | 27.7 |
+| wreq | 37 | 74 | 92 | 16.47 | 28.0 |
+| ureq | 26 | 46 | 54 | 25.73 | 58.0 |
+| libcurl | 19 | 31 | 38 | 16.26 | 32.5 |
+| Go net/http | 29 | 60 | 204 | 22.60 | 97.4 |
+| fasthttp | 28 | 52 | 61 | 12.17 | 113.5 |
+
+HTTP/2, 2 connections, 16 workers, 2,000 requests per second:
+
+| Client | p50 | p99 | p99.9 | CPU µs | RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Leyline** | 20 | 51 | 61 | 11.85 | 14.4 |
+| hyper-util | 25 | 55 | 65 | 14.94 | 9.2 |
+| reqwest | 25 | 55 | 70 | 18.11 | 9.9 |
+| wreq | 25 | 56 | 70 | 16.99 | 10.6 |
+| h2 | 21 | 51 | 61 | 12.23 | 8.7 |
+| libcurl | 22 | 39 | 57 | 15.97 | 9.9 |
+
+HTTP/2, 8 connections, 256 workers, 50,000 requests per second:
+
+| Client | p50 | p99 | p99.9 | CPU µs | RSS MiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| **Leyline** | 60 | 124 | 145 | 7.96 | 50.3 |
+| hyper-util | 74 | 139 | 162 | 12.88 | 44.8 |
+| reqwest | 78 | 148 | 176 | 18.90 | 47.1 |
+| wreq | 73 | 140 | 166 | 18.18 | 48.3 |
+| h2 | 56 | 112 | 130 | 9.70 | 42.6 |
+| libcurl | 61 | 88 | 114 | 10.16 | 46.4 |
+
+Paired ratios, Leyline over each client, with a 95% t-interval across the three
+run means. Below 1 means Leyline is lower.
+
+| Cell | Client | p99 ratio | CPU per request ratio |
+| --- | --- | ---: | ---: |
+| HTTP/1.1, 8 conns | hyper-util | 0.976 [0.929, 1.025] | 0.835 [0.814, 0.857] |
+| | reqwest | 0.832 [0.771, 0.897] | 0.642 [0.620, 0.665] |
+| | wreq | 0.880 [0.843, 0.918] | 0.712 [0.682, 0.744] |
+| | ureq | 0.856 [0.674, 1.088] | 0.523 [0.497, 0.550] |
+| | libcurl | 1.257 [1.085, 1.457] | 1.079 [1.058, 1.101] |
+| | Go net/http | 0.719 [0.664, 0.779] | 0.496 [0.467, 0.528] |
+| | fasthttp | 0.939 [0.885, 0.996] | 0.860 [0.847, 0.873] |
+| HTTP/1.1, 64 conns | hyper-util | 0.969 [0.925, 1.015] | 0.829 [0.806, 0.852] |
+| | reqwest | 0.940 [0.890, 0.993] | 0.557 [0.548, 0.566] |
+| | wreq | 0.923 [0.868, 0.982] | 0.592 [0.575, 0.610] |
+| | ureq | 1.458 [1.392, 1.528] | 0.386 [0.330, 0.451] |
+| | libcurl | 2.188 [2.094, 2.286] | 0.604 [0.586, 0.622] |
+| | Go net/http | 1.141 [1.101, 1.182] | 0.431 [0.421, 0.441] |
+| | fasthttp | 1.317 [1.270, 1.365] | 0.801 [0.780, 0.822] |
+| HTTP/2, 2 conns | hyper-util | 0.937 [0.914, 0.960] | 0.778 [0.742, 0.817] |
+| | reqwest | 0.924 [0.894, 0.954] | 0.647 [0.618, 0.679] |
+| | wreq | 0.904 [0.882, 0.926] | 0.683 [0.645, 0.723] |
+| | h2 | 1.004 [0.995, 1.014] | 0.966 [0.948, 0.985] |
+| | libcurl | 1.319 [1.312, 1.327] | 0.746 [0.734, 0.758] |
+| HTTP/2, 8 conns | hyper-util | 0.888 [0.864, 0.912] | 0.618 [0.613, 0.624] |
+| | reqwest | 0.834 [0.779, 0.892] | 0.420 [0.415, 0.424] |
+| | wreq | 0.885 [0.835, 0.937] | 0.437 [0.435, 0.440] |
+| | h2 | 1.107 [1.035, 1.184] | 0.820 [0.815, 0.824] |
+| | libcurl | 1.446 [1.157, 1.807] | 0.781 [0.734, 0.832] |
+
+Leyline uses less CPU per request than every other client in all four cells,
+except libcurl at HTTP/1.1 with 8 connections, where it uses 1.079 times as
+much. Its p99 is lower than reqwest's and wreq's in every cell, and lower than
+or tied with hyper-util's. libcurl has the lowest p99 in every cell. ureq,
+fasthttp and Go net/http have a lower p99 than Leyline at HTTP/1.1 with 64
+connections, and the h2 crate has a lower p99 at HTTP/2 with 8 connections.
+Leyline does not use the least memory: hyper-util, reqwest and wreq have a
+lower peak RSS in every cell, and h2 in both HTTP/2 cells.
+
+The pooled tables for [HTTP/1.1](benches/comparison/results/2026-11-07-paced-h1-pooled.txt)
+and [HTTP/2](benches/comparison/results/2026-11-07-paced-h2-pooled.txt) and the
+raw runs under `benches/comparison/results/2026-11-07-paced-*` keep every round
+and receipt. To reproduce one cell, run from `benches/comparison`:
+
+```bash
+export CMP_CA=$PWD/pki/ca.der CMP_CERT=$PWD/pki/server.der CMP_KEY=$PWD/pki/server-key.der
+for run in 1 2 3; do
+  TAG=reproduce-paced-h2-r$run MODE=paced PACED_SECONDS=10 ROUNDS=3 PROFILE=bare PROTO=h2 \
+    TIMEOUT=30s CELLS=c8x256:8:256:50000 LIBS="leyline hyper reqwest wreq curl h2" \
+    SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 bash libs.sh
+done
+python3 libs-table.py results/reproduce-paced-h2-r{1,2,3}/rows.txt
+```
+
 ## Results
 
 Raw results are in
@@ -279,7 +395,7 @@ What the table shows:
 
 ## Client libraries
 
-Thirteen HTTP/2 clients ran the same requests against the same local origin on 2026-10-31. The files are in [`benches/comparison/results/2026-10-31-libs`](benches/comparison/results/2026-10-31-libs), and [`benches/comparison/libs.sh`](benches/comparison/libs.sh) reproduces them. Each value is the median of 3 rounds in alternating order. Every client checks the status and full body of every response and holds exactly the stated number of connections. Leyline is commit `beef1b9d`, with no browser profile.
+Thirteen HTTP/2 clients ran the same requests against the same local origin on 2026-10-31. The files are in [`benches/comparison/results/2026-10-31-libs`](benches/comparison/results/2026-10-31-libs), and [`benches/comparison/libs.sh`](benches/comparison/libs.sh) reproduces them. Each value is the median of 3 rounds in alternating order. Every client checks the status and full body of every response and holds exactly the stated number of connections. Leyline is a development build from before 0.2.0, with no browser profile.
 
 Requests per second:
 
@@ -337,7 +453,7 @@ them diagnostic measurements, not evidence for a speed claim.
 
 ## HTTP/1.1 client libraries
 
-Five HTTP/1.1 clients ran the same requests on 2026-11-01, once over loopback and once over a link with added delay. The files are in [`benches/comparison/results/2026-11-01-h1-r10b`](benches/comparison/results/2026-11-01-h1-r10b) and [`benches/comparison/results/2026-11-01-h1-net100us-b`](benches/comparison/results/2026-11-01-h1-net100us-b). Each value is the median of 10 rounds in alternating order. Every client sends the same three request headers, which the origin checks before the rounds start, and every client checks the status and body of every response. Leyline is commit `d6d58d15`, with no browser profile. These runs used Linux 7.0.0-38-generic, Rust 1.98.1 and Go 1.27.3, with HTTP/1.1 over TLS and the CPU pinning listed under Setup.
+Five HTTP/1.1 clients ran the same requests on 2026-11-01, once over loopback and once over a link with added delay. The files are in [`benches/comparison/results/2026-11-01-h1-r10b`](benches/comparison/results/2026-11-01-h1-r10b) and [`benches/comparison/results/2026-11-01-h1-net100us-b`](benches/comparison/results/2026-11-01-h1-net100us-b). Each value is the median of 10 rounds in alternating order. Every client sends the same three request headers, which the origin checks before the rounds start, and every client checks the status and body of every response. Leyline is a development build from before 0.2.0, with no browser profile. These runs used Linux 7.0.0-38-generic, Rust 1.98.1 and Go 1.27.3, with HTTP/1.1 over TLS and the CPU pinning listed under Setup.
 
 `leyline` is the async `Session` with tasks on the tokio multi-thread runtime. `leyline-blocking` is `blocking::Session`, one per thread. ureq has one `Agent` per thread. fasthttp runs one goroutine per request in flight. hyper is the hyper-util client on tokio.
 
@@ -405,6 +521,31 @@ SHA-256 of each client binary.
 
 The host was not dedicated. The pinning left CPUs 7 and 23 free of the
 server and the clients.
+
+## Method
+
+Each comparison has two passes, both run by `libs.sh`.
+
+- Throughput (closed loop). Each worker sends its next request when the last one ends. A run sends `m` requests, then `2m`, and the rate is `(2m - m)` over the difference in wall time, so process start and connection setup cancel out. `perf stat` counts instructions and CPU time; GNU `time` records peak RSS.
+- Latency (open loop, `MODE=paced`). Every client gets the same offered rate. Worker `w` sends request `i` at a fixed time on the schedule and does not wait for a slow response to move the schedule. When the worker's previous request ran past this request's scheduled time, latency counts from the scheduled time, so a client that falls behind shows its queueing delay (coordinated omission). When the worker was idle, latency counts from the send, so timer wake-up error in the harness is not charged to the client. Each worker's gap between requests is at least 2 ms, and a cell that asks for less is refused. The first second is a warm-up and is left out. The row also records CPU time per request at that rate and peak RSS.
+
+In both passes the clients run one at a time, in alternating order each round. A cell is pooled over three independent runs. Ratios are geometric means of same-round pairs with a 95% t-interval over the per-run means. Runs with different Leyline source hashes, certificate settings or protocols are not pooled.
+
+## Client configuration
+
+Each client uses its own recommended pooled setup, with the limits raised where the library's default would cap the cell below its worker count.
+
+| Client | Setting in this harness | Library default it changes |
+| --- | --- | --- |
+| Leyline | One `Session` per connection, cloned into workers | None |
+| hyper-util | Legacy `Client`, `set_nodelay(true)`, `http2_only` for HTTP/2 | `HttpConnector` leaves `TCP_NODELAY` off by default (hyper-util 0.1.21) |
+| reqwest | One `Client` per connection, `http1_only` or `http2_prior_knowledge` | None; `tcp_nodelay` is on by default |
+| wreq | One `Client` per connection, `http1_only` for HTTP/1.1 | None |
+| h2 | One `SendRequest` per connection, cloned into workers | None |
+| ureq | One `Agent`, `max_idle_connections` and `max_idle_connections_per_host` set to the worker count | 10 idle connections, 3 per host (ureq 3.5.0) |
+| libcurl | One multi handle per connection; HTTP/2 uses `CURLMOPT_PIPELINING` multiplexing, `CURLOPT_PIPEWAIT` and one connection per multi handle | None; `TCP_NODELAY` is on by default since 7.50.2 |
+| Go net/http | `MaxIdleConns` and `MaxIdleConnsPerHost` set to the worker count; HTTP/2 uses `ForceAttemptHTTP2` and one connection | `DefaultMaxIdleConnsPerHost` is 2 |
+| fasthttp | `MaxConnsPerHost` set to the worker count | `DefaultMaxConnsPerHost` is 512 |
 
 ## Limits
 

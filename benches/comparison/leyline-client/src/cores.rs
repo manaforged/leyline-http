@@ -100,8 +100,12 @@ fn run_shared(
             .run_per_core(|session| {
                 let index = next.fetch_add(1, Ordering::Relaxed);
                 let mine = tasks / threads + usize::from(index < tasks % threads);
-                let (url, expected, ready, go) =
-                    (url.clone(), Arc::clone(&expected), Arc::clone(&r), Arc::clone(&g));
+                let (url, expected, ready, go) = (
+                    url.clone(),
+                    Arc::clone(&expected),
+                    Arc::clone(&r),
+                    Arc::clone(&g),
+                );
                 async move {
                     fetch(&session, &url, &expected).await;
                     ready.wait();
