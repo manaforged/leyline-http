@@ -165,13 +165,10 @@ fn a_header_value_allows_tab_visible_ascii_and_utf8_only() {
 #[tokio::test]
 async fn time_queued_for_a_connection_is_not_counted_as_request_time() {
     use crate::testing::{Response, Server};
-    let server = Server::http(|_| {
-        Response::new(200)
-            .delay(Duration::from_millis(250))
-            .body("ok")
-    })
-    .await
-    .expect("server starts");
+    let delay = Duration::from_millis(250);
+    let server = Server::http(move |_| Response::new(200).delay(delay).body("ok"))
+        .await
+        .expect("server starts");
     let session = crate::Session::builder()
         .protocol(crate::Protocol::Http1)
         .max_connections_per_host(1)
@@ -179,14 +176,19 @@ async fn time_queued_for_a_connection_is_not_counted_as_request_time() {
         .expect("session");
 
     let url = server.url("/");
+    let started = std::time::Instant::now();
     let (first, second) = tokio::join!(
         session.get(url.as_str()).send(),
         session.get(url.as_str()).send()
     );
+    let total = started.elapsed();
     let (first, second) = (first.expect("first"), second.expect("second"));
 
-    let queued = first.elapsed().max(second.elapsed());
-    assert!(queued < Duration::from_millis(450), "elapsed {queued:?}");
+    let counted = first.elapsed() + second.elapsed();
+    assert!(
+        counted < total + delay / 2,
+        "elapsed {counted:?} of {total:?}"
+    );
 }
 
 #[test]

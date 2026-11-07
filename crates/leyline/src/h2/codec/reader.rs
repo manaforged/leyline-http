@@ -8,7 +8,7 @@ use tokio::io::AsyncRead;
 use crate::h2::H2Error;
 use crate::h2::frame::{DEFAULT_MAX_FRAME_SIZE, FRAME_HEADER_LEN, Frame, FrameHeader};
 
-pub(super) const SLACK: usize = 512;
+const SLACK: usize = 512;
 pub(super) const BULK_AT: usize = 4 * 1024;
 pub(super) const BULK_SLACK: usize = 16 * 1024;
 

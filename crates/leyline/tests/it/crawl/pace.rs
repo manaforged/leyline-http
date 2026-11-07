@@ -28,7 +28,7 @@ fn at(stamps: &Stamps, target: &str) -> Instant {
 #[tokio::test]
 async fn a_crawl_keeps_crawl_delay_out_of_the_sessions_own_requests() {
     let server = testing::Server::http(|request| match request.target.as_str() {
-        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 3\n"),
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 1\n"),
         _ => html("<p>home</p>"),
     })
     .await
@@ -45,7 +45,7 @@ async fn a_crawl_keeps_crawl_delay_out_of_the_sessions_own_requests() {
     for _ in 0..2 {
         session.get(server.url("/x")).send().await.unwrap();
     }
-    assert!(started.elapsed() < Duration::from_millis(1500));
+    assert!(started.elapsed() < Duration::from_millis(800));
 }
 
 #[tokio::test]
@@ -55,6 +55,7 @@ async fn a_crawl_reports_invalid_host_limits() {
         .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .host_limits(HostLimits::new().pause_on([1000]));
     let error = crawl.next().await.unwrap().unwrap_err();
     assert_eq!(error.kind(), leyline::Kind::Config);
@@ -77,6 +78,7 @@ async fn a_crawl_tries_a_busy_page_again_and_gives_up_after_three() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .host_limits(HostLimits::new());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
@@ -138,12 +140,12 @@ async fn paused_hosts_leave_room_for_other_hosts() {
         .collect();
     let server = testing::Server::http(move |request| match request.target.as_str() {
         "/" => html(&format!(r#"{slow}<a href="/next">N</a>"#)),
-        "/next" => html(r#"<p>next</p><a href="/fast">F</a>"#).delay(Duration::from_secs(3)),
+        "/next" => html(r#"<p>next</p><a href="/fast">F</a>"#).delay(Duration::from_millis(600)),
         _ => html("<p>fast</p>"),
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = brisk().crawl(server.url("/"));
     let reached = tokio::time::timeout(Duration::from_secs(20), async {
         while let Some(page) = crawl.next().await {
             if page.is_ok_and(|page| page.url().path() == "/fast") {
@@ -168,7 +170,7 @@ async fn crawls_of_one_session_keep_each_others_crawl_delay() {
     let server = testing::Server::http(move |request| {
         stamp(&seen, &request.target);
         match request.target.as_str() {
-            "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 3\n"),
+            "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 0.6\n"),
             "/" => html(r#"<a href="/a2">A</a>"#),
             "/b" => html(
                 r#"<a href="/b2">B</a><a href="/b3">B</a><a href="/b4">B</a><a href="/b5">B</a><a href="/b6">B</a>"#,
@@ -178,7 +180,7 @@ async fn crawls_of_one_session_keep_each_others_crawl_delay() {
     })
     .await
     .unwrap();
-    let session = Session::new();
+    let session = brisk();
     let polite = session.crawl(server.url("/"));
     let fast = session.crawl(server.url("/b")).respect(None);
     let drain = |mut crawl: leyline::Crawl| async move {
@@ -197,7 +199,7 @@ async fn crawls_of_one_session_keep_each_others_crawl_delay() {
         .max()
         .unwrap();
     let gap = polite_at - before;
-    assert!(gap >= Duration::from_millis(2700), "{gap:?}");
+    assert!(gap >= Duration::from_millis(540), "{gap:?}");
 }
 
 #[tokio::test]
@@ -324,14 +326,14 @@ async fn a_crawl_that_ignores_robots_ignores_an_earlier_crawl_delay() {
     let server = testing::Server::http(move |request| {
         stamp(&seen, &request.target);
         match request.target.as_str() {
-            "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 4\n"),
+            "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 1\n"),
             "/" | "/again" => html(r#"<a href="/b">B</a>"#),
             _ => html("<p>b</p>"),
         }
     })
     .await
     .unwrap();
-    let session = Session::new();
+    let session = brisk();
     let mut first = session.crawl(server.url("/")).limit(1);
     while let Some(page) = first.next().await {
         page.unwrap();
@@ -341,7 +343,7 @@ async fn a_crawl_that_ignores_robots_ignores_an_earlier_crawl_delay() {
         page.unwrap();
     }
     let gap = at(&stamps, "/b") - at(&stamps, "/again");
-    assert!(gap < Duration::from_millis(2500), "{gap:?}");
+    assert!(gap < Duration::from_millis(800), "{gap:?}");
 }
 
 #[tokio::test]

@@ -146,7 +146,6 @@ impl Draft {
     pub(crate) fn deadline(&self) -> &Deadline {
         &self.deadline
     }
-
 }
 
 impl RequestBuilder {

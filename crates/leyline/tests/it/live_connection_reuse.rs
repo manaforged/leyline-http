@@ -40,11 +40,20 @@ async fn live_h2_connection_reuse() {
     let session = leyline::Session::from(Browser::default());
     let resp1 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp1.status(), 200);
+    assert!(!resp1.reused(), "the first request opens a connection");
     let resp2 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp2.status(), 200);
+    assert!(
+        resp2.reused(),
+        "the second request must reuse the connection"
+    );
     let resp3 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp3.status(), 200);
-    println!("✓ Three sequential requests succeeded (pool reuse)");
+    assert!(
+        resp3.reused(),
+        "the third request must reuse the connection"
+    );
+    assert_eq!(session.stats().misses(http::Version::HTTP_2), 1);
 }
 
 #[tokio::test]

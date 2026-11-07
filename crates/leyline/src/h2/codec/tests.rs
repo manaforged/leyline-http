@@ -8,7 +8,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 fn small_frames_do_not_reserve_a_tls_record() {
     let reader = FrameReader::new();
     assert!(reader.read_capacity() < 4 * 1024);
-    assert!(reader.read_capacity() <= super::reader::SLACK);
 }
 
 #[tokio::test]

@@ -104,10 +104,19 @@ async fn stalled_upload_stops_polling_the_producer() {
     while sent < PEER_WINDOW {
         sent += next_of(&mut frames, FrameType::Data).await.1.len();
     }
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let stalled = producer.produced.load(Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(producer.produced.load(Ordering::SeqCst), stalled);
+    let stalled = timeout(Duration::from_secs(10), async {
+        let mut last = producer.produced.load(Ordering::SeqCst);
+        loop {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let now = producer.produced.load(Ordering::SeqCst);
+            if now == last {
+                return now;
+            }
+            last = now;
+        }
+    })
+    .await
+    .expect("the producer stops at the upload budget");
     assert!(
         stalled <= PEER_WINDOW + UPLOAD_BUDGET + 2 * CHUNK,
         "{stalled}"
@@ -165,12 +174,20 @@ async fn request_beyond_the_command_queue_stays_with_the_caller() {
     let mut waiting = vec![send(&handle, "GET", leyline::Body::default())];
     next_of(&mut frames, FrameType::Headers).await;
     waiting.extend((0..1100).map(|_| send(&handle, "GET", leyline::Body::default())));
-    tokio::time::sleep(Duration::from_millis(300)).await;
 
-    let producer = Arc::new(Producer::default());
-    let late = handle.send_shared(head("POST"), endless(&producer), false);
-    assert!(late.now_or_never().is_none());
-    assert!(producer.dropped.load(Ordering::SeqCst));
+    let producer = timeout(Duration::from_secs(10), async {
+        loop {
+            let producer = Arc::new(Producer::default());
+            let late = handle.send_shared(head("POST"), endless(&producer), false);
+            assert!(late.now_or_never().is_none());
+            if producer.dropped.load(Ordering::SeqCst) {
+                return producer;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a request past the full queue stays with the caller");
     assert_eq!(producer.produced.load(Ordering::SeqCst), 0);
     waiting.iter().for_each(tokio::task::JoinHandle::abort);
 }

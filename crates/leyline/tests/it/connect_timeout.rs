@@ -69,9 +69,10 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
         .await;
     let elapsed = start.elapsed();
 
-    assert!(
-        result.is_err(),
-        "unreachable endpoint must error, got {result:?}"
+    assert_eq!(
+        result.unwrap_err().kind(),
+        leyline::Kind::Timeout,
+        "unreachable endpoint must time out"
     );
     assert!(
         elapsed < Duration::from_secs(3),
@@ -83,7 +84,7 @@ async fn connect_timeout_bounds_an_unreachable_endpoint() {
 async fn connect_timeout_is_one_window_per_request_on_http_and_https() {
     let session = Session::builder()
         .proxy(Proxy::new().env(false))
-        .timeout(Timeout::new().connect(Duration::from_millis(300)))
+        .timeout(Timeout::new().connect(Duration::from_millis(500)))
         .build()
         .expect("session builds");
 
@@ -96,10 +97,14 @@ async fn connect_timeout_is_one_window_per_request_on_http_and_https() {
             .await;
         let elapsed = start.elapsed();
 
-        assert!(result.is_err(), "{url} must error, got {result:?}");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            leyline::Kind::Timeout,
+            "{url} must time out"
+        );
         assert!(
-            elapsed < Duration::from_millis(550),
-            "{url} took {elapsed:?}; the 300ms connect timeout must bound the whole request"
+            elapsed < Duration::from_millis(900),
+            "{url} took {elapsed:?}; the 500 ms connect timeout must bound the whole request"
         );
     }
 }

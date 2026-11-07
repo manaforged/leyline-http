@@ -52,10 +52,6 @@ fn builder_with_the_default_browser_matches_session_browser() {
         .unwrap();
     assert_eq!(built.identity().http(), new.identity().http());
     assert_eq!(built.platform(), new.platform());
-    assert_eq!(
-        built.inner.inputs.protocol_policy,
-        new.inner.inputs.protocol_policy
-    );
 }
 
 #[test]

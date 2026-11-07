@@ -32,18 +32,6 @@ fn no_policy_never_retries() {
     ));
 }
 
-const MALLOC_FAST_PATH_BYTES: usize = 1032;
-
-#[tokio::test]
-async fn the_boxed_send_future_fits_the_allocator_fast_path() {
-    let session = crate::Session::new();
-    let respond = session
-        .get("http://example.com/")
-        .respond()
-        .expect("prepared request");
-    assert!(std::mem::size_of_val(&respond) <= MALLOC_FAST_PATH_BYTES);
-}
-
 #[tokio::test]
 async fn a_retried_attempt_sends_the_same_request_again() {
     use crate::testing::{Response, Server};

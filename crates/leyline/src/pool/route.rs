@@ -28,7 +28,7 @@ pub(crate) async fn send(
     h2_config: &H2Config,
     route: Route,
     req: Prepared<'_>,
-) -> Result<TransportResponse> {
+) -> Result<Box<TransportResponse>> {
     match route {
         Route::Auto => send_auto(pool, connector, h2_config, req).await,
         Route::Http1 => send_http1(pool, connector, req).await,
@@ -43,7 +43,7 @@ async fn send_auto(
     connector: &FingerprintConnector,
     h2_config: &H2Config,
     req: Prepared<'_>,
-) -> Result<TransportResponse> {
+) -> Result<Box<TransportResponse>> {
     if Scheme::of(req.url) == Some(Scheme::Http) {
         return send_http1(pool, connector, req).await;
     }
@@ -63,7 +63,7 @@ async fn send_h2_or_fall_back(
     h2_config: &H2Config,
     req: Prepared<'_>,
     opened: Opened<H2Client>,
-) -> Result<TransportResponse> {
+) -> Result<Box<TransportResponse>> {
     let retry = req.body.replay().map(|body| req.again(body));
     match send_request(pool, connector, h2_config, req, Some(opened)).await? {
         H2Outcome::Response(response) => Ok(response),
@@ -87,7 +87,7 @@ async fn send_h1_or_upgrade(
     h2_config: &H2Config,
     req: Prepared<'_>,
     opened: Option<Opened<H1Slot>>,
-) -> Result<TransportResponse> {
+) -> Result<Box<TransportResponse>> {
     let retry = req.again(Body::default());
     match send_h1(pool, connector, Some((h2_config, ())), req, opened).await? {
         H1Outcome::Response(resp) => Ok(resp),

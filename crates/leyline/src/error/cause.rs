@@ -45,12 +45,10 @@ pub(crate) trait Cause: StdError + Send + Sync + 'static {
         false
     }
 
-    /// Returns the HTTP/2 error code.
     fn h2_code(&self) -> Option<u32> {
         None
     }
 
-    /// Returns the I/O failure underneath the source.
     fn io_source(&self) -> Option<&io::Error> {
         None
     }

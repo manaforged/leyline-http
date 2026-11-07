@@ -143,10 +143,6 @@ where
     }
 }
 
-#[cfg(test)]
-#[path = "headers_tests.rs"]
-mod tests;
-
 pub(crate) fn reorder(headers: &mut Vec<HeaderPair>, order: &[String]) {
     let rank = |name: &str| order.iter().position(|n| n.eq_ignore_ascii_case(name));
     let mut groups: Vec<(usize, Vec<HeaderPair>)> = Vec::new();

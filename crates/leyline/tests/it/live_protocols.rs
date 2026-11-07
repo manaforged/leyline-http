@@ -58,6 +58,7 @@ async fn live_h3_cloudflare_firefox_profile() {
         "H3 status with Firefox profile: {}",
         resp.status()
     );
+    assert_eq!(resp.version(), http::Version::HTTP_3, "H3 ALPN");
     println!("✓ HTTP/3 to cloudflare-quic.com (Firefox 150 profile): status 200");
 }
 
@@ -76,6 +77,7 @@ async fn live_h3_google() {
         .await
         .expect("H3 request failed");
     assert_eq!(resp.status(), 200, "H3 status: {}", resp.status());
+    assert_eq!(resp.version(), http::Version::HTTP_3, "H3 ALPN");
     println!("✓ HTTP/3 to www.google.com: status 200");
 }
 

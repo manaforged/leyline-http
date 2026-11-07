@@ -10,32 +10,50 @@ fn parses_md5_challenge() {
     assert_eq!(c.algorithm, Algorithm::Md5);
 }
 
-#[test]
-fn rfc7616_md5_vector() {
+fn rfc7616_section_3_9_1_header(algorithm: Algorithm) -> String {
     let challenge = Challenge {
         realm: "http-auth@example.org".into(),
         nonce: "7ypf/xlj9XXwfDPEoM4URrv/xwf94BcCAzFZH4GiTo0v".into(),
-        qop: Some("auth".into()),
-        algorithm: Algorithm::Md5,
+        qop: Some("auth, auth-int".into()),
+        algorithm,
         opaque: Some("FQhe/qaU925kfnzjCev0ciny7QMkPqMAFRtzCUYo5tdS".into()),
         stale: false,
         domain: Vec::new(),
     };
-    let auth = DigestAuth::new("Mufasa", "Circle of Life");
-    let h = challenge
+    challenge
         .build_auth_header(
-            &auth,
+            &DigestAuth::new("Mufasa", "Circle of Life"),
             "GET",
             "/dir/index.html",
             1,
             "f2/wE4q74E6zIJEtWaHKaf5wv/H5QzzpXusqGemxURZJ",
         )
-        .expect("auth-only qop is supported");
-    assert!(h.starts_with("Digest username=\"Mufasa\""));
-    assert!(h.contains("algorithm=MD5"));
-    assert!(h.contains("qop=auth"));
-    assert!(h.contains("nc=00000001"));
-    assert!(h.contains("response=\""));
+        .expect("auth qop is supported")
+}
+
+#[test]
+fn rfc7616_md5_vector() {
+    let header = rfc7616_section_3_9_1_header(Algorithm::Md5);
+    assert!(header.starts_with("Digest username=\"Mufasa\""), "{header}");
+    assert!(header.contains("algorithm=MD5"), "{header}");
+    assert!(header.contains("qop=auth"), "{header}");
+    assert!(header.contains("nc=00000001"), "{header}");
+    assert!(
+        header.contains("response=\"8ca523f5e9506fed4657c9700eebdbec\""),
+        "{header}"
+    );
+}
+
+#[test]
+fn rfc7616_sha256_vector() {
+    let header = rfc7616_section_3_9_1_header(Algorithm::Sha256);
+    assert!(header.contains("algorithm=SHA-256"), "{header}");
+    assert!(
+        header.contains(
+            "response=\"753927fa0e85d155564e2e272a28d1802ca10daf4496794697cf8db5856cb6c1\""
+        ),
+        "{header}"
+    );
 }
 
 #[test]
@@ -117,31 +135,6 @@ fn reports_missing_nonce() {
     let err = parse_challenge(hdr).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("nonce"), "{msg}");
-}
-
-#[test]
-fn sha256_response_matches_manual_computation() {
-    let challenge = Challenge {
-        realm: "r".into(),
-        nonce: "n".into(),
-        qop: Some("auth".into()),
-        algorithm: Algorithm::Sha256,
-        opaque: None,
-        stale: false,
-        domain: Vec::new(),
-    };
-    let auth = DigestAuth::new("u", "p");
-    let header = challenge
-        .build_auth_header(&auth, "GET", "/x", 1, "cn")
-        .expect("qop=auth is supported");
-
-    let ha1 = Algorithm::Sha256.hash_hex(b"u:r:p");
-    let ha2 = Algorithm::Sha256.hash_hex(b"GET:/x");
-    let expected = Algorithm::Sha256.hash_hex(format!("{ha1}:n:00000001:cn:auth:{ha2}").as_bytes());
-    assert!(
-        header.contains(&format!("response=\"{expected}\"")),
-        "header: {header}"
-    );
 }
 
 static NONCE_CACHE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());

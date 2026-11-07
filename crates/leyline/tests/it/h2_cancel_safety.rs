@@ -25,6 +25,8 @@ fn test_config() -> H2Config {
 #[tokio::test]
 async fn cancelled_send_request_rst_streams_the_slot() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
+    let (headers_tx, headers_rx) = tokio::sync::oneshot::channel();
+    let (reset_tx, reset_rx) = tokio::sync::oneshot::channel();
 
     let server = tokio::spawn(async move {
         read_preface(&mut server_io).await;
@@ -35,6 +37,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         let (h, _) = read_frame(&mut server_io).await;
         assert_eq!(h.frame_type, FrameType::Headers as u8);
         let request_stream_id = h.stream_id;
+        headers_tx.send(()).unwrap_or_default();
 
         let started = std::time::Instant::now();
         let mut saw_rst = false;
@@ -61,6 +64,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
             "driver should RST_STREAM(CANCEL) within 3s of the caller dropping the future"
         );
 
+        reset_tx.send(()).unwrap_or_default();
         let mut sink = [0u8; 256];
         drop(server_io.read(&mut sink).await);
     });
@@ -90,10 +94,13 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         );
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::timeout(Duration::from_secs(5), headers_rx)
+        .await
+        .expect("the request reaches the server")
+        .expect("server task waiting");
     pending.abort();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(tokio::time::timeout(Duration::from_secs(5), reset_rx).await);
 
     drop(handle);
 

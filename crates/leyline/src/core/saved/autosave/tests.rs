@@ -14,7 +14,10 @@ async fn a_dropped_session_is_freed_while_autosave_runs() {
     let weak = session.downgrade();
     session.autosave(dir.join("session.json"), Duration::from_millis(10));
     drop(session);
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while weak.strong_count() != 0 && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     assert_eq!(weak.strong_count(), 0);
     drop(std::fs::remove_dir_all(&dir));
 }

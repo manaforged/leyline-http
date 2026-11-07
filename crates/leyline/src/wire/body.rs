@@ -32,6 +32,20 @@ impl<S: Stream + Unpin> Stream for Exclusive<S> {
     }
 }
 
+/// A stream's declared length, stored so `Option<Length>` takes eight bytes.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Length(std::num::NonZeroU64);
+
+impl Length {
+    fn new(bytes: u64) -> Option<Self> {
+        std::num::NonZeroU64::new(bytes.wrapping_add(1)).map(Self)
+    }
+
+    pub(crate) fn get(self) -> u64 {
+        self.0.get() - 1
+    }
+}
+
 #[derive(Default)]
 pub(crate) enum BodyKind {
     #[default]
@@ -39,7 +53,7 @@ pub(crate) enum BodyKind {
     Bytes(Bytes),
     Stream {
         stream: BoxedStream,
-        length_hint: Option<u64>,
+        length_hint: Option<Length>,
     },
 }
 
@@ -154,7 +168,7 @@ impl Body {
         };
         Body(BodyKind::Stream {
             stream,
-            length_hint: length,
+            length_hint: length.and_then(Length::new),
         })
     }
 
@@ -172,7 +186,7 @@ impl Body {
         match &self.0 {
             BodyKind::Empty => Some(0),
             BodyKind::Bytes(b) => Some(b.len() as u64),
-            BodyKind::Stream { length_hint, .. } => *length_hint,
+            BodyKind::Stream { length_hint, .. } => length_hint.map(Length::get),
         }
     }
 

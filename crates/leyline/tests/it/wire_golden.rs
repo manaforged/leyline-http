@@ -27,50 +27,23 @@ const END_HEADERS: u8 = 0x4;
 const SERVER_SETTINGS: [u8; 18] = [0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0];
 const ORIGIN: &str = "origin.test";
 const WAIT: Duration = Duration::from_secs(3);
-const CAPTURE_CONCURRENCY: usize = 8;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
-    let cases = Browser::all().iter().flat_map(|&browser| {
-        Platform::all()
-            .iter()
-            .filter(|&&platform| platform != Platform::Host)
-            .filter_map(move |&platform| {
-                Session::builder()
-                    .browser(browser)
-                    .platform(platform)
-                    .build()
-                    .ok()
-                    .map(|_| (browser, platform))
-            })
-    });
-    let rendered: String = futures_util::stream::iter(cases)
-        .map(|(browser, platform)| async move {
-            let record = client_hello(browser, platform).await;
-            let wire_ja4 = ja4(&record);
-            let saved = saved_ja4(browser, platform);
-            assert!(
-                saved.as_ref().is_none_or(|saved| *saved == wire_ja4),
-                "{} {platform:?}: JA4 on the wire {wire_ja4}, saved {saved:?}",
-                browser.id()
-            );
-            let hello = describe_client_hello(&record);
-            let hello: String = if leyline::internals::browser_profile(browser)
-                .tls
-                .permute_extensions
-            {
-                hello
-                    .lines()
-                    .filter(|line| !line.starts_with("tls extension_order "))
-                    .map(|line| format!("{line}\n"))
-                    .collect()
-            } else {
-                hello
-            };
-            let opening = h2_opening(browser, platform).await;
-            format!("== {} {platform:?}\n{hello}{opening}", browser.id())
+    let cases: Vec<(Browser, Platform)> = Browser::all()
+        .iter()
+        .flat_map(|&browser| {
+            Platform::all()
+                .iter()
+                .filter(|&&platform| platform != Platform::Host)
+                .map(move |&platform| (browser, platform))
         })
-        .buffered(CAPTURE_CONCURRENCY)
+        .collect();
+    let width = std::thread::available_parallelism().map_or(1, usize::from);
+    let rendered: String = futures_util::stream::iter(cases)
+        .map(|(browser, platform)| tokio::spawn(capture(browser, platform)))
+        .buffered(width)
+        .map(Result::unwrap)
         .collect::<Vec<_>>()
         .await
         .concat();
@@ -87,6 +60,39 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
         .collect();
     assert!(drift.is_empty(), "wire drift:\n{}", drift.join("\n"));
     assert_eq!(golden, rendered, "profile set changed");
+}
+
+async fn capture(browser: Browser, platform: Platform) -> String {
+    let built = Session::builder()
+        .browser(browser)
+        .platform(platform)
+        .build();
+    if built.is_err() {
+        return String::new();
+    }
+    let record = client_hello(browser, platform).await;
+    let wire_ja4 = ja4(&record);
+    let saved = saved_ja4(browser, platform);
+    assert!(
+        saved.as_ref().is_none_or(|saved| *saved == wire_ja4),
+        "{} {platform:?}: JA4 on the wire {wire_ja4}, saved {saved:?}",
+        browser.id()
+    );
+    let hello = describe_client_hello(&record);
+    let hello: String = if leyline::internals::browser_profile(browser)
+        .tls
+        .permute_extensions
+    {
+        hello
+            .lines()
+            .filter(|line| !line.starts_with("tls extension_order "))
+            .map(|line| format!("{line}\n"))
+            .collect()
+    } else {
+        hello
+    };
+    let opening = h2_opening(browser, platform).await;
+    format!("== {} {platform:?}\n{hello}{opening}", browser.id())
 }
 
 async fn client_hello(browser: Browser, platform: Platform) -> Vec<u8> {

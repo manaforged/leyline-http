@@ -109,7 +109,7 @@ impl Session {
 
     pub(super) async fn assemble_response(
         &self,
-        leg: TransportResponse,
+        leg: Box<TransportResponse>,
         journey: Journey,
         audit_headers: Vec<(String, String)>,
         response: ResponseMode,
@@ -124,7 +124,7 @@ impl Session {
             version,
             tls,
             ..
-        } = leg;
+        } = *leg;
         let (body, headers) = self
             .finalize_response_body(
                 body,

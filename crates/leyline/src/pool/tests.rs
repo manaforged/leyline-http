@@ -1,6 +1,7 @@
 use super::*;
 use crate::error::{Error, Kind};
 use crate::h2::{ErrorCode, H2Error};
+use crate::profile::Carrier;
 use crate::tls::error::TlsError;
 
 #[test]

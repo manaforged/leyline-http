@@ -4,7 +4,7 @@ use super::*;
 
 impl H3Stream {
     pub(super) fn new(
-        resp_tx: oneshot::Sender<Result<TransportResponse, H3SendError>>,
+        resp_tx: oneshot::Sender<Result<Box<TransportResponse>, H3SendError>>,
         body: Option<Bytes>,
         stream_body: Option<StreamBody>,
         fin: bool,
@@ -107,17 +107,17 @@ impl H3Stream {
         )
     }
 
-    pub(super) fn response(&mut self, body: Vec<u8>) -> TransportResponse {
-        TransportResponse::new(
+    pub(super) fn response(&mut self, body: Vec<u8>) -> Box<TransportResponse> {
+        Box::new(TransportResponse::new(
             http::Version::HTTP_3,
             self.status,
             std::mem::take(&mut self.headers).into(),
             std::mem::take(&mut self.trailers),
             TransportBody::Buffered(body),
-        )
+        ))
     }
 
-    pub(super) fn reply(&mut self, result: Result<TransportResponse, H3SendError>) {
+    pub(super) fn reply(&mut self, result: Result<Box<TransportResponse>, H3SendError>) {
         if let Some(tx) = self.resp_tx.take() {
             drop(tx.send(result));
         }

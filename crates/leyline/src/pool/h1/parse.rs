@@ -212,7 +212,7 @@ where
     }
 }
 
-#[cfg(any(test, feature = "test-util", feature = "bench-internals"))]
+#[cfg(feature = "bench-internals")]
 /// Reads a chunked body from `stream` after the `buf` bytes already read, up to `limit` bytes.
 pub async fn read_chunked_body<S>(
     stream: &mut S,

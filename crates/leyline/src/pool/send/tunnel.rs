@@ -94,7 +94,7 @@ async fn open_on(
 ) -> Result<Sent<Option<H2ConnectStream>>, Error> {
     let leg = opened.leg();
     if let Some(probe) = opened.probe.take()
-        && !confirm(ctx.pool, ctx.key, &opened.conn, probe).await
+        && !confirm(ctx.pool, ctx.key, &opened.conn, *probe).await
     {
         return Ok(Sent::Retry(body));
     }

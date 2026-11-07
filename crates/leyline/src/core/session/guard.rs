@@ -203,7 +203,3 @@ where
         std::task::Poll::Ready(out)
     }
 }
-
-#[cfg(test)]
-#[path = "guard_tests.rs"]
-mod tests;

@@ -192,12 +192,12 @@ where
 
 /// An HTTP/2 exchange, or the HTTP/1.1 answer to its offer.
 pub(crate) enum H2Outcome {
-    Response(TransportResponse),
+    Response(Box<TransportResponse>),
     Http1(NotH2),
 }
 
 impl H2Outcome {
-    pub(crate) fn response(self) -> Result<TransportResponse, Error> {
+    pub(crate) fn response(self) -> Result<Box<TransportResponse>, Error> {
         match self {
             Self::Response(response) => Ok(response),
             Self::Http1(not_h2) => Err(not_h2.error()),
@@ -310,7 +310,7 @@ async fn send_on(
     if let Some(probe) = opened.probe.take()
         && !(leg == LegKind::Pooled && replay.is_some() && is_idempotent(ctx.method))
     {
-        if !confirm(ctx.pool, ctx.key, &opened.conn, probe).await {
+        if !confirm(ctx.pool, ctx.key, &opened.conn, *probe).await {
             return Ok(Sent::Retry(body));
         }
         send_started = Instant::now();
@@ -344,13 +344,13 @@ async fn send_on(
 }
 
 pub(super) fn answered(
-    mut resp: TransportResponse,
+    mut resp: Box<TransportResponse>,
     host: &str,
     tls: TlsInfo,
     connect_ms: Option<u32>,
     send_started: Instant,
     started: Instant,
-) -> TransportResponse {
+) -> Box<TransportResponse> {
     let answered = Instant::now();
     let waited = answered.saturating_duration_since(send_started);
     trace::head(host, resp.status.as_u16(), resp.version, &resp.headers);

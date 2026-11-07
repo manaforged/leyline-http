@@ -72,7 +72,9 @@ impl Session {
                     body: step_body,
                     proxy,
                     response,
-                    body_limit: crate::error::BodyLimit::session(attempt.carry.body_rules.max_body_size),
+                    body_limit: crate::error::BodyLimit::session(
+                        attempt.carry.body_rules.max_body_size
+                    ),
                 }));
                 attempt.deadline.response_header(send).await
             }

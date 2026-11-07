@@ -16,6 +16,7 @@ async fn a_crawl_keeps_noindex_links_and_drops_copies() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .respect(Respect::Robots);
     let mut kept = Vec::new();
     while let Some(page) = crawl.next().await {
@@ -46,7 +47,7 @@ async fn a_crawl_ignores_an_off_site_canonical_for_copies() {
         .host_limits(leyline::HostLimits::new().max_in_flight(4))
         .build()
         .unwrap();
-    let mut crawl = session.crawl(server.url("/"));
+    let mut crawl = session.crawl(server.url("/")).host_limits(unpaced());
     let mut pages = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -66,7 +67,7 @@ async fn a_crawl_keeps_a_page_whose_text_matched_only_a_skipped_copy() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -84,9 +85,7 @@ async fn a_crawl_keeps_the_canonical_page_over_an_alias_found_first() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -103,9 +102,7 @@ async fn a_crawl_keeps_an_alias_whose_canonical_page_is_gone() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -121,9 +118,7 @@ async fn a_crawl_keeps_short_pages_that_share_their_text() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -142,9 +137,7 @@ async fn a_crawl_follows_a_chain_of_canonical_pages_to_its_end() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -166,9 +159,7 @@ async fn a_crawl_holds_an_alias_through_its_canonical_pages_redirect() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -189,8 +180,8 @@ async fn held_aliases_count_toward_the_page_limit() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
-        .limit(3)
-        .host_limits(leyline::HostLimits::new());
+        .host_limits(unpaced())
+        .limit(3);
     let mut pages = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();

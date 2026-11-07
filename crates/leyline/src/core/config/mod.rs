@@ -18,7 +18,4 @@ pub use redirect::Redirect;
 pub(crate) use websocket::WebSocketOptions;
 
 #[cfg(test)]
-use crate::net::ProxyUrl;
-
-#[cfg(test)]
 mod tests;

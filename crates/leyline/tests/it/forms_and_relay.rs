@@ -1,6 +1,7 @@
 #![cfg(feature = "html")]
 use futures_util::StreamExt;
 
+#[cfg(unix)]
 use futures_util::TryFutureExt;
 use std::time::Duration;
 

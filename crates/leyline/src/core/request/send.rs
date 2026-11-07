@@ -220,7 +220,7 @@ type SharedSlot = Arc<Mutex<Slot>>;
 
 struct Rewind {
     slot: SharedSlot,
-    length_hint: Option<u64>,
+    length_hint: Option<crate::wire::Length>,
     held: Option<BoxedStream>,
 }
 

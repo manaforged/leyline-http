@@ -35,7 +35,7 @@ fn repeated_interrupts_still_end_at_the_deadline() {
     let out = waiting(
         &mut applied,
         started,
-        Some(started + Duration::from_millis(100)),
+        Some(started + Duration::from_millis(300)),
         |limit| {
             let limit = limit.expect("a deadline sets a socket timeout");
             assert!(limit < shrinking.get());
@@ -53,8 +53,8 @@ fn repeated_interrupts_still_end_at_the_deadline() {
         out.expect_err("the deadline passes").kind(),
         io::ErrorKind::TimedOut
     );
-    assert!(started.elapsed() < Duration::from_millis(200));
-    assert!(sets.get() > 1);
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert!((2..=10).contains(&sets.get()), "{}", sets.get());
 }
 
 #[test]

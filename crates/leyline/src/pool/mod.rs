@@ -36,7 +36,4 @@ pub(crate) use send::send_h3;
 pub use types::{ConnectionStats, H1Slot};
 
 #[cfg(test)]
-use crate::profile::Carrier;
-
-#[cfg(test)]
 mod tests;

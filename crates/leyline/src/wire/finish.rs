@@ -58,10 +58,10 @@ impl TransportResponse {
     }
 
     pub(crate) fn streamed(
-        mut self,
+        mut self: Box<Self>,
         mode: ResponseMode,
         rx: Option<mpsc::Receiver<Chunk>>,
-    ) -> Self {
+    ) -> Box<Self> {
         if let Some(rx) = rx
             && mode.keeps_stream(self.status.as_u16())
         {

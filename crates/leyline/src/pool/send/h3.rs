@@ -14,8 +14,8 @@ use crate::wire::TransportResponse;
 use crate::wire::{HeaderPair, Scheme, strip_connection_specific_headers};
 
 use super::{Attempt, LegTrace, Reopened, Sent, resending};
-use crate::pool::Pool;
 use crate::pool::H3Target;
+use crate::pool::Pool;
 use crate::pool::connect::{checkout_h3_opened, open_h3};
 use crate::pool::types::{Opened, PoolKey};
 use crate::profile::Carrier;
@@ -47,7 +47,7 @@ pub(crate) async fn send_h3(
     pool: &Arc<Pool>,
     target: &H3Target<'_>,
     req: Prepared<'_>,
-) -> Result<TransportResponse, Error> {
+) -> Result<Box<TransportResponse>, Error> {
     let Prepared {
         method,
         url,
@@ -104,7 +104,7 @@ async fn reopen_h3(
     target: &H3Target<'_>,
     key: PoolKey,
     body: Body,
-) -> Result<Reopened<H3Client, TransportResponse>, Error> {
+) -> Result<Reopened<H3Client, Box<TransportResponse>>, Error> {
     let opened = open_h3(pool, target, key).await?;
     Ok(ControlFlow::Continue((opened, body)))
 }
@@ -114,7 +114,7 @@ async fn send_on(
     opened: Opened<H3Client>,
     body: Body,
     first: bool,
-) -> Result<Sent<TransportResponse>, Error> {
+) -> Result<Sent<Box<TransportResponse>>, Error> {
     let leg = opened.leg();
     let replay = body.replay();
     let request = ctx.request;

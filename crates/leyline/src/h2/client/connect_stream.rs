@@ -213,7 +213,8 @@ impl H2Client {
         }
 
         let (write_tx, write_rx) = mpsc::channel::<io::Result<Bytes>>(STREAM_REQ_BODY_CAPACITY);
-        let (headers_tx, headers_rx) = oneshot::channel::<Result<TransportResponse, H2Error>>();
+        let (headers_tx, headers_rx) =
+            oneshot::channel::<Result<Box<TransportResponse>, H2Error>>();
         let (sink, body_rx) = ResponseSink::streaming(headers_tx);
 
         let cmd = DriverCommand::OpenConnect {

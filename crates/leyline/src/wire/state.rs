@@ -1,7 +1,7 @@
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
 /// The most informational (1xx) responses leyline reads before the final one.
-pub(crate) const MAX_INFORMATIONAL: usize = 16;
+const MAX_INFORMATIONAL: usize = 16;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ResponseState {

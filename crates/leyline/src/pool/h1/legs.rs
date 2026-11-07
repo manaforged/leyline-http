@@ -10,7 +10,7 @@ use crate::wire::Body;
 use crate::wire::TransportResponse;
 
 pub(crate) enum H1Outcome<W> {
-    Response(TransportResponse),
+    Response(Box<TransportResponse>),
     Upgraded {
         opened: Opened<H2Client>,
         body: Body,
@@ -25,7 +25,7 @@ pub(super) struct Upgrade<W> {
 }
 
 pub(super) enum Reply<W> {
-    Answered(Box<Delivered>),
+    Answered(Delivered),
     Upgraded(Box<Upgrade<W>>),
 }
 

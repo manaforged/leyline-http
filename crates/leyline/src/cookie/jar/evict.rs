@@ -5,9 +5,9 @@ use crate::cookie::Cookie;
 
 use super::JarInner;
 
-pub(super) const MAX_COOKIES_PER_DOMAIN: usize = 180;
+const MAX_COOKIES_PER_DOMAIN: usize = 180;
 const EVICT_PER_DOMAIN: usize = 30;
-pub(super) const MAX_COOKIES_GLOBAL: usize = 3300;
+const MAX_COOKIES_GLOBAL: usize = 3300;
 const EVICT_GLOBAL: usize = 300;
 
 impl JarInner {

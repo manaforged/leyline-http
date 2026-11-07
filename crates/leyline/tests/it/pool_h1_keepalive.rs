@@ -173,17 +173,20 @@ async fn h1_pool_honours_connection_close() {
 
 #[tokio::test]
 async fn h1_pool_recovers_when_server_drops_connection() {
+    let closed = Arc::new(tokio::sync::Notify::new());
     let (listener_addr, accepts, _server) = {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let accepts = Arc::new(AtomicUsize::new(0));
         let accepts_c = accepts.clone();
+        let closed = Arc::clone(&closed);
         let handle = tokio::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     break;
                 };
                 accepts_c.fetch_add(1, Ordering::SeqCst);
+                let closed = Arc::clone(&closed);
                 tokio::spawn(async move {
                     let mut tmp = [0u8; 1024];
                     let mut req = Vec::new();
@@ -201,6 +204,7 @@ async fn h1_pool_recovers_when_server_drops_connection() {
                     }
                     drop(socket.write_all(&ok_response()).await);
                     drop(socket.shutdown().await);
+                    closed.notify_one();
                 });
             }
         });
@@ -224,7 +228,9 @@ async fn h1_pool_recovers_when_server_drops_connection() {
     .expect("first request succeeds");
     assert_eq!(resp1.status, 200);
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(5), closed.notified())
+        .await
+        .expect("the server closes the first connection");
 
     let resp2 = send_request_h1_pooled(
         &pool,

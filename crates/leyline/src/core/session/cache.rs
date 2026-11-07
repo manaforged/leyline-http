@@ -151,7 +151,7 @@ impl Session {
         &self,
         mut req: Prepared<'_>,
         cache: &Cache,
-    ) -> Result<TransportResponse> {
+    ) -> Result<Box<TransportResponse>> {
         let request = request(&req)?;
         let key = Key::of(&req);
         if !eligible(&request, &req) {
@@ -262,9 +262,9 @@ fn finish(
     cache: &Cache,
     key: Key,
     request: &Request<()>,
-    mut response: TransportResponse,
+    mut response: Box<TransportResponse>,
     lookup: Lookup,
-) -> Result<TransportResponse> {
+) -> Result<Box<TransportResponse>> {
     let mut headers = response.headers.map().clone();
     for name in VOLATILE {
         headers.remove(name);
@@ -357,8 +357,8 @@ impl Entry {
         })
     }
 
-    fn response(&self, parts: http::response::Parts) -> TransportResponse {
-        TransportResponse {
+    fn response(&self, parts: http::response::Parts) -> Box<TransportResponse> {
+        Box::new(TransportResponse {
             status: parts.status,
             headers: parts.headers.into(),
             trailers: None,
@@ -366,12 +366,12 @@ impl Entry {
             version: self.version,
             tls: self.tls.clone(),
             timing: Default::default(),
-        }
+        })
     }
 }
 
-fn cache_miss() -> TransportResponse {
-    TransportResponse {
+fn cache_miss() -> Box<TransportResponse> {
+    Box::new(TransportResponse {
         status: StatusCode::GATEWAY_TIMEOUT,
         headers: HeaderMap::new().into(),
         trailers: None,
@@ -379,5 +379,5 @@ fn cache_miss() -> TransportResponse {
         version: http::Version::HTTP_11,
         tls: None,
         timing: Default::default(),
-    }
+    })
 }

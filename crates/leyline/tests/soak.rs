@@ -3,7 +3,7 @@
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use futures_util::StreamExt;
@@ -176,7 +176,17 @@ async fn mixed_failures_return_tasks_and_sockets_to_their_baseline() {
         let (tasks, fds) = settle().await;
         peak = (peak.0.max(tasks), peak.1.max(fds));
     }
-    let (tasks, fds) = settle().await;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (tasks, fds) = loop {
+        let (tasks, fds) = settle().await;
+        let sockets_back = match (base_fds, fds) {
+            (Some(base), Some(current)) => current <= base + SLACK_FDS,
+            _ => true,
+        };
+        if (tasks <= base_tasks + SLACK_TASKS && sockets_back) || Instant::now() >= deadline {
+            break (tasks, fds);
+        }
+    };
     eprintln!(
         "soak: {CYCLES} cycles x {REQUESTS} requests; baseline tasks={base_tasks} fds={base_fds:?}; \
          peak tasks={} fds={:?}; final tasks={tasks} fds={fds:?}",

@@ -19,7 +19,7 @@ pub(crate) struct Opened<C> {
     pub(crate) connect_ms: Option<u32>,
     pub(crate) lane: u8,
     pub(crate) slot: Option<crate::h2::client::Slot>,
-    pub(crate) probe: Option<super::liveness::Probe>,
+    pub(crate) probe: Option<Box<super::liveness::Probe>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,7 +59,7 @@ impl<C> Opened<C> {
     }
 
     pub(crate) fn with_probe(mut self, probe: Option<super::liveness::Probe>) -> Self {
-        self.probe = probe;
+        self.probe = probe.map(Box::new);
         self
     }
 

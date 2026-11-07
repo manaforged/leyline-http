@@ -17,7 +17,7 @@ mod tls;
 mod upload;
 
 pub use body::Body;
-pub(crate) use body::{BodyKind, BoxedStream};
+pub(crate) use body::{BodyKind, BoxedStream, Length};
 pub(crate) use failure::Failure;
 pub use fields::Fields;
 pub(crate) use fields::{Seen, text};
@@ -28,8 +28,6 @@ pub(crate) use method::{has_body_by_default, is_idempotent, is_retrieval, is_saf
 pub use mode::{ErrorBudget, ResponseMode};
 pub(crate) use request_headers::{HeaderBlock, RequestHeaders};
 pub(crate) use scheme::{Scheme, authority, host_port};
-#[cfg(test)]
-pub(crate) use state::MAX_INFORMATIONAL;
 pub(crate) use state::{BlockReader, ResponseBlock, ResponseState};
 pub(crate) use timing::ResponseTiming;
 pub use tls::{TlsFacts, TlsInfo};

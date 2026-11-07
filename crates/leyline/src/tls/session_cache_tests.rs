@@ -1,20 +1,47 @@
-use super::SessionCache;
-use crate::util::lock;
-use leyline_bssl::ssl::{SslContextBuilder, SslMethod};
+use crate::Session;
+use crate::testing::{Response, Server};
 
-#[test]
-fn the_session_cache_keeps_at_most_256_entries() {
-    let mut context = SslContextBuilder::new(SslMethod::tls()).expect("context");
-    let tls = crate::Tls::new().system_roots(false).env_roots(false);
-    let identity = crate::tls::trust::wire_configured_trust(&mut context, &tls).expect("trust");
-    let cache = SessionCache::new(identity);
+#[tokio::test]
+async fn the_session_cache_keeps_the_newest_256_tickets() {
+    let server = Server::https(|_| Response::new(200).body("ok"))
+        .await
+        .expect("server");
+    let session = || {
+        Session::builder()
+            .tls(server.tls())
+            .build()
+            .expect("session")
+    };
 
-    for n in 0..300 {
-        lock(&cache.entries).put(format!("host-{n}:443|"), vec![0; 8]);
-    }
+    let first = session();
+    let response = first.get(server.url("/")).send().await.expect("response");
+    assert_eq!(response.text().await.expect("body"), "ok");
+    let saved = serde_json::to_value(first.connection_state()).expect("state");
+    let ticket = &saved["tls_sessions"][0];
+    let key = ticket["key"].as_str().expect("the handshake left a ticket");
+    let (_, policy) = key.split_once('|').expect("key names its route");
 
-    let entries = lock(&cache.entries);
-    assert_eq!(entries.len(), 256);
-    assert!(!entries.contains("host-0:443|"));
-    assert!(entries.contains("host-299:443|"));
+    let tickets: Vec<serde_json::Value> = (0..300)
+        .map(|n| {
+            serde_json::json!({
+                "key": format!("host-{n}:443|{policy}"),
+                "session": ticket["session"],
+            })
+        })
+        .collect();
+    let state = serde_json::json!({ "tls_sessions": tickets });
+
+    let restored = session();
+    restored.restore(&serde_json::from_value(state).expect("state"));
+
+    let kept = serde_json::to_value(restored.connection_state()).expect("state");
+    let keys: Vec<&str> = kept["tls_sessions"]
+        .as_array()
+        .expect("tickets")
+        .iter()
+        .map(|ticket| ticket["key"].as_str().expect("key"))
+        .collect();
+    assert_eq!(keys.len(), 256);
+    assert!(keys[0].starts_with("host-44:443|"), "{}", keys[0]);
+    assert!(keys[255].starts_with("host-299:443|"), "{}", keys[255]);
 }

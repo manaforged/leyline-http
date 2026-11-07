@@ -13,7 +13,10 @@ async fn a_crawl_stops_at_the_page_budget_and_skips_files() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/")).limit(3);
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(unpaced())
+        .limit(3);
     let mut kept = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -60,7 +63,7 @@ async fn a_crawl_sniffs_a_page_without_a_content_type() {
         .host_limits(leyline::HostLimits::new().max_in_flight(4))
         .build()
         .unwrap();
-    let mut crawl = session.crawl(server.url("/"));
+    let mut crawl = session.crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -78,7 +81,7 @@ async fn a_crawl_resolves_links_against_the_base_element() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -96,9 +99,7 @@ async fn a_crawl_sniffs_html_that_breaks_its_first_tag_with_a_newline() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -114,9 +115,7 @@ async fn a_crawl_sniffs_html_that_starts_with_a_comment() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());

@@ -95,6 +95,7 @@ async fn leaves_a_stopped_peer(body_len: usize) {
     .await;
     let session = Session::builder()
         .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
+        .http2_ping_timeout(Duration::from_millis(100))
         .build()
         .unwrap();
     let url = format!("https://127.0.0.1:{port}/");
@@ -107,8 +108,8 @@ async fn leaves_a_stopped_peer(body_len: usize) {
         .send()
         .await;
     assert!(blocked.is_err(), "{blocked:?}");
-    tokio::time::sleep(Duration::from_millis(1500)).await;
 
+    tokio::time::sleep(Duration::from_secs(1)).await;
     let next = session
         .get(&url)
         .timeout(Timeout::new().total(Duration::from_secs(3)))

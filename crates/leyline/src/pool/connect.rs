@@ -406,7 +406,7 @@ pub async fn checkout_handle(
                 None | Some(H2Leg::Http1 { .. }) => return Ok(None),
             };
         let live = match opened.probe.take() {
-            Some(probe) => confirm(pool, &key, &opened.conn, probe).await,
+            Some(probe) => confirm(pool, &key, &opened.conn, *probe).await,
             None => true,
         };
         if live {

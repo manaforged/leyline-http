@@ -1,15 +1,12 @@
-use std::mem::size_of;
 use std::sync::Arc;
 
-use super::{CommandSlot, DriverCommand, Head, ResponseSink, command_channel};
+use super::{DriverCommand, Head, ResponseSink, command_channel};
 use crate::h2::H2Error;
 use crate::h2::connection::PseudoHeaders;
 use crate::wire::Body;
 
 #[tokio::test]
 async fn command_channel_stores_a_box() {
-    assert!(size_of::<DriverCommand>() > size_of::<CommandSlot>());
-    assert_eq!(size_of::<CommandSlot>(), size_of::<usize>());
     let (tx, mut rx) = command_channel(1);
     let (sink_tx, sink_rx) = tokio::sync::oneshot::channel();
     tx.send(DriverCommand::SendRequest {

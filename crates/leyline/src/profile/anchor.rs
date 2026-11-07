@@ -53,6 +53,3 @@ pub(crate) fn infer_anchor(name: &str) -> Option<HeaderPosition> {
         _ => None,
     }
 }
-
-#[cfg(test)]
-mod tests;

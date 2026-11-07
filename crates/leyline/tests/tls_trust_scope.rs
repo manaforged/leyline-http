@@ -12,9 +12,10 @@ use leyline::internals::tls::{AlpnPlan, FingerprintConnector};
 use leyline::{Platform, Tls};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
+use leyline_bssl::ec::{EcGroup, EcKey};
 use leyline_bssl::hash::MessageDigest;
+use leyline_bssl::nid::Nid;
 use leyline_bssl::pkey::PKey;
-use leyline_bssl::rsa::Rsa;
 use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
 use leyline_bssl::x509::{X509, X509NameBuilder};
 use tokio::net::TcpListener;
@@ -40,7 +41,10 @@ struct Chain {
 }
 
 fn generate_chain(leaf_dns: &str) -> Chain {
-    let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+    let ca_key = PKey::from_ec_key(
+        EcKey::generate(&EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap(),
+    )
+    .unwrap();
     let mut name = X509NameBuilder::new().unwrap();
     name.append_entry_by_text("CN", "leyline-trust-scope-ca")
         .unwrap();
@@ -66,7 +70,10 @@ fn generate_chain(leaf_dns: &str) -> Chain {
     ca.sign(&ca_key, MessageDigest::sha256()).unwrap();
     let ca = ca.build();
 
-    let leaf_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+    let leaf_key = PKey::from_ec_key(
+        EcKey::generate(&EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap(),
+    )
+    .unwrap();
     let mut leaf_name = X509NameBuilder::new().unwrap();
     leaf_name.append_entry_by_text("CN", leaf_dns).unwrap();
     let leaf_name = leaf_name.build();

@@ -84,7 +84,7 @@ async fn a_crawl_obeys_a_nofollow_page_and_an_x_robots_tag() {
 #[tokio::test]
 async fn a_crawl_skips_a_site_whose_robots_txt_stays_down() {
     let server = testing::Server::http(|request| match request.target.as_str() {
-        "/robots.txt" => testing::Response::new(503),
+        "/robots.txt" => testing::Response::new(503).header("retry-after", "0"),
         _ => html("<p>page</p>"),
     })
     .await
@@ -125,7 +125,7 @@ async fn a_crawl_page_hides_url_secrets_in_debug_output() {
         .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/?token=hunter2"))
-        .host_limits(leyline::HostLimits::new());
+        .host_limits(unpaced());
     let page = crawl.next().await.unwrap().unwrap();
     let shown = format!("{page:?}");
     assert!(!shown.contains("hunter2"), "{shown}");

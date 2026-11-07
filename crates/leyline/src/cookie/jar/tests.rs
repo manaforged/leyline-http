@@ -1,4 +1,3 @@
-use super::evict::{MAX_COOKIES_GLOBAL, MAX_COOKIES_PER_DOMAIN};
 use super::*;
 
 #[test]
@@ -152,20 +151,19 @@ fn per_domain_eviction() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
 
-    for i in 0..=MAX_COOKIES_PER_DOMAIN {
-        jar.store(&format!("c{}=v{}; Path=/", i, i), &url);
+    for i in 0..=180 {
+        jar.store(&format!("c{i}=v{i}; Path=/"), &url);
     }
 
-    let inner = lock(&jar.inner);
-    let count = inner
-        .cookies
-        .get("example.com")
-        .map(|v| v.len())
-        .unwrap_or(0);
-    assert!(
-        count <= MAX_COOKIES_PER_DOMAIN,
-        "expected <= {MAX_COOKIES_PER_DOMAIN}, got {count}"
+    assert_eq!(
+        jar.all().len(),
+        151,
+        "the 181st cookie purges the oldest 30"
     );
+    assert_eq!(jar.get(&url, "c0"), None);
+    assert_eq!(jar.get(&url, "c29"), None);
+    assert_eq!(jar.get(&url, "c30"), Some("v30".into()));
+    assert_eq!(jar.get(&url, "c180"), Some("v180".into()));
 }
 
 #[test]
@@ -354,10 +352,10 @@ fn serialize_order_is_stable_across_runs() {
 fn churn_across_hosts_leaves_no_empty_domain_buckets() {
     let jar = Jar::new();
     let host = |i: usize| url::Url::parse(&format!("https://h{i}.example/")).unwrap();
-    for i in 0..MAX_COOKIES_GLOBAL + 100 {
+    for i in 0..3400 {
         jar.store("a=1", &host(i));
     }
-    jar.store("a=1; Max-Age=0", &host(MAX_COOKIES_GLOBAL + 99));
+    jar.store("a=1; Max-Age=0", &host(3399));
 
     let live = jar.all().len();
     assert_eq!(

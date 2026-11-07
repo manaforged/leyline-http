@@ -154,7 +154,9 @@ pub async fn send_request_h1_pooled(
         response: ResponseMode::from(stream),
         body_limit: BodyLimit::session(crate::wire::DEFAULT_MAX_BODY_SIZE),
     };
-    send_http1(pool, connector, req).await
+    send_http1(pool, connector, req)
+        .await
+        .map(|response| *response)
 }
 
 struct H1Request<'a> {
@@ -286,9 +288,7 @@ pub(super) async fn send_h1<W: Copy + Send>(
     )
     .await?;
     match reply {
-        Reply::Answered(delivered) => delivered
-            .respond(req.scheme, permit)
-            .map(H1Outcome::Response),
+        Reply::Answered(delivered) => Ok(H1Outcome::Response(delivered.respond(permit))),
         Reply::Upgraded(upgrade) => {
             let Upgrade {
                 opened,
@@ -309,7 +309,7 @@ pub(super) async fn send_http1(
     pool: &Arc<Pool>,
     connector: &FingerprintConnector,
     req: Prepared<'_>,
-) -> Result<TransportResponse, Error> {
+) -> Result<Box<TransportResponse>, Error> {
     let H1Outcome::Response(response) =
         send_h1(pool, connector, None::<(&H2Config, Infallible)>, req, None).await?;
     Ok(response)

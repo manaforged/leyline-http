@@ -8,11 +8,13 @@ use tokio::net::TcpListener;
 struct Counting;
 
 static ALLOCS: AtomicU64 = AtomicU64::new(0);
+static BYTES: AtomicU64 = AtomicU64::new(0);
 
 // SAFETY: every call forwards to the system allocator with the caller's layout and pointer.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         ALLOCS.fetch_add(1, Ordering::Relaxed);
+        BYTES.fetch_add(layout.size() as u64, Ordering::Relaxed);
         // SAFETY: the caller upholds GlobalAlloc::alloc's contract for this layout.
         unsafe { System.alloc(layout) }
     }
@@ -24,6 +26,10 @@ unsafe impl GlobalAlloc for Counting {
 
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         ALLOCS.fetch_add(1, Ordering::Relaxed);
+        BYTES.fetch_add(
+            new_size.saturating_sub(layout.size()) as u64,
+            Ordering::Relaxed,
+        );
         // SAFETY: ptr came from System.alloc with this layout.
         unsafe { System.realloc(ptr, layout, new_size) }
     }
@@ -37,6 +43,7 @@ const RESPONSE: &[u8] =
 const WARM: u64 = 64;
 const MEASURED: u64 = 256;
 const ALLOCS_PER_REQUEST: u64 = 14;
+const BYTES_PER_REQUEST: u64 = 10_500;
 
 async fn origin() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
@@ -73,12 +80,18 @@ async fn a_warm_http1_request_stays_within_its_allocation_budget() {
         fetch().await;
     }
     let before = ALLOCS.load(Ordering::Relaxed);
+    let bytes_before = BYTES.load(Ordering::Relaxed);
     for _ in 0..MEASURED {
         fetch().await;
     }
     let per_request = (ALLOCS.load(Ordering::Relaxed) - before) / MEASURED;
+    let bytes_per_request = (BYTES.load(Ordering::Relaxed) - bytes_before) / MEASURED;
     assert!(
         per_request <= ALLOCS_PER_REQUEST,
         "{per_request} allocations per request"
+    );
+    assert!(
+        bytes_per_request <= BYTES_PER_REQUEST,
+        "{bytes_per_request} bytes allocated per request"
     );
 }

@@ -14,6 +14,17 @@ pub(super) use std::time::Duration;
 pub(super) use leyline::testing;
 pub(super) use leyline::{Respect, Scope, Session, SkipReason};
 
+pub(super) fn unpaced() -> leyline::HostLimits {
+    leyline::HostLimits::new().max_in_flight(1)
+}
+
+pub(super) fn brisk() -> Session {
+    Session::builder()
+        .host_limits(leyline::HostLimits::new().per_second(20.0))
+        .build()
+        .unwrap()
+}
+
 pub(super) fn html(body: &str) -> testing::Response {
     testing::Response::new(200)
         .header("content-type", "text/html; charset=utf-8")

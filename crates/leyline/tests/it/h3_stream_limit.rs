@@ -122,21 +122,25 @@ async fn a_request_waiting_past_the_full_queue_still_owns_its_body() {
             tokio::spawn(async move { session.get(url).send().await })
         })
         .collect();
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let late = tokio::spawn({
-        let session = session.clone();
-        let url = url.clone();
-        let body = Body::stream(Unpolled(std::sync::Arc::clone(&dropped)), None);
-        async move { session.post(url).body(body).send().await }
-    });
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    late.abort();
-    drop(late.await);
-    assert!(
-        dropped.load(std::sync::atomic::Ordering::SeqCst),
-        "the connection took a request it had no stream for"
-    );
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let late = tokio::spawn({
+                let session = session.clone();
+                let url = url.clone();
+                let body = Body::stream(Unpolled(std::sync::Arc::clone(&dropped)), None);
+                async move { session.post(url).body(body).send().await }
+            });
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            late.abort();
+            drop(late.await);
+            if dropped.load(std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+        }
+    })
+    .await
+    .expect("the connection took a request it had no stream for");
     queued.iter().for_each(tokio::task::JoinHandle::abort);
     drop(held);
 }

@@ -238,10 +238,10 @@ pub struct TlsFingerprint {
     #[serde(default)]
     pub ja4: Option<String>,
     #[cfg_attr(
-        not(any(test, feature = "bench-internals")),
+        not(feature = "bench-internals"),
         expect(
             dead_code,
-            reason = "the TOML schema keeps this key; only tests and bench-internals read it"
+            reason = "the documented TOML schema accepts this key; the library does not read it"
         )
     )]
     #[serde(default)]

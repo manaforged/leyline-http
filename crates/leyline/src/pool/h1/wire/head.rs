@@ -70,7 +70,7 @@ pub(super) fn frame(method: &Method, headers: &[HeaderPair], body: Body) -> (Fra
         BodyKind::Stream {
             stream,
             length_hint: Some(n),
-        } => (Framing::Fixed { stream }, length(n.to_string())),
+        } => (Framing::Fixed { stream }, length(n.get().to_string())),
         BodyKind::Stream {
             stream,
             length_hint: None,

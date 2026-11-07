@@ -66,7 +66,7 @@ impl H2Client {
         head: Arc<Head>,
         body: Body,
         mode: impl Into<ResponseMode>,
-    ) -> impl std::future::Future<Output = Result<TransportResponse, H2Error>> {
+    ) -> impl std::future::Future<Output = Result<Box<TransportResponse>, H2Error>> {
         self.send_reserved(head, body, mode.into(), None)
     }
 
@@ -76,12 +76,13 @@ impl H2Client {
         body: Body,
         mode: ResponseMode,
         slot: Option<Slot>,
-    ) -> Result<TransportResponse, H2Error> {
+    ) -> Result<Box<TransportResponse>, H2Error> {
         if self.shared.closed.load(Ordering::Acquire) {
             return Err(H2Error::NotSent);
         }
 
-        let (response_tx, response_rx) = oneshot::channel::<Result<TransportResponse, H2Error>>();
+        let (response_tx, response_rx) =
+            oneshot::channel::<Result<Box<TransportResponse>, H2Error>>();
         let (sink, stream_body_rx) = match mode {
             ResponseMode::Buffered => (ResponseSink::Buffered(response_tx), None),
             ResponseMode::Streamed => {

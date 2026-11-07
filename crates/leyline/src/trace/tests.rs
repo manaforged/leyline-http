@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
+use tokio::sync::Notify;
 
 use super::{Event, Trace};
 use crate::Session;
@@ -168,34 +170,33 @@ async fn response_timing_reports_a_fresh_dial() {
     );
 }
 
-#[tokio::test]
-async fn no_listener_fires_nothing() {
-    let addr = serve(1).await;
-    let session = Session::builder().build().unwrap();
-    let resp = session
-        .get(format!("http://{addr}/one"))
-        .send()
-        .await
-        .unwrap();
-    assert_eq!(resp.status().as_u16(), 200);
-    assert!(!super::on(), "no scope outside a traced request");
-}
-
 #[derive(Default)]
-struct HeadWait(Mutex<Option<std::time::Duration>>);
+struct HeadWait {
+    head: Mutex<Option<Duration>>,
+    done: Mutex<Option<Duration>>,
+    arrived: Notify,
+}
 
 impl Trace for HeadWait {
     fn event(&self, event: &Event<'_>) {
-        if let Event::Head { elapsed, .. } = *event {
-            *lock(&self.0) = Some(elapsed);
+        match *event {
+            Event::Head { elapsed, .. } => {
+                *lock(&self.head) = Some(elapsed);
+                self.arrived.notify_one();
+            }
+            Event::Done { elapsed, .. } => *lock(&self.done) = Some(elapsed),
+            _ => {}
         }
     }
 }
 
 #[tokio::test]
 async fn head_time_ends_when_the_headers_arrive() {
+    const BODY_WAIT: Duration = Duration::from_millis(200);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let hook = Arc::new(HeadWait::default());
+    let server_hook = Arc::clone(&hook);
     tokio::spawn(async move {
         let (mut sock, _) = listener.accept().await.unwrap();
         let mut buf = [0u8; 4096];
@@ -203,18 +204,19 @@ async fn head_time_ends_when_the_headers_arrive() {
         sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n")
             .await
             .unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        drop(tokio::time::timeout(Duration::from_secs(5), server_hook.arrived.notified()).await);
+        tokio::time::sleep(BODY_WAIT).await;
         sock.write_all(b"hi").await.unwrap();
     });
-    let hook = Arc::new(HeadWait::default());
     let session = Session::builder().trace(Arc::clone(&hook)).build().unwrap();
 
     let resp = session.get(format!("http://{addr}/")).send().await.unwrap();
     assert_eq!(resp.text().await.unwrap(), "hi");
 
-    let elapsed = lock(&hook.0).expect("a head event");
+    let head = lock(&hook.head).expect("a head event");
+    let done = lock(&hook.done).expect("a done event");
     assert!(
-        elapsed < std::time::Duration::from_millis(250),
-        "head time includes the body wait: {elapsed:?}"
+        head + BODY_WAIT <= done,
+        "head time includes the body wait: head {head:?}, done {done:?}"
     );
 }

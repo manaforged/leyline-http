@@ -22,7 +22,7 @@ use std::future::Future;
 use std::ops::ControlFlow;
 
 #[cfg(feature = "http3")]
-type Raced<'r> = ControlFlow<Result<TransportResponse>, (Route, Prepared<'r>)>;
+type Raced<'r> = ControlFlow<Result<Box<TransportResponse>>, (Route, Prepared<'r>)>;
 
 #[cfg(feature = "http3")]
 static RACE_PROXY_FALLBACK_LOGGED: std::sync::Once = std::sync::Once::new();
@@ -61,7 +61,7 @@ impl Session {
     pub(crate) fn send_with_policy<'a>(
         &'a self,
         req: Prepared<'a>,
-    ) -> impl Future<Output = Result<TransportResponse>> + 'a {
+    ) -> impl Future<Output = Result<Box<TransportResponse>>> + 'a {
         if self.inner.inputs.https_only
             && crate::wire::Scheme::of(req.url) != Some(crate::wire::Scheme::Https)
         {
@@ -70,12 +70,12 @@ impl Session {
             ))));
         }
         Either::Right(match &self.inner.cache {
-            Some(cache) => Either::Left(self.send_cached(req, cache)),
+            Some(cache) => Either::Left(Box::pin(self.send_cached(req, cache))),
             None => Either::Right(self.send_transport(req)),
         })
     }
 
-    pub(super) async fn send_transport(&self, req: Prepared<'_>) -> Result<TransportResponse> {
+    pub(super) async fn send_transport(&self, req: Prepared<'_>) -> Result<Box<TransportResponse>> {
         let (route, req) = match self.inner.inputs.protocol_policy.plan() {
             Plan::Tcp(route) => (route, req),
             #[cfg(feature = "http3")]
@@ -97,7 +97,7 @@ impl Session {
     }
 
     #[cfg(feature = "http3")]
-    async fn send_h3_only(&self, req: Prepared<'_>) -> Result<TransportResponse> {
+    async fn send_h3_only(&self, req: Prepared<'_>) -> Result<Box<TransportResponse>> {
         if let Some(cause) = h3_proxy_blocker(req.proxy) {
             return Err(Error::config(cause));
         }

@@ -162,12 +162,17 @@ fn plain_http_and_streamed_bodies_work() {
     assert_eq!(session.stats().misses(http::Version::HTTP_11), 1);
 }
 
-fn serve_then_drop_each_connection() -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+fn serve_then_drop_each_connection() -> (
+    String,
+    std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    std::sync::mpsc::Receiver<()>,
+) {
     use std::io::{Read, Write};
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let url = format!("http://{}/", listener.local_addr().expect("address"));
     let accepted = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let counter = std::sync::Arc::clone(&accepted);
+    let (dropped_tx, dropped) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         for stream in listener.incoming() {
             let Ok(mut stream) = stream else { return };
@@ -191,21 +196,25 @@ fn serve_then_drop_each_connection() -> (String, std::sync::Arc<std::sync::atomi
             let mut body = vec![0u8; length];
             drop(stream.read_exact(&mut body));
             drop(stream.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nok"));
+            drop(stream);
+            dropped_tx.send(()).unwrap_or_default();
         }
     });
-    (url, accepted)
+    (url, accepted, dropped)
 }
 
 #[test]
 fn a_post_after_the_server_dropped_a_fresh_connection_redials() {
-    let (url, accepted) = serve_then_drop_each_connection();
+    let (url, accepted, dropped) = serve_then_drop_each_connection();
     let session = Session::new(crate::Session::builder()).expect("session");
 
     let first = session
         .block_on(async { session.get(url.as_str()).send().await?.text().await })
         .expect("first response");
     assert_eq!(first, "ok");
-    session.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(20)).await });
+    dropped
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the server drops the first connection");
 
     let posted = session
         .block_on(async {
@@ -319,7 +328,7 @@ fn a_total_timeout_ends_a_body_the_server_trickles() {
 #[test]
 fn a_held_stream_from_a_silent_server_does_not_stall_the_next_request() {
     let silent = serve_slowly(10, std::time::Duration::from_secs(60));
-    let (fast, _) = serve_then_drop_each_connection();
+    let (fast, _, _) = serve_then_drop_each_connection();
     let session = Session::new(
         crate::Session::builder()
             .timeout(crate::Timeout::new().total(std::time::Duration::from_secs(4))),

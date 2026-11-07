@@ -162,17 +162,6 @@ fn display_names_the_kind_and_appends_the_url() {
 }
 
 #[test]
-fn without_url_drops_the_url_from_display() {
-    let err = Error::new(Kind::Request)
-        .with_message("boom")
-        .with_url("https://example.test/a".parse().expect("url"));
-    assert!(err.to_string().contains("example.test"));
-    let bare = err.without_url();
-    assert!(bare.url().is_none());
-    assert_eq!(bare.to_string(), "request: boom");
-}
-
-#[test]
 fn debug_redacts_userinfo() {
     let err = Error::new(Kind::Request)
         .with_url("https://user:pass@example.test/a".parse().expect("url"));
@@ -186,13 +175,6 @@ fn debug_redacts_userinfo() {
         !err.to_string().contains("pass"),
         "userinfo leaked in Display"
     );
-}
-
-impl Error {
-    fn without_url(mut self) -> Self {
-        self.inner.url = None;
-        self
-    }
 }
 
 #[test]

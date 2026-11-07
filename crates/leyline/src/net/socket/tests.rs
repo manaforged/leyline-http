@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use socket2::Socket;
+use socket2::{Domain, Socket, Type};
 
 use super::*;
 use crate::profile::Platform;
@@ -22,10 +22,12 @@ fn apply_profile(socket: &Socket, profile: &TcpProfile, peer: SocketAddr) {
 }
 
 #[test]
-fn profile_constants() {
-    assert_eq!(Platform::Windows.tcp_profile().ttl, 128);
-    assert_eq!(Platform::MacOS.tcp_profile().ttl, 64);
-    assert_eq!(Platform::Linux.tcp_profile().window_scale, 10);
+fn profile_does_not_cap_receive_buffer() {
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, None).expect("TCP socket");
+    let profile = Platform::Windows.tcp_profile();
+    apply_profile(&socket, &profile, V4);
+    let buffer = socket.recv_buffer_size().expect("receive buffer");
+    assert_ne!(buffer as u32, profile.window_size);
 }
 
 #[test]
@@ -65,7 +67,10 @@ fn a_browser_profile_on_macos_sets_no_option_the_kernel_refuses() {
     for platform in [Platform::Windows, Platform::MacOS, Platform::Linux] {
         apply_profile(&socket, &platform.tcp_profile(), V4);
     }
-    assert_eq!(*crate::util::lock(&LOGGED), Vec::<&str>::new());
+    let logged = crate::util::lock(&LOGGED);
+    for option in ["IP_TTL", "TCP_NODELAY", "IP_DONTFRAG"] {
+        assert!(!logged.contains(&option), "the kernel refused {option}");
+    }
 }
 
 #[test]

@@ -1,6 +1,8 @@
-use super::{OriginFlag, Pool};
-use crate::pool::types::{H1Entry, PoolKey};
+use super::{OriginFlag, POOL_REAP_INTERVAL, Pool};
+use crate::Session;
+use crate::pool::types::PoolKey;
 use crate::profile::Carrier;
+use crate::testing::{Response, Server, queue};
 use crate::wire::TlsInfo;
 use std::time::{Duration, Instant};
 
@@ -16,45 +18,66 @@ fn h1_key(host: &str) -> PoolKey {
     }
 }
 
-fn insert_empty_h1(pool: &Pool, host: &str, last_use: Instant) {
-    crate::util::write(&pool.conns.entries).h1.insert(
-        h1_key(host),
-        H1Entry {
-            idle: crate::pool::types::H1Idle::default(),
-            last_use,
-            tls: TlsInfo::default(),
-        },
-    );
+async fn fetch(session: &Session, url: String) -> String {
+    let response = session.get(url).send().await.expect("response");
+    response.text().await.expect("body")
 }
 
-#[test]
-fn evict_idle_drops_abandoned_empty_h1_entry() {
-    let pool = Pool::with_limits(Duration::from_millis(20), 2048, 6);
-    let stale = Instant::now()
-        .checked_sub(Duration::from_millis(40))
-        .expect("monotonic clock is >40ms past its epoch");
-    insert_empty_h1(&pool, "abandoned", stale);
-
-    pool.evict_idle(std::time::Instant::now());
-
-    assert_eq!(
-        pool.stats().entries,
-        0,
-        "an empty H1 entry idle past the timeout must be reaped, not linger until LRU"
-    );
+async fn empty_h1_entry(idle_timeout: Duration) -> (Session, Server) {
+    let server = Server::http(queue([
+        Response::new(200).body("first"),
+        Response::new(200).close().body("last"),
+    ]))
+    .await
+    .expect("server");
+    let session = Session::builder()
+        .pool_idle_timeout(idle_timeout)
+        .build()
+        .expect("session");
+    assert_eq!(fetch(&session, server.url("/")).await, "first");
+    let last = session.get(server.url("/")).send().await.expect("response");
+    assert!(last.reused(), "the second request takes the pooled socket");
+    assert_eq!(last.text().await.expect("body"), "last");
+    assert_eq!(session.stats().entries(), 1);
+    (session, server)
 }
 
-#[test]
-fn evict_idle_keeps_empty_h1_entry_with_live_checkouts() {
-    let pool = Pool::with_limits(Duration::from_secs(300), 2048, 6);
-    insert_empty_h1(&pool, "in-flight", Instant::now());
+async fn ok_server() -> Server {
+    Server::http(|_| Response::new(200).body("ok"))
+        .await
+        .expect("server")
+}
 
-    pool.evict_idle(std::time::Instant::now());
+#[tokio::test]
+async fn evict_idle_drops_abandoned_empty_h1_entry() {
+    let (session, _server) = empty_h1_entry(Duration::from_millis(500)).await;
+    let other = ok_server().await;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        assert_eq!(fetch(&session, other.url("/")).await, "ok");
+        if session.stats().entries() == 1 {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "an empty H1 entry idle past the timeout must be reaped, not linger until LRU"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
+async fn evict_idle_keeps_empty_h1_entry_inside_the_idle_window() {
+    let (session, _server) = empty_h1_entry(Duration::from_secs(300)).await;
+    let other = ok_server().await;
+    tokio::time::sleep(POOL_REAP_INTERVAL + Duration::from_millis(50)).await;
+
+    assert_eq!(fetch(&session, other.url("/")).await, "ok");
 
     assert_eq!(
-        pool.stats().entries,
-        1,
-        "an empty H1 entry touched within the idle window (checkouts in flight) must survive"
+        session.stats().entries(),
+        2,
+        "an empty H1 entry touched within the idle window must survive the reap"
     );
 }
 
@@ -242,7 +265,7 @@ async fn a_failure_on_a_replaced_connection_keeps_the_replacement() {
     let (old, _old_io) = h2_client().await;
     let (new, _new_io) = h2_client().await;
     pool.install_mux(key.clone(), old.clone(), TlsInfo::default());
-    crate::util::write(&pool.conns.entries).mux.remove(&key);
+    pool.invalidate(&key, &old);
     pool.install_mux(key.clone(), new.clone(), TlsInfo::default());
 
     pool.invalidate(&key, &old);

@@ -11,6 +11,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 const STALLED_500: &[u8] = b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 2\r\n\r\nx";
+const ERROR_BODY_PAUSE: Duration = Duration::from_secs(5);
 const OK_200: &[u8] = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok";
 
 async fn read_head(socket: &mut TcpStream) -> bool {
@@ -163,7 +164,7 @@ async fn paced_error_server(total: usize, first: usize) -> (u16, Arc<AtomicUsize
                 );
                 drop(socket.write_all(head.as_bytes()).await);
                 drop(socket.write_all(&vec![b'e'; first]).await);
-                tokio::time::sleep(Duration::from_millis(300)).await;
+                tokio::time::sleep(ERROR_BODY_PAUSE).await;
                 drop(socket.write_all(&vec![b'e'; total - first]).await);
                 if read_head(&mut socket).await {
                     drop(socket.write_all(OK_200).await);
@@ -202,7 +203,7 @@ async fn a_small_max_error_body_does_not_read_a_larger_error_body() {
         .unwrap();
 
     assert_eq!(err.body(), Some(&b"eeee"[..]));
-    assert!(elapsed < Duration::from_millis(250), "{elapsed:?}");
+    assert!(elapsed < ERROR_BODY_PAUSE / 2, "{elapsed:?}");
     assert_eq!(body, "ok");
     assert_eq!(accepted.load(Ordering::SeqCst), 2);
 }
@@ -274,7 +275,7 @@ async fn a_smaller_max_body_size_bounds_the_error_read() {
     let session = Session::builder()
         .protocol(Protocol::Http1)
         .max_body_size(4)
-        .timeout(Timeout::new().error_body(Duration::from_millis(500)))
+        .timeout(Timeout::new().error_body(ERROR_BODY_PAUSE))
         .build()
         .unwrap();
 
@@ -289,7 +290,7 @@ async fn a_smaller_max_body_size_bounds_the_error_read() {
     assert_eq!(err.status().map(|s| s.as_u16()), Some(500), "{err}");
     assert_eq!(err.body(), Some(&b"eeee"[..]));
     assert!(
-        started.elapsed() < Duration::from_millis(250),
+        started.elapsed() < ERROR_BODY_PAUSE / 2,
         "{:?}",
         started.elapsed()
     );

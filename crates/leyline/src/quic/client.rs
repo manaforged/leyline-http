@@ -36,7 +36,7 @@ enum H3Command {
         mode: ResponseMode,
         head_request: bool,
         body_limit: BodyLimit,
-        resp_tx: oneshot::Sender<Result<TransportResponse, H3SendError>>,
+        resp_tx: oneshot::Sender<Result<Box<TransportResponse>, H3SendError>>,
     },
 }
 
@@ -116,7 +116,7 @@ impl H3Client {
         body_stream: Option<BoxedStream>,
         mode: ResponseMode,
         body_limit: BodyLimit,
-    ) -> Result<TransportResponse, H3SendError> {
+    ) -> Result<Box<TransportResponse>, H3SendError> {
         if self.closed.load(Ordering::Acquire) {
             return Err(H3SendError::NotSent("h3 connection closed".into()));
         }
@@ -179,7 +179,7 @@ impl H3Client {
 }
 
 struct H3Stream {
-    resp_tx: Option<oneshot::Sender<Result<TransportResponse, H3SendError>>>,
+    resp_tx: Option<oneshot::Sender<Result<Box<TransportResponse>, H3SendError>>>,
     response: ResponseState,
     status: http::StatusCode,
     headers: http::HeaderMap,

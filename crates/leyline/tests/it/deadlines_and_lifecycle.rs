@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use leyline::testing;
 use leyline::{HostLimits, Proxy, Retry, Session};
 
+#[cfg(unix)]
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("leyline-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();

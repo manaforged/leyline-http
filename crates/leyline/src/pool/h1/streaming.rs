@@ -211,7 +211,7 @@ impl Exchange<'_> {
         opened: Opened<H1Slot>,
         body: Body,
         count_install: bool,
-    ) -> Result<Box<Delivered>, H1Error> {
+    ) -> Result<Delivered, H1Error> {
         let req = self.req;
         let connect_ms = opened.connect_ms;
         let Opened {
@@ -240,18 +240,15 @@ impl Exchange<'_> {
             count_install,
         };
         let answer = deliver_head(self.pool, self.key, leg, req.response, req.body_limit).await?;
-        Ok(Box::new(Delivered {
-            answer,
-            tls,
-            timing: ResponseTiming::leg(self.started, connect_ms),
-        }))
+        let timing = ResponseTiming::leg(self.started, connect_ms);
+        Ok(Delivered::new(answer, req.scheme, tls, timing)?)
     }
 }
 
+/// A response and, when its body streams, the pump that feeds it.
 pub(super) struct Delivered {
-    answer: Answer,
-    tls: TlsInfo,
-    timing: ResponseTiming,
+    response: Box<TransportResponse>,
+    pump: Option<Box<H1StreamPump>>,
 }
 
 struct Answer {
@@ -267,38 +264,55 @@ enum Delivery {
 }
 
 impl Delivered {
-    pub(super) fn respond(
-        self: Box<Self>,
+    fn new(
+        answer: Answer,
         scheme: Scheme,
-        permit: OwnedSemaphorePermit,
-    ) -> Result<TransportResponse, Error> {
+        tls: TlsInfo,
+        timing: ResponseTiming,
+    ) -> Result<Self, Error> {
         let Answer {
             status,
             headers,
             trailers,
             body,
-        } = self.answer;
+        } = answer;
         let status = crate::wire::status(status)?;
-        let body = match body {
-            Delivery::Buffered(body) => TransportBody::Buffered(body),
-            Delivery::Streaming(rx, mut pump) => {
-                pump.permit = Some(permit);
-                let blocking = matches!(pump.pool.io(), crate::pool::Io::Blocking(_));
-                let pump = run_h1_stream_pump(*pump);
-                let body = crate::wire::BodyChannel::new(rx);
-                TransportBody::Streaming(if blocking {
-                    body.pumped_by(pump)
-                } else {
-                    tokio::spawn(pump);
-                    body
-                })
-            }
+        let (body, pump) = match body {
+            Delivery::Buffered(body) => (TransportBody::Buffered(body), None),
+            Delivery::Streaming(rx, pump) => (
+                TransportBody::Streaming(crate::wire::BodyChannel::new(rx)),
+                Some(pump),
+            ),
         };
-        let mut response =
-            TransportResponse::new(http::Version::HTTP_11, status, headers, trailers, body);
-        response.tls = scheme.is_secure().then_some(self.tls);
-        response.timing = self.timing;
-        Ok(response)
+        let mut response = Box::new(TransportResponse::new(
+            http::Version::HTTP_11,
+            status,
+            headers,
+            trailers,
+            body,
+        ));
+        response.tls = scheme.is_secure().then_some(tls);
+        response.timing = timing;
+        Ok(Self { response, pump })
+    }
+
+    pub(super) fn respond(self, permit: OwnedSemaphorePermit) -> Box<TransportResponse> {
+        let Self { mut response, pump } = self;
+        let Some(mut pump) = pump else {
+            return response;
+        };
+        pump.permit = Some(permit);
+        let blocking = matches!(pump.pool.io(), crate::pool::Io::Blocking(_));
+        let pump = run_h1_stream_pump(*pump);
+        if blocking {
+            let body = std::mem::replace(&mut response.body, TransportBody::Buffered(Vec::new()));
+            if let TransportBody::Streaming(channel) = body {
+                response.body = TransportBody::Streaming(channel.pumped_by(pump));
+            }
+        } else {
+            tokio::spawn(pump);
+        }
+        response
     }
 }
 

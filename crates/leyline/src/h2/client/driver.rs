@@ -52,14 +52,14 @@ struct PendingSend {
 }
 
 pub(crate) enum ResponseSink {
-    Buffered(oneshot::Sender<Result<TransportResponse, H2Error>>),
+    Buffered(oneshot::Sender<Result<Box<TransportResponse>, H2Error>>),
     StreamingEx {
-        headers_tx: Option<oneshot::Sender<Result<TransportResponse, H2Error>>>,
+        headers_tx: Option<oneshot::Sender<Result<Box<TransportResponse>, H2Error>>>,
         body_tx: mpsc::Sender<io::Result<Bytes>>,
         terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
     },
     Adaptive {
-        tx: oneshot::Sender<Result<TransportResponse, H2Error>>,
+        tx: oneshot::Sender<Result<Box<TransportResponse>, H2Error>>,
         body_tx: mpsc::Sender<io::Result<Bytes>>,
         terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
         mode: ResponseMode,
@@ -79,14 +79,14 @@ impl ResponseSink {
     }
 
     pub(super) fn streaming(
-        headers_tx: oneshot::Sender<Result<TransportResponse, H2Error>>,
+        headers_tx: oneshot::Sender<Result<Box<TransportResponse>, H2Error>>,
     ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
         let (sink, body_rx) = Self::adaptive(headers_tx, ResponseMode::Streamed);
         (sink.settle(http::StatusCode::OK), body_rx)
     }
 
     pub(super) fn adaptive(
-        tx: oneshot::Sender<Result<TransportResponse, H2Error>>,
+        tx: oneshot::Sender<Result<Box<TransportResponse>, H2Error>>,
         mode: ResponseMode,
     ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
         let (body_tx, terminal, body_rx) = crate::wire::body_channel();
@@ -201,14 +201,14 @@ impl StreamActor {
         crate::wire::length_mismatch(self.has_body, self.declared_len, self.recv_len)
     }
 
-    fn response(&mut self, body: Vec<u8>) -> TransportResponse {
-        TransportResponse::new(
+    fn response(&mut self, body: Vec<u8>) -> Box<TransportResponse> {
+        Box::new(TransportResponse::new(
             http::Version::HTTP_2,
             self.status,
             std::mem::take(&mut self.resp_headers).into(),
             std::mem::take(&mut self.trailers),
             TransportBody::Buffered(body),
-        )
+        ))
     }
 
     fn deliver_headers_streaming(&mut self) {
