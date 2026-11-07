@@ -121,7 +121,7 @@ impl H3Stream {
     pub(super) fn response(&mut self, body: Vec<u8>) -> TransportResponse {
         TransportResponse {
             status: self.status,
-            headers: std::mem::take(&mut self.headers),
+            headers: std::mem::take(&mut self.headers).into(),
             trailers: crate::core::transport::trailers(std::mem::take(&mut self.trailers)),
             body: TransportBody::Buffered(body),
             version: http::Version::HTTP_3,

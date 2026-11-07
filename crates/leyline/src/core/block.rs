@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use crate::core::error::{Error, Result};
 use crate::core::response::Response;
+use crate::core::response_head::text;
 
 const STATUS_VENDOR: &str = "status";
 const BUILTIN: &str = include_str!("../../profiles/blocks.toml");
@@ -177,12 +178,12 @@ impl BlockRule {
         let Some(header) = &self.header else {
             return true;
         };
-        let mut values = response.headers().get_all(header).iter().peekable();
+        let headers = &response.parts.headers;
         let Some(expected) = &self.value else {
-            return values.peek().is_some();
+            return headers.any_value(header, |_| true);
         };
-        values
-            .filter_map(|value| value.to_str().ok())
-            .any(|value| value.trim().eq_ignore_ascii_case(expected))
+        headers.any_value(header, |value| {
+            text(value).is_some_and(|value| value.trim().eq_ignore_ascii_case(expected))
+        })
     }
 }

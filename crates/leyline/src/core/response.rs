@@ -91,7 +91,7 @@ pub struct Response {
 pub(crate) struct Parts {
     pub(crate) status: StatusCode,
     pub(crate) version: http::Version,
-    pub(crate) headers: HeaderMap,
+    pub(crate) headers: crate::core::response_head::Fields,
     pub(crate) trailers: Option<Box<HeaderMap>>,
     pub(crate) body: ResponseBody,
     pub(crate) url: Arc<Url>,
@@ -183,7 +183,7 @@ impl Response {
 
     /// Returns the response headers.
     pub fn headers(&self) -> &HeaderMap {
-        &self.parts.headers
+        self.parts.headers.map()
     }
 
     /// Returns the response trailers.
@@ -199,6 +199,7 @@ impl Response {
         let url = &self.parts.url;
         self.parts
             .headers
+            .map()
             .get_all(http::header::SET_COOKIE)
             .iter()
             .filter_map(move |value| {
@@ -263,7 +264,7 @@ impl Response {
             Error::new(Kind::Status)
                 .with_status(self.parts.status)
                 .with_url(Url::clone(&self.parts.url))
-                .with_headers(self.parts.headers.clone())
+                .with_headers(self.parts.headers.map().clone())
                 .with_trail(self.parts.attempts, self.parts.proxy.clone()),
         )
     }
@@ -291,7 +292,11 @@ impl Response {
 
     /// Returns the named header value as text, or `None` when it is absent or not visible ASCII.
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.parts.headers.get(name).and_then(|v| v.to_str().ok())
+        self.parts
+            .headers
+            .map()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
     }
 }
 
@@ -313,6 +318,7 @@ impl fmt::Debug for Response {
                 &masked(
                     self.parts
                         .headers
+                        .map()
                         .iter()
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),

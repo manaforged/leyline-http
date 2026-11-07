@@ -114,4 +114,5 @@ pub(crate) struct SessionInner {
     block_rules: crate::core::block::Rules,
     inputs: Arc<SessionBuilder>,
     trace: Option<Arc<dyn crate::trace::Trace>>,
+    header_id: crate::core::request_headers::HeaderId,
 }

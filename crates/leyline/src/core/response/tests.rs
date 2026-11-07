@@ -4,7 +4,7 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
     Response::from_parts(crate::core::response::Parts {
         status: http::StatusCode::OK,
         version: http::Version::HTTP_2,
-        headers: http::HeaderMap::new(),
+        headers: http::HeaderMap::new().into(),
         trailers: None,
         body: ResponseBody::Buffered(Vec::new()),
         url: std::sync::Arc::new(Url::parse("https://example.test/").unwrap()),
@@ -78,7 +78,8 @@ async fn text_decodes_declared_charset() {
         http::HeaderValue::from_static("text/html; charset=windows-1252"),
     )]
     .into_iter()
-    .collect();
+    .collect::<http::HeaderMap>()
+    .into();
     resp.parts.body = ResponseBody::Buffered(vec![0xE9, 0xA9]);
     assert_eq!(resp.text().await.unwrap(), "é©");
 }
@@ -92,7 +93,8 @@ async fn text_charset_param_is_case_insensitive_and_unquoted() {
         http::HeaderValue::from_static("text/plain; Charset=\"Shift_JIS\""),
     )]
     .into_iter()
-    .collect();
+    .collect::<http::HeaderMap>()
+    .into();
     resp.parts.body = ResponseBody::Buffered(vec![0x82, 0xA0]);
     assert_eq!(resp.text().await.unwrap(), "あ");
 }
@@ -114,7 +116,8 @@ async fn declared_charset_overrides_text_with_charset_default() {
         http::HeaderValue::from_static("text/plain; charset=utf-8"),
     )]
     .into_iter()
-    .collect();
+    .collect::<http::HeaderMap>()
+    .into();
     resp.parts.body = ResponseBody::Buffered("héllo".as_bytes().to_vec());
     assert_eq!(
         resp.text_with_charset("windows-1252").await.unwrap(),
@@ -220,7 +223,8 @@ fn content_length_reads_only_decimal_digits() {
             http::HeaderValue::from_static(value),
         )]
         .into_iter()
-        .collect();
+        .collect::<http::HeaderMap>()
+        .into();
         assert_eq!(resp.content_length(), expected, "{value:?}");
     }
 }

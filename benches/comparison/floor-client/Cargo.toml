@@ -13,3 +13,4 @@ path = "src/main.rs"
 [dependencies]
 leyline = { package = "leyline-http", path = "../../../crates/leyline", features = ["bench-internals"] }
 url = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }

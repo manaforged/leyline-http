@@ -97,14 +97,7 @@ async fn connection_window_update_overflow_kills_connection() {
         let handle = handle.clone();
         async move {
             handle
-                .send_shared(
-                    Arc::new(Head {
-                        pseudo: p,
-                        headers: h,
-                    }),
-                    leyline::Body::default(),
-                    false,
-                )
+                .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
                 .await
         }
     });
@@ -175,14 +168,7 @@ async fn settings_initial_window_overflow_kills_connection() {
         let handle = handle.clone();
         async move {
             handle
-                .send_shared(
-                    Arc::new(Head {
-                        pseudo: p,
-                        headers: h,
-                    }),
-                    leyline::Body::default(),
-                    false,
-                )
+                .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
                 .await
         }
     });

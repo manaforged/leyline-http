@@ -109,16 +109,16 @@ async fn a_buffered_upload_queues_a_bounded_amount_ahead_of_its_reset() {
 #[tokio::test]
 async fn a_header_block_over_the_limit_is_refused_before_the_wire() {
     let (handle, mut server_io) = wide_open(4 * 1024 * 1024, DEFAULT_FRAME).await;
-    let big = Head {
-        pseudo: PseudoHeaders {
+    let big = Head::new(
+        PseudoHeaders {
             method: "GET".into(),
             scheme: "https".into(),
             authority: "example.com".into(),
             path: "/".into(),
             protocol: None,
         },
-        headers: vec![("x-large".into(), "v".repeat(1024 * 1024).into())],
-    };
+        vec![("x-large".into(), "v".repeat(1024 * 1024).into())],
+    );
     let sent = timeout(
         Duration::from_secs(2),
         handle.send_shared(Arc::new(big), leyline::Body::default(), false),
@@ -176,19 +176,19 @@ async fn a_cancelled_upload_of_empty_chunks_drops_its_producer() {
 }
 
 fn head_with(headers: Vec<(String, String)>) -> Arc<Head> {
-    Arc::new(Head {
-        pseudo: PseudoHeaders {
+    Arc::new(Head::new(
+        PseudoHeaders {
             method: "GET".into(),
             scheme: "https".into(),
             authority: "example.com".into(),
             path: "/".into(),
             protocol: None,
         },
-        headers: headers
+        headers
             .into_iter()
             .map(|(name, value)| (name.into(), value.into()))
             .collect(),
-    })
+    ))
 }
 
 #[tokio::test]

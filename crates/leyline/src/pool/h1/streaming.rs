@@ -211,7 +211,10 @@ impl Exchange<'_> {
             io.as_mut(),
             req.method,
             req.url,
-            &req.headers,
+            Fields {
+                pairs: &req.headers,
+                lines: req.headers.h1_lines(),
+            },
             body,
             req.target,
             buf,
@@ -230,7 +233,7 @@ impl Exchange<'_> {
 
 pub(super) struct Delivered {
     status: u16,
-    headers: HeaderMap,
+    headers: crate::core::response_head::Fields,
     body: TransportBody,
 }
 

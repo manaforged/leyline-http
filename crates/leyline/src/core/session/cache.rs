@@ -202,6 +202,7 @@ impl Session {
         for name in [header::LOCATION, header::CONTENT_LOCATION] {
             if let Some(to) = response
                 .headers
+                .map()
                 .get(name)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|value| base.join(value).ok())
@@ -244,7 +245,7 @@ fn condition(req: &mut Prepared<'_>, headers: &HeaderMap) -> Result<()> {
             extra.append(name.clone(), value.clone())?;
         }
     }
-    apply_extra_headers(&mut req.headers, &extra, false, &|_| false);
+    apply_extra_headers(req.headers.to_mut(), &extra, false, &|_| false);
     Ok(())
 }
 
@@ -265,7 +266,7 @@ fn finish(
     mut response: TransportResponse,
     lookup: Lookup,
 ) -> Result<TransportResponse> {
-    let mut headers = response.headers.clone();
+    let mut headers = response.headers.map().clone();
     for name in VOLATILE {
         headers.remove(name);
     }
@@ -284,11 +285,13 @@ fn finish(
                 let timing = response.timing;
                 response = old.response(parts);
                 response.timing = timing;
+                let mut headers = std::mem::take(&mut response.headers).into_map();
                 for name in VOLATILE {
-                    for value in actual.get_all(&name) {
-                        response.headers.append(name.clone(), value.clone());
+                    for value in actual.map().get_all(&name) {
+                        headers.append(name.clone(), value.clone());
                     }
                 }
+                response.headers = headers.into();
                 policy
             }
             AfterResponse::Modified(policy, _) => policy,
@@ -303,7 +306,7 @@ fn finish(
             },
         ),
     };
-    if response.headers.contains_key(header::SET_COOKIE) {
+    if response.headers.seen().cookies {
         cache.remove(&key.url);
         return Ok(response);
     }
@@ -335,7 +338,7 @@ impl Entry {
             .len()
             .saturating_add(key.url.len().saturating_mul(4))
             .saturating_add(header_cost(request.headers()))
-            .saturating_add(header_cost(&response.headers))
+            .saturating_add(header_cost(response.headers.map()))
             .saturating_add(
                 response
                     .tls
@@ -358,7 +361,7 @@ impl Entry {
     fn response(&self, parts: http::response::Parts) -> TransportResponse {
         TransportResponse {
             status: parts.status,
-            headers: parts.headers,
+            headers: parts.headers.into(),
             trailers: None,
             body: TransportBody::Buffered(self.body.clone()),
             version: self.version,
@@ -371,7 +374,7 @@ impl Entry {
 fn cache_miss() -> TransportResponse {
     TransportResponse {
         status: StatusCode::GATEWAY_TIMEOUT,
-        headers: HeaderMap::new(),
+        headers: HeaderMap::new().into(),
         trailers: None,
         body: TransportBody::Buffered(Vec::new()),
         version: http::Version::HTTP_11,

@@ -82,6 +82,7 @@ pub(super) struct Head<'a> {
     pub(super) target: &'a str,
     pub(super) host: Option<&'a str>,
     pub(super) headers: &'a [HeaderPair],
+    pub(super) lines: Option<&'a [u8]>,
     pub(super) length: Option<(&'a str, &'a str)>,
     pub(super) keep_alive: bool,
 }
@@ -93,11 +94,15 @@ impl Head<'_> {
             + self.target.len()
             + 13
             + self.host.map_or(0, |host| line(("Host", host)))
-            + self
-                .headers
-                .iter()
-                .map(|(name, value)| line((name.as_ref(), value.as_ref())))
-                .sum::<usize>()
+            + self.lines.map_or_else(
+                || {
+                    self.headers
+                        .iter()
+                        .map(|(name, value)| line((name.as_ref(), value.as_ref())))
+                        .sum::<usize>()
+                },
+                <[u8]>::len,
+            )
             + self.length.map_or(0, line)
             + 26;
         req.clear();
@@ -109,8 +114,13 @@ impl Head<'_> {
         if let Some(host) = self.host {
             put(req, "Host", host);
         }
-        for (name, value) in self.headers {
-            put(req, h1_header_name(name), value);
+        match self.lines {
+            Some(lines) => req.extend_from_slice(lines),
+            None => {
+                for (name, value) in self.headers {
+                    put(req, h1_header_name(name), value);
+                }
+            }
         }
         if let Some((name, value)) = self.length {
             put(req, name, value);
@@ -127,4 +137,22 @@ fn put(req: &mut Vec<u8>, name: &str, value: &str) {
     req.extend_from_slice(b": ");
     req.extend_from_slice(value.as_bytes());
     req.extend_from_slice(b"\r\n");
+}
+
+pub(crate) fn field_lines(headers: &[HeaderPair]) -> Option<Vec<u8>> {
+    let size = headers
+        .iter()
+        .map(|(name, value)| name.len() + value.len() + 4)
+        .sum();
+    let mut lines = Vec::with_capacity(size);
+    for (name, value) in headers {
+        if !crate::core::transport::sent_on(http::Version::HTTP_11, name, value) {
+            continue;
+        }
+        if !is_valid_token(name) || !is_valid_header_value(value) {
+            return None;
+        }
+        put(&mut lines, h1_header_name(name), value);
+    }
+    Some(lines)
 }

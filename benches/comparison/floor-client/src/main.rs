@@ -4,7 +4,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use leyline::pool::floor::{Floor, floor_connect};
+use leyline::pool::floor::{Floor, floor_connect, floor_connect_async};
 
 fn request_headers() -> Vec<(String, String)> {
     env::var_os("CMP_HEADERS")
@@ -25,6 +25,31 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     bytes.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, &b| {
         (h ^ u64::from(b)).wrapping_mul(0x0000_0100_0000_01b3)
     })
+}
+
+#[tokio::main]
+async fn warm_async(
+    addr: String,
+    url: url::Url,
+    headers: Arc<Vec<(String, String)>>,
+    warm_n: usize,
+) -> f64 {
+    tokio::spawn(async move {
+        let expected = b"ok-10byte!";
+        let mut stream = floor_connect_async(&addr).await.expect("connect");
+        let mut floor = Floor::new(&headers);
+        let start = Instant::now();
+        for _ in 0..warm_n {
+            let (status, body) = floor
+                .get_async(&mut stream, &url)
+                .await
+                .expect("warm request");
+            assert!(status == 200 && body[..] == expected[..]);
+        }
+        warm_n as f64 / start.elapsed().as_secs_f64()
+    })
+    .await
+    .expect("client task")
 }
 
 fn main() {
@@ -62,6 +87,12 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(64)
         .max(1);
+
+    if env::var("CMP_FLOOR").as_deref() == Ok("async") {
+        let warm_rps = warm_async(addr, url, headers, warm_n.max(1));
+        println!("RESULT floor connections={conc_c} warm_rps={warm_rps:.3} conc_rps=0 cold_rps=0");
+        return;
+    }
 
     let mut stream = floor_connect(&addr).expect("connect");
     let mut floor = Floor::new(&headers);

@@ -9,7 +9,7 @@ use bytes::Bytes;
 use tokio::sync::{Notify, mpsc, oneshot};
 
 use crate::core::Body;
-use crate::h2::connection::{HeaderPair, PseudoHeaders};
+use crate::h2::connection::PseudoHeaders;
 
 use super::ResponseSink;
 
@@ -26,7 +26,17 @@ pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
 
 pub struct Head {
     pub pseudo: PseudoHeaders,
-    pub headers: Vec<HeaderPair>,
+    pub(crate) headers: crate::core::request_headers::RequestHeaders,
+}
+
+impl Head {
+    /// Builds a request head from its pseudo-headers and header fields.
+    pub fn new(pseudo: PseudoHeaders, headers: Vec<crate::h2::connection::HeaderPair>) -> Self {
+        Self {
+            pseudo,
+            headers: headers.into(),
+        }
+    }
 }
 
 pub(crate) enum DriverCommand {

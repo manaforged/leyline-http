@@ -123,16 +123,16 @@ async fn streaming_upload_completes_after_last_handle_drops() {
 
     let resp = handle
         .send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "POST".into(),
                     scheme: "https".into(),
                     authority: "example.com".into(),
                     path: "/upload".into(),
                     protocol: None,
                 },
-                headers: vec![("user-agent".into(), "test".into())],
-            }),
+                vec![("user-agent".into(), "test".into())],
+            )),
             leyline::Body::stream(stream, None),
             true,
         )
@@ -208,16 +208,16 @@ async fn abandoned_response_is_reset_before_shutdown() {
         .expect("connection");
     let response = handle
         .send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.test".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: Vec::new(),
-            }),
+                Vec::new(),
+            )),
             leyline::Body::default(),
             true,
         )

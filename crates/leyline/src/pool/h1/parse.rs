@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::response_head::{Fields, Seen};
 use crate::core::session::decompress::BodyLimit;
 use crate::util::MAX_INFORMATIONAL;
 
@@ -21,31 +22,14 @@ where
                 "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
             )));
         }
-        let head = Bytes::copy_from_slice(&buf[..header_end]);
-        let (status, headers, minor, body) = parse_head(&head)?;
-        buf.drain(..body_start);
-
-        if status == 101 {
-            return Err(malformed("unexpected 101 Switching Protocols"));
-        }
-        if (100..200).contains(&status) {
-            informational += 1;
-            if informational > MAX_INFORMATIONAL {
-                return Err(malformed(format!(
-                    "more than {MAX_INFORMATIONAL} informational responses"
-                )));
-            }
+        let head = &buf[..header_end];
+        let Some((status, minor, framing, seen)) = final_head(head, method, &mut informational)?
+        else {
+            buf.drain(..body_start);
             continue;
-        }
-
-        body.validate()?;
-
-        let framing = if method.eq_ignore_ascii_case("HEAD") || matches!(status, 204 | 304) {
-            BodyFraming::None
-        } else {
-            body.framing()
         };
-
+        let headers = Fields::raw(Bytes::copy_from_slice(head), seen);
+        buf.drain(..body_start);
         return Ok(H1Head {
             status,
             headers,
@@ -54,6 +38,33 @@ where
             initial_body: buf,
         });
     }
+}
+
+fn final_head(
+    head: &[u8],
+    method: &str,
+    informational: &mut usize,
+) -> Result<Option<(u16, u8, BodyFraming, Seen)>, Error> {
+    let (status, minor, scanned) = scan_head(head)?;
+    if status == 101 {
+        return Err(malformed("unexpected 101 Switching Protocols"));
+    }
+    if (100..200).contains(&status) {
+        *informational += 1;
+        if *informational > MAX_INFORMATIONAL {
+            return Err(malformed(format!(
+                "more than {MAX_INFORMATIONAL} informational responses"
+            )));
+        }
+        return Ok(None);
+    }
+    scanned.body.validate()?;
+    let framing = if method.eq_ignore_ascii_case("HEAD") || matches!(status, 204 | 304) {
+        BodyFraming::None
+    } else {
+        scanned.body.framing()
+    };
+    Ok(Some((status, minor, framing, scanned.seen())))
 }
 
 pub(super) async fn read_h1_body<S>(
@@ -132,120 +143,41 @@ where
     }
 }
 pub fn parse_h1_head(head: &[u8]) -> Result<(u16, HeaderMap, u8), Error> {
-    let (status, headers, minor, _) = parse_head(&Bytes::copy_from_slice(head))?;
-    Ok((status, headers, minor))
+    parse_head(&Bytes::copy_from_slice(head))
 }
 
-pub(super) fn parse_head(head: &Bytes) -> Result<(u16, HeaderMap, u8, BodyHeaders), Error> {
+pub(crate) fn parse_head(head: &Bytes) -> Result<(u16, HeaderMap, u8), Error> {
     let mut sink = Typed {
         head,
         fields: HeaderMap::with_capacity(memchr::memchr_iter(b'\n', head).count()),
         last: None,
-        body: BodyHeaders::default(),
     };
     let (status, minor) = parse(head, &mut sink)?;
     sink.flush();
-    Ok((status, sink.fields, minor, sink.body))
+    Ok((status, sink.fields, minor))
 }
 
-#[derive(Default)]
-pub(super) struct BodyHeaders {
-    lengths: usize,
-    length: Option<http::HeaderValue>,
-    coding: Option<http::HeaderValue>,
-}
-
-impl BodyHeaders {
-    fn note(&mut self, name: &http::HeaderName, value: &http::HeaderValue) {
-        if name == http::header::CONTENT_LENGTH {
-            self.lengths += 1;
-            self.length.get_or_insert_with(|| value.clone());
-        } else if name == http::header::TRANSFER_ENCODING {
-            self.coding.get_or_insert_with(|| value.clone());
-        }
-    }
-
-    fn length(&self) -> Option<&str> {
-        self.length.as_ref().and_then(|v| v.to_str().ok())
-    }
-
-    fn coding(&self) -> Option<&str> {
-        self.coding.as_ref().and_then(|v| v.to_str().ok())
-    }
-
-    fn validate(&self) -> Result<(), Error> {
-        if self.lengths > 1 {
-            return Err(malformed(
-                "response has multiple Content-Length headers (RFC 9112 §6.1)",
-            ));
-        }
-        if let Some(v) = self.length() {
-            if v.contains(',') {
-                return Err(malformed(
-                    "response Content-Length contains multiple values",
-                ));
-            }
-            if crate::util::content_length(v).is_none() {
-                return Err(malformed(format!(
-                    "response Content-Length `{v}` is not a valid decimal integer (RFC 9112 §8.6)"
-                )));
-            }
-        }
-        let te = self.coding();
-        if te.is_some() && self.lengths > 0 {
-            return Err(malformed(
-                "response has both Content-Length and Transfer-Encoding (RFC 9112 §6.1)",
-            ));
-        }
-        if let Some(te) = te {
-            let last = te
-                .split(',')
-                .map(|t| t.trim())
-                .rfind(|t| !t.is_empty())
-                .unwrap_or("");
-            if !last.eq_ignore_ascii_case("chunked") {
-                return Err(malformed(format!(
-                    "response Transfer-Encoding `{te}`: `chunked` must be the final coding"
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    fn framing(&self) -> BodyFraming {
-        if self.coding().is_some_and(|te| has_token(te, "chunked")) {
-            BodyFraming::Chunked
-        } else if let Some(len) = self.length().and_then(crate::util::content_length) {
-            BodyFraming::Fixed(len)
-        } else {
-            BodyFraming::ToClose
-        }
-    }
-}
-
-trait Sink {
-    fn field(&mut self, name: &[u8], value: &[u8]) -> Result<(), Error>;
-    fn fold(&mut self, line: &[u8]) -> Result<(), Error>;
+trait Sink<'a> {
+    fn field(&mut self, name: &'a [u8], value: &'a [u8]) -> Result<(), Error>;
+    fn fold(&mut self, line: &'a [u8]) -> Result<(), Error>;
 }
 
 struct Typed<'a> {
     head: &'a Bytes,
     fields: HeaderMap,
     last: Option<(http::HeaderName, http::HeaderValue)>,
-    body: BodyHeaders,
 }
 
 impl Typed<'_> {
     fn flush(&mut self) {
         if let Some((name, value)) = self.last.take() {
-            self.body.note(&name, &value);
             self.fields.append(name, value);
         }
     }
 }
 
-impl Sink for Typed<'_> {
-    fn field(&mut self, name: &[u8], value: &[u8]) -> Result<(), Error> {
+impl<'a> Sink<'a> for Typed<'_> {
+    fn field(&mut self, name: &'a [u8], value: &'a [u8]) -> Result<(), Error> {
         self.flush();
         let value = self.head.slice_ref(trim_start(value));
         let Ok(name) = http::HeaderName::from_bytes(name) else {
@@ -256,11 +188,11 @@ impl Sink for Typed<'_> {
                 self.last = Some((name, value));
                 Ok(())
             }
-            Err(_) => framing_value(&name),
+            Err(_) => framing_value(name.as_str()),
         }
     }
 
-    fn fold(&mut self, line: &[u8]) -> Result<(), Error> {
+    fn fold(&mut self, line: &'a [u8]) -> Result<(), Error> {
         let Some((name, value)) = self.last.as_mut() else {
             return Ok(());
         };
@@ -271,13 +203,13 @@ impl Sink for Typed<'_> {
             *value = folded;
             return Ok(());
         }
-        framing_value(name)?;
+        framing_value(name.as_str())?;
         self.last = None;
         Ok(())
     }
 }
 
-fn framing_value(name: &http::HeaderName) -> Result<(), Error> {
+fn framing_value(name: &str) -> Result<(), Error> {
     if name == http::header::CONTENT_LENGTH || name == http::header::TRANSFER_ENCODING {
         return Err(malformed(format!(
             "response {name} value has a control character"
@@ -373,7 +305,7 @@ fn status_line(line: &[u8]) -> Result<(u16, u8), Error> {
     Ok((status, minor))
 }
 
-fn parse<S: Sink>(head: &[u8], sink: &mut S) -> Result<(u16, u8), Error> {
+fn parse<'a, S: Sink<'a>>(head: &'a [u8], sink: &mut S) -> Result<(u16, u8), Error> {
     let mut lines = lines(head);
     let first = lines
         .next()
@@ -528,6 +460,11 @@ pub(super) fn chunk_size(line: &[u8]) -> Result<u64, String> {
         })
         .ok_or_else(invalid)
 }
+
+#[path = "scan.rs"]
+mod scan;
+pub(crate) use scan::find_values;
+use scan::scan_head;
 
 #[cfg(test)]
 #[path = "parse_tests.rs"]

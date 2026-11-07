@@ -158,7 +158,7 @@ pub(crate) fn head(
     status: u16,
     protocol: http::Version,
     elapsed: Duration,
-    headers: &http::HeaderMap,
+    headers: &crate::core::response_head::Fields,
 ) {
     with(|ctx| {
         ctx.hook.event(&Event::Head {
@@ -167,7 +167,7 @@ pub(crate) fn head(
             status,
             protocol,
             elapsed,
-            headers,
+            headers: headers.map(),
         });
     });
 }

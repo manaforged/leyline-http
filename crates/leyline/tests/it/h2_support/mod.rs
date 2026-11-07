@@ -161,16 +161,16 @@ pub fn test_config() -> H2Config {
 }
 
 pub fn get_head(path: &str) -> Head {
-    Head {
-        pseudo: PseudoHeaders {
+    Head::new(
+        PseudoHeaders {
             method: "GET".into(),
             scheme: "https".into(),
             authority: "example.com".into(),
             path: path.into(),
             protocol: None,
         },
-        headers: vec![("user-agent".into(), "test".into())],
-    }
+        vec![("user-agent".into(), "test".into())],
+    )
 }
 
 pub async fn write_end_headers<S: AsyncWrite + Unpin>(s: &mut S, stream_id: u32) {
@@ -227,16 +227,16 @@ pub const CHUNK: usize = 16 * 1024;
 pub static ZEROS: [u8; CHUNK] = [0; CHUNK];
 
 pub fn head(method: &str) -> Arc<Head> {
-    Arc::new(Head {
-        pseudo: PseudoHeaders {
+    Arc::new(Head::new(
+        PseudoHeaders {
             method: method.into(),
             scheme: "https".into(),
             authority: "example.com".into(),
             path: "/".into(),
             protocol: None,
         },
-        headers: vec![],
-    })
+        vec![],
+    ))
 }
 
 pub fn send(handle: &H2Client, method: &str, body: leyline::Body) -> tokio::task::JoinHandle<()> {

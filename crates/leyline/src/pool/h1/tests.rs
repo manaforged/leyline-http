@@ -138,7 +138,7 @@ async fn warm_send_future_leaves_the_dial_frame_on_the_heap() {
         port: 80,
         method: "GET",
         url: &url,
-        headers: Vec::new(),
+        headers: Vec::new().into(),
         proxy: None,
         target: crate::pool::H1Target::OriginForm,
         response: ResponseMode::Buffered,
@@ -161,7 +161,7 @@ async fn a_buffered_body_leaves_the_read_buffer_with_the_connection() {
     initial_body.extend_from_slice(b"ok-10byte!");
     let mut head = H1Head {
         status: 200,
-        headers: HeaderMap::new(),
+        headers: crate::core::response_head::Fields::default(),
         minor: 1,
         framing: BodyFraming::Fixed(10),
         initial_body,

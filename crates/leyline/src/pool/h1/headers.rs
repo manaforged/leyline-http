@@ -41,8 +41,8 @@ const fn token_byte(b: u8) -> bool {
     )
 }
 
-pub(super) fn is_valid_header_value(s: &str) -> bool {
-    s.bytes().fold(true, |valid, b| {
+pub(super) fn is_valid_header_value(s: impl AsRef<[u8]>) -> bool {
+    s.as_ref().iter().fold(true, |valid, &b| {
         valid & ((b >= b' ') & (b != 0x7F) | (b == b'\t'))
     })
 }

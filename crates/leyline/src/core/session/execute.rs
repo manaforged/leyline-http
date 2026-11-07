@@ -87,24 +87,19 @@ impl Session {
             answered |= leg.status != http::StatusCode::UNAUTHORIZED;
             journey.timing.add_leg(&leg.timing);
 
-            let (mut cookies, mut hsts, mut alt_svc) = (false, false, false);
-            for name in leg.headers.keys() {
-                cookies |= name == http::header::SET_COOKIE;
-                hsts |= name == http::header::STRICT_TRANSPORT_SECURITY;
-                alt_svc |= name == http::header::ALT_SVC;
+            let seen = leg.headers.seen();
+            if seen.cookies {
+                self.store_cookies(leg.headers.map(), &journey.url);
             }
-            if cookies {
-                self.store_cookies(&leg.headers, &journey.url);
-            }
-            if hsts {
-                self.note_hsts(&journey.url, &leg.headers);
+            if seen.hsts {
+                self.note_hsts(&journey.url, leg.headers.map());
             }
             #[cfg(feature = "http3")]
-            if alt_svc {
-                self.note_alt_svc(&journey.url, &leg.headers);
+            if seen.alt_svc {
+                self.note_alt_svc(&journey.url, leg.headers.map());
             }
             #[cfg(not(feature = "http3"))]
-            let _ = alt_svc;
+            let _ = seen.alt_svc;
 
             if leg.status == http::StatusCode::UNAUTHORIZED
                 && let Some(version) = refresh
@@ -241,7 +236,7 @@ mod reorder_tests;
 
 struct Turn<'a> {
     code: u16,
-    headers: &'a http::HeaderMap,
+    headers: &'a crate::core::response_head::Fields,
     redirect_policy: &'a Redirect,
     redirect_cap: usize,
 }
@@ -268,7 +263,7 @@ impl Turn<'_> {
         }
         if self.code == 401
             && let Some(digest) = digest
-            && let Some(authorized) = digest.answer(journey, self.headers)?
+            && let Some(authorized) = digest.answer(journey, self.headers.map())?
         {
             journey.body = replay_body.ok_or_else(unreplayable_body)?;
             journey.authorized = Some(authorized);

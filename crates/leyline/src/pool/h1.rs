@@ -20,6 +20,7 @@ use crate::trace;
 use crate::util::is_idempotent;
 use crate::{Error, Kind};
 
+use crate::core::request_headers::RequestHeaders;
 use crate::pool::send::{not_resendable, resend};
 use crate::pool::types::PoolKey;
 use crate::pool::types::{Opened, Transport};
@@ -119,7 +120,8 @@ pub async fn send_request_h1_pooled(
         headers: headers
             .into_iter()
             .map(|(name, value)| (name.into(), value.into()))
-            .collect(),
+            .collect::<Vec<_>>()
+            .into(),
         proxy,
         target,
         response: ResponseMode::from(stream),
@@ -135,7 +137,7 @@ pub(crate) struct H1Request<'a> {
     pub(crate) port: u16,
     pub(crate) method: &'a str,
     pub(crate) url: &'a url::Url,
-    pub(crate) headers: Vec<HeaderPair>,
+    pub(crate) headers: RequestHeaders,
     pub(crate) proxy: Option<&'a crate::core::ProxyUrl>,
     pub(crate) target: H1Target,
     pub(crate) response: ResponseMode,
@@ -149,7 +151,11 @@ pub(crate) async fn send_h1_pooled(
     opened: Option<Opened<H1Slot>>,
     dial: H1Dial<'_>,
 ) -> Result<H1Outcome, Error> {
-    validate(req.method, &req.headers)?;
+    let checked: &[HeaderPair] = match req.headers.h1_lines() {
+        Some(_) => &[],
+        None => &req.headers,
+    };
+    validate(req.method, checked)?;
     let key = pool.key(req.scheme, req.host, req.port, req.proxy, Transport::Tcp);
     let permit = pool.acquire_h1_permit(&key).await;
     let now = std::time::Instant::now();
@@ -228,7 +234,7 @@ enum BodyFraming {
 
 struct H1Head {
     status: u16,
-    headers: HeaderMap,
+    headers: crate::core::response_head::Fields,
     minor: u8,
     framing: BodyFraming,
     initial_body: Vec<u8>,
@@ -259,9 +265,6 @@ use crate::util::{has_token, header_contains_token};
 #[cfg(feature = "bench-internals")]
 pub use wire::floor;
 
-fn text(headers: &HeaderMap, name: http::HeaderName) -> Option<&str> {
-    headers.get(name).and_then(|v| v.to_str().ok())
-}
 pub(crate) use dial::H1Dial;
 use headers::*;
 pub(crate) use legs::H1Outcome;
@@ -269,6 +272,7 @@ use legs::{Leg, first_legs, fresh_leg};
 use parse::*;
 use read::*;
 use streaming::*;
+pub(crate) use wire::field_lines;
 use wire::*;
 
 #[cfg(feature = "websocket")]

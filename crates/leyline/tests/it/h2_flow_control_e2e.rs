@@ -186,16 +186,16 @@ async fn transfer(config: H2Config, body_len: usize, bulk: bool) {
     let resp = tokio::time::timeout(
         Duration::from_secs(10),
         handle.send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.com".into(),
                     path: "/big".into(),
                     protocol: None,
                 },
-                headers: vec![("user-agent".into(), "test".into())],
-            }),
+                vec![("user-agent".into(), "test".into())],
+            )),
             leyline::Body::default(),
             false,
         ),
@@ -304,16 +304,16 @@ async fn backpressure(orphaned: bool) {
         .expect("H2 connection");
     let response = handle
         .send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.test".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: Vec::new(),
-            }),
+                Vec::new(),
+            )),
             leyline::Body::default(),
             true,
         )

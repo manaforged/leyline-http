@@ -12,6 +12,7 @@ use crate::tls::FingerprintConnector;
 use crate::core::body::Body;
 use crate::core::body_stream::BodyStream;
 use crate::core::error::{Error, Kind, Result};
+use crate::core::request_headers::RequestHeaders;
 
 mod h1;
 mod h2;
@@ -145,7 +146,7 @@ pub struct TransportResponse {
     /// The response status.
     pub status: StatusCode,
     /// The response header fields.
-    pub headers: HeaderMap,
+    pub headers: crate::core::response_head::Fields,
     /// The response trailer fields, when the response has any.
     pub trailers: Option<Box<HeaderMap>>,
     /// The response body.
@@ -163,7 +164,7 @@ const _: () = assert!(
 pub(crate) struct Prepared<'a> {
     pub(crate) method: &'a str,
     pub(crate) url: &'a url::Url,
-    pub(crate) headers: Vec<HeaderPair>,
+    pub(crate) headers: RequestHeaders,
     pub(crate) body: Body,
     pub(crate) proxy: Option<&'a crate::core::ProxyUrl>,
     pub(crate) response: ResponseMode,
@@ -262,7 +263,7 @@ pub(crate) struct H2Parts<'a> {
     pub(crate) host: &'a str,
     pub(crate) port: u16,
     pub(crate) pseudo: crate::h2::connection::PseudoHeaders,
-    pub(crate) headers: Vec<HeaderPair>,
+    pub(crate) headers: RequestHeaders,
     pub(crate) body: Body,
     pub(crate) proxy: Option<&'a crate::core::ProxyUrl>,
     pub(crate) mode: ResponseMode,
@@ -272,13 +273,19 @@ pub(crate) fn h2_parts(req: Prepared<'_>) -> Result<H2Parts<'_>> {
     let Prepared {
         method,
         url,
-        mut headers,
+        headers,
         body,
         proxy,
         response,
     } = req;
     let pseudo = h2::request_pseudo(method, url)?;
-    strip_connection_specific_headers(&mut headers)?;
+    let headers = if h2_ready(&headers) {
+        headers
+    } else {
+        let mut headers = headers.into_vec();
+        strip_connection_specific_headers(&mut headers)?;
+        RequestHeaders::from(headers)
+    };
     let (host, port) = crate::util::host_port(url)?;
     Ok(H2Parts {
         host,
@@ -311,6 +318,13 @@ pub(crate) fn check_framing(headers: &[HeaderPair]) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+pub(crate) fn h2_ready(headers: &[HeaderPair]) -> bool {
+    check_framing(headers).is_ok()
+        && headers.iter().all(|(name, value)| {
+            !crate::util::has_ascii_uppercase(name) && sent_on(http::Version::HTTP_2, name, value)
+        })
 }
 
 pub(crate) fn strip_connection_specific_headers(headers: &mut Vec<HeaderPair>) -> Result<()> {
@@ -357,12 +371,13 @@ pub(crate) async fn send_request_h3(
     let Prepared {
         method,
         url,
-        mut headers,
+        headers,
         body,
         response,
         proxy,
         ..
     } = req;
+    let mut headers = headers.into_vec();
     let (host, port) = crate::util::host_port(url)?;
     let authority = crate::util::authority(url, host, port);
     let full_path = crate::util::request_target(url);

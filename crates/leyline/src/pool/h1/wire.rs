@@ -14,7 +14,14 @@ mod upload;
 
 use upload::{Sent, Upload};
 
+pub(crate) use head::field_lines;
 pub(super) use head::validate;
+
+#[derive(Clone, Copy)]
+pub(super) struct Fields<'a> {
+    pub(super) pairs: &'a [HeaderPair],
+    pub(super) lines: Option<&'a [u8]>,
+}
 
 enum Framing {
     None,
@@ -27,11 +34,15 @@ async fn send_h1_request(
     stream: &mut dyn H1Io,
     method: &str,
     url: &url::Url,
-    headers: &[HeaderPair],
+    fields: Fields<'_>,
     body: Body,
     target: H1Target,
     mut buf: Vec<u8>,
 ) -> Result<(bool, Upload), Error> {
+    let Fields {
+        pairs: headers,
+        lines,
+    } = fields;
     let (request_target, authority) = head::target(url, target)?;
     let (framing, length) = head::frame(method, headers, body);
     head::Head {
@@ -39,6 +50,7 @@ async fn send_h1_request(
         target: &request_target,
         host: (!contains_header(headers, "host")).then_some(&*authority),
         headers,
+        lines,
         length: length.as_ref().map(|(name, value)| (*name, value.as_ref())),
         keep_alive: !contains_header(headers, "connection"),
     }
@@ -87,25 +99,22 @@ async fn response_head(
 }
 pub(super) fn compute_reusable(
     client_asked_close: bool,
-    resp_headers: &HeaderMap,
+    seen: crate::core::response_head::Seen,
     minor: u8,
 ) -> bool {
-    let connection = text(resp_headers, http::header::CONNECTION);
-    let server_says_close = connection.is_some_and(|v| has_token(v, "close"));
-    let server_says_keepalive = connection.is_some_and(|v| has_token(v, "keep-alive"));
-    if client_asked_close || server_says_close {
+    if client_asked_close || seen.close {
         false
     } else if minor >= 1 {
         true
     } else {
-        server_says_keepalive
+        seen.keep_alive
     }
 }
 pub(super) async fn exchange_head_on_stream(
     stream: &mut dyn H1Io,
     method: &str,
     url: &url::Url,
-    headers: &[HeaderPair],
+    fields: Fields<'_>,
     body: Body,
     target: H1Target,
     buf: Vec<u8>,
@@ -113,7 +122,7 @@ pub(super) async fn exchange_head_on_stream(
     let host = url.host_str().unwrap_or("");
     let started = trace::on().then(Instant::now);
     let (client_asked_close, sent) =
-        send_h1_request(stream, method, url, headers, body, target, buf).await?;
+        send_h1_request(stream, method, url, fields, body, target, buf).await?;
     trace::sent(
         host,
         method,
@@ -130,7 +139,7 @@ pub(super) async fn exchange_head_on_stream(
         started.map_or(Duration::ZERO, |started| started.elapsed()),
         &head.headers,
     );
-    let reusable = compute_reusable(client_asked_close, &head.headers, head.minor)
+    let reusable = compute_reusable(client_asked_close, head.headers.seen(), head.minor)
         && !matches!(head.framing, BodyFraming::ToClose)
         && complete;
     Ok((head, reusable))
@@ -151,7 +160,10 @@ pub(crate) async fn upgrade_on_stream(
         stream,
         "GET",
         url,
-        headers,
+        Fields {
+            pairs: headers,
+            lines: None,
+        },
         Body::default(),
         H1Target::OriginForm,
         Vec::new(),

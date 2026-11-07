@@ -35,7 +35,7 @@ fi
 if [ "$TIMEOUT" != default ]; then
   for lib in $LIBS; do
     case $lib in
-      leyline|leyline-nt|leyline-cores|leyline-blocking|reqwest|hyper|h2|curl|wreq|ureq|nethttp|tlsclient|fasthttp|pingora) ;;
+      leyline|leyline-nt|leyline-cores|leyline-blocking|cand-*|reqwest|hyper|h2|curl|wreq|ureq|nethttp|tlsclient|fasthttp|pingora) ;;
       floor) [ "$TIMEOUT" = none ] || { echo "floor has no request timeout; it cannot honour TIMEOUT=$TIMEOUT" >&2; exit 1; } ;;
       *) echo "$lib does not read CMP_TIMEOUT; it cannot honour TIMEOUT=$TIMEOUT" >&2; exit 1 ;;
     esac
@@ -91,6 +91,7 @@ declare -A CMD=(
   [requests]="$PYTHON -I $C/python-client/requests_client.py" [aiohttp]="$PYTHON -I $C/python-client/aiohttp_client.py"
 )
 declare -A DIV=([httpx]=20 [requests]=20 [aiohttp]=10 [undici]=4 [node-http2]=4 [axios]=4 [jdk-httpclient]=2 [okhttp]=2 [apache-httpclient]=2)
+for lib in $LIBS; do case $lib in cand-*) CMD[$lib]="env LEYLINE_CHROME=$LCH $C/bin/$lib" ;; esac; done
 
 "${SPIN[@]}" bin/server "${SERVER_ADDR:-127.0.0.1:0}" > "$OUT/server.log" 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null' EXIT

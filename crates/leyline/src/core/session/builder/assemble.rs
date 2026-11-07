@@ -80,6 +80,7 @@ impl SessionBuilder {
                 proxy_pool: self.proxy_pool,
                 block_rules: self.block_rules,
                 inputs,
+                header_id: crate::core::request_headers::HeaderId::default(),
             }),
         }
     }

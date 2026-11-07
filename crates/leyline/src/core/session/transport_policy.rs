@@ -11,6 +11,7 @@ use crate::pool::{H3Target, checkout_h3_handle};
 use crate::pool::{OriginFlag, checkout_handle};
 #[cfg(feature = "http3")]
 use crate::quic::{H3Config, h3_proxy_blocker};
+use futures_util::future::Either;
 use std::future::Future;
 
 #[cfg(feature = "http3")]
@@ -45,20 +46,32 @@ impl Session {
         }
     }
 
-    pub(crate) async fn send_with_policy<'a>(
+    pub(crate) fn send_with_policy<'a>(
         &'a self,
         req: Prepared<'a>,
-    ) -> Result<TransportResponse> {
+    ) -> impl Future<Output = Result<TransportResponse>> + 'a {
         if self.inner.https_only && req.url.scheme() != "https" {
-            return Err(Error::config("https_only session rejected non-HTTPS URL"));
+            return Either::Left(std::future::ready(Err(Error::config(
+                "https_only session rejected non-HTTPS URL",
+            ))));
         }
-        match &self.inner.cache {
-            Some(cache) => self.send_cached(req, cache).await,
-            None => self.send_transport(req).await,
+        Either::Right(match &self.inner.cache {
+            Some(cache) => Either::Left(self.send_cached(req, cache)),
+            None => Either::Right(self.send_transport(req)),
+        })
+    }
+
+    pub(super) fn send_transport<'a>(
+        &'a self,
+        req: Prepared<'a>,
+    ) -> impl Future<Output = Result<TransportResponse>> + 'a {
+        match self.inner.protocol_policy {
+            Protocol::Auto => Either::Left(self.send_auto(req)),
+            _ => Either::Right(self.send_pinned(req)),
         }
     }
 
-    pub(super) async fn send_transport(&self, req: Prepared<'_>) -> Result<TransportResponse> {
+    async fn send_pinned(&self, req: Prepared<'_>) -> Result<TransportResponse> {
         let pool = &self.inner.pool;
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;

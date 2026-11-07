@@ -50,7 +50,10 @@ async fn streaming_head_waits_for_final_response_after_103() {
         .expect("final response head delivered")
         .expect("success");
     assert_eq!(head.status, 200);
-    assert_eq!(head.headers, typed(&[("content-type", "text/plain")]));
+    assert_eq!(
+        head.headers.map(),
+        &typed(&[("content-type", "text/plain")])
+    );
 }
 
 #[test]

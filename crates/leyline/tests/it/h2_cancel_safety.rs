@@ -103,10 +103,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         drop(
             handle_clone
                 .send_shared(
-                    Arc::new(Head {
-                        pseudo,
-                        headers: vec![],
-                    }),
+                    Arc::new(Head::new(pseudo, vec![])),
                     leyline::Body::default(),
                     false,
                 )

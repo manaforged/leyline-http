@@ -30,11 +30,14 @@ pub(super) struct Journey {
     trusted_origin: Option<String>,
 }
 
-pub(super) fn redirect_location(code: u16, headers: &http::HeaderMap) -> Option<String> {
+pub(super) fn redirect_location(
+    code: u16,
+    headers: &crate::core::response_head::Fields,
+) -> Option<String> {
     if !matches!(code, 301 | 302 | 303 | 307 | 308) {
         return None;
     }
-    header_values(headers, http::header::LOCATION)
+    header_values(headers.map(), http::header::LOCATION)
         .next()
         .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
 }

@@ -121,16 +121,16 @@ async fn early_hints_103_is_skipped_final_status_wins() {
     let resp = tokio::time::timeout(
         Duration::from_secs(5),
         handle.send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.com".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: vec![],
-            }),
+                vec![],
+            )),
             leyline::Body::default(),
             false,
         ),
@@ -206,16 +206,16 @@ async fn endless_early_hints_fail_the_request() {
     let result = tokio::time::timeout(
         Duration::from_secs(5),
         handle.send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.com".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: vec![],
-            }),
+                vec![],
+            )),
             leyline::Body::default(),
             false,
         ),

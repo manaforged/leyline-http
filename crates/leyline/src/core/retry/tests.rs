@@ -10,7 +10,7 @@ fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
     Response::from_parts(crate::core::response::Parts {
         status: StatusCode::from_u16(status).unwrap(),
         version: http::Version::HTTP_2,
-        headers,
+        headers: headers.into(),
         trailers: None,
         body: crate::core::response::ResponseBody::Buffered(Vec::new()),
         url: std::sync::Arc::new(url::Url::parse("https://example.test/").unwrap()),

@@ -26,7 +26,7 @@ impl Response {
     /// Parses every `Link` header of the response.
     pub fn links(&self) -> Vec<Link> {
         let mut out = Vec::new();
-        for value in self.parts.headers.get_all(LINK) {
+        for value in self.parts.headers.map().get_all(LINK) {
             if let Ok(text) = value.to_str() {
                 out.extend(parse_links(text, &self.parts.url));
             }

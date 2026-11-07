@@ -228,7 +228,7 @@ impl H2Client {
         let (sink, body_rx) = ResponseSink::streaming(headers_tx);
 
         let cmd = DriverCommand::OpenConnect {
-            head: Box::new(Head { pseudo, headers }),
+            head: Box::new(Head::new(pseudo, headers)),
             write_rx,
             sink,
         };
@@ -254,7 +254,7 @@ impl H2Client {
         Ok(H2ConnectStream {
             shutdown_state: ShutdownState::Open,
             status: resp.status.as_u16(),
-            response_headers: crate::core::transport::string_pairs(&resp.headers),
+            response_headers: crate::core::transport::string_pairs(resp.headers.map()),
             write_tx: Some(PollSender::new(write_tx)),
             read_rx: body_rx,
             read_leftover: Bytes::new(),

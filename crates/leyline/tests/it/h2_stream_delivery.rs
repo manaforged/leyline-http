@@ -116,16 +116,16 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
         .expect("H2 connection");
     let response = handle
         .send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.test".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: Vec::new(),
-            }),
+                Vec::new(),
+            )),
             leyline::Body::default(),
             true,
         )

@@ -108,14 +108,7 @@ async fn connection_recv_window_overrun_kills_connection() {
         let handle = handle.clone();
         async move {
             handle
-                .send_shared(
-                    Arc::new(Head {
-                        pseudo: p,
-                        headers: h,
-                    }),
-                    leyline::Body::default(),
-                    false,
-                )
+                .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
                 .await
         }
     });
@@ -188,14 +181,7 @@ async fn stream_recv_window_overrun_rsts_stream_and_survives() {
 
     let (p, h) = get_req("/");
     let req_result = handle
-        .send_shared(
-            Arc::new(Head {
-                pseudo: p,
-                headers: h,
-            }),
-            leyline::Body::default(),
-            false,
-        )
+        .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
         .await;
 
     match req_result {

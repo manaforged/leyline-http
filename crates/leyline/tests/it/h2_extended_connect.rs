@@ -359,10 +359,7 @@ async fn dropping_connect_stream_signals_end_stream() {
     };
     let resp = handle
         .send_shared(
-            Arc::new(Head {
-                pseudo,
-                headers: vec![("user-agent".into(), "x".into())],
-            }),
+            Arc::new(Head::new(pseudo, vec![("user-agent".into(), "x".into())])),
             leyline::Body::default(),
             false,
         )

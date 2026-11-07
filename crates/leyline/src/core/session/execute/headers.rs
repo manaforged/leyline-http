@@ -10,6 +10,7 @@ use crate::FetchSite;
 use crate::core::Session;
 use crate::core::body::{Body, BodyKind};
 use crate::core::headers::{HeaderList, reorder};
+use crate::core::request_headers::{self, HeaderKey, RequestHeaders};
 use crate::header_str::HeaderStr;
 use crate::profile::RequestKind;
 use crate::profile::preset::{HeaderContext, HeaderPair, Plan};
@@ -90,7 +91,7 @@ impl Session {
         journey: &Journey,
         preset: Option<RequestKind>,
         header_order: Option<&[String]>,
-    ) -> Vec<HeaderPair> {
+    ) -> RequestHeaders {
         let plan = self.inner.header_plan.plan(preset);
         let origin = journey.origin_of(&journey.url);
         let referrer = (journey.initiated || plan.reads_referer()).then(|| journey.referrer());
@@ -117,26 +118,60 @@ impl Session {
             (Some(origin), false) => origin.as_ref(),
             (None, false) => original_origin.as_ref(),
         };
-        self.attempt_headers(
-            plan,
-            RequestContext {
-                origin: request_origin,
-                origin_downgrade: downgrade,
-                referer: &referer,
-                initiated: journey.initiated,
-                site: SiteContext {
-                    fetch_site,
-                    initiator: journey.initiator.as_deref(),
-                    chain: &journey.chain,
+        let extra = journey.authorized.as_ref().or(journey.extra.as_ref());
+        let build = || {
+            self.attempt_headers(
+                plan,
+                RequestContext {
+                    origin: request_origin,
+                    origin_downgrade: downgrade,
+                    referer: &referer,
+                    initiated: journey.initiated,
+                    site: SiteContext {
+                        fetch_site,
+                        initiator: journey.initiator.as_deref(),
+                        chain: &journey.chain,
+                    },
                 },
-            },
-            &journey.url,
-            journey.method.as_str(),
-            &journey.body,
-            journey.authorized.as_ref().or(journey.extra.as_ref()),
-            strip_sensitive,
-            header_order,
-        )
+                &journey.url,
+                journey.method.as_str(),
+                &journey.body,
+                extra,
+                strip_sensitive,
+                header_order,
+            )
+        };
+        let plain = extra.is_none() && header_order.is_none();
+        if !plain || strip_sensitive || !self.caches_headers(journey) {
+            return build().into();
+        }
+        let key = HeaderKey {
+            session: self.inner.header_id.get(),
+            preset,
+            method: journey.method.as_str(),
+            origin: request_origin,
+            referer: &referer,
+            site: fetch_site,
+            downgrade,
+        };
+        request_headers::cached(&key, build)
+    }
+
+    fn caches_headers(&self, journey: &Journey) -> bool {
+        !journey.initiated
+            && matches!(journey.body.0, BodyKind::Empty)
+            && self.inner.bearer.is_none()
+            && self.inner.cookie_jar.is_empty()
+    }
+
+    bench_pub! {
+        #[cfg_attr(
+            not(feature = "bench-internals"),
+            expect(dead_code, reason = "benches read the header cache counts")
+        )]
+        fn header_cache_counts() -> (u64, u64) {
+            request_headers::counts()
+        }
     }
 
     pub(super) fn audit_copy(&self, headers: &[HeaderPair]) -> Vec<(String, String)> {

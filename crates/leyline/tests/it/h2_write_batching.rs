@@ -158,14 +158,7 @@ async fn eight_concurrent_requests_share_one_write() {
     let reqs: Vec<_> = (0..8)
         .map(|i| {
             let (p, h) = get_req(&format!("/{i}"));
-            handle.send_shared(
-                Arc::new(Head {
-                    pseudo: p,
-                    headers: h,
-                }),
-                leyline::Body::default(),
-                false,
-            )
+            handle.send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
         })
         .collect();
     let mut all = Box::pin(futures_util::future::join_all(reqs));
@@ -260,7 +253,7 @@ async fn follow_up_requests_share_one_write() {
                     let (pseudo, headers) = get_req(&format!("/{i}/{round}"));
                     let response = handle
                         .send_shared(
-                            Arc::new(Head { pseudo, headers }),
+                            Arc::new(Head::new(pseudo, headers)),
                             leyline::Body::default(),
                             false,
                         )
@@ -346,7 +339,7 @@ async fn requests_queued_at_the_stream_limit_share_writes() {
                 let (pseudo, headers) = get_req(&format!("/{i}"));
                 let response = handle
                     .send_shared(
-                        Arc::new(Head { pseudo, headers }),
+                        Arc::new(Head::new(pseudo, headers)),
                         leyline::Body::default(),
                         false,
                     )
@@ -475,7 +468,7 @@ async fn ping_ack_precedes_continuation_wait() {
         tokio::join!(
             server,
             handle.send_shared(
-                Arc::new(Head { pseudo, headers }),
+                Arc::new(Head::new(pseudo, headers)),
                 leyline::Body::default(),
                 false
             )

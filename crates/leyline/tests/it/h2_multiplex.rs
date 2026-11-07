@@ -52,7 +52,7 @@ fn head(
     pseudo: PseudoHeaders,
     headers: Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
 ) -> Arc<Head> {
-    Arc::new(Head { pseudo, headers })
+    Arc::new(Head::new(pseudo, headers))
 }
 
 fn buffered(body: leyline::pool::TransportBody) -> Vec<u8> {

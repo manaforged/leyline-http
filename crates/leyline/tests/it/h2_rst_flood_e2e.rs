@@ -118,14 +118,7 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
         let (p, h) = get_req(&format!("/{i}"));
         tasks.push(tokio::spawn(async move {
             handle
-                .send_shared(
-                    Arc::new(Head {
-                        pseudo: p,
-                        headers: h,
-                    }),
-                    leyline::Body::default(),
-                    false,
-                )
+                .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
                 .await
         }));
     }

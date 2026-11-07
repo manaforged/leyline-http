@@ -11,6 +11,7 @@ use crate::core::Session;
 use crate::core::deadline::Deadline;
 use crate::core::error::Result;
 use crate::core::response::Response;
+use crate::core::response_head::Fields;
 use crate::core::saved::{ConnectionState, StateParts};
 use crate::core::transport::{ResponseMode, TransportResponse};
 use crate::util::lock;
@@ -163,11 +164,11 @@ impl Session {
     pub(super) async fn finalize_response_body(
         &self,
         resp_body_shape: crate::core::transport::TransportBody,
-        resp_headers: http::HeaderMap,
+        resp_headers: Fields,
         keep_stream: bool,
         rules: &BodyRules,
         deadline: &Deadline,
-    ) -> Result<(crate::core::response::ResponseBody, http::HeaderMap)> {
+    ) -> Result<(crate::core::response::ResponseBody, Fields)> {
         Ok(match resp_body_shape {
             crate::core::transport::TransportBody::Streaming(mut bs) if keep_stream => {
                 bs.set_read_timeout(deadline.read());
@@ -183,10 +184,11 @@ impl Session {
                 let mut bs = *bs;
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
-                let (buf, resp_headers) = buffer_and_strip(bs, resp_headers, rules).await?;
+                let (buf, resp_headers) =
+                    buffer_and_strip(bs, resp_headers.into_map(), rules).await?;
                 (
                     crate::core::response::ResponseBody::Buffered(buf),
-                    resp_headers,
+                    resp_headers.into(),
                 )
             }
             crate::core::transport::TransportBody::Buffered(buf) => {
@@ -199,16 +201,17 @@ impl Session {
                         crate::core::response::ResponseBody::Streaming(Box::new(bs)),
                         resp_headers,
                     )
-                } else if !resp_headers.contains_key(http::header::CONTENT_ENCODING) {
+                } else if !resp_headers.seen().encoded {
                     (
                         crate::core::response::ResponseBody::Buffered(buf),
                         resp_headers,
                     )
                 } else {
-                    let (buf, resp_headers) = decompress_and_strip(buf, resp_headers, rules)?;
+                    let (buf, resp_headers) =
+                        decompress_and_strip(buf, resp_headers.into_map(), rules)?;
                     (
                         crate::core::response::ResponseBody::Buffered(buf),
-                        resp_headers,
+                        resp_headers.into(),
                     )
                 }
             }

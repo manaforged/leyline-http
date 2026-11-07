@@ -72,7 +72,7 @@ impl Response {
             }
             ResponseBody::Streaming(s) => *s,
         };
-        let encoding = content_codings(self.parts.headers.get_all(http::header::CONTENT_ENCODING));
+        let encoding = coding(&self.parts.headers);
         let (buf, _) = buffer_decoded(stream, encoding.as_deref(), &self.parts.compression).await?;
         Ok(Bytes::from(buf))
     }
@@ -92,7 +92,7 @@ impl Response {
     }
 
     pub(super) fn content_coding(&self) -> Option<String> {
-        content_codings(self.parts.headers.get_all(http::header::CONTENT_ENCODING))
+        coding(&self.parts.headers)
     }
 
     /// Returns the decoded body as a stream and fails when the declared length exceeds the size limit.
@@ -220,4 +220,11 @@ where
     }
     writer.flush().await.map_err(Error::from)?;
     Ok(total)
+}
+
+fn coding(headers: &crate::core::response_head::Fields) -> Option<String> {
+    if !headers.seen().encoded {
+        return None;
+    }
+    content_codings(headers.map().get_all(http::header::CONTENT_ENCODING))
 }
