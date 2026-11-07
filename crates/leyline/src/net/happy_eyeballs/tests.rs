@@ -12,7 +12,7 @@ fn interleave_v6_first() {
     let v4a: SocketAddr = "127.0.0.1:443".parse().unwrap();
     let v4b: SocketAddr = "127.0.0.2:443".parse().unwrap();
 
-    let out = interleave_by_family(vec![v4a, v6a, v4b, v6b]);
+    let out = interleave_by_family(vec![v4a, v6a, v4b, v6b], 0);
     assert_eq!(out, vec![v6a, v4a, v6b, v4b]);
 }
 
@@ -23,7 +23,7 @@ fn interleave_imbalanced() {
     let v4b: SocketAddr = "127.0.0.2:443".parse().unwrap();
     let v4c: SocketAddr = "127.0.0.3:443".parse().unwrap();
 
-    let out = interleave_by_family(vec![v4a, v4b, v6a, v4c]);
+    let out = interleave_by_family(vec![v4a, v4b, v6a, v4c], 0);
     assert_eq!(out, vec![v6a, v4a, v4b, v4c]);
 }
 
@@ -133,4 +133,27 @@ async fn empty_input_errs() {
     .await
     .expect_err("empty addr list must error");
     assert_eq!(err.kind(), io::ErrorKind::NotFound);
+}
+
+#[test]
+fn each_turn_starts_on_the_next_address_of_each_family() {
+    let v6a: SocketAddr = "[fe80::1]:443".parse().unwrap();
+    let v6b: SocketAddr = "[fe80::2]:443".parse().unwrap();
+    let v4a: SocketAddr = "127.0.0.1:443".parse().unwrap();
+    let v4b: SocketAddr = "127.0.0.2:443".parse().unwrap();
+    let v4c: SocketAddr = "127.0.0.3:443".parse().unwrap();
+    let addrs = vec![v6a, v6b, v4a, v4b, v4c];
+
+    assert_eq!(
+        interleave_by_family(addrs.clone(), 1),
+        vec![v6b, v4b, v6a, v4c, v4a]
+    );
+    assert_eq!(
+        interleave_by_family(addrs.clone(), 2),
+        vec![v6a, v4c, v6b, v4a, v4b]
+    );
+    assert_eq!(
+        interleave_by_family(addrs, 3),
+        vec![v6b, v4a, v6a, v4b, v4c]
+    );
 }

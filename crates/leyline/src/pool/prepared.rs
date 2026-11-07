@@ -12,6 +12,7 @@ pub(crate) struct Prepared<'a> {
     pub(crate) proxy: Option<&'a ProxyUrl>,
     pub(crate) response: ResponseMode,
     pub(crate) body_limit: BodyLimit,
+    pub(crate) stale_resend: bool,
 }
 
 impl<'a> Prepared<'a> {
@@ -24,6 +25,7 @@ impl<'a> Prepared<'a> {
             proxy: self.proxy,
             response: self.response,
             body_limit: self.body_limit,
+            stale_resend: self.stale_resend,
         }
     }
 }

@@ -12,9 +12,15 @@ pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
     if drained_clean
         && pump.reusable
         && !excess
-        && pump
-            .pool
-            .return_h1(&pump.key, H1Slot::new(pump.io), pump.tls)
+        && pump.pool.return_h1(
+            &pump.key,
+            H1Slot {
+                io: pump.io,
+                buf: Vec::new(),
+                opened_at: pump.opened_at,
+            },
+            pump.tls,
+        )
         && pump.count_install
     {
         pump.pool.note(Counter::Installs);
@@ -197,6 +203,7 @@ impl Exchange<'_> {
             leg,
             first,
             method: self.req.method,
+            stale_resend: self.req.stale_resend,
         };
         match self.on(opened, body, count_install).await {
             Ok(delivered) => Ok(Sent::Done(Reply::Answered(delivered))),
@@ -215,7 +222,12 @@ impl Exchange<'_> {
         let req = self.req;
         let connect_ms = opened.connect_ms;
         let Opened {
-            conn: H1Slot { mut io, buf },
+            conn:
+                H1Slot {
+                    mut io,
+                    buf,
+                    opened_at,
+                },
             tls,
             ..
         } = opened;
@@ -234,6 +246,7 @@ impl Exchange<'_> {
         .await?;
         let leg = HeadLeg {
             io,
+            opened_at,
             tls: tls.clone(),
             head,
             reusable,
@@ -317,6 +330,7 @@ impl Delivered {
 }
 
 pub(super) struct HeadLeg {
+    opened_at: Instant,
     io: Box<dyn H1Io>,
     tls: TlsInfo,
     head: H1Head,
@@ -343,6 +357,7 @@ async fn deliver_head(
 ) -> Result<Answer, H1Error> {
     let HeadLeg {
         mut io,
+        opened_at,
         tls,
         mut head,
         reusable,
@@ -369,7 +384,7 @@ async fn deliver_head(
         } = body;
         if complete && reusable && !excess {
             let buf = std::mem::take(&mut head.initial_body);
-            if pool.return_h1(key, H1Slot { io, buf }, tls) && count_install {
+            if pool.return_h1(key, H1Slot { io, buf, opened_at }, tls) && count_install {
                 pool.note(Counter::Installs);
             }
         }
@@ -383,6 +398,7 @@ async fn deliver_head(
     let (tx, rx) = mpsc::channel(crate::wire::STREAM_CHANNEL_DEPTH);
     let pump = H1StreamPump {
         io,
+        opened_at,
         permit: None,
         pool: pool.clone(),
         key: key.clone(),

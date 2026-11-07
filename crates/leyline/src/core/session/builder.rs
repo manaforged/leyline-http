@@ -178,9 +178,21 @@ impl SessionBuilder {
         self
     }
 
+    /// Fails a request with `Kind::Overloaded` when this many HTTP/1.1 requests already wait for a connection to its host; 1024 by default, and `None` removes the limit.
+    pub fn max_pending_per_host(mut self, limit: impl Into<Option<usize>>) -> Self {
+        self.pool_config.max_h1_pending_per_host = limit.into();
+        self
+    }
+
     /// Sets how long an idle pooled connection stays open.
     pub fn pool_idle_timeout(mut self, timeout: Duration) -> Self {
         self.pool_config.idle_timeout = timeout;
+        self
+    }
+
+    /// Stops reusing a connection this long after it opened, so traffic follows a DNS or load balancer change; no limit by default.
+    pub fn pool_max_lifetime(mut self, lifetime: Duration) -> Self {
+        self.pool_config.max_lifetime = Some(lifetime);
         self
     }
 

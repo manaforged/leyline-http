@@ -65,6 +65,10 @@ pub struct HostLimits {
     rule: Rule,
     overrides: Vec<(HostPattern, Rule)>,
     max_total: Option<usize>,
+    #[serde(default)]
+    max_pending: Option<usize>,
+    #[serde(default)]
+    max_total_pending: Option<usize>,
     pause: Pause,
 }
 
@@ -95,6 +99,8 @@ impl Default for HostLimits {
             rule: Rule::default(),
             overrides: Vec::new(),
             max_total: None,
+            max_pending: None,
+            max_total_pending: None,
             pause: Pause {
                 statuses: Vec::new(),
                 invalid: None,
@@ -148,6 +154,18 @@ impl HostLimits {
         self
     }
 
+    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a `max_in_flight` slot on its host.
+    pub fn max_pending(mut self, n: usize) -> Self {
+        self.max_pending = Some(n);
+        self
+    }
+
+    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a `max_total_in_flight` slot.
+    pub fn max_total_pending(mut self, n: usize) -> Self {
+        self.max_total_pending = Some(n);
+        self
+    }
+
     /// Pauses a host when a response has one of these status codes, replacing any earlier list.
     pub fn pause_on(mut self, statuses: impl IntoIterator<Item = u16>) -> Self {
         self.pause.statuses.clear();
@@ -196,6 +214,10 @@ impl HostLimits {
             ))),
             None => Ok(()),
         }
+    }
+
+    pub(super) fn pending_limits(&self) -> (Option<usize>, Option<usize>) {
+        (self.max_pending, self.max_total_pending)
     }
 
     pub(super) fn max_total(&self) -> Option<usize> {

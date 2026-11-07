@@ -1,5 +1,6 @@
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
 use crate::core::attempt::Attempt;
@@ -31,6 +32,39 @@ pub struct Retry {
     max_wait: Duration,
     wait_headers: Vec<WaitHeader>,
     any_method: bool,
+    budget: Option<Arc<Budget>>,
+}
+
+const BUDGET_TOKEN: i64 = 1000;
+const BUDGET_CAPACITY: i64 = 100 * BUDGET_TOKEN;
+
+#[derive(Debug)]
+struct Budget {
+    deposit: i64,
+    tokens: AtomicI64,
+}
+
+impl Budget {
+    fn new(ratio: f64) -> Self {
+        Self {
+            deposit: (ratio.clamp(0.0, 1.0) * BUDGET_TOKEN as f64) as i64,
+            tokens: AtomicI64::new(BUDGET_CAPACITY),
+        }
+    }
+
+    fn deposit(&self) {
+        if self.tokens.load(Ordering::Relaxed) < BUDGET_CAPACITY {
+            self.tokens.fetch_add(self.deposit, Ordering::Relaxed);
+        }
+    }
+
+    fn withdraw(&self) -> bool {
+        self.tokens
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |tokens| {
+                (tokens >= BUDGET_TOKEN).then_some(tokens - BUDGET_TOKEN)
+            })
+            .is_ok()
+    }
 }
 
 impl fmt::Debug for Retry {
@@ -42,6 +76,7 @@ impl fmt::Debug for Retry {
             .field("max_wait", &self.max_wait)
             .field("wait_headers", &self.wait_headers)
             .field("any_method", &self.any_method)
+            .field("budget", &self.budget)
             .finish()
     }
 }
@@ -68,6 +103,7 @@ impl Retry {
             max_wait: DEFAULT_MAX_WAIT,
             wait_headers: Vec::new(),
             any_method: false,
+            budget: None,
         }
     }
 
@@ -115,6 +151,24 @@ impl Retry {
     fn push_wait_header(mut self, name: String, format: WaitFormat) -> Self {
         self.wait_headers.push(WaitHeader { name, format });
         self
+    }
+
+    /// Limits retries to `ratio` of the requests sent through this policy and its clones, after a burst of 100; off by default.
+    pub fn budget(mut self, ratio: f64) -> Self {
+        self.budget = Some(Arc::new(Budget::new(ratio)));
+        self
+    }
+
+    fn count_request(&self, attempt: u32) {
+        if attempt == 0
+            && let Some(budget) = &self.budget
+        {
+            budget.deposit();
+        }
+    }
+
+    fn spend_budget(&self) -> bool {
+        self.budget.as_ref().is_none_or(|budget| budget.withdraw())
     }
 
     /// Sets whether non-idempotent methods retry too, off by default.
@@ -174,6 +228,7 @@ impl Retry {
         if self.is_none() {
             return RetryPlan::Stop;
         }
+        self.count_request(attempt);
         let view = Attempt::sent(result);
         if attempt >= self.count {
             return match result {
@@ -183,6 +238,13 @@ impl Retry {
         }
         if !self.wants(&view) || !(method_allowed || view.is_unsent()) || !body_retryable() {
             return RetryPlan::Stop;
+        }
+        if !self.spend_budget() {
+            return if result.is_ok() {
+                RetryPlan::Exhausted
+            } else {
+                RetryPlan::Stop
+            };
         }
         match result.as_ref().ok().and_then(|r| self.server_wait(r)) {
             Some(wait) if wait > self.max_wait => RetryPlan::Declined,

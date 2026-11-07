@@ -1,13 +1,12 @@
-use foldhash::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant, SystemTime};
 
 #[cfg(feature = "http3")]
 use self::alt_svc::AltSvcCache;
+use self::shards::Shards;
 use crate::pool::connect::{H2Dial, Inflight};
 use crate::util::expiring::ExpiringSet;
-use tokio::sync::Semaphore;
 
 use super::config::{Io, PoolConfig};
 #[cfg(feature = "bench-internals")]
@@ -18,9 +17,9 @@ use crate::quic::H3Client;
 use crate::pool::ConnectionStats;
 #[cfg(feature = "bench-internals")]
 use crate::pool::types::MuxHandle;
-use crate::pool::types::{Counter, Entries, MuxClient, PoolCounters, PoolKey, Proto};
+use crate::pool::types::{Counter, MuxClient, PoolCounters, PoolKey, Proto};
 use crate::profile::Carrier;
-use crate::util::{lock, write};
+use crate::util::{lock, read, write};
 use crate::wire::Scheme;
 
 pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -28,6 +27,8 @@ pub const DEFAULT_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 pub const DEFAULT_MAX_CONNECTIONS: usize = 2048;
 
 pub const DEFAULT_MAX_H1_CONNS_PER_HOST: usize = 256;
+
+pub const DEFAULT_MAX_H1_PENDING_PER_HOST: usize = 1024;
 
 const POOL_REAP_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -63,28 +64,104 @@ type OriginProxyKey = (String, u16, Option<String>);
 
 pub(crate) type OriginMemory = [ExpiringSet<OriginProxyKey>; OriginFlag::COUNT];
 
+struct Reaping {
+    conns: Weak<Conns>,
+    retired: bool,
+}
+
+impl Drop for Reaping {
+    fn drop(&mut self) {
+        if !self.retired
+            && let Some(conns) = self.conns.upgrade()
+        {
+            conns.reaping.store(false, Ordering::Release);
+        }
+    }
+}
+
+async fn reap(conns: Weak<Conns>, idle_timeout: Duration) {
+    let mut reaping = Reaping {
+        conns,
+        retired: false,
+    };
+    let period = (idle_timeout / 2).max(POOL_REAP_INTERVAL);
+    loop {
+        tokio::time::sleep(period).await;
+        let Some(conns) = reaping.conns.upgrade() else {
+            return;
+        };
+        if conns.evict(idle_timeout, Instant::now(), true) {
+            reaping.retired = true;
+            return;
+        }
+    }
+}
+
 struct Conns {
-    entries: RwLock<Entries>,
+    shards: Shards,
     inflight_h2: Inflight<H2Dial>,
     #[cfg(feature = "http3")]
     inflight_h3: Inflight<H3Client>,
-    h1_permits: Mutex<HashMap<PoolKey, Arc<Semaphore>>>,
     counters: PoolCounters,
     created: Instant,
     next_reap_ms: AtomicU64,
+    reaping: AtomicBool,
 }
 
-impl Default for Conns {
-    fn default() -> Self {
+impl Conns {
+    fn evict(&self, idle_timeout: Duration, now: Instant, retire_when_empty: bool) -> bool {
+        let mut idle_evicted = 0u64;
+        let mut empty = true;
+        for shard in self.shards.iter() {
+            let mut entries = write(&shard.entries);
+            let before = entries.len();
+            entries.h1.retain(|_, entry| {
+                let idle = entry.idle.queue();
+                let before = idle.len();
+                idle.retain(|(_, returned_at)| now.duration_since(*returned_at) < idle_timeout);
+                idle_evicted += (before - idle.len()) as u64;
+                !idle.is_empty() || now.duration_since(entry.last_use) < idle_timeout
+            });
+            entries.mux.retain(|_, entry| {
+                let keep =
+                    !entry.is_dead() && now.duration_since(entry.last_use.get()) < idle_timeout;
+                if !keep {
+                    idle_evicted += 1;
+                }
+                keep
+            });
+            self.shards.removed(before - entries.len());
+            empty &= entries.h1.is_empty() && entries.mux.is_empty();
+            drop(entries);
+            lock(&shard.h1_permits).retain(|_, slots| Arc::strong_count(&slots.permits) > 1);
+        }
+        if idle_evicted > 0 {
+            self.counters.add(Counter::EvictionsIdle, idle_evicted);
+        }
+        empty && retire_when_empty && self.retire()
+    }
+
+    fn retire(&self) -> bool {
+        self.reaping.store(false, Ordering::Release);
+        let refilled = self
+            .shards
+            .iter()
+            .any(|shard| read(&shard.entries).len() > 0);
+        !refilled || self.reaping.swap(true, Ordering::AcqRel)
+    }
+}
+
+impl Conns {
+    fn new(max_connections: usize) -> Self {
         Self {
-            entries: RwLock::default(),
+            shards: Shards::new(max_connections),
             inflight_h2: Inflight::default(),
             #[cfg(feature = "http3")]
             inflight_h3: Inflight::default(),
-            h1_permits: Mutex::default(),
             counters: PoolCounters::default(),
             created: Instant::now(),
             next_reap_ms: AtomicU64::default(),
+            reaping: AtomicBool::default(),
         }
     }
 }
@@ -238,7 +315,7 @@ impl Pool {
             "max_h1_conns_per_host must be at least 1"
         );
         Self {
-            conns: Arc::default(),
+            conns: Arc::new(Conns::new(config.max_connections)),
             memory: Arc::default(),
             config,
             io,
@@ -256,7 +333,7 @@ impl Pool {
 
     pub(crate) fn sibling(&self) -> Self {
         Self {
-            conns: Arc::default(),
+            conns: Arc::new(Conns::new(self.config.max_connections)),
             ..self.clone()
         }
     }
@@ -281,7 +358,12 @@ impl Pool {
     }
 
     pub fn stats(&self) -> ConnectionStats {
-        let entries = write(&self.conns.entries).len();
+        let entries = self
+            .conns
+            .shards
+            .iter()
+            .map(|shard| read(&shard.entries).len())
+            .sum();
         let counts = self.connection_counts();
         ConnectionStats {
             entries,
@@ -302,33 +384,21 @@ impl Pool {
             now_ms + POOL_REAP_INTERVAL.as_millis() as u64,
             Ordering::Relaxed,
         );
+        conns.evict(self.config.idle_timeout, now, false);
+    }
+
+    pub(crate) fn watch_idle(&self) {
+        if self.conns.reaping.load(Ordering::Relaxed) {
+            return;
+        }
+        let Ok(runtime) = tokio::runtime::Handle::try_current() else {
+            return;
+        };
+        if self.conns.reaping.swap(true, Ordering::AcqRel) {
+            return;
+        }
         let idle_timeout = self.config.idle_timeout;
-        let mut idle_evicted = 0u64;
-        {
-            let mut entries = write(&conns.entries);
-            entries.h1.retain(|_, entry| {
-                let idle = entry.idle.queue();
-                let before = idle.len();
-                idle.retain(|(_, returned_at)| now.duration_since(*returned_at) < idle_timeout);
-                idle_evicted += (before - idle.len()) as u64;
-                !idle.is_empty() || now.duration_since(entry.last_use) < idle_timeout
-            });
-            entries.mux.retain(|_, entry| {
-                let keep =
-                    !entry.is_dead() && now.duration_since(entry.last_use.get()) < idle_timeout;
-                if !keep {
-                    idle_evicted += 1;
-                }
-                keep
-            });
-        }
-        {
-            let mut permits = lock(&conns.h1_permits);
-            permits.retain(|_, sem| Arc::strong_count(sem) > 1);
-        }
-        if idle_evicted > 0 {
-            conns.counters.add(Counter::EvictionsIdle, idle_evicted);
-        }
+        runtime.spawn(reap(Arc::downgrade(&self.conns), idle_timeout));
     }
 
     pub(crate) fn stale_hit(
@@ -350,7 +420,7 @@ impl Pool {
 
     /// Drops the entry at `key` when it still holds `failed`, so a replacement stays pooled.
     pub(crate) fn invalidate<C: MuxClient>(&self, key: &PoolKey, failed: &C) {
-        let mut entries = write(&self.conns.entries);
+        let mut entries = write(&self.conns.shards.of(key).entries);
         let holds = entries
             .mux
             .get(key)
@@ -358,26 +428,33 @@ impl Pool {
             .is_some_and(|c| c.same(failed));
         if holds {
             entries.mux.remove(key);
+            self.conns.shards.removed(1);
             self.conns.counters.add(Counter::EvictionsDead, 1);
         }
     }
 
     #[cfg(feature = "bench-internals")]
     pub fn bench_populate_h2(&self, n: usize, handle: &H2Client) {
-        let mut entries = write(&self.conns.entries);
-        entries.h1.clear();
-        entries.mux.clear();
+        for shard in self.conns.shards.iter() {
+            let mut entries = write(&shard.entries);
+            self.conns.shards.removed(entries.len());
+            entries.h1.clear();
+            entries.mux.clear();
+        }
         for i in 0..n {
-            entries.mux.insert(
-                self.key(
-                    Scheme::Https,
-                    &format!("h{i}.bench"),
-                    443,
-                    None,
-                    Carrier::Tcp,
-                ),
+            let key = self.key(
+                Scheme::Https,
+                &format!("h{i}.bench"),
+                443,
+                None,
+                Carrier::Tcp,
+            );
+            self.conns.shards.added();
+            write(&self.conns.shards.of(&key).entries).mux.insert(
+                key,
                 super::types::MuxEntry {
                     handle: MuxHandle::H2(handle.clone()),
+                    opened: Instant::now(),
                     last_use: super::types::Stamp::now(),
                     tls: crate::wire::TlsInfo::default(),
                 },
@@ -408,6 +485,7 @@ impl Default for Pool {
 mod tests;
 
 mod counts;
+mod shards;
 mod slots;
 
 #[cfg(feature = "http3")]

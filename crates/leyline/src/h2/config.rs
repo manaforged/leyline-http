@@ -31,6 +31,8 @@ pub struct H2Limits {
     pub control_flood_window: Duration,
     /// The longest wait for the CONTINUATION frames of one header block.
     pub header_block_reassembly_timeout: Duration,
+    /// The first client stream id, so a test can reach the end of the id space.
+    pub first_stream_id: u32,
 }
 
 const LIMITS: H2Limits = H2Limits {
@@ -41,6 +43,7 @@ const LIMITS: H2Limits = H2Limits {
     control_flood_threshold: 1000,
     control_flood_window: Duration::from_secs(10),
     header_block_reassembly_timeout: Duration::from_secs(10),
+    first_stream_id: 1,
 };
 
 impl Default for H2Limits {

@@ -18,9 +18,10 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 bytes = "1"
+futures-util = { version = "0.3", default-features = false }
 leyline = { package = "leyline-http", path = "../crates/leyline", features = ["bench-internals"] }
 leyline-quiche = { path = "../crates/leyline-quiche" }
-tokio = { version = "1", features = ["rt", "io-util"] }
+tokio = { version = "1", features = ["rt", "io-util", "time", "test-util"] }
 url = "2"
 
 [[bin]]
@@ -89,6 +90,13 @@ bench = false
 [[bin]]
 name = "link"
 path = "fuzz_targets/link.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "h2_session"
+path = "fuzz_targets/h2_session.rs"
 test = false
 doc = false
 bench = false

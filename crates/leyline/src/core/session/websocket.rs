@@ -17,7 +17,7 @@ impl Session {
     ) -> Result<WebSocket> {
         let handshake = async {
             let http_url = http_equivalent(url)?;
-            let _pass = self.admit_host(&http_url).await;
+            let _pass = self.admit_host(&http_url).await?;
             let conn = self
                 .websocket_with_options(&http_url, headers, carry)
                 .await?;

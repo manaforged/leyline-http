@@ -25,7 +25,8 @@ pub use liveness::{DEFAULT_H2_PING_AFTER_IDLE, DEFAULT_H2_PING_TIMEOUT};
 #[cfg(feature = "http3")]
 pub(crate) use pool::OriginFlag;
 pub use pool::{
-    DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST, Pool,
+    DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, DEFAULT_MAX_H1_CONNS_PER_HOST,
+    DEFAULT_MAX_H1_PENDING_PER_HOST, Pool,
 };
 pub(crate) use prepared::Prepared;
 pub(crate) use route::{Route, send};

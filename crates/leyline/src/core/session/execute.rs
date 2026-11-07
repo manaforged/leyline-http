@@ -50,7 +50,7 @@ impl Session {
         let mut refreshed = false;
         loop {
             drop(pass.take());
-            pass = self.admit_host(&journey.url).await;
+            pass = self.admit_host(&journey.url).await?;
             let refresh = self
                 .refresh_version(&journey, digest.as_ref())
                 .filter(|_| !refreshed);
@@ -75,6 +75,7 @@ impl Session {
                     body_limit: crate::error::BodyLimit::session(
                         attempt.carry.body_rules.max_body_size
                     ),
+                    stale_resend: !attempt.carry.retrying,
                 }));
                 attempt.deadline.response_header(send).await
             }

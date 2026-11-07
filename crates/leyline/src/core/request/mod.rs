@@ -60,6 +60,7 @@ pub(crate) struct Draft {
 
 #[derive(Clone)]
 pub(crate) struct Carry {
+    pub(crate) retrying: bool,
     pub(crate) preset: Option<RequestKind>,
     pub(crate) preset_user: bool,
     pub(crate) timeouts: Option<Timeout>,
@@ -101,6 +102,7 @@ impl Draft {
             response: ResponseMode::Buffered,
             download: None,
             carry: Carry {
+                retrying: false,
                 preset,
                 preset_user: false,
                 timeouts: None,

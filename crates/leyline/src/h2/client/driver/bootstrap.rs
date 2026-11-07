@@ -80,7 +80,7 @@ where
         conn_send_window: initial_send_window,
         conn_recv_window: config.initial_connection_window_size as i64,
         streams: super::stream_map::StreamMap::new(Arc::clone(&streams)),
-        next_stream_id: 1,
+        next_stream_id: config.limits().first_stream_id,
         rst_flood: FloodGuard::new(
             Flood::RstStream,
             config.limits().rst_stream_flood_threshold,

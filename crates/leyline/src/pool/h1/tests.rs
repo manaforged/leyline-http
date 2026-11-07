@@ -191,6 +191,127 @@ async fn time_queued_for_a_connection_is_not_counted_as_request_time() {
     );
 }
 
+#[tokio::test]
+async fn a_full_host_refuses_requests_past_the_pending_limit() {
+    use crate::testing::{Response, Server};
+    let delay = Duration::from_millis(200);
+    let server = Server::http(move |_| Response::new(200).delay(delay).body("ok"))
+        .await
+        .expect("server starts");
+    let session = crate::Session::builder()
+        .protocol(crate::Protocol::Http1)
+        .max_connections_per_host(1)
+        .max_pending_per_host(1)
+        .build()
+        .expect("session");
+
+    let url = server.url("/");
+    let (running, waiting, refused) = tokio::join!(
+        session.get(url.as_str()).send(),
+        async {
+            tokio::time::sleep(delay / 4).await;
+            session.get(url.as_str()).send().await
+        },
+        async {
+            tokio::time::sleep(delay / 2).await;
+            session.get(url.as_str()).retry(3).send().await
+        },
+    );
+    assert_eq!(running.expect("running").status(), 200);
+    assert_eq!(waiting.expect("waiting").status(), 200);
+    let refused = refused.expect_err("over the pending limit");
+    assert_eq!(refused.kind(), Kind::Overloaded, "{refused:?}");
+    assert_eq!(server.requests().await.len(), 2);
+    let after = session
+        .get(url.as_str())
+        .send()
+        .await
+        .expect("after the queue drains");
+    assert_eq!(after.status(), 200);
+}
+
+#[tokio::test]
+async fn a_default_session_refuses_the_request_past_1024_waiting() {
+    use crate::testing::{Response, Server};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let delay = Duration::from_millis(300);
+    let first = std::sync::Arc::new(AtomicBool::new(true));
+    let server = Server::http(move |_| {
+        let held = if first.swap(false, Ordering::SeqCst) {
+            delay
+        } else {
+            Duration::ZERO
+        };
+        Response::new(200).delay(held).body("ok")
+    })
+    .await
+    .expect("server starts");
+    let session = crate::Session::builder()
+        .protocol(crate::Protocol::Http1)
+        .max_connections_per_host(1)
+        .build()
+        .expect("session");
+    let url = server.url("/");
+    let running = tokio::spawn({
+        let (session, url) = (session.clone(), url.clone());
+        async move { session.get(url.as_str()).send().await }
+    });
+    tokio::time::sleep(delay / 3).await;
+    let queued: Vec<_> = (0..1025)
+        .map(|_| {
+            let (session, url) = (session.clone(), url.clone());
+            tokio::spawn(async move { session.get(url.as_str()).send().await })
+        })
+        .collect();
+    assert_eq!(running.await.expect("task").expect("running").status(), 200);
+    let mut refused = 0;
+    for task in queued {
+        match task.await.expect("task") {
+            Ok(response) => assert_eq!(response.status(), 200),
+            Err(error) => {
+                assert_eq!(error.kind(), Kind::Overloaded, "{error:?}");
+                refused += 1;
+            }
+        }
+    }
+    assert_eq!(refused, 1);
+}
+
+#[tokio::test]
+async fn a_full_total_limit_refuses_requests_past_the_pending_limit() {
+    use crate::testing::{Response, Server};
+    let delay = Duration::from_millis(200);
+    let server = Server::http(move |_| Response::new(200).delay(delay).body("ok"))
+        .await
+        .expect("server starts");
+    let session = crate::Session::builder()
+        .host_limits(
+            crate::HostLimits::new()
+                .max_total_in_flight(1)
+                .max_total_pending(1),
+        )
+        .build()
+        .expect("session");
+
+    let url = server.url("/");
+    let (running, waiting, refused) = tokio::join!(
+        session.get(url.as_str()).send(),
+        async {
+            tokio::time::sleep(delay / 4).await;
+            session.get(url.as_str()).send().await
+        },
+        async {
+            tokio::time::sleep(delay / 2).await;
+            session.get(url.as_str()).retry(3).send().await
+        },
+    );
+    assert_eq!(running.expect("running").status(), 200);
+    assert_eq!(waiting.expect("waiting").status(), 200);
+    let refused = refused.expect_err("over the pending limit");
+    assert_eq!(refused.kind(), Kind::Overloaded, "{refused:?}");
+    assert_eq!(server.requests().await.len(), 2);
+}
+
 #[test]
 fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
     let closed = closed("before headers");

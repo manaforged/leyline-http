@@ -19,4 +19,6 @@ let session = Session::builder().retry(retry).build()?;
 
 When the retries run out on a retryable status, `send` returns the last response; with `error_for_status`, it returns a status error whose [`Error::retries_exhausted`](crate::Error::retries_exhausted) is true. An error on the last try is returned as it is.
 
+`budget` limits retries when an upstream sheds load. `Retry::new(2).budget(0.2)` allows a burst of 100 retries, then one retry for each 5 requests. Clones of the policy share the budget, so build one policy and clone it.
+
 See also: [`Timeout`](crate::Timeout), [Retries and timeouts](https://manaforged.github.io/leyline-http/guide/retries-and-timeouts.html).

@@ -155,6 +155,7 @@ pub async fn send_request_h1_pooled(
         proxy,
         response: ResponseMode::from(stream),
         body_limit: BodyLimit::session(crate::wire::DEFAULT_MAX_BODY_SIZE),
+        stale_resend: true,
     };
     send_http1(pool, connector, req)
         .await
@@ -172,6 +173,7 @@ struct H1Request<'a> {
     target: H1Target,
     response: ResponseMode,
     body_limit: BodyLimit,
+    stale_resend: bool,
 }
 
 impl<'a> H1Request<'a> {
@@ -184,6 +186,7 @@ impl<'a> H1Request<'a> {
             proxy,
             response,
             body_limit,
+            stale_resend,
         } = req;
         check_framing(&headers)?;
         let (host, port) = crate::wire::host_port(url)?;
@@ -205,6 +208,7 @@ impl<'a> H1Request<'a> {
             target,
             response,
             body_limit,
+            stale_resend,
         };
         Ok((request, body))
     }
@@ -261,7 +265,7 @@ pub(super) async fn send_h1<W: Copy + Send>(
     };
     validate(req.method, checked)?;
     let key = pool.key(req.scheme, req.host, req.port, req.proxy, Carrier::Tcp);
-    let permit = pool.acquire_h1_permit(&key).await;
+    let permit = pool.acquire_h1_permit(&key).await?;
     let now = Instant::now();
     pool.evict_idle(now);
     let resendable = !body.is_stream() && is_idempotent(req.method);
@@ -375,6 +379,7 @@ struct H1Head {
 }
 
 struct H1StreamPump {
+    opened_at: Instant,
     io: Box<dyn H1Io>,
     permit: Option<OwnedSemaphorePermit>,
     pool: Arc<Pool>,

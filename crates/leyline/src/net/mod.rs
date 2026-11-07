@@ -3,6 +3,7 @@ mod dial;
 mod dns;
 mod error;
 mod happy_eyeballs;
+mod outlier;
 pub(crate) mod proxy;
 mod resolver;
 mod socket;

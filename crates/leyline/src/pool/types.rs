@@ -107,6 +107,7 @@ impl PoolKey {
 pub struct H1Slot {
     pub(crate) io: Box<dyn H1Io>,
     pub(crate) buf: Vec<u8>,
+    pub(crate) opened_at: Instant,
 }
 
 impl H1Slot {
@@ -114,6 +115,7 @@ impl H1Slot {
         Self {
             io,
             buf: Vec::new(),
+            opened_at: Instant::now(),
         }
     }
 }
@@ -269,6 +271,7 @@ impl Stamp {
 
 pub(crate) struct MuxEntry {
     pub(crate) handle: MuxHandle,
+    pub(crate) opened: Instant,
     pub(crate) last_use: Stamp,
     pub(crate) tls: TlsInfo,
 }
@@ -291,6 +294,11 @@ pub(crate) struct Entries {
     pub(crate) mux: HashMap<PoolKey, MuxEntry>,
 }
 
+pub(crate) enum Evicted {
+    H1 { _entry: H1Entry },
+    Mux { _entry: MuxEntry },
+}
+
 enum Victim {
     H1(PoolKey),
     Mux(PoolKey),
@@ -301,9 +309,9 @@ impl Entries {
         self.h1.len() + self.mux.len()
     }
 
-    pub(crate) fn evict_lru(&mut self, cap: usize) -> u64 {
-        let mut evicted = 0u64;
-        while self.len() >= cap {
+    pub(crate) fn evict_lru(&mut self, count: usize) -> Vec<Evicted> {
+        let mut evicted = Vec::new();
+        while evicted.len() < count {
             let h1 = self.h1.iter().min_by_key(|(_, entry)| entry.last_use);
             let mux = self
                 .mux
@@ -319,10 +327,13 @@ impl Entries {
                 (None, None) => break,
             };
             match victim {
-                Victim::H1(key) => drop(self.h1.remove(&key)),
-                Victim::Mux(key) => drop(self.mux.remove(&key)),
+                Victim::H1(key) => {
+                    evicted.extend(self.h1.remove(&key).map(|_entry| Evicted::H1 { _entry }))
+                }
+                Victim::Mux(key) => {
+                    evicted.extend(self.mux.remove(&key).map(|_entry| Evicted::Mux { _entry }))
+                }
             }
-            evicted += 1;
         }
         evicted
     }

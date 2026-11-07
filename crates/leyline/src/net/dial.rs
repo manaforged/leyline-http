@@ -1,10 +1,12 @@
 use std::io;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tokio::net::TcpStream;
 
-use super::happy_eyeballs::happy_eyeballs_connect;
+use super::happy_eyeballs::{happy_eyeballs_connect, interleave_by_family};
+use super::outlier::Outliers;
 use super::resolver::{Resolver, SystemResolver};
 use super::socket::configure;
 use super::{NetError, SocketOptions};
@@ -17,6 +19,8 @@ pub(crate) struct Dialer {
     resolver: Arc<dyn Resolver>,
     tcp: TcpProfile,
     socket: SocketOptions,
+    turn: Arc<AtomicUsize>,
+    outliers: Arc<Outliers>,
 }
 
 impl Dialer {
@@ -25,6 +29,8 @@ impl Dialer {
             resolver: Arc::new(SystemResolver),
             tcp,
             socket: SocketOptions::default(),
+            turn: Arc::default(),
+            outliers: Arc::default(),
         }
     }
 
@@ -68,15 +74,56 @@ impl Dialer {
         }
 
         let race = self.socket.happy_eyeballs.unwrap_or_default();
-        let (tcp_stream, _addr) = happy_eyeballs_connect(addrs, race, |peer| {
+        let turn = self.turn.fetch_add(1, Ordering::Relaxed);
+        let order = self.outliers.order(interleave_by_family(addrs, turn));
+        let (tcp_stream, _addr) = happy_eyeballs_connect(order, race, |peer| {
             let tcp = self.tcp.clone();
             let socket = self.socket.clone();
-            async move { connect_one(peer, &tcp, &socket).await }
+            let watch = Watch::new(Arc::clone(&self.outliers), peer, race.resolve_delay);
+            async move { watch.finish(connect_one(peer, &tcp, &socket).await) }
         })
         .await
         .map_err(NetError::TcpConnect)?;
         trace::connect(host, port, false);
         Ok(tcp_stream)
+    }
+}
+
+struct Watch {
+    outliers: Arc<Outliers>,
+    peer: SocketAddr,
+    started: tokio::time::Instant,
+    slow: std::time::Duration,
+    done: bool,
+}
+
+impl Watch {
+    fn new(outliers: Arc<Outliers>, peer: SocketAddr, slow: std::time::Duration) -> Self {
+        let started = tokio::time::Instant::now();
+        Self {
+            outliers,
+            peer,
+            started,
+            slow,
+            done: false,
+        }
+    }
+
+    fn finish(mut self, result: io::Result<TcpStream>) -> io::Result<TcpStream> {
+        self.done = true;
+        match &result {
+            Ok(_) => self.outliers.succeeded(self.peer),
+            Err(_) => self.outliers.failed(self.peer),
+        }
+        result
+    }
+}
+
+impl Drop for Watch {
+    fn drop(&mut self) {
+        if !self.done && self.started.elapsed() >= self.slow {
+            self.outliers.failed(self.peer);
+        }
     }
 }
 

@@ -58,6 +58,8 @@ kinds! {
     Request => "request",
     /// Socket I/O failed after the connect, or an HTTP/1.1 response broke the wire format.
     Io => "io",
+    /// Too many requests already wait for a slot, past `max_pending_per_host`, `HostLimits::max_pending`, or `HostLimits::max_total_pending`.
+    Overloaded => "overloaded",
 }
 
 impl Kind {
@@ -66,11 +68,12 @@ impl Kind {
         LABELS[self as usize]
     }
 
-    /// Returns the status a gateway should answer with: 504 for a timeout, 500 for a local fault, 502 otherwise, and `None` for `Status`.
+    /// Returns the status a gateway should answer with: 504 for a timeout, 500 for a local fault, 503 when overloaded, 502 otherwise, and `None` for `Status`.
     pub fn gateway_status(self) -> Option<StatusCode> {
         match self {
             Self::Status => None,
             Self::Timeout => Some(StatusCode::GATEWAY_TIMEOUT),
+            Self::Overloaded => Some(StatusCode::SERVICE_UNAVAILABLE),
             Self::Url | Self::Config | Self::Request => Some(StatusCode::INTERNAL_SERVER_ERROR),
             _ => Some(StatusCode::BAD_GATEWAY),
         }

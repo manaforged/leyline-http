@@ -67,6 +67,25 @@ async fn evict_idle_drops_abandoned_empty_h1_entry() {
 }
 
 #[tokio::test]
+async fn a_quiet_session_closes_its_idle_connections() {
+    let server = ok_server().await;
+    let session = Session::builder()
+        .pool_idle_timeout(Duration::from_millis(300))
+        .build()
+        .unwrap();
+    assert_eq!(fetch(&session, server.url("/")).await, "ok");
+    assert_eq!(session.stats().entries(), 1);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while session.stats().entries() != 0 {
+        assert!(
+            Instant::now() < deadline,
+            "an idle connection outlived its timeout on a session with no traffic"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+#[tokio::test]
 async fn evict_idle_keeps_empty_h1_entry_inside_the_idle_window() {
     let (session, _server) = empty_h1_entry(Duration::from_secs(300)).await;
     let other = ok_server().await;

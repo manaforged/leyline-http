@@ -95,3 +95,7 @@ Keep one shared runtime when requests are a small part of the program's
 work, when the program already runs on a multi-threaded runtime for other
 reasons, or when all requests must share one cookie jar or one per-host
 limit.
+
+## Choose an allocator for sustained load
+
+Use jemalloc at sustained rates in the hundreds of thousands of requests per second. In the qualification run at 300,000 requests per second across 2,000 hosts, glibc's allocator produced stalls of 15 to 40 ms when faults ended, and all 3 runs failed their latency limit. Under jemalloc, the same scenario passed all 3 paired runs, for about 10% more peak resident memory. Leyline does not set a global allocator. Set one in your application.

@@ -96,7 +96,10 @@ impl Session {
         self.changed(|inner| inner.extra_gates = Some(gates))
     }
 
-    pub(crate) fn admit_host(&self, url: &url::Url) -> impl Future<Output = Option<HostPass>> {
+    pub(crate) fn admit_host(
+        &self,
+        url: &url::Url,
+    ) -> impl Future<Output = Result<Option<HostPass>>> {
         self.inner
             .host_limits
             .admit_with(self.inner.extra_gates.as_ref(), url)

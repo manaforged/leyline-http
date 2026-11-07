@@ -78,6 +78,7 @@ struct H2Parts<'a> {
     proxy: Option<&'a crate::net::ProxyUrl>,
     mode: ResponseMode,
     body_limit: BodyLimit,
+    stale_resend: bool,
 }
 
 fn h2_parts(req: Prepared<'_>) -> crate::error::Result<H2Parts<'_>> {
@@ -89,6 +90,7 @@ fn h2_parts(req: Prepared<'_>) -> crate::error::Result<H2Parts<'_>> {
         proxy,
         response,
         body_limit,
+        stale_resend,
     } = req;
     let pseudo = request_pseudo(method, url)?;
     let headers = if h2_ready(&headers) {
@@ -109,6 +111,7 @@ fn h2_parts(req: Prepared<'_>) -> crate::error::Result<H2Parts<'_>> {
         proxy,
         mode: response,
         body_limit,
+        stale_resend,
     })
 }
 
@@ -122,6 +125,7 @@ pub(crate) struct Attempt<'a> {
     pub(crate) leg: LegKind,
     pub(crate) first: bool,
     pub(crate) method: &'a Method,
+    pub(crate) stale_resend: bool,
 }
 
 pub(crate) struct LegTrace<'a> {
@@ -222,6 +226,7 @@ pub(crate) async fn send_request(
         proxy,
         mode,
         body_limit,
+        stale_resend,
     } = h2_parts(req)?;
     let now = Instant::now();
     let started = opened.as_ref().map_or(now, |o| o.started);
@@ -253,6 +258,7 @@ pub(crate) async fn send_request(
         mode,
         started,
         now,
+        stale_resend,
     };
     let trace = LegTrace {
         host,
@@ -293,6 +299,7 @@ struct H2Send<'a> {
     mode: ResponseMode,
     started: Instant,
     now: Instant,
+    stale_resend: bool,
 }
 
 async fn send_on(
@@ -326,6 +333,7 @@ async fn send_on(
                 leg,
                 first,
                 method: ctx.method,
+                stale_resend: ctx.stale_resend,
             };
             return ctx
                 .pool
@@ -389,7 +397,11 @@ pub(crate) fn resend<E>(
         (Failure::Request | Failure::Refused, _) => Err(failed(error)),
         _ if attempt.leg == LegKind::Fresh => Err(failed(error)),
         (_, None) => Err(unsendable(error)),
-        (Failure::Connection, Some(_)) if !is_idempotent(attempt.method) => Err(failed(error)),
+        (Failure::Connection, Some(_))
+            if !is_idempotent(attempt.method) || !attempt.stale_resend =>
+        {
+            Err(failed(error))
+        }
         (Failure::Unsent | Failure::Connection, Some(body)) => Ok(body),
     }
 }

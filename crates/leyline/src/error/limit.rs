@@ -62,3 +62,7 @@ impl Cause for BodyLimit {
         Some(Box::new(*self))
     }
 }
+
+#[cfg(kani)]
+#[path = "limit_proofs.rs"]
+mod proofs;

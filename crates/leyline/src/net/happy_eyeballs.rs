@@ -24,7 +24,7 @@ impl Default for HappyEyeballs {
     }
 }
 
-pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
+pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>, turn: usize) -> Vec<SocketAddr> {
     let mut v6: Vec<SocketAddr> = Vec::new();
     let mut v4: Vec<SocketAddr> = Vec::new();
     for addr in addrs {
@@ -32,6 +32,13 @@ pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
             v6.push(addr);
         } else {
             v4.push(addr);
+        }
+    }
+
+    for family in [&mut v6, &mut v4] {
+        if !family.is_empty() {
+            let len = family.len();
+            family.rotate_left(turn % len);
         }
     }
 
@@ -51,8 +58,10 @@ pub(crate) fn interleave_by_family(addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
     out
 }
 
+type Attempt = Pin<Box<dyn Future<Output = Result<(TcpStream, SocketAddr), io::Error>> + Send>>;
+
 pub(crate) async fn happy_eyeballs_connect<F, Fut>(
-    addrs: Vec<SocketAddr>,
+    order: Vec<SocketAddr>,
     config: HappyEyeballs,
     connect_fn: F,
 ) -> Result<(TcpStream, SocketAddr), io::Error>
@@ -60,71 +69,50 @@ where
     F: Fn(SocketAddr) -> Fut + Send + Sync,
     Fut: Future<Output = Result<TcpStream, io::Error>> + Send + 'static,
 {
-    let interleaved = interleave_by_family(addrs);
-    let attempt_limit = config.attempt_limit.max(1);
-    let mut iter = interleaved.into_iter().take(attempt_limit);
-
-    type Attempt = Pin<Box<dyn Future<Output = Result<(TcpStream, SocketAddr), io::Error>> + Send>>;
+    let mut queue = order.into_iter().take(config.attempt_limit.max(1));
+    let launch = |addr: SocketAddr| -> Attempt {
+        let fut = connect_fn(addr);
+        Box::pin(async move { fut.await.map(|stream| (stream, addr)) })
+    };
     let mut in_flight: FuturesUnordered<Attempt> = FuturesUnordered::new();
-    let mut last_err: Option<io::Error> = None;
-
-    if let Some(first) = iter.next() {
-        let fut = connect_fn(first);
-        in_flight.push(Box::pin(async move { fut.await.map(|s| (s, first)) }));
-    }
-
-    'outer: loop {
-        match iter.next() {
-            Some(addr) => {
-                let sleep_fut = sleep(config.resolve_delay);
-                tokio::pin!(sleep_fut);
-                loop {
-                    tokio::select! {
-                        biased;
-                        done = in_flight.next(), if !in_flight.is_empty() => {
-                            match done {
-                                Some(Ok(winner)) => return Ok(winner),
-                                Some(Err(e)) => {
-                                    last_err = Some(e);
-                                    if in_flight.is_empty() {
-                                        let fut = connect_fn(addr);
-                                        in_flight.push(Box::pin(async move {
-                                            fut.await.map(|s| (s, addr))
-                                        }));
-                                        continue 'outer;
-                                    }
-                                }
-                                None => unreachable!(),
-                            }
-                        }
-                        _ = &mut sleep_fut => {
-                            let fut = connect_fn(addr);
-                            in_flight.push(Box::pin(async move {
-                                fut.await.map(|s| (s, addr))
-                            }));
-                            continue 'outer;
-                        }
-                    }
-                }
-            }
-            None => {
-                if in_flight.is_empty() {
-                    return Err(last_err.unwrap_or_else(|| {
-                        io::Error::new(io::ErrorKind::NotFound, "no addresses resolved")
-                    }));
-                }
-                while let Some(done) = in_flight.next().await {
-                    match done {
-                        Ok(winner) => return Ok(winner),
-                        Err(e) => last_err = Some(e),
-                    }
-                }
-                return Err(last_err.unwrap_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, "no addresses resolved")
-                }));
-            }
+    let mut last_err = None;
+    let Some(first) = queue.next() else {
+        return Err(no_connection(last_err));
+    };
+    in_flight.push(launch(first));
+    let mut waiting = queue.next();
+    let timer = sleep(config.resolve_delay);
+    tokio::pin!(timer);
+    loop {
+        tokio::select! {
+            biased;
+            done = in_flight.next(), if !in_flight.is_empty() => match done {
+                Some(Ok(winner)) => return Ok(winner),
+                Some(Err(error)) => last_err = Some(error),
+                None => unreachable!(),
+            },
+            () = &mut timer, if waiting.is_some() => {}
         }
+        let next_due = timer.is_elapsed() || in_flight.is_empty();
+        if !next_due {
+            continue;
+        }
+        let Some(addr) = waiting.take() else {
+            if in_flight.is_empty() {
+                return Err(no_connection(last_err));
+            }
+            continue;
+        };
+        in_flight.push(launch(addr));
+        waiting = queue.next();
+        timer
+            .as_mut()
+            .reset(tokio::time::Instant::now() + config.resolve_delay);
     }
+}
+
+fn no_connection(last_err: Option<io::Error>) -> io::Error {
+    last_err.unwrap_or_else(|| io::Error::new(io::ErrorKind::NotFound, "no addresses resolved"))
 }
 
 #[cfg(test)]

@@ -91,7 +91,10 @@ pub(crate) fn header_first<'a, K: AsRef<str>, V: AsRef<[u8]>>(
 }
 
 pub(crate) fn content_length(value: &str) -> Option<u64> {
-    let bytes = value.as_bytes();
+    content_length_value(value.as_bytes())
+}
+
+fn content_length_value(bytes: &[u8]) -> Option<u64> {
     let blank = |b: &u8| matches!(b, b' ' | b'\t');
     let start = bytes.iter().position(|b| !blank(b))?;
     let end = bytes.iter().rposition(|b| !blank(b))?;
@@ -343,6 +346,10 @@ pub(crate) mod wait;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(kani)]
+#[path = "util/content_length_proofs.rs"]
+mod content_length_proofs;
 
 /// Calls `check` with every concatenation of up to `max_len` tokens from `alphabet`.
 #[cfg(test)]

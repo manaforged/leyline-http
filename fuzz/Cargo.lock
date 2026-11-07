@@ -542,6 +542,7 @@ name = "leyline-fuzz"
 version = "0.0.0"
 dependencies = [
  "bytes",
+ "futures-util",
  "leyline-http",
  "leyline-quiche",
  "libfuzzer-sys",

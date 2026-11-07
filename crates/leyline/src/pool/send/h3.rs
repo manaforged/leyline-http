@@ -34,6 +34,7 @@ struct H3Send<'a> {
     request: &'a H3Request<'a>,
     mode: ResponseMode,
     body_limit: BodyLimit,
+    stale_resend: bool,
     started: Instant,
 }
 
@@ -56,6 +57,7 @@ pub(crate) async fn send_h3(
         response,
         proxy,
         body_limit,
+        stale_resend,
     } = req;
     let mut headers = headers.into_vec();
     let (host, port) = crate::wire::host_port(url)?;
@@ -80,6 +82,7 @@ pub(crate) async fn send_h3(
         request: &request,
         mode: response,
         body_limit,
+        stale_resend,
         started,
     };
     let trace = LegTrace {
@@ -140,6 +143,7 @@ async fn send_on(
                 leg,
                 first,
                 method: request.method,
+                stale_resend: ctx.stale_resend,
             };
             return ctx
                 .pool

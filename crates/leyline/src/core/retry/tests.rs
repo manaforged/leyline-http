@@ -167,3 +167,16 @@ fn a_failed_tls_handshake_is_unsent() {
     let error = Error::from(crate::tls::error::TlsError::Handshake("alert".into()));
     assert!(error.is_unsent());
 }
+
+#[test]
+fn a_spent_budget_stops_retries_and_each_request_refills_it() {
+    let retry = Retry::new(3).budget(0.5);
+    let failed = || Err::<Response, _>(Error::new(Kind::Connect));
+    let plan = |attempt| plan_label(retry.plan_resend(&failed(), attempt, true, || true));
+    let allowed = (0..200).take_while(|_| plan(1) == "backoff").count();
+    assert_eq!(allowed, 100);
+    assert_eq!(plan(1), "stop");
+    assert_eq!(plan(0), "stop");
+    assert_eq!(plan(0), "backoff");
+    assert_eq!(plan(1), "stop");
+}

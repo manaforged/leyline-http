@@ -41,8 +41,15 @@ The default is the system resolver. To use your own, implement
 ## Happy Eyeballs
 
 Leyline connects to the addresses of a host IPv6 first, then alternating
-between the families. Inside one family, the order stays as the resolver or
-`resolve` gave it. Leyline starts one attempt, and starts the next when
+between the families. Each new connection starts one address further on in
+each family, so connections spread evenly across the addresses of a host.
+An address that fails to connect 5 times in a row, or is still connecting
+when another address wins after `happy_eyeballs_delay`, moves to the back of
+the order for 30 seconds. Each further ejection adds 30 seconds, up to
+5 minutes, and a successful connection clears its record. These are the
+defaults of Envoy's outlier detection. An ejected address is still tried
+when every address before it fails.
+Leyline starts one attempt, and starts the next when
 `happy_eyeballs_delay` passes with no connection, or at once when every running
 attempt has failed. The first connection to complete wins.
 
@@ -130,9 +137,11 @@ limits, and every limit applies to one pool.
 
 | Setter | Default | Effect |
 | --- | --- | --- |
-| `max_connections` | 2048 | Pool entries. The least recently used entry leaves first |
+| `max_connections` | 2048 | Pool entries, one per host, port, scheme, proxy, and transport. Set it above the number of hosts you talk to. At the limit, a new entry replaces the least recently used entry in its shard |
 | `max_connections_per_host` | 256 | HTTP/1.1 connections per host, port, scheme, proxy, and transport. A request over the limit waits for a free slot. HTTP/2 and HTTP/3 share one connection per origin |
+| `max_pending_per_host` | 1024 | HTTP/1.1 requests that wait for a free slot on one host. A request over the limit fails at once with `Kind::Overloaded`, so a slow host cannot build a backlog. `None` removes the limit |
 | `pool_idle_timeout` | 300 s | An idle connection closes after this time |
+| `pool_max_lifetime` | no limit | A connection is not reused after this time. In-flight requests finish. Set it so traffic follows a DNS or load balancer change |
 | `keep_alive` | `true` | Keep connections open for reuse |
 | `http2_ping_after_idle` | 10 s | An idle HTTP/2 connection gets a `PING` after this time, and so does a connection where a request timed out before its response headers arrived. `None` turns both off |
 | `http2_ping_timeout` | 2 s | The wait for the answer to that `PING` |

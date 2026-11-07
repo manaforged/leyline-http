@@ -239,7 +239,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     pub(super) fn admit(&self) -> Admit {
-        if self.peer_goaway_last_stream.is_some() || self.output.stalled() {
+        if self.peer_goaway_last_stream.is_some()
+            || self.output.stalled()
+            || self.next_stream_id > U31_MAX
+        {
             return Admit::Refuse(H2Error::NotSent);
         }
         if let Some(limit) = self.peer_settings.max_concurrent_streams
@@ -248,18 +251,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         {
             return Admit::Defer;
         }
-        if self.next_stream_id > U31_MAX {
-            return Admit::Refuse(H2Error::Connection {
-                code: ErrorCode::NoError,
-                reason: "stream ID space exhausted".into(),
-            });
-        }
         Admit::Open
     }
 
     pub(super) fn alloc_stream_id(&mut self) -> u32 {
         let stream_id = self.next_stream_id;
         self.next_stream_id = stream_id + 2;
+        if self.next_stream_id > U31_MAX {
+            self.closed.store(true, Ordering::Release);
+        }
         stream_id
     }
 

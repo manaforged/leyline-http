@@ -10,8 +10,8 @@ pub(super) struct Counts {
 impl Pool {
     pub(super) fn connection_counts(&self) -> Counts {
         let mut counts = Counts::default();
-        {
-            let entries = crate::util::read(&self.conns.entries);
+        for shard in self.conns.shards.iter() {
+            let entries = crate::util::read(&shard.entries);
             counts.idle += entries
                 .h1
                 .values()
@@ -30,12 +30,18 @@ impl Pool {
     }
 
     fn h1_checked_out(&self) -> usize {
-        lock(&self.conns.h1_permits)
-            .values()
-            .map(|sem| {
-                self.config
-                    .max_h1_conns_per_host
-                    .saturating_sub(sem.available_permits())
+        self.conns
+            .shards
+            .iter()
+            .map(|shard| {
+                lock(&shard.h1_permits)
+                    .values()
+                    .map(|slots| {
+                        self.config
+                            .max_h1_conns_per_host
+                            .saturating_sub(slots.permits.available_permits())
+                    })
+                    .sum::<usize>()
             })
             .sum()
     }

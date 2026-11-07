@@ -110,6 +110,7 @@ async fn open_on(
                 leg,
                 first,
                 method: &Method::CONNECT,
+                stale_resend: true,
             };
             ctx.pool
                 .resend(

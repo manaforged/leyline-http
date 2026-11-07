@@ -112,25 +112,37 @@ impl CommandTx {
         &self,
         cmd: DriverCommand,
     ) -> Result<(), mpsc::error::SendError<DriverCommand>> {
+        let mut waited = false;
         loop {
             if self.queue.queued.fetch_add(1, Ordering::AcqRel) < self.capacity {
-                return self.tx.send(Box::new(cmd)).map_err(|err| {
+                let sent = self.tx.send(Box::new(cmd)).map_err(|err| {
                     self.queue.queued.fetch_sub(1, Ordering::AcqRel);
                     mpsc::error::SendError(*err.0)
                 });
+                if waited && self.queue.queued.load(Ordering::Acquire) < self.capacity {
+                    self.queue.space.notify_one();
+                }
+                return sent;
             }
             self.queue.queued.fetch_sub(1, Ordering::AcqRel);
-            if self.tx.is_closed() {
-                return Err(mpsc::error::SendError(cmd));
-            }
             let space = self.queue.space.notified();
             tokio::pin!(space);
             space.as_mut().enable();
-            if self.queue.queued.load(Ordering::Acquire) < self.capacity {
-                continue;
+            if self.tx.is_closed() {
+                return Err(mpsc::error::SendError(cmd));
             }
-            space.await;
+            if self.queue.queued.load(Ordering::Acquire) >= self.capacity {
+                space.await;
+                waited = true;
+            }
         }
+    }
+}
+
+impl Drop for CommandRx {
+    fn drop(&mut self) {
+        self.rx.close();
+        self.queue.space.notify_waiters();
     }
 }
 

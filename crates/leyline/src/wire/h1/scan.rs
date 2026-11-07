@@ -130,9 +130,10 @@ impl<'a> Pick<'a> for Scanned<'a> {
                 self.body.lengths += 1;
                 self.body.length.get_or_insert(value);
             }
-            Known::Coding => {
-                self.body.coding.get_or_insert(value);
-            }
+            Known::Coding => match &mut self.body.coding {
+                Some(coding) => *coding = Cow::Owned([&**coding, b",", &*value].concat()),
+                None => self.body.coding = Some(value),
+            },
             Known::Connection => {
                 self.connection.get_or_insert(value);
             }
@@ -235,9 +236,13 @@ impl BodyHeaders<'_> {
                 .map(|t| t.trim())
                 .rfind(|t| !t.is_empty())
                 .unwrap_or("");
-            if !last.eq_ignore_ascii_case("chunked") {
+            let chunked = te
+                .split(',')
+                .filter(|t| t.trim().eq_ignore_ascii_case("chunked"))
+                .count();
+            if !last.eq_ignore_ascii_case("chunked") || chunked != 1 {
                 return Err(malformed(format!(
-                    "response Transfer-Encoding `{te}`: `chunked` must be the final coding"
+                    "response Transfer-Encoding `{te}`: `chunked` must be the final coding, once"
                 )));
             }
         }
@@ -254,3 +259,7 @@ impl BodyHeaders<'_> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "scan_framing_tests.rs"]
+mod framing_tests;

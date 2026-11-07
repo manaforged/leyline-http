@@ -501,3 +501,56 @@ async fn a_server_that_enables_push_fails_the_connection() {
     );
     server.abort();
 }
+
+#[tokio::test]
+async fn the_last_stream_id_retires_the_connection_without_failing_requests() {
+    let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
+    let server = tokio::spawn(async move {
+        read_preface(&mut server_io).await;
+        let (h, _) = read_frame(&mut server_io).await;
+        assert_eq!(h.frame_type, FrameType::Settings as u8);
+        write_server_settings_with(&mut server_io, vec![]).await;
+        write_settings_ack(&mut server_io).await;
+        loop {
+            let (h, _) = read_frame(&mut server_io).await;
+            if h.frame_type == FrameType::Headers as u8 {
+                assert_eq!(h.stream_id, 0x7FFF_FFFF);
+                let block = [0x88u8];
+                let mut head = vec![0, 0, 1, FrameType::Headers as u8, 0x5];
+                head.extend_from_slice(&h.stream_id.to_be_bytes());
+                head.extend_from_slice(&block);
+                server_io.write_all(&head).await.expect("response");
+                let mut rest = [0u8; 1];
+                drop(server_io.read(&mut rest).await);
+                return;
+            }
+        }
+    });
+    let mut config = test_config();
+    config.limits.first_stream_id = 0x7FFF_FFFF;
+    let handle = leyline::internals::h2::start(client_io, config)
+        .await
+        .expect("handshake");
+
+    let head = Arc::new(get_head("/"));
+    let last = handle
+        .send_shared(Arc::clone(&head), leyline::Body::default(), false)
+        .await
+        .expect("the last stream id still carries a request");
+    assert_eq!(last.status, 200);
+    assert!(
+        handle.is_closed(),
+        "the pool must stop handing this connection out"
+    );
+
+    let next = handle
+        .send_shared(head, leyline::Body::default(), false)
+        .await
+        .expect_err("no stream id is left");
+    assert!(
+        matches!(next, leyline::internals::h2::H2Error::NotSent),
+        "the request must move to a new connection, got {next:?}"
+    );
+    drop(handle);
+    server.await.expect("server");
+}

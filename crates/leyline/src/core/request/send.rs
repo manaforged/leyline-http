@@ -165,7 +165,8 @@ async fn run_attempts(
             return (Err(err), n);
         }
         let attempt_body = std::mem::take(&mut attempt.body);
-        let this = attempt.again(attempt_body, base_headers.clone());
+        let mut this = attempt.again(attempt_body, base_headers.clone());
+        this.carry.retrying = n > 0;
         let result = route.send(this).await;
 
         let body_retryable = || replay.is_some() || rewind.as_mut().is_some_and(Rewind::reclaim);

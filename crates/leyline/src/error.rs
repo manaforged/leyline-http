@@ -106,6 +106,10 @@ impl Error {
         }
     }
 
+    pub(crate) fn overloaded() -> Self {
+        Self::new(Kind::Overloaded).with_message("too many requests are waiting for a slot")
+    }
+
     pub(crate) fn config(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(Kind::Config).with_message(message)
     }

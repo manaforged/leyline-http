@@ -12,9 +12,25 @@ version and publish as separate crates.
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The [upgrade guide](UPGRADE.md) maps the changed 0.1.6 names. The sections below list new features, behavior changes, removals without a replacement, and fixes.
 
+### Fixed since the first 0.2 draft
+
+- `pool_idle_timeout` now closes idle connections on a session with no traffic. Before, they stayed open until the next request.
+- A response with several `Transfer-Encoding` lines is now read as one list, and `chunked` must end it exactly once. Before, only the first line counted, so `chunked` then `gzip` was framed as chunked, a response desync risk.
+- A session that talks to more hosts than `max_connections` no longer collapses. Eviction scanned every entry under one write lock and closed sockets inside it; at 20,000 hosts and 300,000 req/s on the default limit this held the client to about 190,000 req/s with latency of many seconds. The pool now has up to 64 shards, and sockets close outside the lock.
+- An HTTP/2 connection that uses its last stream id now retires, and later requests move to a new connection. Before, the connection stayed in the pool and every later request to that host failed.
+- `retry(n)` now reaches the origin at most `n + 2` times for an idempotent request: one resend on a stale pooled connection for the first attempt only. Before, every attempt could resend, up to `2 * (n + 1)` times.
+
+- HTTP/2 requests no longer wait until their deadline when more than 1,024 requests queue on a connection and the queue drains in a batch. A sender that waited now wakes the next one, and every waiting sender fails at once when the connection ends.
+
 ### Added since the first 0.2 draft
 
 - `leyline::get` sends a one-off request on a new default session.
+- `Retry::budget` limits retries to a share of requests, so retries cannot multiply the load on an overloaded upstream or on the client itself.
+- `HostLimits::max_pending` and `HostLimits::max_total_pending` limit the requests that wait for a slot. Without one, a request queue on `max_total_in_flight` past origin capacity lets every request reach the origin as its deadline ends, and goodput falls to zero.
+- `pool_max_lifetime` stops reusing a connection a set time after it opened, so traffic moves after a DNS or load balancer change. Without it, a busy pool stays on the old address.
+- `max_pending_per_host` limits the HTTP/1.1 requests that wait for a connection to one host. A request over the limit fails at once with the new `Kind::Overloaded`, which `gateway_status` maps to 503 and `retry` does not resend. The default is 1024, as in Envoy, so one slow host cannot hold an unbounded queue; `max_pending_per_host(None)` removes the limit.
+- New connections to a host start on the next address of each family in turn, so a pool spreads its connections across every address DNS returns instead of opening them all on the first.
+- An address that keeps failing to connect moves to the back of the dial order for 30 seconds, longer each time it fails again, so new connections stop waiting on a dead address.
 - `Error::is_timeout` is public.
 - `multipart::Form::text` and `Form::file` add a field without naming `Part`.
 - `RequestBuilder::download_to` retries a dropped transfer under the retry policy and resumes when the server sends a strong ETag.

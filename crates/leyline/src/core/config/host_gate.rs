@@ -9,6 +9,7 @@ use tokio::time::Instant;
 
 use super::host_limits::{HostLimits, HostStats, Rule};
 use super::origin::Origin;
+use crate::error::Error;
 
 const MAX_SPACING: Duration = Duration::from_secs(365 * 24 * 60 * 60);
 
@@ -25,6 +26,11 @@ impl Drop for Count {
     fn drop(&mut self) {
         self.0.fetch_sub(1, Ordering::Relaxed);
     }
+}
+
+fn over_limit(slots: Option<&Arc<Semaphore>>, waiting: &AtomicUsize, limit: Option<usize>) -> bool {
+    slots.is_some_and(|slots| slots.available_permits() == 0)
+        && limit.is_some_and(|limit| waiting.load(Ordering::Relaxed) > limit)
 }
 
 async fn acquire(slots: Option<&Arc<Semaphore>>) -> Option<OwnedSemaphorePermit> {
@@ -85,6 +91,7 @@ impl Room {
 struct Gates {
     by_origin: Mutex<HashMap<Origin, Arc<HostGate>>>,
     total: Option<Arc<Semaphore>>,
+    total_waiting: Arc<AtomicUsize>,
     floors: Mutex<HashMap<Origin, Duration>>,
     floored: AtomicBool,
     room: Arc<Room>,
@@ -97,6 +104,7 @@ impl Gates {
         Self {
             by_origin: Mutex::default(),
             total: max_total.map(|n| Arc::new(Semaphore::new(n))),
+            total_waiting: Arc::default(),
             floors: Mutex::default(),
             floored: AtomicBool::new(false),
             room: Arc::default(),
@@ -342,26 +350,36 @@ impl HostGates {
         &self,
         extra: Option<&HostGates>,
         url: &url::Url,
-    ) -> Option<HostPass> {
+    ) -> Result<Option<HostPass>, Error> {
         if std::iter::once(self)
             .chain(extra)
             .all(HostGates::is_unlimited)
         {
-            return None;
+            return Ok(None);
         }
-        let origin = Origin::of(url)?;
+        let Some(origin) = Origin::of(url) else {
+            return Ok(None);
+        };
         let sides: Vec<Side<'_>> = std::iter::once(self)
             .chain(extra)
             .filter(|limits| !limits.is_unlimited())
             .map(|limits| limits.side(&origin))
             .collect();
         if sides.is_empty() {
-            return None;
+            return Ok(None);
         }
         let waiting: Vec<Count> = sides
             .iter()
-            .map(|side| Count::enter(&side.gate.waiting))
+            .flat_map(|side| {
+                [
+                    Count::enter(&side.gate.waiting),
+                    Count::enter(&side.limits.gates.total_waiting),
+                ]
+            })
             .collect();
+        if sides.iter().any(Side::is_full) {
+            return Err(Error::overloaded());
+        }
         let mut permits = Vec::with_capacity(sides.len());
         for side in &sides {
             permits.push(acquire(side.gate.slots.as_ref()).await);
@@ -389,7 +407,7 @@ impl HostGates {
             }
         };
         drop(waiting);
-        sides.into_iter().zip(permits).zip(totals).rev().fold(
+        Ok(sides.into_iter().zip(permits).zip(totals).rev().fold(
             None,
             |also, ((side, permit), total)| {
                 Some(HostPass {
@@ -400,7 +418,7 @@ impl HostGates {
                     _also: also.map(Box::new),
                 })
             },
-        )
+        ))
     }
 
     fn side(&self, origin: &Origin) -> Side<'_> {
@@ -431,6 +449,13 @@ struct Side<'a> {
 }
 
 impl Side<'_> {
+    fn is_full(&self) -> bool {
+        let (host, total) = self.limits.limits.pending_limits();
+        let gates = &self.limits.gates;
+        over_limit(self.gate.slots.as_ref(), &self.gate.waiting, host)
+            || over_limit(gates.total.as_ref(), &gates.total_waiting, total)
+    }
+
     fn interval(&self, origin: &Origin) -> Option<Duration> {
         self.limits.interval_for(origin, self.rule)
     }

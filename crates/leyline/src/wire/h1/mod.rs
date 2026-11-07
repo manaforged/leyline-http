@@ -245,12 +245,15 @@ pub(crate) fn parse<'a, S: Sink<'a>>(head: &'a [u8], sink: &mut S) -> Result<(u1
 }
 
 pub(crate) fn chunk_size(line: &[u8]) -> Result<u64, String> {
-    let invalid = || {
+    chunk_size_value(line).ok_or_else(|| {
         format!(
             "invalid chunk size line: {:?}",
             line.escape_ascii().to_string()
         )
-    };
+    })
+}
+
+fn chunk_size_value(line: &[u8]) -> Option<u64> {
     let digits = line
         .iter()
         .take_while(|byte| byte.is_ascii_hexdigit())
@@ -261,15 +264,12 @@ pub(crate) fn chunk_size(line: &[u8]) -> Result<u64, String> {
         .take_while(|byte| matches!(byte, b' ' | b'\t'))
         .count();
     if digits == 0 || rest.get(blank).is_some_and(|&byte| byte != b';') {
-        return Err(invalid());
+        return None;
     }
-    line[..digits]
-        .iter()
-        .try_fold(0u64, |size, &byte| {
-            let digit = char::from(byte).to_digit(16)?;
-            size.checked_mul(16)?.checked_add(u64::from(digit))
-        })
-        .ok_or_else(invalid)
+    line[..digits].iter().try_fold(0u64, |size, &byte| {
+        let digit = char::from(byte).to_digit(16)?;
+        size.checked_mul(16)?.checked_add(u64::from(digit))
+    })
 }
 
 pub(crate) fn contains_header<K: AsRef<str>, V>(headers: &[(K, V)], name: &str) -> bool {
@@ -378,3 +378,7 @@ pub(crate) fn field_lines(headers: &[HeaderPair]) -> Option<Vec<u8>> {
     }
     Some(lines)
 }
+
+#[cfg(kani)]
+#[path = "chunk_proofs.rs"]
+mod chunk_proofs;
