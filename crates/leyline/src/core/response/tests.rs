@@ -15,7 +15,7 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
             ("referer".to_string(), "https://example.test/".to_string()),
         ],
         tls: None,
-        request_method: "GET".to_string(),
+        request_method: Some(http::Method::GET),
         audit_tls,
         audit_cache: OnceLock::new(),
         timing: ResponseTiming::default(),
@@ -27,13 +27,15 @@ fn bare_response(audit_tls: Option<Arc<crate::audit::AuditTlsCache>>) -> Respons
 }
 
 fn sample_cache() -> Arc<crate::audit::AuditTlsCache> {
-    Arc::new(crate::audit::AuditTlsCache {
-        ja4: "t13d1516h2_8daaf6152771_d8a2da3f94cd".to_string(),
-        ja3: "771,4865-4866,0-23,29-23,0".to_string(),
-        h2_fingerprint: "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p".to_string(),
-        ja4t: "64240_2-1-3-1-1-4_1460_8".to_string(),
-        permutes_extensions: false,
-    })
+    let profile = crate::profile::Browser::Chrome154.profile();
+    let h2 = crate::h2::H2Config::from_profile(&profile.h2).unwrap();
+    Arc::new(crate::audit::AuditTlsCache::new(
+        profile,
+        &h2,
+        &crate::profile::TcpProfile::default(),
+        crate::audit::ClientHello::TcpH2,
+        None,
+    ))
 }
 
 #[test]
@@ -49,10 +51,10 @@ fn audit_surfaces_cached_connection_fingerprints() {
     let audit = resp
         .fingerprint()
         .expect("audit present when tls context set");
-    assert_eq!(audit.ja4, cache.ja4);
-    assert_eq!(audit.ja3, cache.ja3);
-    assert_eq!(audit.h2_fingerprint, cache.h2_fingerprint);
-    assert_eq!(audit.ja4t, cache.ja4t);
+    assert_eq!(audit.ja4, cache.tcp().ja4);
+    assert_eq!(audit.ja3, cache.tcp().ja3);
+    assert_eq!(audit.h2_fingerprint, cache.tcp().h2_fingerprint);
+    assert_eq!(audit.ja4t, cache.tcp().ja4t);
     assert_eq!(
         audit.ja4h.split('_').count(),
         4,

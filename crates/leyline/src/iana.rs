@@ -29,7 +29,11 @@ const CIPHERS: &[(&str, u16)] = &[
     ("TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA", 0xc012),
 ];
 
-const TLS13_CIPHERS: std::ops::RangeInclusive<u16> = 0x1301..=0x1303;
+const TLS13_CIPHERS: std::ops::RangeInclusive<u16> = 0x1301..=0x1305;
+
+pub(crate) const SERVER_NAME: u16 = 0x0000;
+
+pub(crate) const ALPN: u16 = 0x0010;
 
 const SIGALGS: &[(&str, u16)] = &[
     ("ecdsa_secp256r1_sha256", 0x0403),

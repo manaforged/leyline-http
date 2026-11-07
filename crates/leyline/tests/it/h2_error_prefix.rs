@@ -4,9 +4,9 @@ use futures_util::StreamExt as _;
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::BrowserProfile;
-use leyline::h2::frame::FrameType;
-use leyline::h2::{ErrorBudget, H2Client, H2Config, ResponseMode};
+use leyline::internals::BrowserProfile;
+use leyline::internals::h2::frame::FrameType;
+use leyline::internals::h2::{ErrorBudget, H2Client, H2Config, ResponseMode};
 use support::{
     get_head, read_frame, read_preface, write_data, write_raw_headers, write_server_settings,
     write_settings_ack,
@@ -30,7 +30,7 @@ async fn request_stream(peer: &mut DuplexStream) -> u32 {
 
 async fn client(peer_io: DuplexStream) -> H2Client {
     let config = H2Config::from_profile(&BrowserProfile::bare().h2).expect("bare H2 config");
-    leyline::h2::start(peer_io, config)
+    leyline::internals::h2::start(peer_io, config)
         .await
         .expect("handshake")
 }
@@ -60,7 +60,7 @@ async fn an_error_prefix_success_is_buffered_with_its_trailers() {
     .expect("response");
 
     assert!(
-        matches!(&response.body, leyline::pool::TransportBody::Buffered(body) if body == b"ok"),
+        matches!(&response.body, leyline::internals::pool::TransportBody::Buffered(body) if body == b"ok"),
         "{:?}",
         response.body
     );
@@ -94,7 +94,7 @@ async fn an_error_prefix_error_streams_before_the_body_ends() {
     .expect("response");
 
     assert_eq!(response.status, 500);
-    let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
+    let leyline::internals::pool::TransportBody::Streaming(mut body) = response.body else {
         panic!("an error response must stream");
     };
     let first = timeout(Duration::from_secs(2), body.next())

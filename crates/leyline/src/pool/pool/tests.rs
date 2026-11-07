@@ -1,23 +1,25 @@
 use super::{OriginFlag, Pool};
-use crate::pool::types::{PoolKey, PooledConn, TlsInfo, Transport};
+use crate::pool::types::{H1Entry, PoolKey};
+use crate::profile::Carrier;
+use crate::wire::TlsInfo;
 use std::time::{Duration, Instant};
 
 fn h1_key(host: &str) -> PoolKey {
     PoolKey {
-        scheme: "http".into(),
+        scheme: crate::wire::Scheme::Http,
         host: host.to_string(),
         port: 80,
         proxy: None,
-        transport: Transport::Tcp,
-        partition: 0,
+        transport: Carrier::Tcp,
+        partition: None,
         lane: 0,
     }
 }
 
 fn insert_empty_h1(pool: &Pool, host: &str, last_use: Instant) {
-    crate::util::write(&pool.inner).insert(
+    crate::util::write(&pool.conns.entries).h1.insert(
         h1_key(host),
-        PooledConn::H1 {
+        H1Entry {
             idle: crate::pool::types::H1Idle::default(),
             last_use,
             tls: TlsInfo::default(),
@@ -104,7 +106,7 @@ fn alpn_h1_memory_is_per_origin_and_proxy() {
         OriginFlag::H1Only,
         "example.com",
         443,
-        Some(&crate::core::ProxyUrl::parse("http://proxy:1").unwrap())
+        Some(&crate::net::ProxyUrl::parse("http://proxy:1").unwrap())
     ));
     assert!(!pool.recalls(OriginFlag::H1Only, "example.com", 8443, None));
 }
@@ -116,19 +118,19 @@ fn alpn_h1_memory_expires() {
     let key = ("example.com".to_string(), 443, None);
     let now = std::time::SystemTime::now();
     assert!(
-        crate::util::lock(&pool.origin_memory)[super::OriginFlag::H1Only as usize]
+        crate::util::lock(&pool.memory.origins)[super::OriginFlag::H1Only as usize]
             .contains(&key, now)
     );
     let later = now + super::OriginFlag::H1Only.ttl() + Duration::from_secs(1);
     assert!(
-        !crate::util::lock(&pool.origin_memory)[super::OriginFlag::H1Only as usize]
+        !crate::util::lock(&pool.memory.origins)[super::OriginFlag::H1Only as usize]
             .contains(&key, later)
     );
 }
 
 #[test]
 fn expiring_set_is_bounded() {
-    use super::expiring::{ExpiringSet, MAX_ENTRIES};
+    use crate::util::expiring::{ExpiringSet, MAX_ENTRIES};
     let now = std::time::SystemTime::now();
     let mut set = ExpiringSet::default();
     for i in 0..=MAX_ENTRIES {
@@ -192,32 +194,32 @@ fn a_failed_http3_origin_is_skipped_until_cleared() {
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap())
+        Some(&crate::net::ProxyUrl::parse("socks5://p:1").unwrap())
     ));
     pool.remember(
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap()),
+        Some(&crate::net::ProxyUrl::parse("socks5://p:1").unwrap()),
     );
     assert!(pool.recalls(
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap())
+        Some(&crate::net::ProxyUrl::parse("socks5://p:1").unwrap())
     ));
     assert!(!pool.recalls(OriginFlag::H3Broken, "example.com", 443, None));
     pool.forget(
         super::OriginFlag::H3Broken,
         "example.com",
         443,
-        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap()),
+        Some(&crate::net::ProxyUrl::parse("socks5://p:1").unwrap()),
     );
     assert!(!pool.recalls(
         OriginFlag::H3Broken,
         "example.com",
         443,
-        Some(&crate::core::ProxyUrl::parse("socks5://p:1").unwrap())
+        Some(&crate::net::ProxyUrl::parse("socks5://p:1").unwrap())
     ));
 }
 
@@ -233,14 +235,14 @@ async fn h2_client() -> (crate::h2::client::H2Client, tokio::io::DuplexStream) {
 async fn a_failure_on_a_replaced_connection_keeps_the_replacement() {
     let pool = Pool::new();
     let key = PoolKey {
-        scheme: "https".into(),
+        scheme: crate::wire::Scheme::Https,
         port: 443,
         ..h1_key("replaced.test")
     };
     let (old, _old_io) = h2_client().await;
     let (new, _new_io) = h2_client().await;
     pool.install_mux(key.clone(), old.clone(), TlsInfo::default());
-    crate::util::write(&pool.inner).remove(&key);
+    crate::util::write(&pool.conns.entries).mux.remove(&key);
     pool.install_mux(key.clone(), new.clone(), TlsInfo::default());
 
     pool.invalidate(&key, &old);

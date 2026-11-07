@@ -2,18 +2,10 @@ use std::collections::HashMap;
 
 use serde::Deserialize;
 
-use crate::Error;
-use crate::h2::config::SettingId;
-use crate::profile::H3Profile;
-use crate::profile::preset::HeaderStyle;
+use crate::error::Error;
+use crate::profile::HeaderStyle;
+use crate::profile::{Carrier, H2Settings, H3Profile, SettingId};
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -31,13 +23,6 @@ pub struct BrowserProfile {
     fingerprint: Vec<crate::profile::fingerprint::FingerprintLayer>,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -87,13 +72,6 @@ pub struct ProfileMeta {
     _verified_at: serde::de::IgnoredAny,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -149,13 +127,103 @@ const fn default_true() -> bool {
     true
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
+/// A certificate compression algorithm of RFC 8879 that a profile may list.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CertCompression {
+    Brotli,
+    Zlib,
+    Zstd,
+}
+
+impl CertCompression {
+    pub(crate) fn parse(id: &str) -> Result<Self, String> {
+        match id {
+            "brotli" => Ok(Self::Brotli),
+            "zlib" => Ok(Self::Zlib),
+            "zstd" => Ok(Self::Zstd),
+            other => Err(format!("unknown cert compression algorithm: {other:?}")),
+        }
+    }
+}
+
+/// The lowest TLS version a handshake accepts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum TlsMinVersion {
+    /// TLS 1.0.
+    Tls10,
+    /// TLS 1.2.
+    Tls12,
+    /// TLS 1.3.
+    Tls13,
+}
+
+impl TlsMinVersion {
+    pub(crate) fn parse(id: &str) -> Result<Self, String> {
+        match id {
+            "1.0" => Ok(Self::Tls10),
+            "1.2" => Ok(Self::Tls12),
+            "1.3" => Ok(Self::Tls13),
+            other => Err(format!(
+                "unsupported min_tls_version {other:?}; expected \"1.0\", \"1.2\", or \"1.3\""
+            )),
+        }
+    }
+}
+
+impl TlsProfile {
+    pub(super) fn validate_ids(&self) -> Result<(), String> {
+        for algo in self.cert_compressions() {
+            algo?;
+        }
+        self.min_version()?;
+        self.key_share_ids()?;
+        Ok(())
+    }
+
+    /// Parses `cert_compression` in profile order.
+    pub(crate) fn cert_compressions(
+        &self,
+    ) -> impl Iterator<Item = Result<CertCompression, String>> + '_ {
+        self.cert_compression
+            .iter()
+            .map(|id| CertCompression::parse(id))
+    }
+
+    /// Parses `min_tls_version`, which is `None` when the profile declares no minimum.
+    pub(crate) fn min_version(&self) -> Result<Option<TlsMinVersion>, String> {
+        self.min_tls_version
+            .as_deref()
+            .map(TlsMinVersion::parse)
+            .transpose()
+    }
+
+    /// Resolves `key_shares` to group ids, which must be an ordered subsequence of `curves`.
+    pub(crate) fn key_share_ids(&self) -> Result<Option<Vec<u16>>, String> {
+        let Some(names) = self.key_shares.as_deref() else {
+            return Ok(None);
+        };
+        let ids = names
+            .iter()
+            .map(|name| {
+                crate::iana::curve_id(name)
+                    .ok_or_else(|| format!("unknown key share group: {name}"))
+            })
+            .collect::<Result<Vec<u16>, _>>()?;
+        let mut curves = self
+            .curves
+            .iter()
+            .filter_map(|name| crate::iana::curve_id(name));
+        if !ids.iter().all(|id| curves.any(|curve| curve == *id)) {
+            return Err(format!(
+                "key_shares {names:?} must be an ordered subsequence of curves {:?}",
+                self.curves
+            ));
+        }
+        Ok(Some(ids))
+    }
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -189,42 +257,15 @@ pub struct TlsFingerprint {
     pub platforms: HashMap<String, TlsFingerprint>,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct H2Profile {
-    #[serde(default)]
-    pub header_table_size: Option<u32>,
-    #[serde(default)]
-    pub enable_push: Option<bool>,
-    #[serde(default)]
-    pub max_concurrent_streams: Option<u32>,
-    #[serde(default)]
-    pub initial_stream_window_size: Option<u32>,
-    #[serde(default)]
+    pub settings: H2Settings,
     pub initial_connection_window_size: Option<u32>,
-    #[serde(default)]
-    pub max_frame_size: Option<u32>,
-    #[serde(default)]
-    pub max_header_list_size: Option<u32>,
-    #[serde(default)]
-    pub unknown_setting8: Option<u32>,
-    #[serde(default)]
-    pub unknown_setting9: Option<u32>,
     pub pseudo_order: Vec<String>,
     pub settings_order: Vec<String>,
-    #[serde(default)]
     pub default_priority: Option<H2PriorityProfile>,
-    #[serde(default)]
     pub fingerprint: Option<H2Fingerprint>,
-    #[serde(default)]
     pub platforms: HashMap<String, H2PlatformOverride>,
 }
 
@@ -237,40 +278,13 @@ pub struct H2PriorityProfile {
     pub weight: u8,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, Default)]
 #[non_exhaustive]
 pub struct H2PlatformOverride {
-    #[serde(default)]
-    pub header_table_size: Option<u32>,
-    #[serde(default)]
-    pub enable_push: Option<bool>,
-    #[serde(default)]
-    pub max_concurrent_streams: Option<u32>,
-    #[serde(default)]
-    pub initial_stream_window_size: Option<u32>,
-    #[serde(default)]
+    pub settings: H2Settings,
     pub initial_connection_window_size: Option<u32>,
-    #[serde(default)]
-    pub max_frame_size: Option<u32>,
-    #[serde(default)]
-    pub max_header_list_size: Option<u32>,
-    #[serde(default)]
-    pub unknown_setting8: Option<u32>,
-    #[serde(default)]
-    pub unknown_setting9: Option<u32>,
-    #[serde(default)]
     pub omit_settings: Vec<String>,
-    #[serde(default)]
     pub pseudo_order: Option<Vec<String>>,
-    #[serde(default)]
     pub settings_order: Option<Vec<String>>,
     #[cfg_attr(
         not(feature = "bench-internals"),
@@ -279,17 +293,9 @@ pub struct H2PlatformOverride {
             reason = "the TOML schema keeps this key; only bench-internals reads it"
         )
     )]
-    #[serde(default)]
     pub fingerprint: Option<H2Fingerprint>,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -305,13 +311,6 @@ pub struct H2Fingerprint {
     pub akamai: Option<String>,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -323,18 +322,18 @@ pub struct BrowserHeaders {
     pub accept_language: Option<String>,
 }
 
-fn invalid_profile(why: impl std::fmt::Display) -> crate::Error {
+fn invalid_profile(why: impl std::fmt::Display) -> crate::error::Error {
     Error::config(format!("invalid profile: {why}"))
 }
 
 impl BrowserProfile {
-    pub fn from_toml(toml_str: &str) -> crate::Result<Self> {
+    pub fn from_toml(toml_str: &str) -> crate::error::Result<Self> {
         let mut profile: Self = toml::from_str(toml_str).map_err(invalid_profile)?;
         profile.derive_sec_ch_ua();
         profile.source = Some(source::ProfileSource::new(toml_str));
         profile
             .tls
-            .validate(false)
+            .validate(Carrier::Tcp)
             .map_err(|why| invalid_profile(format!("{}: {why}", profile.meta.name)))?;
         if let Some(h3) = &profile.h3 {
             h3.validate()
@@ -362,29 +361,25 @@ impl BrowserProfile {
         }
     }
 
-    bench_pub! {
-        fn load_warnings(&self) -> Vec<String> {
-            let mut warnings = Vec::new();
-            let capture_unrecorded = self
-                .meta
-                .captured_against
-                .as_deref()
-                .is_none_or(|s| s.trim().is_empty());
-            if capture_unrecorded {
-                warnings.push(format!(
-                    "{}: [meta] captured_against is missing — the exact browser build this \
-                     profile was captured against is unrecorded",
-                    self.meta.name
-                ));
-            }
-            warnings
+    pub fn load_warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        let capture_unrecorded = self
+            .meta
+            .captured_against
+            .as_deref()
+            .is_none_or(|s| s.trim().is_empty());
+        if capture_unrecorded {
+            warnings.push(format!(
+                "{}: [meta] captured_against is missing — the exact browser build this \
+                 profile was captured against is unrecorded",
+                self.meta.name
+            ));
         }
+        warnings
     }
 
-    bench_pub! {
-        fn identity_for(&self, platform: crate::profile::Platform) -> Option<&BrowserHeaders> {
-            self.identity.get(platform.identity_key())
-        }
+    pub fn identity_for(&self, platform: crate::profile::Platform) -> Option<&BrowserHeaders> {
+        self.identity.get(platform.identity_key())
     }
 
     pub(crate) fn source(&self) -> Option<&str> {
@@ -393,105 +388,46 @@ impl BrowserProfile {
 }
 
 impl H2Profile {
-    bench_pub! {
-        fn resolve_for_platform(
-            &self,
-            platform: crate::profile::Platform,
-        ) -> Result<H2Profile, Error> {
-            let Some(over) = self.platforms.get(platform.identity_key()) else {
-                return Ok(self.clone());
+    pub fn resolve_for_platform(
+        &self,
+        platform: crate::profile::Platform,
+    ) -> Result<H2Profile, Error> {
+        let Some(over) = self.platforms.get(platform.identity_key()) else {
+            return Ok(self.clone());
+        };
+        let mut out = self.clone();
+        let config = |why: String| Error::config(why);
+
+        for id in SettingId::all() {
+            if let Some(v) = over.settings.get(id) {
+                out.settings.set(id, Some(v)).map_err(config)?;
+            }
+        }
+        if let Some(v) = over.initial_connection_window_size {
+            out.initial_connection_window_size = Some(v);
+        }
+        if let Some(ref order) = over.pseudo_order {
+            out.pseudo_order = order.clone();
+        }
+        if let Some(ref order) = over.settings_order {
+            out.settings_order = order.clone();
+        }
+
+        for name in &over.omit_settings {
+            let Some(id) = SettingId::from_field(name) else {
+                return Err(config(format!(
+                    "unknown name in [h2.platforms.{}].omit_settings: {name:?}",
+                    platform.identity_key()
+                )));
             };
-            let mut out = self.clone();
-            let config = |why: String| Error::config(why);
-
-            for id in SettingId::all() {
-                if let Some(v) = over.setting(id) {
-                    out.set_setting(id, Some(v)).map_err(config)?;
-                }
-            }
-            if let Some(v) = over.initial_connection_window_size {
-                out.initial_connection_window_size = Some(v);
-            }
-            if let Some(ref order) = over.pseudo_order {
-                out.pseudo_order = order.clone();
-            }
-            if let Some(ref order) = over.settings_order {
-                out.settings_order = order.clone();
-            }
-
-            for name in &over.omit_settings {
-                let Some(id) = setting_by_field(name) else {
-                    return Err(config(format!(
-                        "unknown name in [h2.platforms.{}].omit_settings: {name:?}",
-                        platform.identity_key()
-                    )));
-                };
-                out.set_setting(id, None).map_err(config)?;
-            }
-
-            Ok(out)
+            out.settings.set(id, None).map_err(config)?;
         }
-    }
 
-    pub(crate) fn set_setting(&mut self, id: SettingId, value: Option<u32>) -> Result<(), String> {
-        match id {
-            SettingId::HeaderTableSize => self.header_table_size = value,
-            SettingId::EnablePush => {
-                self.enable_push = match value {
-                    None => None,
-                    Some(0) => Some(false),
-                    Some(1) => Some(true),
-                    Some(other) => return Err(format!("ENABLE_PUSH value {other} is not 0 or 1")),
-                };
-            }
-            SettingId::MaxConcurrentStreams => self.max_concurrent_streams = value,
-            SettingId::InitialWindowSize => self.initial_stream_window_size = value,
-            SettingId::MaxFrameSize => self.max_frame_size = value,
-            SettingId::MaxHeaderListSize => self.max_header_list_size = value,
-            SettingId::Unknown8 => self.unknown_setting8 = value,
-            SettingId::Unknown9 => self.unknown_setting9 = value,
-        }
-        Ok(())
+        Ok(out)
     }
 }
 
-fn setting_by_field(name: &str) -> Option<SettingId> {
-    Some(match name {
-        "header_table_size" => SettingId::HeaderTableSize,
-        "enable_push" => SettingId::EnablePush,
-        "max_concurrent_streams" => SettingId::MaxConcurrentStreams,
-        "initial_stream_window_size" => SettingId::InitialWindowSize,
-        "max_frame_size" => SettingId::MaxFrameSize,
-        "max_header_list_size" => SettingId::MaxHeaderListSize,
-        "unknown_setting8" => SettingId::Unknown8,
-        "unknown_setting9" => SettingId::Unknown9,
-        _ => return None,
-    })
-}
-
-macro_rules! h2_setting_getter {
-    ($($ty:ty),+) => {
-        $(
-            impl $ty {
-                pub(crate) fn setting(&self, id: SettingId) -> Option<u32> {
-                    match id {
-                        SettingId::HeaderTableSize => self.header_table_size,
-                        SettingId::EnablePush => self.enable_push.map(u32::from),
-                        SettingId::MaxConcurrentStreams => self.max_concurrent_streams,
-                        SettingId::InitialWindowSize => self.initial_stream_window_size,
-                        SettingId::MaxFrameSize => self.max_frame_size,
-                        SettingId::MaxHeaderListSize => self.max_header_list_size,
-                        SettingId::Unknown8 => self.unknown_setting8,
-                        SettingId::Unknown9 => self.unknown_setting9,
-                    }
-                }
-            }
-        )+
-    };
-}
-
-h2_setting_getter!(H2Profile, H2PlatformOverride);
-
+mod h2_serde;
 mod source;
 
 #[cfg(test)]

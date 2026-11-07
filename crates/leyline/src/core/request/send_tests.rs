@@ -1,8 +1,8 @@
-use crate::core::error::{Error, Kind};
 use crate::core::retry::Retry;
 use crate::core::retry::RetryPlan;
+use crate::error::{Error, Kind};
 
-fn io(kind: std::io::ErrorKind) -> crate::core::Result<crate::core::Response> {
+fn io(kind: std::io::ErrorKind) -> crate::error::Result<crate::core::response::Response> {
     Err(Error::new(Kind::Io).with_source(std::io::Error::new(kind, "x")))
 }
 
@@ -10,15 +10,15 @@ fn io(kind: std::io::ErrorKind) -> crate::core::Result<crate::core::Response> {
 fn transient_retries_connection_loss_only() {
     let policy = Retry::new(3);
     assert!(matches!(
-        policy.plan(&io(std::io::ErrorKind::ConnectionReset), 0, true, || true),
+        policy.plan(&io(std::io::ErrorKind::ConnectionReset), 0),
         RetryPlan::Backoff(_)
     ));
     assert!(matches!(
-        policy.plan(&io(std::io::ErrorKind::PermissionDenied), 0, true, || true),
+        policy.plan(&io(std::io::ErrorKind::PermissionDenied), 0),
         RetryPlan::Stop
     ));
     assert!(matches!(
-        policy.plan(&Err(Error::new(Kind::Timeout)), 0, true, || true),
+        policy.plan(&Err(Error::new(Kind::Timeout)), 0),
         RetryPlan::Backoff(_)
     ));
 }
@@ -27,7 +27,7 @@ fn transient_retries_connection_loss_only() {
 fn no_policy_never_retries() {
     let policy = Retry::new(0);
     assert!(matches!(
-        policy.plan(&io(std::io::ErrorKind::ConnectionReset), 0, true, || true),
+        policy.plan(&io(std::io::ErrorKind::ConnectionReset), 0),
         RetryPlan::Stop
     ));
 }

@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use futures_util::{Stream, TryFutureExt};
 
-use crate::core::body::{Body, BodyKind};
+use crate::wire::{Body, BodyKind};
 
 mod debug;
 

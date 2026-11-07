@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use crate::core::headers;
-use crate::core::{Error, Result};
+use crate::error::{Error, Result};
 use crate::header_str::HeaderStr;
 use crate::util::lock;
 

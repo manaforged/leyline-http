@@ -4,7 +4,6 @@ use crate::h2::error::ErrorCode;
 pub enum ClosedReason {
     EndStream,
     RstRemote(ErrorCode),
-    /// The local endpoint reset the stream.
     RstLocal(ErrorCode),
 }
 
@@ -19,21 +18,12 @@ pub enum StreamState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamEvent {
-    SendHeaders {
-        end_stream: bool,
-    },
-    SendData {
-        end_stream: bool,
-    },
-    RecvHeaders {
-        end_stream: bool,
-    },
-    RecvData {
-        end_stream: bool,
-    },
+    SendHeaders { end_stream: bool },
+    SendData { end_stream: bool },
+    RecvHeaders { end_stream: bool },
+    RecvData { end_stream: bool },
     RecvTrailers,
     RecvRstStream(ErrorCode),
-    /// Resets the stream from the local endpoint.
     SendRstStream(ErrorCode),
 }
 
@@ -57,7 +47,6 @@ impl StreamState {
         matches!(self, StreamState::Closed { .. })
     }
 
-    /// Returns whether the local endpoint reset the stream.
     pub fn is_reset_local(&self) -> bool {
         matches!(
             self,

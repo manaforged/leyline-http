@@ -23,7 +23,7 @@ fn encode_at_max_prefix() {
 
 #[test]
 fn decode_small_value() {
-    let (val, consumed) = decode(10, 5, &[], 0).unwrap();
+    let (val, consumed) = decode(10, 5, &[]).unwrap();
     assert_eq!(val, 10);
     assert_eq!(consumed, 0);
 }
@@ -31,7 +31,7 @@ fn decode_small_value() {
 #[test]
 fn decode_multi_byte() {
     let src = [0x9A, 0x0A];
-    let (val, consumed) = decode(0x1F, 5, &src, 0).unwrap();
+    let (val, consumed) = decode(0x1F, 5, &src).unwrap();
     assert_eq!(val, 1337);
     assert_eq!(consumed, 2);
 }
@@ -55,7 +55,7 @@ fn roundtrip_various_values() {
         encode(value, prefix_bits, 0x00, &mut buf);
 
         let first = buf[0];
-        let (decoded, _) = decode(first, prefix_bits, &buf[1..], 0).unwrap();
+        let (decoded, _) = decode(first, prefix_bits, &buf[1..]).unwrap();
         assert_eq!(
             decoded, value,
             "roundtrip failed for value={value}, prefix={prefix_bits}"
@@ -66,7 +66,7 @@ fn roundtrip_various_values() {
 #[test]
 fn decode_overflow_rejected() {
     let src = [0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x0F];
-    let result = decode(0x1F, 5, &src, 0);
+    let result = decode(0x1F, 5, &src);
     result.expect_err("expected Err");
 }
 
@@ -79,13 +79,13 @@ fn decode_rejects_values_past_u31_max() {
         rem >>= 7;
     }
     src.push(rem as u8);
-    assert!(decode(0x1F, 5, &src, 0).is_err(), "2^32 must be rejected");
+    assert!(decode(0x1F, 5, &src).is_err(), "2^32 must be rejected");
 }
 
 #[test]
 fn decode_accepts_max_legal_value() {
     let mut buf = Vec::new();
     encode(0x7FFF_FFFF, 5, 0x00, &mut buf);
-    let (val, _) = decode(buf[0], 5, &buf[1..], 0).unwrap();
+    let (val, _) = decode(buf[0], 5, &buf[1..]).unwrap();
     assert_eq!(val, 0x7FFF_FFFF);
 }

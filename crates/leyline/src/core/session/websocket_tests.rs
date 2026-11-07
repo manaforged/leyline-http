@@ -1,4 +1,10 @@
-use super::ws_origin;
+use crate::core::config::Origin;
+use crate::core::websocket::http_equivalent;
+
+fn ws_origin(url: &str) -> crate::Result<String> {
+    let url = url::Url::parse(url).map_err(crate::Error::from)?;
+    Ok(Origin::ascii(&http_equivalent(&url)?).into_owned())
+}
 use crate::Session;
 
 #[test]

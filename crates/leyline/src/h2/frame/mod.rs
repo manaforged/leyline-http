@@ -18,39 +18,79 @@ pub use rst_stream::RstStreamFrame;
 pub use settings::SettingsFrame;
 pub use window_update::WindowUpdateFrame;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, Bytes};
 
-pub(crate) trait Encode {
-    fn encode(&self, buf: &mut BytesMut);
+use crate::h2::H2Error;
+use crate::h2::error::ErrorCode;
+
+/// The largest value a 31-bit HTTP/2 field holds: a stream ID, window, or window increment.
+pub const U31_MAX: u32 = 0x7FFF_FFFF;
+/// The RFC 9113 initial SETTINGS_MAX_FRAME_SIZE.
+pub(crate) const DEFAULT_MAX_FRAME_SIZE: u32 = 16_384;
+/// The RFC 9113 initial SETTINGS_HEADER_TABLE_SIZE.
+pub(crate) const DEFAULT_HEADER_TABLE_SIZE: u32 = 4096;
+/// The largest SETTINGS_MAX_FRAME_SIZE a peer may advertise.
+pub(crate) const MAX_FRAME_SIZE_LIMIT: u32 = (1 << 24) - 1;
+/// The length of the stream dependency and weight a PRIORITY flag adds.
+pub(crate) const PRIORITY_LEN: usize = 5;
+
+/// HTTP/2 frame flag bits.
+pub mod flags {
+    /// END_STREAM on DATA and HEADERS.
+    pub const END_STREAM: u8 = 0x1;
+    /// ACK on SETTINGS and PING.
+    pub const ACK: u8 = 0x1;
+    /// END_HEADERS on HEADERS, PUSH_PROMISE and CONTINUATION.
+    pub const END_HEADERS: u8 = 0x4;
+    /// PADDED on DATA, HEADERS and PUSH_PROMISE.
+    pub const PADDED: u8 = 0x8;
+    /// PRIORITY on HEADERS.
+    pub const PRIORITY: u8 = 0x20;
 }
 
-macro_rules! impl_encode {
-    ($($ty:ty),+ $(,)?) => {
-        $(
-            impl Encode for $ty {
-                fn encode(&self, buf: &mut BytesMut) {
-                    <$ty>::encode(self, buf);
-                }
-            }
-        )+
-    };
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum Scope {
+    Stream,
+    Connection,
 }
 
-impl<F: AsRef<[u8]>> Encode for HeadersFrame<F> {
-    fn encode(&self, buf: &mut BytesMut) {
-        HeadersFrame::<F>::encode(self, buf);
+pub(super) fn check_scope(header: &FrameHeader, scope: Scope, frame: &str) -> Result<(), H2Error> {
+    let on_connection = header.stream_id == 0;
+    if on_connection == (scope == Scope::Connection) {
+        return Ok(());
     }
+    let place = if on_connection {
+        "stream 0"
+    } else {
+        "non-zero stream"
+    };
+    Err(H2Error::Connection {
+        code: ErrorCode::ProtocolError,
+        reason: format!("{frame} on {place}"),
+    })
 }
 
-impl_encode!(
-    SettingsFrame,
-    WindowUpdateFrame,
-    ContinuationFrame<'_>,
-    DataFrame,
-    PingFrame,
-    RstStreamFrame,
-    GoAwayFrame,
-);
+/// Returns where the field block ends after RFC 9113 padding, checking frame size before padding.
+pub(super) fn padded_end(payload: &[u8], padded: bool, fixed: usize) -> Result<usize, H2Error> {
+    let mandatory = usize::from(padded) + fixed;
+    if payload.len() < mandatory {
+        return Err(H2Error::Connection {
+            code: ErrorCode::FrameSizeError,
+            reason: format!(
+                "frame of {} bytes is shorter than its {mandatory} fixed bytes",
+                payload.len()
+            ),
+        });
+    }
+    let pad_len = if padded { usize::from(payload[0]) } else { 0 };
+    if pad_len > payload.len() - mandatory {
+        return Err(H2Error::Connection {
+            code: ErrorCode::ProtocolError,
+            reason: "padding exceeds the field block".into(),
+        });
+    }
+    Ok(payload.len() - pad_len)
+}
 
 pub(crate) struct ContinuationFrame<'a> {
     pub(crate) stream_id: u32,
@@ -64,7 +104,7 @@ impl ContinuationFrame<'_> {
             length: self.fragment.len() as u32,
             frame_type: FrameType::Continuation as u8,
             flags: if self.end_headers {
-                headers::flags::END_HEADERS
+                flags::END_HEADERS
             } else {
                 0
             },
@@ -133,8 +173,7 @@ impl FrameHeader {
         let length = ((buf[0] as u32) << 16) | ((buf[1] as u32) << 8) | (buf[2] as u32);
         let frame_type = buf[3];
         let flags = buf[4];
-        let stream_id = be_u32(&buf[5..9]);
-        let stream_id = stream_id & 0x7FFF_FFFF;
+        let stream_id = be_u32(&buf[5..9]) & U31_MAX;
 
         Self {
             length,
@@ -150,7 +189,7 @@ impl FrameHeader {
         buf.put_u8(self.length as u8);
         buf.put_u8(self.frame_type);
         buf.put_u8(self.flags);
-        buf.put_u32(self.stream_id & 0x7FFF_FFFF);
+        buf.put_u32(self.stream_id & U31_MAX);
     }
 }
 
@@ -174,37 +213,29 @@ pub enum Frame {
 }
 
 impl Frame {
-    pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, crate::h2::H2Error> {
-        match FrameType::from_u8(header.frame_type) {
-            Some(FrameType::Data) => Ok(Frame::Data(DataFrame::parse(header, payload)?)),
-            Some(FrameType::Headers) => Ok(Frame::Headers(HeadersFrame::parse(header, payload)?)),
-            Some(FrameType::Priority) => {
-                priority::validate(&header, &payload)?;
-                Ok(Frame::Priority)
+    pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
+        let Some(kind) = FrameType::from_u8(header.frame_type) else {
+            return Ok(Frame::Unknown);
+        };
+        match kind {
+            FrameType::Data => DataFrame::parse(header, payload).map(Frame::Data),
+            FrameType::Headers => HeadersFrame::parse(header, payload).map(Frame::Headers),
+            FrameType::Priority => priority::validate(&header, &payload).map(|()| Frame::Priority),
+            FrameType::RstStream => RstStreamFrame::parse(header, payload).map(Frame::RstStream),
+            FrameType::Settings => SettingsFrame::parse(header, payload).map(Frame::Settings),
+            FrameType::PushPromise => {
+                PushPromiseFrame::parse(header, payload).map(Frame::PushPromise)
             }
-            Some(FrameType::RstStream) => {
-                Ok(Frame::RstStream(RstStreamFrame::parse(header, payload)?))
+            FrameType::Ping => PingFrame::parse(header, payload).map(Frame::Ping),
+            FrameType::GoAway => GoAwayFrame::parse(header, payload).map(Frame::GoAway),
+            FrameType::WindowUpdate => {
+                WindowUpdateFrame::parse(header, payload).map(Frame::WindowUpdate)
             }
-            Some(FrameType::Settings) => {
-                Ok(Frame::Settings(SettingsFrame::parse(header, payload)?))
-            }
-            Some(FrameType::PushPromise) => Ok(Frame::PushPromise(PushPromiseFrame::parse(
-                header, payload,
-            )?)),
-            Some(FrameType::Ping) => Ok(Frame::Ping(PingFrame::parse(header, payload)?)),
-            Some(FrameType::GoAway) => Ok(Frame::GoAway(GoAwayFrame::parse(header, payload)?)),
-            Some(FrameType::WindowUpdate) => Ok(Frame::WindowUpdate(WindowUpdateFrame::parse(
-                header, payload,
-            )?)),
-            Some(FrameType::Continuation) => {
-                let end_headers = header.flags & 0x4 != 0;
-                Ok(Frame::Continuation {
-                    stream_id: header.stream_id,
-                    end_headers,
-                    fragment: payload,
-                })
-            }
-            None => Ok(Frame::Unknown),
+            FrameType::Continuation => Ok(Frame::Continuation {
+                stream_id: header.stream_id,
+                end_headers: header.flags & flags::END_HEADERS != 0,
+                fragment: payload,
+            }),
         }
     }
 }

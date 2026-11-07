@@ -1,7 +1,9 @@
 use md5::{Digest as Md5Digest, Md5};
 use sha2::{Sha256, Sha512_256};
 
-use crate::core::error::{Error, Kind, Result};
+use crate::core::config::Origin;
+use crate::error::{Error, Kind, Result};
+use crate::util::quote;
 
 mod scan;
 
@@ -53,6 +55,15 @@ pub(crate) enum Algorithm {
 }
 
 impl Algorithm {
+    const ALL: [Algorithm; 6] = [
+        Algorithm::Md5,
+        Algorithm::Md5Sess,
+        Algorithm::Sha256,
+        Algorithm::Sha256Sess,
+        Algorithm::Sha512_256,
+        Algorithm::Sha512_256Sess,
+    ];
+
     fn is_sess(self) -> bool {
         matches!(
             self,
@@ -92,11 +103,14 @@ impl Algorithm {
     }
 }
 
+const SCHEME: &str = "Digest ";
+
 pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let trimmed = header.trim();
     let body = trimmed
-        .strip_prefix("Digest ")
-        .or_else(|| trimmed.strip_prefix("digest "))
+        .get(..SCHEME.len())
+        .filter(|scheme| scheme.eq_ignore_ascii_case(SCHEME))
+        .map(|_| &trimmed[SCHEME.len()..])
         .ok_or_else(|| Error::new(Kind::Request).with_message("digest: not a Digest challenge"))?;
 
     let mut ch = Challenge::default();
@@ -131,16 +145,12 @@ impl Challenge {
 }
 
 fn algorithm(val: &str) -> Result<Algorithm> {
-    match val {
-        "MD5" | "md5" => Ok(Algorithm::Md5),
-        "MD5-sess" | "md5-sess" => Ok(Algorithm::Md5Sess),
-        "SHA-256" | "sha-256" => Ok(Algorithm::Sha256),
-        "SHA-256-sess" | "sha-256-sess" => Ok(Algorithm::Sha256Sess),
-        "SHA-512-256" | "sha-512-256" => Ok(Algorithm::Sha512_256),
-        "SHA-512-256-sess" | "sha-512-256-sess" => Ok(Algorithm::Sha512_256Sess),
-        other => Err(Error::new(Kind::Request)
-            .with_message(format!("digest: unsupported algorithm {other}"))),
-    }
+    Algorithm::ALL
+        .into_iter()
+        .find(|alg| alg.wire_name().eq_ignore_ascii_case(val))
+        .ok_or_else(|| {
+            Error::new(Kind::Request).with_message(format!("digest: unsupported algorithm {val}"))
+        })
 }
 
 impl Challenge {
@@ -181,36 +191,23 @@ impl Challenge {
             alg.hash_hex(format!("{}:{}:{}", ha1, self.nonce, ha2).as_bytes())
         };
 
-        let quoted = |s: &str| {
-            let mut esc = String::with_capacity(s.len() + 2);
-            esc.push('"');
-            for c in s.chars() {
-                if c == '"' || c == '\\' {
-                    esc.push('\\');
-                }
-                esc.push(c);
-            }
-            esc.push('"');
-            esc
-        };
-
         let mut out = format!(
-            "Digest username={u}, realm={r}, nonce={n}, uri={uri}, algorithm={alg}, response={resp}",
-            u = quoted(&auth.username),
-            r = quoted(&self.realm),
-            n = quoted(&self.nonce),
-            uri = quoted(uri),
+            "{SCHEME}username={u}, realm={r}, nonce={n}, uri={uri}, algorithm={alg}, response={resp}",
+            u = quote(&auth.username),
+            r = quote(&self.realm),
+            n = quote(&self.nonce),
+            uri = quote(uri),
             alg = alg.wire_name(),
-            resp = quoted(&response),
+            resp = quote(&response),
         );
         if !qop.is_empty() {
             out.push_str(&format!(
                 ", qop={qop}, nc={nc_hex}, cnonce={}",
-                quoted(cnonce)
+                quote(cnonce)
             ));
         }
         if let Some(opaque) = &self.opaque {
-            out.push_str(&format!(", opaque={}", quoted(opaque)));
+            out.push_str(&format!(", opaque={}", quote(opaque)));
         }
         Some(out)
     }
@@ -218,7 +215,7 @@ impl Challenge {
     pub(crate) fn covers(&self, url: &url::Url) -> bool {
         self.domain.is_empty()
             || self.domain.iter().any(|space| match url.join(space) {
-                Ok(space) => space.origin() == url.origin() && url.path().starts_with(space.path()),
+                Ok(space) => Origin::same(&space, url) && url.path().starts_with(space.path()),
                 Err(_) => false,
             })
     }

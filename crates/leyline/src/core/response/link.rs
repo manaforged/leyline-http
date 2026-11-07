@@ -146,20 +146,8 @@ impl<'a> Parser<'a> {
     }
 
     fn quoted(&mut self) -> String {
-        self.pos += 1;
-        let mut out = String::new();
-        let mut chars = self.src[self.pos..].char_indices();
-        while let Some((offset, c)) = chars.next() {
-            match c {
-                '"' => {
-                    self.pos += offset + 1;
-                    return out;
-                }
-                '\\' => out.extend(chars.next().map(|(_, escaped)| escaped)),
-                other => out.push(other),
-            }
-        }
-        self.pos = self.src.len();
+        let (out, used) = crate::util::unquote(&self.src[self.pos..]);
+        self.pos += used;
         out
     }
 

@@ -1,10 +1,10 @@
 use super::Draft;
-use crate::core::Result;
 use crate::core::config::{Origin, Proxy};
 use crate::core::proxy_pool::{Lease, ProxyPool};
 use crate::core::response::Response;
 use crate::core::retry::Retry;
 use crate::core::session::Session;
+use crate::error::Result;
 
 pub(super) struct Route<'a> {
     session: &'a Session,
@@ -22,7 +22,9 @@ impl<'a> Route<'a> {
         attempt: &Draft,
         policy: &'a Retry,
     ) -> Self {
-        let pool = session.proxy_pool().filter(|_| attempt.proxy.is_none());
+        let pool = session
+            .proxy_pool()
+            .filter(|_| attempt.carry.proxy.is_none());
         let origin = pool.and_then(|_| Origin::of(&url));
         Self {
             session,
@@ -36,14 +38,14 @@ impl<'a> Route<'a> {
 
     pub(super) async fn send(&mut self, mut this: Box<Draft>) -> Result<Response> {
         let lease = self.lease(&mut this);
-        let used = self.used_proxy(this.proxy.as_ref());
+        let used = self.used_proxy(this.carry.proxy.as_ref());
         crate::trace::note_proxy(used.as_deref());
         let leased = match &lease {
             Some(lease) => Some(lease.session(self.session)?),
             None => None,
         };
         let session = leased.as_ref().unwrap_or(self.session);
-        crate::trace::note_browser(session);
+        crate::trace::note_browser(|| session.browser());
         let mut result = session.attempt(this).await;
         match result.as_mut() {
             Ok(response) => {
@@ -62,7 +64,7 @@ impl<'a> Route<'a> {
 
     fn lease(&self, this: &mut Draft) -> Option<Box<Lease>> {
         let lease = Box::new(self.pool?.lease(self.origin.as_ref(), self.last)?);
-        this.proxy = Some(lease.config().clone());
+        this.carry.proxy = Some(lease.config().clone());
         Some(lease)
     }
 

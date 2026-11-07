@@ -3,11 +3,20 @@ use std::sync::atomic::Ordering;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::error::ErrorCode;
+
+use crate::h2::H2Error;
 use crate::h2::stream_state::{StreamEvent, StreamState};
 
 use super::*;
-use crate::core::deadline::Tick;
+use crate::deadline::Tick;
+use crate::h2::frame::U31_MAX;
+
+pub(super) enum Admit {
+    Open,
+    Defer,
+    Refuse(H2Error),
+}
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn run(mut self) -> Result<(), H2Error> {
@@ -29,12 +38,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         while let Some(cmd) = self.pending.pop_front() {
             if let Some(sink) = cmd.into_sink() {
-                send_err_to_sink(sink, final_err.duplicate());
+                sink.fail(final_err.duplicate());
             }
         }
         while let Ok(cmd) = self.command_rx.try_recv() {
             if let Some(sink) = cmd.into_sink() {
-                send_err_to_sink(sink, final_err.duplicate());
+                sink.fail(final_err.duplicate());
             }
         }
         result
@@ -44,7 +53,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let mut sweep_tick = Tick::every(SWEEP_PERIOD);
         let mut flush_tick = Tick::every(FLUSH_PERIOD);
         loop {
-            if self.shutdown_started && self.streams.is_empty() && self.goaway_drained()? {
+            if self.shutdown_started && self.streams.is_empty() && self.goaway_drained() {
                 return Ok(());
             }
             if self.read_buffered_frames().await?.is_break() {
@@ -66,16 +75,16 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     fn run_ready_work(&mut self) -> Result<(), H2Error> {
-        self.take_queued_commands()?;
+        self.take_queued_commands();
         self.take_queued_body_chunks()?;
-        self.drain_pending()?;
-        self.try_drain_pending()?;
+        self.drain_pending();
+        self.try_drain_pending();
         Ok(())
     }
 
     fn after_event(&mut self, tick_fired: bool) -> Result<(), H2Error> {
-        self.take_queued_commands()?;
-        self.try_drain_pending()?;
+        self.take_queued_commands();
+        self.try_drain_pending();
         if tick_fired {
             self.check_ping_deadlines()?;
             self.sweep_cancelled_streams()?;
@@ -84,16 +93,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(super) fn on_command_received(
-        &mut self,
-        cmd: Option<DriverCommand>,
-    ) -> Result<(), H2Error> {
+    pub(super) fn on_command_received(&mut self, cmd: Option<DriverCommand>) {
         match cmd {
             Some(cmd) => self.on_command(cmd),
-            None => {
-                self.shutdown_started = true;
-                Ok(())
-            }
+            None => self.shutdown_started = true,
         }
     }
 
@@ -131,7 +134,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             });
         };
         self.on_inbound_frame(frame).await?;
-        self.drain_pending()?;
+        self.drain_pending();
         Ok(ControlFlow::Continue(()))
     }
 
@@ -158,9 +161,9 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             && (!self.writer.congested() || self.output.stalled())
     }
 
-    fn take_queued_commands(&mut self) -> Result<(), H2Error> {
-        while let Ok((ack_tx, deadline)) = self.ping_rx.try_recv() {
-            self.on_command(DriverCommand::Ping { ack_tx, deadline })?;
+    fn take_queued_commands(&mut self) {
+        while let Ok(ping) = self.ping_rx.try_recv() {
+            self.on_command(DriverCommand::Ping(ping));
         }
         for _ in 0..self.command_rx.len() {
             if !self.pending.is_empty() || self.writer.congested() {
@@ -169,9 +172,19 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let Ok(next) = self.command_rx.try_recv() else {
                 break;
             };
-            self.on_command(next)?;
+            self.on_command(next);
         }
-        Ok(())
+    }
+
+    pub(super) fn send_ping(&mut self, (ack_tx, deadline): Ping) {
+        self.ping_seq = self.ping_seq.wrapping_add(1);
+        let payload = self.ping_seq.to_be_bytes();
+        PingFrame {
+            ack: false,
+            payload,
+        }
+        .encode(self.writer.out());
+        self.pings.push_back((payload, ack_tx, deadline));
     }
 
     pub(super) fn sweep_cancelled_streams(&mut self) -> Result<(), H2Error> {
@@ -225,42 +238,23 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(super) fn reject_after_goaway(&self) -> Result<(), H2Error> {
+    pub(super) fn admit(&self) -> Admit {
         if self.peer_goaway_last_stream.is_some() || self.output.stalled() {
-            return Err(H2Error::Stream {
-                stream_id: 0,
-                code: ErrorCode::RefusedStream,
-            });
+            return Admit::Refuse(H2Error::NotSent);
         }
-        Ok(())
-    }
-
-    pub(super) fn peer_ready(&self) -> bool {
-        self.peer_greeted
-    }
-
-    pub(super) fn check_stream_capacity(&self) -> Result<(), H2Error> {
         if let Some(limit) = self.peer_settings.max_concurrent_streams
             && self.streams.len() >= limit as usize
             && self.active_stream_count() >= limit
         {
-            return Err(H2Error::Connection {
-                code: ErrorCode::RefusedStream,
-                reason: "MAX_CONCURRENT_STREAMS exceeded".into(),
-            });
+            return Admit::Defer;
         }
-        if self.next_stream_id > 0x7FFF_FFFF {
-            return Err(H2Error::Connection {
+        if self.next_stream_id > U31_MAX {
+            return Admit::Refuse(H2Error::Connection {
                 code: ErrorCode::NoError,
                 reason: "stream ID space exhausted".into(),
             });
         }
-        Ok(())
-    }
-
-    pub(super) fn admit_new_stream(&self) -> Result<(), H2Error> {
-        self.reject_after_goaway()?;
-        self.check_stream_capacity()
+        Admit::Open
     }
 
     pub(super) fn alloc_stream_id(&mut self) -> u32 {
@@ -279,40 +273,24 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         conn.min(stream)
     }
 
-    pub(super) fn park_stream(&mut self, stream_id: u32, pending: PendingSend) {
-        if let Some(actor) = self.streams.get_mut(stream_id) {
-            actor.pending_send = Some(pending);
-            if !self.buffered_pending.contains(&stream_id) {
-                self.buffered_pending.push_back(stream_id);
-            }
-        }
-    }
-
     pub(super) fn finish_remote(&mut self, stream_id: u32) -> Result<(), H2Error> {
         if self
             .streams
             .get(stream_id)
             .is_some_and(|actor| actor.response.finish().is_err() || actor.length_mismatch())
         {
-            self.reset_stream(
-                stream_id,
-                H2Error::Stream {
-                    stream_id,
-                    code: ErrorCode::ProtocolError,
-                },
-                ErrorCode::ProtocolError,
-            )?;
-            return Ok(());
+            return self.reset_protocol(stream_id);
         }
         let local_open = self
             .streams
             .get(stream_id)
             .is_some_and(|a| !a.state.is_closed());
         if local_open {
-            self.writer.write_frame(&RstStreamFrame {
+            RstStreamFrame {
                 stream_id,
                 error_code: ErrorCode::NoError,
-            })?;
+            }
+            .encode(self.writer.out());
             if let Some(actor) = self.streams.get_mut(stream_id) {
                 actor
                     .state
@@ -320,7 +298,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     .map_err(|error| map_state_err(stream_id, error))?;
                 actor.cancel_upload();
             }
-            self.buffered_pending.retain(|&id| id != stream_id);
+            self.streams.unpark(stream_id);
         }
         if let Some(actor) = self.streams.get_mut(stream_id)
             && !actor.stalled.is_empty()
@@ -332,44 +310,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(super) fn flush_stalled(&mut self) -> Result<(), H2Error> {
-        let mut drained = Vec::new();
-        for (sid, actor) in self.streams.iter_mut() {
-            let Some(ResponseSink::StreamingEx { body_tx, .. }) = actor.response_tx.as_ref() else {
-                continue;
-            };
-            while let Some(chunk) = actor.stalled.pop_front() {
-                self.stalled -= 1;
-                match body_tx.try_send(Ok(chunk)) {
-                    Ok(()) => {}
-                    Err(mpsc::error::TrySendError::Full(Ok(chunk))) => {
-                        actor.stalled.push_front(chunk);
-                        self.stalled += 1;
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-            if actor.stalled.is_empty() {
-                drained.push((sid, actor.remote_done));
-            }
-        }
-        for (sid, done) in drained {
+    pub(super) fn flush_stalled(&mut self) {
+        for (sid, done) in self.streams.flush_stalled() {
             if done {
                 self.complete_stream(sid);
             } else {
-                self.maybe_top_up_stream_window(sid)?;
+                self.maybe_top_up_stream_window(sid);
             }
         }
-        Ok(())
     }
 
     pub(super) fn complete_stream(&mut self, stream_id: u32) {
         if let Some(mut actor) = self.streams.remove(stream_id) {
-            self.stalled = self.stalled.saturating_sub(actor.stalled.len());
             actor.deliver_ok();
         }
-        self.buffered_pending.retain(|&s| s != stream_id);
     }
 
     pub(super) fn reset_stream(
@@ -384,20 +338,30 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .transition(StreamEvent::SendRstStream(code))
                 .map_err(|error| map_state_err(stream_id, error))?;
         }
-        self.writer.write_frame(&RstStreamFrame {
+        RstStreamFrame {
             stream_id,
             error_code: code,
-        })?;
+        }
+        .encode(self.writer.out());
         self.fail_stream(stream_id, err);
         Ok(())
     }
 
+    pub(super) fn reset_protocol(&mut self, stream_id: u32) -> Result<(), H2Error> {
+        self.reset_stream(
+            stream_id,
+            H2Error::Stream {
+                stream_id,
+                code: ErrorCode::ProtocolError,
+            },
+            ErrorCode::ProtocolError,
+        )
+    }
+
     pub(super) fn fail_stream(&mut self, stream_id: u32, err: H2Error) {
         if let Some(mut actor) = self.streams.remove(stream_id) {
-            self.stalled = self.stalled.saturating_sub(actor.stalled.len());
             actor.deliver_err(err);
         }
-        self.buffered_pending.retain(|&s| s != stream_id);
     }
 
     pub(super) fn active_stream_count(&self) -> u32 {

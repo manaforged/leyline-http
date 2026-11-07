@@ -2,9 +2,9 @@
     clippy::unwrap_used,
     reason = "test/example harness: unwrap doubles as the assertion - a failed helper panics with the test location"
 )]
-use leyline::pool::{H1Target, Pool, send_request_h1_pooled};
-use leyline::profile::ProfileRegistry;
-use leyline::tls::FingerprintConnector;
+use leyline::internals::pool::{Pool, send_request_h1_pooled};
+use leyline::internals::profile::ProfileRegistry;
+use leyline::internals::tls::FingerprintConnector;
 use leyline::{Browser, Platform};
 use std::sync::Arc;
 
@@ -20,22 +20,18 @@ const UNROUTABLE_URL: &str = "http://127.0.0.1:1/";
 async fn short_exchange(
     method: &str,
     headers: Vec<(String, String)>,
-) -> Result<leyline::pool::TransportResponse, leyline::Error> {
+) -> Result<leyline::internals::pool::TransportResponse, leyline::Error> {
     let pool = Arc::new(Pool::new());
     let connector = connector();
     let url = url::Url::parse(UNROUTABLE_URL).unwrap();
     send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        "127.0.0.1",
-        1,
         method,
         &url,
         headers,
         leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         false,
     )
     .await

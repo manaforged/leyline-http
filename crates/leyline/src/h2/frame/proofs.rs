@@ -1,4 +1,4 @@
-use super::{FRAME_HEADER_LEN, FrameHeader};
+use super::{FRAME_HEADER_LEN, FrameHeader, U31_MAX};
 
 #[kani::proof]
 fn a_frame_header_round_trips_and_ignores_the_reserved_bit() {
@@ -19,6 +19,6 @@ fn a_frame_header_round_trips_and_ignores_the_reserved_bit() {
         assert_eq!(got.length, sent.length);
         assert_eq!(got.frame_type, sent.frame_type);
         assert_eq!(got.flags, sent.flags);
-        assert_eq!(got.stream_id, sent.stream_id & 0x7FFF_FFFF);
+        assert_eq!(got.stream_id, sent.stream_id & U31_MAX);
     }
 }

@@ -1,8 +1,8 @@
 use super::super::helpers::header_values;
 use super::journey::Journey;
 use crate::core::digest::{self, Challenge, DigestAuth};
-use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
+use crate::error::{Error, Kind, Result};
 use crate::util::request_target;
 
 pub(super) struct DigestLeg {
@@ -102,7 +102,7 @@ impl super::Session {
         if digest.is_some() {
             return None;
         }
-        let version = self.inner.bearer.as_ref()?.version()?;
+        let version = self.inner.inputs.bearer.as_ref()?.version()?;
         if journey.tainted
             || !self.bearer_in_scope(&journey.url)
             || journey

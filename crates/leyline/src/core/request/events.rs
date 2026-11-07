@@ -9,10 +9,10 @@ use futures_util::{Stream, StreamExt};
 use http::{Method, StatusCode, header};
 
 use super::{Draft, RequestBuilder};
-use crate::core::body::Body;
-use crate::core::error::{Error, Kind, Result};
 use crate::core::retry::{Retry, RetryPlan};
 use crate::core::session::Session;
+use crate::error::{Error, Kind, Result};
+use crate::wire::Body;
 
 mod parser;
 use parser::Parser;
@@ -96,10 +96,8 @@ impl RequestBuilder {
                 "events requires a GET request without a body",
             ));
         }
-        let url = self.prepare()?;
-        self.draft.url = Some(url);
-        self.draft.query_params.clear();
-        self.draft.stream_response = true;
+        self.prepare_in_place()?;
+        self.draft.carry.stream_response = true;
         self.draft
             .headers
             .set(header::ACCEPT, "text/event-stream")?;
@@ -206,8 +204,6 @@ impl Source {
         let mut draft = self
             .request
             .again(Body::default(), self.request.headers.clone());
-        draft.timeouts = self.request.timeouts;
-        draft.retry_policy = self.request.retry_policy.clone();
         if self.parser.last_id.is_empty() {
             draft.headers.remove_all("last-event-id");
         } else {
@@ -226,12 +222,9 @@ impl Source {
         }
         response.error_for_status()?;
         if response.status() != StatusCode::OK
-            || !response.header("content-type").is_some_and(|value| {
-                value
-                    .split(';')
-                    .next()
-                    .is_some_and(|media| media.trim().eq_ignore_ascii_case("text/event-stream"))
-            })
+            || !response
+                .media_type()
+                .is_some_and(|media| media.eq_ignore_ascii_case("text/event-stream"))
         {
             return Err(Error::new(Kind::Request)
                 .with_message("SSE response is not text/event-stream with status 200"));
@@ -265,18 +258,20 @@ impl Source {
     async fn reconnect(&mut self, error: Error) -> Result<()> {
         let result = Err(error);
         let retry = crate::util::lock(&self.settings).retry.clone();
-        let plan = retry.plan(&result, self.reconnects, true, || true);
+        let plan = retry.plan(&result, self.reconnects);
         let RetryPlan::Backoff(backoff) = plan else {
-            return result.map(|_: crate::Response| ());
+            return result.map(|_: crate::core::response::Response| ());
         };
         let wait = self.parser.wait.max(backoff);
         if !retry.allows_wait(wait) {
-            return result.map(|_: crate::Response| ());
+            return result.map(|_: crate::core::response::Response| ());
         }
         let Some(at) = tokio::time::Instant::now().checked_add(wait) else {
-            return result.map(|_: crate::Response| ()).map_err(|error| {
-                error.with_message("event reconnect wait exceeds the supported clock range")
-            });
+            return result
+                .map(|_: crate::core::response::Response| ())
+                .map_err(|error| {
+                    error.with_message("event reconnect wait exceeds the supported clock range")
+                });
         };
         self.body = None;
         self.bytes = Bytes::new();

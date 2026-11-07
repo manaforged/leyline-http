@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 
 use serde::Deserialize;
 
-use crate::tcp::TcpProfile;
+use super::TcpProfile;
 
 #[derive(Deserialize)]
 struct PlatformData {
@@ -136,16 +136,14 @@ impl Platform {
             .map(|data| data.accept_language.as_str())
     }
 
-    bench_pub! {
-        fn identity_key(&self) -> &'static str {
-            match self {
-                Self::Windows => "windows",
-                Self::MacOS => "macos",
-                Self::Linux => "linux",
-                Self::Android => "android",
-                Self::IOS => "ios",
-                Self::Host => Self::detect_host().identity_key(),
-            }
+    pub(crate) fn identity_key(&self) -> &'static str {
+        match self {
+            Self::Windows => "windows",
+            Self::MacOS => "macos",
+            Self::Linux => "linux",
+            Self::Android => "android",
+            Self::IOS => "ios",
+            Self::Host => Self::detect_host().identity_key(),
         }
     }
 }
@@ -157,7 +155,7 @@ impl std::fmt::Display for Platform {
 }
 
 impl std::str::FromStr for Platform {
-    type Err = crate::Error;
+    type Err = crate::error::Error;
 
     fn from_str(id: &str) -> Result<Self, Self::Err> {
         PLATFORM_ALL

@@ -20,6 +20,6 @@ impl Session {
     }
 
     pub(crate) fn protocol_policy(&self) -> crate::core::Protocol {
-        self.inner.protocol_policy
+        self.inner.inputs.protocol_policy
     }
 }

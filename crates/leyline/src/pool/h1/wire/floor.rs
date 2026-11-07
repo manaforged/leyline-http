@@ -5,7 +5,7 @@ use leyline_bssl::ssl::{Ssl, SslStream, SslVerifyMode};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use crate::header_str::HeaderStr;
-use crate::pool::h1::parse::parse_head;
+use crate::wire::h1::parse_head;
 
 /// The least work an HTTP/1.1 GET over TLS can do with leyline's own encoder, parser and BoringSSL: the floor the full client is measured against.
 pub struct Floor {
@@ -15,9 +15,11 @@ pub struct Floor {
 }
 
 fn floor_ssl() -> io::Result<Ssl> {
-    let mut context = crate::profile::BrowserProfile::bare_shared()
-        .build_ssl_context(crate::TlsMinVersion::Tls12)
-        .map_err(|e| io::Error::other(e.to_string()))?;
+    let mut context = crate::tls::builder::ssl_context(
+        &crate::profile::BrowserProfile::bare_shared(),
+        crate::profile::TlsMinVersion::Tls12,
+    )
+    .map_err(|e| io::Error::other(e.to_string()))?;
     context.set_verify(SslVerifyMode::NONE);
     context
         .set_alpn_protos(crate::tls::alpn::HTTP11_WIRE)
@@ -76,7 +78,7 @@ impl Floor {
     }
 
     fn head_end(&self, filled: usize) -> Option<usize> {
-        memchr::memmem::find(&self.rx[..filled], b"\r\n\r\n")
+        find_header_end(&self.rx[..filled])
     }
 
     fn parse(&self, end: usize) -> Result<(u16, usize, usize), Error> {

@@ -2,10 +2,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use leyline::h2::H2Config;
-use leyline::pool::Pool;
-use leyline::profile::ProfileRegistry;
-use leyline::tls::FingerprintConnector;
+use leyline::internals::h2::H2Config;
+use leyline::internals::pool::Pool;
+use leyline::internals::profile::ProfileRegistry;
+use leyline::internals::tls::FingerprintConnector;
 use leyline::{Browser, Platform};
 use tokio::net::TcpListener;
 
@@ -60,7 +60,10 @@ async fn coalesced_h2_connect_failure_shares_one_retry() {
         let h2_config = h2_config.clone();
         let host = host.clone();
         handles.push(tokio::spawn(async move {
-            leyline::pool::checkout_handle(&pool, &connector, &h2_config, &host, port, None).await
+            leyline::internals::pool::checkout_handle(
+                &pool, &connector, &h2_config, &host, port, None,
+            )
+            .await
         }));
     }
 
@@ -75,8 +78,12 @@ async fn coalesced_h2_connect_failure_shares_one_retry() {
         };
         assert!(
             matches!(
-                std::error::Error::source(&err).and_then(|s| s.downcast_ref::<leyline::TlsError>()),
-                Some(leyline::TlsError::HandshakeIo(_) | leyline::TlsError::Rejected(_))
+                std::error::Error::source(&err)
+                    .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>()),
+                Some(
+                    leyline::internals::TlsError::HandshakeIo(_)
+                        | leyline::internals::TlsError::Rejected(_)
+                )
             ),
             "coalescing must preserve the typed TLS handshake I/O failure, got {err:?}"
         );

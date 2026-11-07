@@ -17,8 +17,7 @@ static BRAND_JA4: LazyLock<HashMap<String, String>> =
 
 fn expected_ja4(browser: Browser) -> Option<String> {
     BRAND_JA4.get(browser.id()).cloned().or_else(|| {
-        browser
-            .branded_profile()
+        leyline::internals::branded_profile(browser)
             .tls
             .fingerprint
             .as_ref()
@@ -105,7 +104,7 @@ async fn live_wire_audit_every_profile() {
             .build()
             .unwrap();
         let json = peet(&session).await;
-        let profile = browser.branded_profile();
+        let profile = leyline::internals::branded_profile(browser);
 
         let wire_ja4 = json["tls"]["ja4"].as_str().unwrap_or("?");
         let wire_ja3 = json["tls"]["ja3_hash"].as_str().unwrap_or("?");
@@ -173,7 +172,7 @@ async fn live_ja4_exact_match_chrome149() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome149).unwrap();
     let expected = profile
         .tls
@@ -196,7 +195,7 @@ async fn live_ja4_exact_match_chrome148() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome148).unwrap();
     let expected = profile
         .tls
@@ -219,7 +218,7 @@ async fn live_ja4_exact_match_chrome147() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let expected = profile
         .tls
@@ -242,7 +241,7 @@ async fn live_ja4_exact_match_chrome146() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome146).unwrap();
     let expected = profile
         .tls
@@ -265,7 +264,7 @@ async fn live_ja4_exact_match_chrome145() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome145).unwrap();
     let expected = profile
         .tls
@@ -288,7 +287,7 @@ async fn live_ja4_exact_match_firefox150() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Firefox150).unwrap();
     let expected = profile
         .tls
@@ -311,7 +310,7 @@ async fn live_ja4_exact_match_firefox151() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Firefox151).unwrap();
     let expected = profile
         .tls
@@ -334,7 +333,7 @@ async fn live_ja4_exact_match_firefox152() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Firefox152).unwrap();
     let expected = profile
         .tls
@@ -358,7 +357,7 @@ async fn live_ja4_exact_match_safari18() {
     let json = peet(&session).await;
     let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Safari18).unwrap();
     let expected = profile
         .tls
@@ -428,7 +427,7 @@ async fn live_h2_akamai_every_profile() {
             .expect("no http2.akamai_fingerprint");
         let observed = normalize_akamai(observed);
 
-        let profile = browser.branded_profile();
+        let profile = leyline::internals::branded_profile(browser);
         let expected = profile
             .h2
             .fingerprint
@@ -454,7 +453,7 @@ async fn live_chrome147_ciphers_match_profile_order() {
     let session = leyline::Session::from(Browser::default());
     let json = peet(&session).await;
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let expected_ciphers: Vec<&str> = profile.tls.ciphers.iter().map(|s| s.as_str()).collect();
 

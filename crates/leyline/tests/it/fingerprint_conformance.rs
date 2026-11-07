@@ -1,14 +1,17 @@
-use leyline::audit::{Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t};
-use leyline::fuzz::extension_ids;
-use leyline::h2::H2Config;
-use leyline::profile::ProfileRegistry;
-use leyline::{Browser, BrowserProfile, Platform};
+use leyline::internals::BrowserProfile;
+use leyline::internals::audit::{
+    ClientHello, Ja3Input, Ja4Input, compute_ja3, compute_ja4, compute_ja4t,
+};
+use leyline::internals::fuzz::extension_ids;
+use leyline::internals::h2::H2Config;
+use leyline::internals::profile::ProfileRegistry;
+use leyline::{Browser, Platform};
 
 fn expected_h2_for(profile: &BrowserProfile, platform: Platform) -> Option<&str> {
     profile
         .h2
         .platforms
-        .get(platform.identity_key())
+        .get(leyline::internals::identity_key(platform))
         .and_then(|over| over.fingerprint.as_ref())
         .and_then(|fp| fp.akamai.as_deref())
         .or_else(|| {
@@ -72,18 +75,19 @@ fn fingerprint_conformance() {
         rows.push(gated(
             &name,
             "Akamai-H2",
-            &h2.akamai_fingerprint(),
+            &akamai(&h2),
             p.h2.fingerprint.as_ref().and_then(|f| f.akamai.as_deref()),
         ));
         for plat in ALL_PLATFORMS {
-            if p.h2.platforms.contains_key(plat.identity_key()) {
+            if p.h2
+                .platforms
+                .contains_key(leyline::internals::identity_key(plat))
+            {
                 let resolved = p.h2.resolve_for_platform(plat).expect("resolve");
-                let fp = H2Config::from_profile(&resolved)
-                    .expect("valid override")
-                    .akamai_fingerprint();
+                let fp = akamai(&H2Config::from_profile(&resolved).expect("valid override"));
                 rows.push(gated(
                     &name,
-                    &format!("Akamai-H2 [{}]", plat.identity_key()),
+                    &format!("Akamai-H2 [{}]", leyline::internals::identity_key(plat)),
                     &fp,
                     expected_h2_for(p, plat),
                 ));
@@ -95,9 +99,8 @@ fn fingerprint_conformance() {
             ciphers: &p.tls.ciphers,
             sigalgs: &p.tls.sigalgs,
             extension_ids: &ext,
-            tls_version: "1.3",
             has_sni: true,
-            alpn: "h2",
+            hello: ClientHello::TcpH2,
         });
         rows.push(if p.tls.extension_permutation.is_some() {
             gated(
@@ -151,7 +154,7 @@ fn fingerprint_conformance() {
 
         #[cfg(feature = "http3")]
         {
-            let detail = match leyline::H3Config::from_profile(p) {
+            let detail = match leyline::internals::H3Config::from_profile(p) {
                 Ok(_) => "[h3] table → H3Config; no QUIC-capture golden".to_string(),
                 Err(_) => "no [h3] table (HTTP/3 unsupported)".to_string(),
             };
@@ -286,4 +289,12 @@ fn render(rows: &[Row]) -> String {
             .expect("writing to a String cannot fail");
     }
     s
+}
+
+fn akamai(h2: &H2Config) -> String {
+    leyline::internals::profile::akamai_fingerprint(
+        &h2.settings,
+        h2.initial_connection_window_size,
+        &h2.pseudo_order,
+    )
 }

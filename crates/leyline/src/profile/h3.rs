@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use serde::Deserialize;
 
-use crate::profile::TlsProfile;
+use crate::profile::{Carrier, TlsProfile};
 
 const LOCAL_TRANSPORT_PARAMS: [u64; 14] = [
     0x01, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0e, 0x0f, 0x20,
@@ -13,14 +13,9 @@ const INITIAL_SOURCE_CONNECTION_ID: u64 = 0x0f;
 const HTTP2_RESERVED_SETTINGS: [u64; 4] = [0x02, 0x03, 0x04, 0x05];
 const MAX_VARINT: u64 = (1 << 62) - 1;
 const MIN_INITIAL_DATAGRAM_SIZE: u16 = 1200;
+#[cfg(feature = "http3")]
+const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x06;
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[cfg_attr(
     not(any(feature = "http3", feature = "bench-internals")),
     expect(
@@ -76,13 +71,6 @@ pub struct H3Profile {
     pub tls: Option<TlsProfile>,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(untagged)]
 #[non_exhaustive]
@@ -91,13 +79,6 @@ pub enum H3ConnectionIdLength {
     Weighted { weights: Vec<(usize, u32)> },
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -108,13 +89,6 @@ pub enum H3Order {
     Rotate,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -124,13 +98,6 @@ pub enum H3CryptoSplit {
     Even,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -140,13 +107,6 @@ pub enum H3CryptoReorder {
     SniMidpoint,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -158,13 +118,6 @@ pub struct H3Grease {
     pub value_bits: u32,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -183,13 +136,6 @@ pub struct H3TransportParam {
     pub pinned: bool,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -200,13 +146,6 @@ pub struct H3VersionInformation {
     pub grease: Option<H3VersionGrease>,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
@@ -215,13 +154,6 @@ pub enum H3VersionGrease {
     Random,
 }
 
-#[cfg_attr(
-    feature = "bench-internals",
-    expect(
-        missing_docs,
-        reason = "profile schema mirrors the embedded TOML tables; variant and field names are the documentation"
-    )
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
@@ -235,6 +167,17 @@ pub struct H3Setting {
 }
 
 impl H3Profile {
+    #[cfg(feature = "http3")]
+    pub(crate) fn header_list_limit(&self) -> u64 {
+        self.settings
+            .iter()
+            .flatten()
+            .find(|setting| setting.id == Some(SETTINGS_MAX_FIELD_SECTION_SIZE))
+            .and_then(|setting| setting.value)
+            .or(self.max_field_section_size)
+            .unwrap_or(crate::wire::DEFAULT_MAX_HEADER_LIST_BYTES as u64)
+    }
+
     pub(crate) fn validate(&self) -> Result<(), String> {
         let legacy_settings = self.qpack_max_table_capacity.is_some()
             || self.qpack_blocked_streams.is_some()
@@ -250,11 +193,15 @@ impl H3Profile {
             validate_settings(settings)?;
         }
         if let Some(tls) = &self.tls {
-            tls.validate(true)?;
+            tls.validate(Carrier::Quic)?;
         }
         if let Some(params) = &self.transport_parameters {
             validate_transport_parameters(params)?;
         }
+        self.validate_initial()
+    }
+
+    fn validate_initial(&self) -> Result<(), String> {
         if let Some(size) = self.initial_datagram_size
             && !(MIN_INITIAL_DATAGRAM_SIZE..=self.max_udp_payload_size).contains(&size)
         {

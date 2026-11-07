@@ -6,8 +6,10 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use leyline::tls::{FingerprintConnector, Resolver};
-use leyline::{BrowserProfile, Platform, Tls, TlsError};
+use leyline::Resolver;
+use leyline::internals::tls::{AlpnPlan, FingerprintConnector};
+use leyline::internals::{BrowserProfile, NetError, TlsError};
+use leyline::{Platform, Tls};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
@@ -206,7 +208,7 @@ async fn native_system_trust_preserves_custom_ca_hostname_and_pins() {
         }
         let addr = spawn_tls_server(&generated).await;
         let result = connector_with_trust(trust, addr)
-            .connect(host, 443, None)
+            .connect(host, 443, None, AlpnPlan::Browser)
             .await;
         match expected {
             "ok" => assert!(result.is_ok(), "{host}: {:?}", result.err()),
@@ -224,7 +226,7 @@ async fn pinned_cert_still_accepts_matching_hostname() {
     let _ = r#gen.leaf_der;
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
-        .connect("wrong.example", 443, None)
+        .connect("wrong.example", 443, None, AlpnPlan::Browser)
         .await;
     assert!(
         res.is_ok(),
@@ -238,7 +240,7 @@ async fn pinned_cert_rejects_mismatched_hostname() {
     let r#gen = generate_chain("wrong.example", San::Dns("wrong.example"), Usage::Any);
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
-        .connect("right.example", 443, None)
+        .connect("right.example", 443, None, AlpnPlan::Browser)
         .await;
     let err = res.err().expect("hostname mismatch must fail");
     assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
@@ -254,7 +256,7 @@ async fn default_verifier_reports_hostname_mismatch() {
         .ca_der(r#gen.ca_der.clone());
 
     let err = connector_with_trust(trust, addr)
-        .connect("right.example", 443, None)
+        .connect("right.example", 443, None, AlpnPlan::Browser)
         .await
         .err()
         .expect("hostname mismatch must fail");
@@ -266,7 +268,7 @@ async fn pinned_cert_accepts_matching_ip_san() {
     let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"), Usage::Any);
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
-        .connect("127.0.0.1", 443, None)
+        .connect("127.0.0.1", 443, None, AlpnPlan::Browser)
         .await;
     assert!(
         res.is_ok(),
@@ -280,7 +282,7 @@ async fn pinned_cert_rejects_mismatched_ip() {
     let r#gen = generate_chain("127.0.0.1", San::Ip("127.0.0.1"), Usage::Any);
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
-        .connect("127.0.0.2", 443, None)
+        .connect("127.0.0.2", 443, None, AlpnPlan::Browser)
         .await;
     let err = res.err().expect("IP mismatch must fail");
     assert!(matches!(err, TlsError::Hostname(_)), "got {err:?}");
@@ -293,7 +295,7 @@ async fn certificate_and_pinning_failures_are_permanent() {
     let addr = spawn_tls_server(&r#gen).await;
     let trust = Tls::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
-        .connect("right.example", 443, None)
+        .connect("right.example", 443, None, AlpnPlan::Browser)
         .await
         .err()
         .expect("untrusted chain must fail");
@@ -306,7 +308,7 @@ async fn certificate_and_pinning_failures_are_permanent() {
         .ca_der(r#gen.ca_der.clone())
         .pin_sha256([0; 32]);
     let err = connector_with_trust(trust, addr)
-        .connect("right.example", 443, None)
+        .connect("right.example", 443, None, AlpnPlan::Browser)
         .await
         .err()
         .expect("wrong pin must fail");
@@ -321,11 +323,14 @@ async fn tcp_connect_failure_is_retryable() {
 
     let trust = Tls::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
-        .connect("offline.example", 443, None)
+        .connect("offline.example", 443, None, AlpnPlan::Browser)
         .await
         .err()
         .expect("closed listener must reject the TCP connection");
-    assert!(matches!(err, TlsError::TcpConnect(_)), "got {err:?}");
+    assert!(
+        matches!(err, TlsError::Net(NetError::TcpConnect(_))),
+        "got {err:?}"
+    );
 }
 
 #[tokio::test]
@@ -339,7 +344,7 @@ async fn handshake_transport_failure_is_retryable() {
 
     let trust = Tls::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
-        .connect("closed.example", 443, None)
+        .connect("closed.example", 443, None, AlpnPlan::Browser)
         .await
         .err()
         .expect("peer closing during the handshake must fail");
@@ -360,7 +365,7 @@ async fn handshake_protocol_failure_is_retryable() {
 
     let trust = Tls::new().env_roots(false).system_roots(false);
     let err = connector_with_trust(trust, addr)
-        .connect("plaintext.example", 443, None)
+        .connect("plaintext.example", 443, None, AlpnPlan::Browser)
         .await
         .err()
         .expect("a non-TLS peer must fail the handshake");
@@ -377,7 +382,7 @@ async fn pinned_verifier_rejects_a_leaf_not_issued_for_servers() {
     );
     let addr = spawn_tls_server(&r#gen).await;
     let res = connector(&r#gen, addr)
-        .connect("client.example", 443, None)
+        .connect("client.example", 443, None, AlpnPlan::Browser)
         .await;
     assert!(
         matches!(res, Err(TlsError::Certificate { .. })),

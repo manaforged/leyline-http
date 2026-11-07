@@ -1,7 +1,7 @@
 #[cfg(feature = "http3")]
 use crate::core::Protocol;
-use crate::core::error::{Error, Result};
 use crate::core::proxy_pool::ProxyPool;
+use crate::error::{Error, Result};
 use crate::profile::Platform;
 
 use super::super::proxy::InvalidEnvProxy;
@@ -26,13 +26,26 @@ impl SessionBuilder {
     }
 
     fn check_config(&mut self) -> Result<()> {
-        match self.config_error.take() {
-            Some(error) => Err(Error::config(error)),
-            None => Ok(()),
-        }
+        let Some(error) = self.config_error.take() else {
+            return Ok(());
+        };
+        Err(std::sync::Arc::try_unwrap(error).unwrap_or_else(|shared| {
+            Error::config(shared.message().unwrap_or_default().to_owned())
+        }))
     }
 
     fn check_proxy_pool(&self) -> Result<()> {
+        if self
+            .proxy_pool
+            .iter()
+            .flat_map(ProxyPool::configs)
+            .any(|config| config.pool.is_some())
+        {
+            return Err(Error::config(
+                "a Proxy::list or Proxy::identified entry must be one proxy, not another \
+                 Proxy::list or Proxy::identified",
+            ));
+        }
         if !self.impersonates()
             && self
                 .proxy_pool
@@ -91,12 +104,11 @@ impl SessionBuilder {
 
     #[cfg(not(feature = "socks"))]
     fn check_socks_feature(&self) -> Result<()> {
-        let socks = self.proxy_rules().find(|rule| {
-            rule.proxy()
-                .is_ok_and(|proxy| matches!(proxy.url().scheme(), "socks5" | "socks5h"))
-        });
+        let socks = self
+            .proxy_rules()
+            .find(|rule| rule.proxy().is_ok_and(|proxy| proxy.scheme().is_socks()));
         match socks {
-            Some(rule) => Err(crate::core::ProxyUrl::socks_feature_error(rule.url())),
+            Some(rule) => Err(Error::config(crate::net::proxy::socks_disabled(rule.url()))),
             None => Ok(()),
         }
     }

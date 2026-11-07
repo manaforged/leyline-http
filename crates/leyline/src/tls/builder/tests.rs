@@ -1,9 +1,3 @@
-#[cfg(any(
-    feature = "compression-gzip",
-    feature = "compression-deflate",
-    feature = "compression-zstd"
-))]
-use super::cert::CertDecompressor;
 #[cfg(feature = "compression-zstd")]
 use super::cert::Zstd;
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
@@ -17,12 +11,6 @@ use super::*;
 use leyline_bssl::ssl::CertificateCompressor;
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 use std::io::Write;
-#[cfg(any(
-    feature = "compression-gzip",
-    feature = "compression-deflate",
-    feature = "compression-zstd"
-))]
-use std::marker::PhantomData;
 
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 #[test]
@@ -33,9 +21,7 @@ fn zlib_decompressor_round_trips() {
     let compressed = enc.finish().unwrap();
 
     let mut out = Vec::new();
-    CertDecompressor(PhantomData::<Zlib>)
-        .decompress(&compressed, &mut out)
-        .unwrap();
+    Zlib.decompress(&compressed, &mut out).unwrap();
     assert_eq!(out, original);
 }
 
@@ -46,9 +32,7 @@ fn zstd_decompressor_round_trips() {
     let compressed = zstd::stream::encode_all(&original[..], 3).unwrap();
 
     let mut out = Vec::new();
-    CertDecompressor(PhantomData::<Zstd>)
-        .decompress(&compressed, &mut out)
-        .unwrap();
+    Zstd.decompress(&compressed, &mut out).unwrap();
     assert_eq!(out, original);
 }
 
@@ -61,19 +45,19 @@ fn decompression_bomb_is_capped() {
     let compressed = enc.finish().unwrap();
 
     let mut out = Vec::new();
-    let err = CertDecompressor(PhantomData::<Zlib>)
-        .decompress(&compressed, &mut out)
-        .unwrap_err();
+    let err = Zlib.decompress(&compressed, &mut out).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     assert!(out.len() <= MAX_CERT_DECOMPRESSED_BYTES + 8192);
 }
 
 #[test]
 fn unknown_min_tls_version_is_a_profile_error() {
-    profile_min_version(&Some("1.1".into())).expect_err("expected Err");
-    assert_eq!(
-        profile_min_version(&Some("1.2".into())).unwrap(),
-        Some(TlsMinVersion::Tls12)
-    );
-    assert_eq!(profile_min_version(&None).unwrap(), None);
+    let declared = |id: Option<&str>| {
+        let mut tls = crate::profile::BrowserProfile::bare_shared().tls.clone();
+        tls.min_tls_version = id.map(str::to_owned);
+        tls.min_version()
+    };
+    declared(Some("1.1")).expect_err("expected Err");
+    assert_eq!(declared(Some("1.2")).unwrap(), Some(TlsMinVersion::Tls12));
+    assert_eq!(declared(None).unwrap(), None);
 }

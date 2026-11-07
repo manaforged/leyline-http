@@ -1,8 +1,8 @@
 use http::{HeaderName, HeaderValue};
 
-use crate::core::error::{Error, Kind, Result};
+use crate::error::{Error, Kind, Result};
 use crate::profile::HeaderPosition;
-use crate::profile::preset::HeaderPair;
+use crate::wire::HeaderPair;
 
 #[expect(
     clippy::map_err_ignore,
@@ -37,7 +37,7 @@ pub(crate) struct HeaderList {
 impl std::fmt::Debug for HeaderList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list()
-            .entries(crate::trace::masked(
+            .entries(crate::util::masked(
                 self.inner
                     .iter()
                     .map(|entry| (entry.name.as_str(), entry.value.as_bytes())),

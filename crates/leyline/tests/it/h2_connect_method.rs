@@ -1,6 +1,6 @@
-use leyline::h2::config::PseudoOrder;
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::error::{ErrorCode, H2Error};
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::error::{ErrorCode, H2Error};
+use leyline::internals::profile::PseudoOrder;
 
 const CHROME_ORDER: [PseudoOrder; 4] = [
     PseudoOrder::Method,

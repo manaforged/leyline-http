@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 
-use super::BlockingTcp;
+use crate::net::BlockingTcp;
 
 pub(crate) enum TlsIo {
     Boring(leyline_bssl_tokio::SslStream<TcpStream>),
@@ -84,4 +84,10 @@ pub struct TlsStream {
     pub peer_cert_der: Option<Vec<u8>>,
     pub tls_version: Option<String>,
     pub tls_cipher: Option<String>,
+}
+
+impl TlsStream {
+    pub(crate) fn is_h2(&self) -> bool {
+        self.alpn.as_deref() == Some(super::alpn::H2)
+    }
 }

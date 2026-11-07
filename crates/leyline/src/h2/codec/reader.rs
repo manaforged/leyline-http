@@ -6,9 +6,7 @@ use bytes::{Buf, BytesMut};
 use tokio::io::AsyncRead;
 
 use crate::h2::H2Error;
-use crate::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
-
-use crate::h2::config::DEFAULT_MAX_FRAME_SIZE;
+use crate::h2::frame::{DEFAULT_MAX_FRAME_SIZE, FRAME_HEADER_LEN, Frame, FrameHeader};
 
 pub(super) const SLACK: usize = 512;
 pub(super) const BULK_AT: usize = 4 * 1024;
@@ -18,12 +16,6 @@ pub struct FrameReader {
     max_frame_size: u32,
     buf: BytesMut,
     header: Option<FrameHeader>,
-}
-
-impl Default for FrameReader {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl FrameReader {

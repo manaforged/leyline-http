@@ -1,8 +1,8 @@
 use url::Url;
 
 use super::Event;
-use crate::Error;
-use crate::core::ResponseTiming;
+use crate::error::Error;
+use crate::wire::ResponseTiming;
 
 pub(crate) struct Finish<'a> {
     pub(crate) method: &'a str,
@@ -11,16 +11,23 @@ pub(crate) struct Finish<'a> {
     pub(crate) streamed: bool,
 }
 
-pub(crate) fn summary(finish: &Finish<'_>, out: Result<&crate::Response, &Error>) {
+pub(crate) struct Answer<'a> {
+    pub(crate) url: &'a Url,
+    pub(crate) redirects: usize,
+    pub(crate) status: http::StatusCode,
+    pub(crate) version: http::Version,
+}
+
+pub(crate) fn summary(finish: &Finish<'_>, out: Result<Answer<'_>, &Error>) {
     super::with(|ctx| {
         let notes = super::notes::take(&ctx.notes);
         let parsed;
         let (url, redirects, status, version, outcome) = match out {
-            Ok(r) => (
-                Some(r.url()),
-                r.redirect_chain().len(),
-                Some(r.status()),
-                Some(r.version()),
+            Ok(answer) => (
+                Some(answer.url),
+                answer.redirects,
+                Some(answer.status),
+                Some(answer.version),
                 Ok(()),
             ),
             Err(e) => {

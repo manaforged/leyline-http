@@ -1,18 +1,16 @@
-use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use tokio::sync::{mpsc, oneshot};
 
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::error::ErrorCode;
 
-#[cfg(feature = "websocket")]
-use super::driver::PeerSettingsSnapshot;
+use crate::h2::H2Error;
+
 use super::driver::{CommandTx, DriverCommand, Head, ResponseSink};
-use crate::core::Body;
-use crate::core::BodyStream;
-use crate::core::ResponseMode;
-use crate::core::transport::{TransportBody, TransportResponse};
+use crate::wire::Body;
+use crate::wire::ResponseMode;
+use crate::wire::TransportResponse;
 
 #[derive(Clone)]
 pub struct H2Client {
@@ -30,8 +28,6 @@ pub(super) struct Shared {
     pub(super) closed: Arc<AtomicBool>,
     pub(super) unanswered_timeout: Arc<AtomicBool>,
     pub(super) streams: Arc<Streams>,
-    #[cfg(feature = "websocket")]
-    pub(super) peer_settings: Arc<PeerSettingsSnapshot>,
 }
 
 impl H2Client {
@@ -64,16 +60,13 @@ impl H2Client {
         self.shared.streams.open.load(Ordering::Relaxed)
     }
 
-    #[cfg_attr(
-        not(feature = "bench-internals"),
-        expect(dead_code, reason = "integration tests drive the client directly")
-    )]
+    #[cfg(feature = "bench-internals")]
     pub fn send_shared(
         &self,
         head: Arc<Head>,
         body: Body,
         mode: impl Into<ResponseMode>,
-    ) -> impl Future<Output = Result<TransportResponse, H2Error>> {
+    ) -> impl std::future::Future<Output = Result<TransportResponse, H2Error>> {
         self.send_reserved(head, body, mode.into(), None)
     }
 
@@ -85,10 +78,7 @@ impl H2Client {
         slot: Option<Slot>,
     ) -> Result<TransportResponse, H2Error> {
         if self.shared.closed.load(Ordering::Acquire) {
-            return Err(H2Error::Stream {
-                stream_id: 0,
-                code: ErrorCode::RefusedStream,
-            });
+            return Err(H2Error::NotSent);
         }
 
         let (response_tx, response_rx) = oneshot::channel::<Result<TransportResponse, H2Error>>();
@@ -112,21 +102,11 @@ impl H2Client {
         };
         self.shared.tx.send(cmd).await.map_err(|e| {
             tracing::debug!(error = %e, "h2 driver command channel closed");
-            H2Error::Stream {
-                stream_id: 0,
-                code: ErrorCode::RefusedStream,
-            }
+            H2Error::NotSent
         })?;
 
         match response_rx.await {
-            Ok(Ok(mut resp)) => {
-                if let Some(rx) = stream_body_rx
-                    && mode.keeps_stream(resp.status.as_u16())
-                {
-                    resp.body = TransportBody::Streaming(Box::new(BodyStream::new(rx)));
-                }
-                Ok(resp)
-            }
+            Ok(Ok(resp)) => Ok(resp.streamed(mode, stream_body_rx)),
             Ok(Err(e)) => Err(e),
             Err(_) => Err(H2Error::Connection {
                 code: ErrorCode::NoError,
@@ -176,6 +156,9 @@ impl Drop for Slot {
         self.0.reserved.fetch_sub(1, Ordering::AcqRel);
     }
 }
+
+pub(crate) const PRE_SETTINGS_STREAM_CAPACITY: usize = 100;
+pub(crate) const UNLIMITED_STREAM_CAPACITY: usize = 1000;
 
 pub(crate) struct Streams {
     pub(super) open: AtomicUsize,

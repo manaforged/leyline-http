@@ -2,7 +2,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use super::{AUTHORIZATION, SessionBuilder};
-use crate::core::Result;
+use crate::error::Result;
 use crate::header_str::HeaderStr;
 
 mod refresh;

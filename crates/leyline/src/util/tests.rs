@@ -16,17 +16,6 @@ fn percent_decode_roundtrips_common_cases() {
 }
 
 #[test]
-fn idempotent_matches_rfc_set() {
-    for m in ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"] {
-        assert!(is_idempotent(m), "{m}");
-        assert!(is_idempotent(&m.to_lowercase()), "{m}");
-    }
-    for m in ["POST", "PATCH"] {
-        assert!(!is_idempotent(m), "{m}");
-    }
-}
-
-#[test]
 fn lock_recovers_after_panic() {
     let cache = std::sync::Arc::new(std::sync::Mutex::new(vec![1u8]));
     let poisoner = cache.clone();

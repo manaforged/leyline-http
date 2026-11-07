@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
 use crate::audit::Fingerprint;
-use crate::core::{Error, Result};
+use crate::error::{Error, Result};
 
 mod headers;
 

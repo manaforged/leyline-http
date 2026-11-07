@@ -7,15 +7,15 @@ use futures_util::Stream;
 
 use super::route::Route;
 use super::{Draft, RequestBuilder};
-use crate::core::Result;
-use crate::core::body::{Body, BodyKind, BoxedStream};
-use crate::core::deadline::Deadline;
-use crate::core::error::{Error, Kind};
-use crate::core::headers::HeaderList;
 use crate::core::response::Response;
 use crate::core::retry::{Retry, RetryPlan};
 use crate::core::session::Session;
-use crate::core::transport::ResponseMode;
+use crate::deadline::Deadline;
+use crate::error::Result;
+use crate::error::{Error, Kind};
+use crate::wire::ResponseMode;
+use crate::wire::Scheme;
+use crate::wire::{Body, BodyKind, BoxedStream};
 
 impl RequestBuilder {
     /// Sends the request with retries and waits for the response headers.
@@ -32,11 +32,12 @@ impl RequestBuilder {
 
     fn respond(mut self) -> Result<impl Future<Output = Result<Response>> + Send + 'static> {
         let url = self.prepare()?;
-        let retry_policy = std::mem::take(&mut self.draft.retry_policy);
-        let deadline = self.session.deadline(self.draft.timeouts.as_ref());
-        let label = self.draft.label.take();
-        let status_errors = self.draft.status_errors;
-        let streamed = self.draft.stream_response;
+        let carry = &mut self.draft.carry;
+        let retry_policy = std::mem::take(&mut carry.retry_policy);
+        let label = carry.label.take();
+        let status_errors = carry.status_errors;
+        let streamed = carry.stream_response;
+        let deadline = self.session.deadline(carry.timeouts.as_ref());
         let (session, attempt) = self.into_attempt(deadline, Arc::clone(&url));
         Ok(async move {
             let method = attempt.method.clone();
@@ -73,41 +74,57 @@ impl RequestBuilder {
 
     fn into_attempt(self, deadline: Deadline, url: Arc<url::Url>) -> (Session, Box<Draft>) {
         let Self { session, mut draft } = self;
+        let carry = &draft.carry;
         draft.response = ResponseMode::new(
-            draft.stream_response
-                || draft.body_rules.max_body_size > session.body_rules().max_body_size,
-            draft
+            carry.stream_response,
+            carry
                 .status_errors
-                .then(|| Session::error_budget(&deadline, &draft.body_rules)),
+                .then(|| Session::error_budget(&deadline, &carry.body_rules)),
         );
         draft.url = Some(url);
         draft.deadline = deadline;
         (session, draft)
     }
 
-    pub(crate) fn prepare(&mut self) -> Result<Arc<url::Url>> {
+    pub(super) fn resolve(&mut self) -> Result<Arc<url::Url>> {
         if let Some(err) = self.draft.builder_error.take() {
             return Err(err);
         }
         let Some(mut url) = self.draft.url.take() else {
             return Err(Error::from(url::ParseError::EmptyHost));
         };
-        self.infer_from_content_type();
-
-        if !self.draft.query_params.is_empty() {
-            let mut pairs = Arc::make_mut(&mut url).query_pairs_mut();
-            for (k, v) in &self.draft.query_params {
-                pairs.append_pair(k, v);
-            }
+        let params = std::mem::take(&mut self.draft.query_params);
+        if !params.is_empty() {
+            Arc::make_mut(&mut url)
+                .query_pairs_mut()
+                .extend_pairs(&params);
         }
+        Ok(url)
+    }
+
+    pub(super) fn prepare_in_place(&mut self) -> Result<()> {
+        let url = self.prepare()?;
+        self.draft.url = Some(url);
+        Ok(())
+    }
+
+    pub(super) fn prepare(&mut self) -> Result<Arc<url::Url>> {
+        let url = self.resolve()?;
+        if Scheme::of(&url).is_none() {
+            return Err(Error::config(format!(
+                "unsupported URL scheme `{}`: requests need http or https",
+                url.scheme()
+            )));
+        }
+        self.infer_from_content_type();
 
         if let Some(encoding) = self.draft.compress {
             match &self.draft.body.0 {
                 BodyKind::Bytes(b) => {
-                    let compressed = encoding.encode(b)?;
+                    let compressed = super::compress::encode(encoding, b)?;
                     self.draft
                         .headers
-                        .set("content-encoding", encoding.header_value())?;
+                        .set("content-encoding", encoding.token())?;
                     self.draft.body = Body::from(compressed);
                 }
                 BodyKind::Empty => {}
@@ -137,7 +154,7 @@ async fn run_attempts(
     if retry_policy.is_none() {
         return (counted(route.send(attempt).await, 1), 1);
     }
-    let retryable_method = retry_policy.allows(attempt.method.as_str());
+    let retryable_method = retry_policy.allows(&attempt.method);
     let replay = attempt.body.replay();
     let mut rewind = Rewind::wrap(&mut attempt.body);
     let base_headers = attempt.headers.clone();
@@ -152,7 +169,7 @@ async fn run_attempts(
         let result = route.send(this).await;
 
         let body_retryable = || replay.is_some() || rewind.as_mut().is_some_and(Rewind::reclaim);
-        let sleep = match retry_policy.plan(&result, n, retryable_method, body_retryable) {
+        let sleep = match retry_policy.plan_resend(&result, n, retryable_method, body_retryable) {
             RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,
             plan => {
                 *exhausted = matches!(
@@ -179,37 +196,6 @@ async fn run_attempts(
             .and_then(Body::replay)
             .or_else(|| rewind.as_mut().and_then(Rewind::again))
             .unwrap_or_default();
-    }
-}
-
-impl Draft {
-    pub(super) fn again(&self, body: Body, headers: HeaderList) -> Box<Draft> {
-        Box::new(Draft {
-            method: self.method.clone(),
-            url: self.url.clone(),
-            preset: self.preset,
-            body,
-            headers,
-            query_params: Vec::new(),
-            timeouts: None,
-            builder_error: None,
-            stream_response: self.stream_response,
-            compress: None,
-            retry_policy: Retry::default(),
-            digest_auth: self.digest_auth.clone(),
-            proxy: self.proxy.clone(),
-            header_order: self.header_order.clone(),
-            preset_user: self.preset_user,
-            redirect: self.redirect.clone(),
-            initiator: self.initiator.clone(),
-            trusted_origin: self.trusted_origin.clone(),
-            label: None,
-            status_errors: self.status_errors,
-            body_rules: self.body_rules,
-            deadline: self.deadline,
-            response: self.response,
-            download: None,
-        })
     }
 }
 

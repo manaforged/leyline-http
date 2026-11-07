@@ -2,10 +2,11 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use url::{Host, Url};
 
-use crate::core::config::{Origin, normalize_host};
-use crate::core::registrable_domain;
+use crate::core::config::Origin;
 use crate::core::robots::normalize;
-use crate::html::WEB_SCHEMES;
+use crate::net::normalize_host;
+use crate::util::registrable_domain;
+use crate::wire::Scheme;
 
 mod queues;
 
@@ -166,7 +167,7 @@ impl Frontier {
 
     fn admit(&mut self, mut queued: Queued, redirect: bool) -> bool {
         queued.url.set_fragment(None);
-        let usable = WEB_SCHEMES.contains(&queued.url.scheme())
+        let usable = Scheme::of(&queued.url).is_some()
             && queued.url.as_str().len() <= MAX_URL_BYTES
             && queued.depth <= MAX_DEPTH;
         if !usable {
@@ -207,7 +208,7 @@ impl Frontier {
         self.bounds.iter().any(|bound| bound.holds(url))
     }
 
-    pub(super) fn validate(&self) -> crate::Result<()> {
+    pub(super) fn validate(&self) -> crate::error::Result<()> {
         let order: HashSet<_> = self.order.iter().collect();
         if order.len() != self.order.len()
             || order.len() != self.queues.len()
@@ -215,12 +216,12 @@ impl Frontier {
             || self.queues.values().flatten().any(|queued| {
                 queued.url.as_str().len() > MAX_URL_BYTES
                     || queued.depth > MAX_DEPTH
-                    || !WEB_SCHEMES.contains(&queued.url.scheme())
+                    || Scheme::of(&queued.url).is_none()
                     || !self.has_seen(&queued.url)
                     || (!queued.seed && !self.in_scope(&queued.url))
             })
         {
-            return Err(crate::Error::config(
+            return Err(crate::error::Error::config(
                 "checkpoint contains an inconsistent crawl frontier",
             ));
         }

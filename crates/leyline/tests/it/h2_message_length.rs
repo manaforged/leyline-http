@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
 use leyline::{Body, Session, Tls};
 use support::{
     read_preface, write_data, write_raw_headers, write_server_settings, write_settings_ack,

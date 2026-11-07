@@ -1,12 +1,15 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
-use crate::h2::config::{
-    DEFAULT_HEADER_TABLE_SIZE, DEFAULT_MAX_FRAME_SIZE, DEFAULT_WINDOW_SIZE, PseudoOrder,
+use crate::h2::error::ErrorCode;
+
+use crate::h2::H2Error;
+use crate::h2::frame::{
+    DEFAULT_HEADER_TABLE_SIZE, DEFAULT_MAX_FRAME_SIZE, MAX_FRAME_SIZE_LIMIT, U31_MAX,
 };
-use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::hpack;
 use crate::header_str::HeaderStr;
+use crate::profile::{DEFAULT_WINDOW_SIZE, PseudoOrder, SettingId};
 
 #[derive(Debug, Clone)]
 pub struct PeerSettings {
@@ -53,10 +56,13 @@ impl PeerSettings {
         })
     }
 
-    fn set(&mut self, id: u16, val: u32) -> Result<(), H2Error> {
+    fn set(&mut self, code: u16, val: u32) -> Result<(), H2Error> {
+        let Some(id) = SettingId::from_code(code) else {
+            return Ok(());
+        };
         match id {
-            0x1 => self.header_table_size = val,
-            0x2 => {
+            SettingId::HeaderTableSize => self.header_table_size = val,
+            SettingId::EnablePush => {
                 if val != 0 {
                     return Err(H2Error::Connection {
                         code: ErrorCode::ProtocolError,
@@ -65,9 +71,9 @@ impl PeerSettings {
                 }
                 self.enable_push = false;
             }
-            0x3 => self.max_concurrent_streams = Some(val),
-            0x4 => {
-                if val > 0x7FFF_FFFF {
+            SettingId::MaxConcurrentStreams => self.max_concurrent_streams = Some(val),
+            SettingId::InitialWindowSize => {
+                if val > U31_MAX {
                     return Err(H2Error::Connection {
                         code: ErrorCode::FlowControlError,
                         reason: "INITIAL_WINDOW_SIZE exceeds max".into(),
@@ -75,8 +81,8 @@ impl PeerSettings {
                 }
                 self.initial_window_size = val;
             }
-            0x5 => {
-                if !(DEFAULT_MAX_FRAME_SIZE..=16777215).contains(&val) {
+            SettingId::MaxFrameSize => {
+                if !(DEFAULT_MAX_FRAME_SIZE..=MAX_FRAME_SIZE_LIMIT).contains(&val) {
                     return Err(H2Error::Connection {
                         code: ErrorCode::ProtocolError,
                         reason: format!("MAX_FRAME_SIZE {val} out of range"),
@@ -84,8 +90,8 @@ impl PeerSettings {
                 }
                 self.max_frame_size = val;
             }
-            0x6 => self.max_header_list_size = Some(val),
-            0x8 => {
+            SettingId::MaxHeaderListSize => self.max_header_list_size = Some(val),
+            SettingId::EnableConnectProtocol => {
                 if val > 1 || (self.enable_connect_protocol && val == 0) {
                     return Err(H2Error::Connection {
                         code: ErrorCode::ProtocolError,
@@ -96,50 +102,63 @@ impl PeerSettings {
                 }
                 self.enable_connect_protocol = val == 1;
             }
-            _ => {}
+            SettingId::NoRfc7540Priorities => {}
         }
         Ok(())
     }
 }
 
-pub(crate) const CONTROL_FLOOD_THRESHOLD: u32 = 1000;
-pub(crate) const CONTROL_FLOOD_WINDOW: std::time::Duration = std::time::Duration::from_secs(10);
+/// The peer behavior a [`FloodGuard`] limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flood {
+    /// RST_STREAM frames.
+    RstStream,
+    /// SETTINGS frames that are not an ACK.
+    Settings,
+    /// PING, WINDOW_UPDATE on unknown streams, and empty CONTINUATION frames.
+    Control,
+}
 
+impl Flood {
+    fn label(self) -> &'static str {
+        match self {
+            Self::RstStream => "leyline::h2::rst_flood",
+            Self::Settings => "leyline::h2::settings_flood",
+            Self::Control => "leyline::h2::control_flood",
+        }
+    }
+
+    fn reason(self) -> &'static str {
+        match self {
+            Self::RstStream => "peer sent excessive RST_STREAMs",
+            Self::Settings => "peer sent excessive SETTINGS updates",
+            Self::Control => "peer sent excessive PING, WINDOW_UPDATE or empty CONTINUATION frames",
+        }
+    }
+}
+
+/// Counts one kind of peer frame in a sliding window and fails the connection past a threshold.
 #[doc(hidden)]
 #[derive(Debug, Clone)]
-pub struct RstFloodDetector {
+pub struct FloodGuard {
     events: VecDeque<Instant>,
     threshold: u32,
     window: std::time::Duration,
-    label: &'static str,
-    reason: &'static str,
+    flood: Flood,
 }
 
-impl RstFloodDetector {
-    pub fn new(threshold: u32, window: std::time::Duration) -> Self {
-        Self::with_label(
-            threshold,
-            window,
-            "leyline::h2::rst_flood",
-            "peer sent excessive RST_STREAMs",
-        )
-    }
-
-    pub fn with_label(
-        threshold: u32,
-        window: std::time::Duration,
-        label: &'static str,
-        reason: &'static str,
-    ) -> Self {
+impl FloodGuard {
+    /// Builds a guard that allows `threshold` frames of `flood` per `window`.
+    pub fn new(flood: Flood, threshold: u32, window: std::time::Duration) -> Self {
         Self {
             events: VecDeque::new(),
             threshold,
             window,
-            label,
-            reason,
+            flood,
         }
     }
 
+    /// Records one frame seen at `at` and fails once the window holds more than the threshold.
     pub fn record(&mut self, at: Instant) -> Result<(), H2Error> {
         while let Some(front) = self.events.front().copied() {
             if at.saturating_duration_since(front) > self.window {
@@ -153,7 +172,7 @@ impl RstFloodDetector {
         if self.events.len() > self.threshold as usize {
             tracing::warn!(
                 target: "leyline::h2::flood_guard",
-                detector = self.label,
+                detector = self.flood.label(),
                 events_in_window = self.events.len(),
                 threshold = self.threshold,
                 window_ms = self.window.as_millis() as u64,
@@ -161,14 +180,14 @@ impl RstFloodDetector {
             );
             return Err(H2Error::Connection {
                 code: ErrorCode::EnhanceYourCalm,
-                reason: self.reason.into(),
+                reason: self.flood.reason().into(),
             });
         }
         Ok(())
     }
 }
 
-pub(crate) type HeaderPair = crate::profile::preset::HeaderPair;
+use crate::wire::HeaderPair;
 
 pub type PseudoList<'a> = ([(&'a str, &'a str); 5], usize);
 
@@ -182,12 +201,18 @@ pub struct PseudoHeaders {
 }
 
 impl PseudoHeaders {
+    /// Returns whether `:method` is `method`, ignoring ASCII case.
+    pub fn method_is(&self, method: &http::Method) -> bool {
+        self.method.eq_ignore_ascii_case(method.as_str())
+    }
+
     pub fn build_pseudo_list<'a>(
         &'a self,
         pseudo_order: &[PseudoOrder; 4],
     ) -> Result<PseudoList<'a>, H2Error> {
-        let is_connect = self.method.eq_ignore_ascii_case("CONNECT") && self.protocol.is_none();
-        if self.method.eq_ignore_ascii_case("CONNECT") && self.authority.is_empty() {
+        let connect = self.method_is(&http::Method::CONNECT);
+        let is_connect = connect && self.protocol.is_none();
+        if connect && self.authority.is_empty() {
             return Err(H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: "CONNECT requires :authority".into(),

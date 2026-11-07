@@ -56,7 +56,7 @@ fn latest_covers_every_bundled_family() {
 
 #[test]
 fn latest_matches_the_builder_defaults() {
-    assert_eq!(Browser::chrome(), Browser::default_browser());
+    assert_eq!(Browser::chrome(), Browser::default());
     assert_eq!(Browser::edge().base(), Browser::chrome());
     assert_eq!(Browser::edge().version(), Browser::chrome().version());
 }
@@ -97,7 +97,8 @@ fn the_bare_profile_advertises_64_kib_http2_frames() {
     assert_eq!(
         profile
             .h2
-            .setting(crate::h2::config::SettingId::MaxFrameSize),
+            .settings
+            .get(crate::profile::SettingId::MaxFrameSize),
         Some(65_536)
     );
 }

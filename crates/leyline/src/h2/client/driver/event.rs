@@ -3,11 +3,11 @@ use std::task::{Context, Poll};
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::h2::error::H2Error;
+use crate::h2::H2Error;
 use crate::h2::frame::Frame;
 
 use super::*;
-use crate::core::deadline::Tick;
+use crate::deadline::Tick;
 
 enum Event {
     Written(Result<(), H2Error>),
@@ -80,7 +80,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 .body_chunks
                 .as_ref()
                 .is_some_and(|(tx, rx)| tx.strong_count() > 1 || !rx.is_empty());
-        let stalled = self.stalled > 0;
+        let stalled = self.streams.has_stalled();
         let write_first = self.pending.is_empty() || self.output.batch_full();
         poll_fn(|cx| {
             if sweep_tick.poll_tick(cx).is_ready() {
@@ -143,13 +143,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             Event::Read(frame) => {
                 return Ok(self.on_read(frame).await?.is_continue().then_some(false));
             }
-            Event::Command(cmd) => self.on_command_received(cmd)?,
+            Event::Command(cmd) => self.on_command_received(cmd),
             Event::BodyChunk(chunk) => self.on_body_chunk(chunk)?,
-            Event::Ping((ack_tx, deadline)) => {
-                self.on_command(DriverCommand::Ping { ack_tx, deadline })?
-            }
+            Event::Ping(ping) => self.on_command(DriverCommand::Ping(ping)),
             Event::Sweep => return Ok(Some(true)),
-            Event::FlushStalled => self.flush_stalled()?,
+            Event::FlushStalled => self.flush_stalled(),
         }
         Ok(Some(false))
     }

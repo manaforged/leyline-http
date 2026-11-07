@@ -9,8 +9,9 @@ run one single-threaded runtime per CPU core and give each runtime its own
 ## One runtime per core
 
 `SessionBuilder::run_per_core` starts one single-threaded runtime per CPU
-core, builds a session from the builder on each one, runs your future there,
-and returns each core's output. It blocks the calling thread until every core
+core, runs your future there with a session built from the builder, and returns
+each core's output. The cores share one cookie jar, cache, token and HSTS list;
+each core keeps its own connections, so connections never cross runtimes. It blocks the calling thread until every core
 finishes, so call it from `main` or a plain thread, not from async code.
 
 ```rust,no_run

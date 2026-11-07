@@ -1,5 +1,4 @@
 use crate::pool::Pool;
-use crate::pool::types::PooledConn;
 use crate::util::lock;
 
 #[derive(Default)]
@@ -8,23 +7,22 @@ pub(super) struct Counts {
     pub(super) idle: usize,
 }
 
-impl Counts {
-    fn add(&mut self, busy: bool) {
-        if busy {
-            self.busy += 1;
-        } else {
-            self.idle += 1;
-        }
-    }
-}
-
 impl Pool {
     pub(super) fn connection_counts(&self) -> Counts {
         let mut counts = Counts::default();
-        for conn in crate::util::read(&self.inner).values() {
-            match conn {
-                PooledConn::H1 { idle, .. } => counts.idle += idle.len(),
-                PooledConn::Mux { handle, .. } => counts.add(handle.open_streams() > 0),
+        {
+            let entries = crate::util::read(&self.conns.entries);
+            counts.idle += entries
+                .h1
+                .values()
+                .map(|entry| entry.idle.len())
+                .sum::<usize>();
+            for entry in entries.mux.values() {
+                if entry.handle.open_streams() > 0 {
+                    counts.busy += 1;
+                } else {
+                    counts.idle += 1;
+                }
             }
         }
         counts.busy += self.h1_checked_out();
@@ -32,7 +30,7 @@ impl Pool {
     }
 
     fn h1_checked_out(&self) -> usize {
-        lock(&self.h1_permits)
+        lock(&self.conns.h1_permits)
             .values()
             .map(|sem| {
                 self.config

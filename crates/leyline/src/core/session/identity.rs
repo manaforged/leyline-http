@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::error::{Error, Result};
+use crate::error::{Error, Result};
 use crate::profile::browser::digest;
 use crate::profile::{Browser, BrowserProfile, ChromiumBrand, Family, Platform};
 
@@ -78,11 +78,7 @@ impl TryFrom<SavedIdentity> for Identity {
     fn try_from(saved: SavedIdentity) -> Result<Self> {
         let source = match (saved.http, saved.tls, saved.profile) {
             (Some(http), Some(tls), None) => {
-                if http.family() != tls.family() {
-                    return Err(Error::config(format!(
-                        "saved identity tls {tls} is not the same family as {http}"
-                    )));
-                }
+                let (http, tls) = Browser::pair(http, tls)?;
                 Source::Browser { http, tls }
             }
             (None, None, Some(toml)) => {
@@ -179,22 +175,14 @@ impl Identity {
     }
 
     pub(crate) fn rotate_tls(self, tls: Browser) -> Result<Self> {
-        let tls = tls.base();
         let Source::Browser { http, .. } = self.source else {
             return Err(Error::config(
                 "tls rotate needs a browser identity, not a profile or plain one",
             ));
         };
-        if http.family() != tls.family() {
-            return Err(Error::config(format!(
-                "tls rotate {tls} is not the same family as {http}"
-            )));
-        }
+        let (http, tls) = Browser::pair(http, tls)?;
         Ok(Self {
-            source: Source::Browser {
-                http,
-                tls: tls.hello_rep(),
-            },
+            source: Source::Browser { http, tls },
             ..self
         })
     }
@@ -256,7 +244,7 @@ impl Session {
     /// Returns the language tags set on the session, if any.
     #[must_use]
     pub fn languages(&self) -> Option<&[String]> {
-        self.inner.languages.as_deref()
+        self.inner.inputs.languages.as_deref()
     }
 
     #[must_use]
@@ -270,7 +258,7 @@ impl Session {
             (None, None) => Identity::plain(inner.platform),
         };
         identity.brand = inner.shown_brand();
-        identity.languages = inner.languages.clone();
+        identity.languages = inner.inputs.languages.clone();
         identity
     }
 
@@ -295,7 +283,7 @@ impl Session {
 
 impl SessionInner {
     fn shown_brand(&self) -> Option<ChromiumBrand> {
-        match self.brand {
+        match self.inputs.brand {
             ChromiumBrand::Chrome => self
                 .browser
                 .filter(|browser| browser.family() == Family::Chrome)
@@ -327,9 +315,13 @@ impl SessionInner {
                 id.http()?.base(),
                 id.tls()?,
                 id.platform,
-                self.brand,
+                self.inputs.brand,
             )),
-            (None, Some(source)) => Some(source_profile_hash(source, self.platform, self.brand)),
+            (None, Some(source)) => Some(source_profile_hash(
+                source,
+                self.platform,
+                self.inputs.brand,
+            )),
             (None, None) => None,
         }
     }

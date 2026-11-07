@@ -1,6 +1,7 @@
-use leyline::h2::H2Config;
-use leyline::profile::ProfileRegistry;
-use leyline::{Browser, BrowserProfile, Platform, TlsContext, TlsMinVersion};
+use leyline::internals::BrowserProfile;
+use leyline::internals::h2::H2Config;
+use leyline::internals::profile::ProfileRegistry;
+use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
 
 const ALL_PLATFORMS: [Platform; 5] = [
     Platform::Windows,

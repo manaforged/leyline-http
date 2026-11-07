@@ -3,9 +3,10 @@ use bytes::Bytes;
 use super::huffman;
 use super::integer;
 use super::table::{self, DynamicTable, Typed};
-use crate::h2::config::DEFAULT_HEADER_TABLE_SIZE;
+use crate::h2::frame::DEFAULT_HEADER_TABLE_SIZE;
 
-const MAX_HEADER_LIST_SIZE: usize = 64 * 1024;
+type Indexed<'a> = (&'a [u8], &'a [u8], &'a Typed, usize);
+
 const MAX_TABLE_SIZE_UPDATES: u8 = 2;
 
 pub struct Decoder {
@@ -25,7 +26,7 @@ impl Decoder {
         Self {
             dynamic: DynamicTable::new(),
             max_table_size: DEFAULT_HEADER_TABLE_SIZE as usize,
-            max_header_list_size: MAX_HEADER_LIST_SIZE,
+            max_header_list_size: crate::wire::DEFAULT_MAX_HEADER_LIST_BYTES,
         }
     }
 
@@ -36,6 +37,10 @@ impl Decoder {
 
     pub fn set_max_header_list_size(&mut self, size: usize) {
         self.max_header_list_size = size;
+    }
+
+    pub(crate) fn max_header_list_size(&self) -> usize {
+        self.max_header_list_size
     }
 
     #[cfg(any(test, feature = "bench-internals"))]
@@ -67,14 +72,8 @@ impl Decoder {
             }
             size_updates_left = 0;
             if byte & 0x80 != 0 {
-                let (index, consumed) =
-                    integer::decode(byte, 7, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
-                pos += 1 + consumed;
-                if index == 0 {
-                    return Err("HPACK index 0 is invalid".into());
-                }
-                let (name, value, typed) = table::entry(index, &self.dynamic)
-                    .ok_or_else(|| format!("invalid index {index}"))?;
+                let (name, value, typed, consumed) = self.decode_indexed(src, pos)?;
+                pos += consumed;
                 self.account(&mut total_size, name.len() + value.len())?;
                 each(name, value, typed.clone());
                 continue;
@@ -91,6 +90,18 @@ impl Decoder {
             each(&header.name, &header.value, typed);
         }
         Ok(())
+    }
+
+    #[inline]
+    fn decode_indexed(&self, src: &[u8], pos: usize) -> Result<Indexed<'_>, String> {
+        let (index, consumed) =
+            integer::decode(src[pos], 7, &src[pos + 1..]).map_err(|e| e.to_string())?;
+        if index == 0 {
+            return Err("HPACK index 0 is invalid".into());
+        }
+        let (name, value, typed) =
+            table::entry(index, &self.dynamic).ok_or_else(|| format!("invalid index {index}"))?;
+        Ok((name, value, typed, 1 + consumed))
     }
 
     fn account(&self, total_size: &mut usize, len: usize) -> Result<(), String> {
@@ -117,7 +128,7 @@ impl Decoder {
         }
         *updates_left -= 1;
         let (new_size, consumed) =
-            integer::decode(src[pos], 5, &src[pos + 1..], 0).map_err(|e| e.to_string())?;
+            integer::decode(src[pos], 5, &src[pos + 1..]).map_err(|e| e.to_string())?;
         if new_size > self.max_table_size {
             return Err(format!(
                 "dynamic table size update {new_size} exceeds max {}",
@@ -139,8 +150,8 @@ impl Decoder {
         let byte = src[pos];
         let mut offset = pos + 1;
 
-        let (name_index, consumed) = integer::decode(byte & mask, prefix_bits, &src[offset..], 0)
-            .map_err(|e| e.to_string())?;
+        let (name_index, consumed) =
+            integer::decode(byte & mask, prefix_bits, &src[offset..]).map_err(|e| e.to_string())?;
         offset += consumed;
 
         let (name, typed_name) = if name_index == 0 {
@@ -182,19 +193,13 @@ fn parse_name(name: &[u8]) -> Option<http::HeaderName> {
     http::HeaderName::from_bytes(name).ok()
 }
 
-impl Default for Decoder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
     if src.is_empty() {
         return Err("unexpected end of string".into());
     }
 
     let huffman_encoded = src[0] & 0x80 != 0;
-    let (length, consumed) = integer::decode(src[0], 7, &src[1..], 0).map_err(|e| e.to_string())?;
+    let (length, consumed) = integer::decode(src[0], 7, &src[1..]).map_err(|e| e.to_string())?;
     let start = 1 + consumed;
     let end = start + length;
 

@@ -2,18 +2,13 @@ use super::*;
 
 #[test]
 fn header_tokens() {
-    assert_eq!(Encoding::Gzip.header_value(), "gzip");
-    assert_eq!(Encoding::Brotli.header_value(), "br");
-    assert_eq!(Encoding::Zstd.header_value(), "zstd");
-    assert_eq!(Encoding::Deflate.header_value(), "deflate");
+    assert_eq!(Encoding::Gzip.token(), "gzip");
+    assert_eq!(Encoding::Brotli.token(), "br");
+    assert_eq!(Encoding::Zstd.token(), "zstd");
+    assert_eq!(Encoding::Deflate.token(), "deflate");
 }
 
-#[cfg(any(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-zstd",
-    feature = "compression-deflate"
-))]
+#[cfg(leyline_any_codec)]
 fn sample() -> Vec<u8> {
     b"the quick brown fox jumps over the lazy dog. ".repeat(16)
 }
@@ -23,7 +18,7 @@ fn sample() -> Vec<u8> {
 fn gzip_roundtrips_and_shrinks() {
     use std::io::Read;
     let data = sample();
-    let enc = Encoding::Gzip.encode(&data).unwrap();
+    let enc = encode(Encoding::Gzip, &data).unwrap();
     assert!(enc.len() < data.len());
     let mut out = Vec::new();
     flate2::read::GzDecoder::new(&enc[..])
@@ -37,7 +32,7 @@ fn gzip_roundtrips_and_shrinks() {
 fn brotli_roundtrips_and_shrinks() {
     use std::io::Read;
     let data = sample();
-    let enc = Encoding::Brotli.encode(&data).unwrap();
+    let enc = encode(Encoding::Brotli, &data).unwrap();
     assert!(enc.len() < data.len());
     let mut out = Vec::new();
     brotli::Decompressor::new(&enc[..], 4096)
@@ -50,7 +45,7 @@ fn brotli_roundtrips_and_shrinks() {
 #[test]
 fn zstd_roundtrips_and_shrinks() {
     let data = sample();
-    let enc = Encoding::Zstd.encode(&data).unwrap();
+    let enc = encode(Encoding::Zstd, &data).unwrap();
     assert!(enc.len() < data.len());
     let out = zstd::decode_all(&enc[..]).unwrap();
     assert_eq!(out, data);
@@ -61,7 +56,7 @@ fn zstd_roundtrips_and_shrinks() {
 fn deflate_roundtrips_zlib_wrapped() {
     use std::io::Read;
     let data = sample();
-    let enc = Encoding::Deflate.encode(&data).unwrap();
+    let enc = encode(Encoding::Deflate, &data).unwrap();
     assert!(enc.len() < data.len());
     assert_eq!(enc.first(), Some(&0x78));
     let mut out = Vec::new();
@@ -71,12 +66,7 @@ fn deflate_roundtrips_zlib_wrapped() {
     assert_eq!(out, data);
 }
 
-#[cfg(not(all(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-zstd",
-    feature = "compression-deflate"
-)))]
+#[cfg(not(leyline_all_codecs))]
 #[test]
 fn disabled_codecs_return_body_errors() {
     for (encoding, enabled, feature) in [
@@ -102,10 +92,8 @@ fn disabled_codecs_return_body_errors() {
         ),
     ] {
         if !enabled {
-            let error = encoding
-                .encode(b"request body")
-                .expect_err("disabled codec must fail");
-            assert_eq!(error.kind(), crate::core::Kind::Body);
+            let error = encode(encoding, b"request body").expect_err("disabled codec must fail");
+            assert_eq!(error.kind(), crate::error::Kind::Body);
             assert!(error.message().expect("feature guidance").contains(feature));
         }
     }

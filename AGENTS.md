@@ -50,7 +50,7 @@ let again = Session::load("session.json")?.build()?;
 - Pass a `Duration` to `timeout`, a `u32` to `retry`, and a URL string to `proxy`; each converts into the full config type.
 - Match on `err.kind()` or a predicate such as `err.is_retryable()`. Do not parse the error message.
 - Use `session.tab()` when requests belong to a page: each request after `open` sends the current page as its `from_page`, so its headers match the kind of request.
-- For the highest request rate from one process, call `Session::builder().run_per_core(|session| async move { ... })`: one single-threaded runtime and session per core. It needs at least as many connections as cores to help.
+- For the highest request rate from one process, call `Session::builder().run_per_core(|session| async move { ... })`: one single-threaded runtime per core, with cookies, cache and tokens shared and connections per core. It needs at least as many connections as cores to help.
 - Use `session.save(path)` and `Session::load(path)` to keep cookies and the identity across runs.
 - Enable a bounded HTTP cache with `Session::builder().cache(bytes)`; clones share it, and `session.clear_cache()` empties it.
 - Call `request.download_to(path).await?` to resume a download with a strong ETag; `sha256` and `progress` configure verification and reporting.

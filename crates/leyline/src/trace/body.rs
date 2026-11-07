@@ -3,7 +3,7 @@ use std::time::Duration;
 use bytes::Bytes;
 
 use super::{CURRENT, Ctx, Event};
-use crate::core::ResponseTiming;
+use crate::wire::ResponseTiming;
 
 pub(crate) struct BodyWatch {
     ctx: Ctx,

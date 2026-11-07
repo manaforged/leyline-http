@@ -4,9 +4,9 @@ use std::time::Duration;
 use http::StatusCode;
 use url::Url;
 
-use super::masked;
-use crate::Error;
+use crate::error::Error;
 use crate::profile::Browser;
+use crate::util::masked;
 
 /// One step of a request, passed to [`Trace::event`](super::Trace::event).
 #[non_exhaustive]

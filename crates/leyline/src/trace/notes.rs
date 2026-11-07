@@ -23,11 +23,11 @@ pub(crate) fn note_proxy(proxy: Option<&str>) {
     edit(|notes| notes.proxy = proxy);
 }
 
-pub(crate) fn note_browser(session: &crate::core::Session) {
+pub(crate) fn note_browser(browser: impl FnOnce() -> Option<crate::profile::Browser>) {
     if !super::on() {
         return;
     }
-    let browser = session.browser();
+    let browser = browser();
     edit(|notes| notes.browser = browser);
 }
 

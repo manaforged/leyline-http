@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use leyline::pool::{H1Target, Pool, TransportBody, TransportResponse, send_request_h1_pooled};
-use leyline::profile::ProfileRegistry;
-use leyline::tls::FingerprintConnector;
+use leyline::internals::pool::{Pool, TransportBody, TransportResponse, send_request_h1_pooled};
+use leyline::internals::profile::ProfileRegistry;
+use leyline::internals::tls::FingerprintConnector;
 use leyline::{Browser, Platform};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -61,19 +61,15 @@ async fn absolute_form_target_strips_userinfo_and_fragment() {
     let pool = Arc::new(Pool::new());
     let connector = connector();
     let url = url::Url::parse("http://user:pw@example.com/a?b#frag").unwrap();
-    let proxy = leyline::pool::ProxyUrl::parse(format!("http://{addr}")).unwrap();
+    let proxy = leyline::internals::pool::ProxyUrl::parse(format!("http://{addr}")).unwrap();
     let resp = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        "example.com",
-        80,
         "GET",
         &url,
         vec![],
         leyline::Body::default(),
         Some(&proxy),
-        H1Target::AbsoluteForm,
         false,
     )
     .await
@@ -90,7 +86,7 @@ async fn absolute_form_target_strips_userinfo_and_fragment() {
 
 async fn run_against_with_stats(
     server_response: &'static [u8],
-) -> (String, leyline::pool::ConnectionStats) {
+) -> (String, leyline::internals::pool::ConnectionStats) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -119,15 +115,11 @@ async fn run_against_with_stats(
     let err = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        "127.0.0.1",
-        addr.port(),
         "GET",
         &url,
         vec![],
         leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         false,
     )
     .await
@@ -165,15 +157,11 @@ async fn informational_response(
     send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        "127.0.0.1",
-        addr.port(),
         "GET",
         &url,
         vec![],
         leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         stream,
     )
     .await

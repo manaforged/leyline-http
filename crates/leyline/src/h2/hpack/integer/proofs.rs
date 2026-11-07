@@ -18,7 +18,7 @@ fn every_hpack_integer_round_trips() {
     assert!(encoded.len() <= 6);
     assert_eq!(encoded[0] & !mask, pattern);
     assert_eq!(
-        decode(encoded[0], bits, &encoded, 1),
+        decode(encoded[0], bits, &encoded[1..]),
         Ok((value, encoded.len() - 1))
     );
 }
@@ -28,7 +28,7 @@ fn every_hpack_integer_round_trips() {
 fn arbitrary_bytes_never_decode_past_the_hpack_limit() {
     let bytes: [u8; 6] = kani::any();
     let len: usize = kani::any_where(|len: &usize| *len <= bytes.len());
-    if let Ok((value, used)) = decode(kani::any(), prefix_bits(), &bytes[..len], 0) {
+    if let Ok((value, used)) = decode(kani::any(), prefix_bits(), &bytes[..len]) {
         assert!(value <= MAX_HPACK_INTEGER);
         assert!(used <= len);
     }

@@ -6,8 +6,10 @@ use std::net::SocketAddr;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use leyline::tls::{FingerprintConnector, Resolver};
-use leyline::{BrowserProfile, Platform, Tls};
+use leyline::Resolver;
+use leyline::internals::BrowserProfile;
+use leyline::internals::tls::{AlpnPlan, FingerprintConnector};
+use leyline::{Platform, Tls};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
@@ -165,7 +167,7 @@ async fn without_env_roots_excludes_environment_roots() {
     )
     .expect("connector build")
     .with_resolver(Arc::new(LoopbackResolver(addr)))
-    .connect("trust.example", 443, None)
+    .connect("trust.example", 443, None, AlpnPlan::Browser)
     .await;
     assert!(
         res.is_ok(),
@@ -181,7 +183,7 @@ async fn without_env_roots_excludes_environment_roots() {
     )
     .expect("connector build")
     .with_resolver(Arc::new(LoopbackResolver(addr)))
-    .connect("trust.example", 443, None)
+    .connect("trust.example", 443, None, AlpnPlan::Browser)
     .await;
     assert!(
         res.is_err(),
@@ -196,7 +198,7 @@ async fn without_env_roots_excludes_environment_roots() {
     )
     .expect("connector build")
     .with_resolver(Arc::new(LoopbackResolver(addr)))
-    .connect("trust.example", 443, None)
+    .connect("trust.example", 443, None, AlpnPlan::Browser)
     .await;
     assert!(
         res.is_ok(),

@@ -1,4 +1,5 @@
-use crate::core::session::decompress::BodyLimit;
+use crate::error::BodyLimit;
+use crate::error::{Cause, Error, Kind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u32)]
@@ -51,6 +52,9 @@ pub enum H2Error {
     #[error("stream {stream_id} error: {code:?}")]
     Stream { stream_id: u32, code: ErrorCode },
 
+    #[error("request not sent: the connection is closing")]
+    NotSent,
+
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 
@@ -62,6 +66,12 @@ pub enum H2Error {
 
     #[error("request body stream failed")]
     RequestBody(#[source] std::io::Error),
+
+    #[error("{0}")]
+    BodyLimit(BodyLimit),
+
+    #[error("peer did not advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1")]
+    NoExtendedConnect,
 }
 
 fn copy_io(io: &std::io::Error) -> std::io::Error {
@@ -79,6 +89,7 @@ impl H2Error {
                 stream_id: *stream_id,
                 code: *code,
             },
+            Self::NotSent => Self::NotSent,
             Self::Io(io) => Self::Io(copy_io(io)),
             Self::Hpack(message) => Self::Hpack(message.clone()),
             Self::FrameTooLarge { size, max } => Self::FrameTooLarge {
@@ -86,17 +97,83 @@ impl H2Error {
                 max: *max,
             },
             Self::RequestBody(io) => Self::RequestBody(copy_io(io)),
+            Self::BodyLimit(limit) => Self::BodyLimit(*limit),
+            Self::NoExtendedConnect => Self::NoExtendedConnect,
         }
     }
 
+    /// Returns true when the error ends the whole connection, not one stream.
     pub(crate) fn connection_failed(&self) -> bool {
-        self.body_limit().is_none() && !matches!(self, Self::RequestBody(_))
+        matches!(
+            self,
+            Self::Connection { .. }
+                | Self::NotSent
+                | Self::Io(_)
+                | Self::Hpack(_)
+                | Self::FrameTooLarge { .. }
+        )
     }
 
-    pub(crate) fn body_limit(&self) -> Option<BodyLimit> {
+    /// Returns true when the peer never processed the request, so it is safe to send again.
+    pub(crate) fn refused(&self) -> bool {
+        matches!(
+            self,
+            Self::NotSent
+                | Self::Stream {
+                    code: ErrorCode::RefusedStream,
+                    ..
+                }
+        )
+    }
+
+    /// Returns the RFC 9113 error code the error carries.
+    pub(crate) fn code(&self) -> Option<ErrorCode> {
         match self {
-            Self::Io(io) => BodyLimit::of_io(io),
+            Self::Connection { code, .. } | Self::Stream { code, .. } => Some(*code),
+            Self::NotSent => Some(ErrorCode::RefusedStream),
             _ => None,
         }
+    }
+}
+
+impl From<H2Error> for Error {
+    fn from(e: H2Error) -> Self {
+        match e {
+            H2Error::BodyLimit(limit) => limit.error(),
+            H2Error::RequestBody(io) => Error::from_request_body(io),
+            other => Error::new(Kind::Http2).with_cause(other),
+        }
+    }
+}
+
+impl Cause for H2Error {
+    fn is_closed(&self) -> bool {
+        matches!(
+            self,
+            Self::Io(_)
+                | Self::Connection {
+                    code: ErrorCode::NoError,
+                    ..
+                }
+        )
+    }
+
+    fn refused(&self) -> bool {
+        H2Error::refused(self)
+    }
+
+    fn h2_code(&self) -> Option<u32> {
+        self.code().map(|code| code as u32)
+    }
+
+    fn duplicate(&self) -> Option<Box<dyn Cause>> {
+        Some(Box::new(H2Error::duplicate(self)))
+    }
+}
+
+#[cfg(test)]
+impl Error {
+    pub(crate) fn h2(&self) -> Option<&H2Error> {
+        self.source_as()
     }
 }

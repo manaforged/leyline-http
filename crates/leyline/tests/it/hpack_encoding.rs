@@ -1,5 +1,5 @@
 use hex::encode;
-use leyline::h2::hpack::Encoder;
+use leyline::internals::h2::hpack::Encoder;
 
 #[test]
 fn rfc7541_huffman_requests() {

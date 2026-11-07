@@ -5,7 +5,6 @@ use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::h2::H2Error;
-use crate::h2::frame::Encode;
 
 const CAP: usize = 64 * 1024;
 const CEILING: usize = 4 * CAP;
@@ -14,12 +13,6 @@ const START: usize = 1024;
 pub struct FrameWriter {
     buf: BytesMut,
     unflushed: bool,
-}
-
-impl Default for FrameWriter {
-    fn default() -> Self {
-        Self::new()
-    }
 }
 
 impl FrameWriter {
@@ -72,9 +65,8 @@ impl FrameWriter {
             .extend_from_slice(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
     }
 
-    pub(crate) fn write_frame<F: Encode>(&mut self, frame: &F) -> Result<(), H2Error> {
-        frame.encode(&mut self.buf);
-        Ok(())
+    pub(crate) fn out(&mut self) -> &mut BytesMut {
+        &mut self.buf
     }
 
     pub async fn flush<W: AsyncWrite + Unpin + ?Sized>(

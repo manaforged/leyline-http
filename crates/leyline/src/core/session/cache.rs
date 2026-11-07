@@ -9,10 +9,11 @@ use sha2::{Digest, Sha256};
 
 use super::Session;
 use super::header_merge::apply_extra_headers;
-use crate::core::error::{Error, Kind, Result};
 use crate::core::headers::HeaderList;
-use crate::core::transport::{Prepared, ResponseMode, TransportBody, TransportResponse};
+use crate::error::{Error, Kind, Result};
+use crate::pool::Prepared;
 use crate::util::lock;
+use crate::wire::{ResponseMode, TransportBody, TransportResponse};
 
 pub(super) struct Cache {
     capacity: usize,
@@ -40,7 +41,7 @@ struct Entry {
     policy: CachePolicy,
     body: Vec<u8>,
     version: http::Version,
-    tls: Option<crate::pool::TlsInfo>,
+    tls: Option<crate::wire::TlsInfo>,
     cost: usize,
 }
 
@@ -188,10 +189,8 @@ impl Session {
     }
 
     fn invalidate(&self, cache: &Cache, request: &Request<()>, response: &TransportResponse) {
-        if matches!(
-            *request.method(),
-            Method::GET | Method::HEAD | Method::OPTIONS | Method::TRACE
-        ) || !(response.status.is_success() || response.status.is_redirection())
+        if crate::wire::is_safe(request.method())
+            || !(response.status.is_success() || response.status.is_redirection())
         {
             return;
         }
@@ -245,7 +244,7 @@ fn condition(req: &mut Prepared<'_>, headers: &HeaderMap) -> Result<()> {
             extra.append(name.clone(), value.clone())?;
         }
     }
-    apply_extra_headers(req.headers.to_mut(), &extra, false, &|_| false);
+    apply_extra_headers(req.headers.to_mut(), &extra, false);
     Ok(())
 }
 

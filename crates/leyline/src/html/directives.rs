@@ -1,12 +1,12 @@
-use http::HeaderMap;
+use http::{HeaderMap, HeaderName};
 
+use super::Directives;
 use super::page::Element;
 use super::scan::Scanner;
-use super::{Directives, lookup};
-use crate::core::product_token;
+use crate::util::{lookup, product_token};
 
 const META_NAME: &str = "robots";
-const HEADER: &str = "x-robots-tag";
+pub(crate) const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Directive {
@@ -43,35 +43,38 @@ impl Directive {
     }
 }
 
-pub(super) fn read(document: &str, headers: &HeaderMap, agent: &str) -> Directives {
-    let mut found = Directives {
-        index: true,
-        follow: true,
-        ai: true,
-    };
-    for tag in Scanner::new(document) {
-        if tag.closing || Element::of(&tag.name) != Element::Meta {
-            continue;
+impl Directives {
+    /// Reads the directives that apply to `agent` from the document and response headers.
+    #[must_use]
+    pub fn read(document: &str, headers: &HeaderMap, agent: &str) -> Directives {
+        let mut found = Directives {
+            index: true,
+            follow: true,
+            ai: true,
+        };
+        for tag in Scanner::new(document) {
+            if tag.closing || Element::of(&tag.name) != Element::Meta {
+                continue;
+            }
+            let names_us = tag.attr("name").map(str::trim).is_some_and(|name| {
+                name.eq_ignore_ascii_case(META_NAME) || names_agent(name, agent)
+            });
+            if let (true, Some(content)) = (names_us, tag.attr("content")) {
+                apply(&mut found, content);
+            }
         }
-        let names_us = tag
-            .attr("name")
-            .map(str::trim)
-            .is_some_and(|name| name.eq_ignore_ascii_case(META_NAME) || names_agent(name, agent));
-        if let (true, Some(content)) = (names_us, tag.attr("content")) {
-            apply(&mut found, content);
+        for value in headers
+            .get_all(X_ROBOTS_TAG)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+        {
+            let (scope, list) = scoped(value);
+            if scope.is_none_or(|scope| names_agent(scope, agent)) {
+                apply(&mut found, list);
+            }
         }
+        found
     }
-    for value in headers
-        .get_all(HEADER)
-        .iter()
-        .filter_map(|v| v.to_str().ok())
-    {
-        let (scope, list) = scoped(value);
-        if scope.is_none_or(|scope| names_agent(scope, agent)) {
-            apply(&mut found, list);
-        }
-    }
-    found
 }
 
 fn names_agent(name: &str, agent: &str) -> bool {

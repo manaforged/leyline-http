@@ -1,11 +1,12 @@
 use std::sync::{Arc, Mutex};
 
-#[cfg(any(target_os = "macos", feature = "http3"))]
-use leyline_bssl::ssl::NameType;
-use leyline_bssl::ssl::{Ssl, SslAlert, SslContextBuilder, SslRef, SslVerifyError, SslVerifyMode};
+use leyline_bssl::ssl::{
+    NameType, Ssl, SslAlert, SslContextBuilder, SslRef, SslVerifyError, SslVerifyMode,
+};
 use leyline_bssl::x509::{X509, X509Purpose, X509StoreContext};
 use sha2::{Digest, Sha256};
 
+use crate::tls::builder::Transport;
 use crate::tls::error::TlsError;
 
 mod config;
@@ -19,11 +20,10 @@ mod system;
 use env::collect_ca_dir_candidates;
 use env::{env_roots_set, wire_env_trust};
 #[cfg(not(target_os = "macos"))]
-use system::wire_system_trust_cached;
+use system::wire_system_trust;
 
 pub use config::Tls;
-use identity::LoadedTrust;
-pub(crate) use identity::TrustIdentity;
+pub(crate) use identity::{TrustIdentity, TrustKey};
 
 pub(crate) type VerificationFailure = Arc<Mutex<Option<TrustFailure>>>;
 
@@ -34,25 +34,68 @@ pub(crate) enum TrustFailure {
     Pinning,
 }
 
-#[cfg(any(target_os = "macos", feature = "http3"))]
-pub(crate) fn install_verifier_ctx(
-    builder: &mut SslContextBuilder,
-    pins: &[[u8; 32]],
+fn needs_verifier(trust: &Tls, host: Option<&str>, transport: Transport) -> bool {
+    let unchecked_ip = transport == Transport::Quic
+        && host.is_some_and(|host| host.parse::<std::net::IpAddr>().is_ok());
+    !trust.accept_invalid_certs
+        && (!trust.pinned_leaf_sha256.is_empty()
+            || unchecked_ip
+            || cfg!(target_os = "macos") && trust.use_system_roots)
+}
+
+fn verify_callback(
+    trust: &Tls,
     host: Option<&str>,
-    system_roots: bool,
+) -> (
+    impl Fn(&mut SslRef) -> Result<(), SslVerifyError> + Send + Sync + 'static,
+    VerificationFailure,
 ) {
-    let pins = pins.to_vec();
+    let pins = trust.pinned_leaf_sha256.clone();
+    let system_roots = trust.use_system_roots;
     let host = host.map(str::to_owned);
-    builder.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
+    let failure = VerificationFailure::default();
+    let slot = failure.clone();
+    let callback = move |ssl: &mut SslRef| {
         let hostname = host
             .as_deref()
             .or_else(|| ssl.servername(NameType::HOST_NAME))
             .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-        verify(ssl, hostname, &pins, system_roots).map_err(|failure| {
-            tracing::debug!(target: "leyline::tls::trust", ?failure, "peer certificate rejected");
+        verify(ssl, hostname, &pins, system_roots).map_err(|reason| {
+            tracing::debug!(target: "leyline::tls::trust", ?reason, "peer certificate rejected");
+            *crate::util::lock(&slot) = Some(reason);
             SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)
         })
-    });
+    };
+    (callback, failure)
+}
+
+/// Installs the custom verifier on a context when `trust` needs one for `transport`.
+#[cfg(any(feature = "http3", feature = "bench-internals", leyline_unstable_bssl))]
+pub(crate) fn install_verifier_ctx(
+    builder: &mut SslContextBuilder,
+    trust: &Tls,
+    host: Option<&str>,
+    transport: Transport,
+) {
+    if needs_verifier(trust, host, transport) {
+        let (callback, _) = verify_callback(trust, host);
+        builder.set_custom_verify_callback(SslVerifyMode::PEER, callback);
+    }
+}
+
+/// Installs the custom verifier on one connection when `trust` needs one, returning where its failure lands.
+pub(crate) fn install_verifier(
+    ssl: &mut Ssl,
+    trust: &Tls,
+    host: &str,
+    transport: Transport,
+) -> Option<VerificationFailure> {
+    if !needs_verifier(trust, Some(host), transport) {
+        return None;
+    }
+    let (callback, failure) = verify_callback(trust, Some(host));
+    ssl.set_custom_verify_callback(SslVerifyMode::PEER, callback);
+    Some(failure)
 }
 
 fn rejected(error: &leyline_bssl::error::ErrorStack, failure: TrustFailure) -> TrustFailure {
@@ -121,16 +164,16 @@ pub(crate) fn wire_configured_trust(
     builder: &mut SslContextBuilder,
     config: &Tls,
 ) -> Result<TrustIdentity, TlsError> {
-    let mut loaded = LoadedTrust::default();
+    let mut key = TrustKey::of(config);
     #[cfg(target_os = "macos")]
     if config.use_env_roots {
-        wire_env_trust(builder, &mut loaded);
+        wire_env_trust(builder, &mut key);
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let env_roots_loaded = config.use_env_roots && wire_env_trust(builder, &mut loaded);
+        let env_roots_loaded = config.use_env_roots && wire_env_trust(builder, &mut key);
         if config.use_system_roots
-            && let Err(err) = wire_system_trust_cached(builder, config, env_roots_loaded)
+            && let Err(err) = wire_system_trust(builder, config, env_roots_loaded)
         {
             tracing::warn!(
                 target: "leyline::tls::trust",
@@ -141,7 +184,7 @@ pub(crate) fn wire_configured_trust(
     }
 
     for path in &config.ca_files {
-        files::add_root_file(builder, path, &mut loaded)?;
+        files::add_root_file(builder, path, &mut key)?;
     }
 
     if !config.ca_der.is_empty() {
@@ -150,39 +193,14 @@ pub(crate) fn wire_configured_trust(
             store
                 .add_cert(X509::from_der(der).map_err(TlsError::from_stack)?)
                 .map_err(TlsError::from_stack)?;
-            loaded.root_bytes(der);
         }
     }
 
-    #[cfg(target_os = "macos")]
-    if config.use_system_roots {
-        install_verifier_ctx(builder, &config.pinned_leaf_sha256, None, true);
-    }
-
     if let Some(identity) = &config.client_identity {
-        files::set_client_identity(builder, identity, &mut loaded)?;
+        files::set_client_identity(builder, identity, &mut key)?;
     }
 
-    Ok(loaded.finish(config))
-}
-
-pub(crate) fn install_verifier(
-    ssl: &mut Ssl,
-    pins: &[[u8; 32]],
-    host: &str,
-    system_roots: bool,
-) -> VerificationFailure {
-    let pins = pins.to_vec();
-    let host = host.to_owned();
-    let failure = Arc::new(Mutex::new(None));
-    let callback_failure = failure.clone();
-    ssl.set_custom_verify_callback(SslVerifyMode::PEER, move |ssl| {
-        verify(ssl, &host, &pins, system_roots).map_err(|reason| {
-            *crate::util::lock(&callback_failure) = Some(reason);
-            SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)
-        })
-    });
-    failure
+    Ok(key.identity())
 }
 
 #[cfg(test)]

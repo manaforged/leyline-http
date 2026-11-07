@@ -6,7 +6,7 @@ pub(super) enum Encoder {
 }
 
 impl Encoder {
-    pub(super) fn encode(&mut self, chunk: Bytes, out: &mut VecDeque<Bytes>) -> Result<(), Error> {
+    pub(super) fn encode(&mut self, chunk: Bytes, out: &mut VecDeque<Bytes>) {
         match self {
             Encoder::Fixed => {
                 if !chunk.is_empty() {
@@ -21,16 +21,12 @@ impl Encoder {
                 }
             }
         }
-        Ok(())
     }
 
-    pub(super) fn finish(&self, out: &mut VecDeque<Bytes>) -> Result<(), Error> {
+    pub(super) fn finish(&self, out: &mut VecDeque<Bytes>) {
         match self {
-            Encoder::Fixed => Ok(()),
-            Encoder::Chunked => {
-                out.push_back(Bytes::from_static(b"0\r\n\r\n"));
-                Ok(())
-            }
+            Encoder::Fixed => {}
+            Encoder::Chunked => out.push_back(Bytes::from_static(b"0\r\n\r\n")),
         }
     }
 }

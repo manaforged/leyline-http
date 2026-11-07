@@ -2,17 +2,11 @@ use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use http::StatusCode;
-
 use crate::core::attempt::Attempt;
-use crate::core::error::Result;
 use crate::core::response::Response;
+use crate::error::Result;
 
-mod wait;
-
-pub(crate) use wait::WaitFormat;
-pub(crate) use wait::parse_retry_after;
-use wait::{RETRY_AFTER, WaitHeader};
+use crate::util::wait::{WaitFormat, WaitHeader, retry_after};
 
 pub(crate) enum RetryPlan {
     Stop,
@@ -24,18 +18,6 @@ pub(crate) enum RetryPlan {
 const DEFAULT_MIN_BACKOFF: Duration = Duration::from_millis(100);
 const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(1);
 const DEFAULT_MAX_WAIT: Duration = Duration::from_secs(60);
-
-const GATEWAY_STATUSES: [StatusCode; 3] = [
-    StatusCode::BAD_GATEWAY,
-    StatusCode::SERVICE_UNAVAILABLE,
-    StatusCode::GATEWAY_TIMEOUT,
-];
-
-pub(crate) fn is_gateway_status(code: u16) -> bool {
-    GATEWAY_STATUSES
-        .iter()
-        .any(|status| status.as_u16() == code)
-}
 
 type RetryPredicate = dyn Fn(&Attempt<'_>) -> bool + Send + Sync;
 
@@ -157,16 +139,8 @@ impl Retry {
         self.count() == 0
     }
 
-    #[cfg(feature = "html")]
-    pub(crate) fn or(self, fallback: Retry) -> Retry {
-        match self.is_none() {
-            true => fallback,
-            false => self,
-        }
-    }
-
-    pub(crate) fn allows(&self, method: &str) -> bool {
-        self.any_method || crate::util::is_idempotent(method)
+    pub(crate) fn allows(&self, method: &http::Method) -> bool {
+        self.any_method || crate::wire::is_idempotent(method)
     }
 
     fn wants(&self, attempt: &Attempt<'_>) -> bool {
@@ -183,10 +157,14 @@ impl Retry {
                     .header(&wait.name)
                     .and_then(|value| wait.format.parse(value))
             })
-            .or_else(|| response.header(RETRY_AFTER).and_then(parse_retry_after))
+            .or_else(|| retry_after(response.headers()))
     }
 
-    pub(crate) fn plan(
+    pub(crate) fn plan(&self, result: &Result<Response>, attempt: u32) -> RetryPlan {
+        self.plan_resend(result, attempt, true, || true)
+    }
+
+    pub(crate) fn plan_resend(
         &self,
         result: &Result<Response>,
         attempt: u32,

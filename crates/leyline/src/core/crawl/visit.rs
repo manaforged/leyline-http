@@ -1,12 +1,13 @@
-use sha2::{Digest, Sha256};
+use std::collections::{HashMap, HashSet};
 
 use http::HeaderMap;
+use sha2::{Digest, Sha256};
 use url::Url;
 
 use super::fetch::{CONTENT_USAGE, Loaded};
 use super::frontier::{Queued, page_key};
 use super::{Crawl, MIN_PRINT_WORDS, NOFOLLOW, Page, SkipReason};
-use crate::core::robots::{Purpose, header_uses};
+use crate::core::robots::{Purpose, usage_prefs};
 use crate::html::{self, Directives};
 
 impl Crawl {
@@ -16,13 +17,13 @@ impl Crawl {
                 .get_all(CONTENT_USAGE)
                 .iter()
                 .filter_map(|value| value.to_str().ok())
-                .flat_map(header_uses)
+                .flat_map(usage_prefs)
                 .any(|(usage, allowed)| usage == purpose && !allowed)
         })
     }
 
     fn excluded(&self, rules: Directives, headers: &HeaderMap) -> Option<SkipReason> {
-        if self.respect.is_some() && !rules.index() {
+        if self.settings.respect.is_some() && !rules.index() {
             Some(SkipReason::NoIndex)
         } else if !rules.ai() && self.purpose().is_some_and(uses_ai) {
             Some(SkipReason::NoAi)
@@ -43,8 +44,8 @@ impl Crawl {
         let base = html::base(&html)
             .and_then(|href| url.join(&href).ok())
             .unwrap_or_else(|| url.clone());
-        let rules = Directives::read(&html, &headers, &self.agent);
-        let may_follow = self.respect.is_none() || rules.follow();
+        let rules = Directives::read(&html, &headers, &self.settings.agent);
+        let may_follow = self.settings.respect.is_none() || rules.follow();
         if may_follow {
             self.follow(&base, &html, depth + 1);
         }
@@ -69,13 +70,12 @@ impl Crawl {
         if let (Some(key), Some(link)) = (held.claimed.clone(), canonical)
             && may_follow
             && key != held.own
-            && !self.kept.contains(&key)
-            && !self.settled.contains(&key)
+            && !self.dedup.kept.contains(&key)
+            && !self.dedup.settled.contains(&key)
         {
             self.frontier.add(Queued::link(link, depth));
-            self.waiting_on.insert(held.own.clone(), key.clone());
-            self.held.entry(key).or_default().push(held);
-            self.holding += 1;
+            self.dedup.waiting_on.insert(held.own.clone(), key.clone());
+            self.dedup.held.entry(key).or_default().push(held);
             return;
         }
         self.keep(held);
@@ -88,36 +88,37 @@ impl Crawl {
             print,
             page,
         } = held;
-        let duplicate = self.kept.contains(&own)
-            || claimed.as_ref().is_some_and(|key| self.kept.contains(key))
-            || print.is_some_and(|print| self.texts.contains(&print));
+        let duplicate = self.dedup.kept.contains(&own)
+            || claimed
+                .as_ref()
+                .is_some_and(|key| self.dedup.kept.contains(key))
+            || print.is_some_and(|print| self.dedup.texts.contains(&print));
         if duplicate {
             self.stats.skip(SkipReason::Duplicate);
             return;
         }
-        self.kept.insert(own);
+        self.dedup.kept.insert(own);
         if let Some(key) = claimed {
-            self.kept.insert(key);
+            self.dedup.kept.insert(key);
         }
         if let Some(print) = print {
-            self.texts.insert(print);
+            self.dedup.texts.insert(print);
         }
         self.stats.page();
         self.ready.push_back(Ok(page));
     }
 
     pub(super) fn settle(&mut self, key: String) {
-        let kept = self.kept.contains(&key);
-        let waiting = self.held.remove(&key).unwrap_or_default();
-        if let Some(next) = self.waiting_on.get(&key).cloned() {
-            self.held.entry(next).or_default().extend(waiting);
-            self.settled.insert(key);
+        let kept = self.dedup.kept.contains(&key);
+        let waiting = self.dedup.held.remove(&key).unwrap_or_default();
+        if let Some(next) = self.dedup.waiting_on.get(&key).cloned() {
+            self.dedup.held.entry(next).or_default().extend(waiting);
+            self.dedup.settled.insert(key);
             return;
         }
-        self.settled.insert(key);
+        self.dedup.settled.insert(key);
         for held in waiting {
-            self.holding -= 1;
-            self.waiting_on.remove(&held.own);
+            self.dedup.waiting_on.remove(&held.own);
             if kept {
                 self.stats.skip(SkipReason::Duplicate);
             } else {
@@ -130,30 +131,33 @@ impl Crawl {
         if from == to {
             return;
         }
-        let waiting = self.held.remove(&from).unwrap_or_default();
-        self.settled.insert(from);
+        let waiting = self.dedup.held.remove(&from).unwrap_or_default();
+        self.dedup.settled.insert(from);
         if waiting.is_empty() {
             return;
         }
         let (cycle, onward): (Vec<Held>, Vec<Held>) =
             waiting.into_iter().partition(|held| held.own == to);
         for held in cycle {
-            self.holding -= 1;
-            self.waiting_on.remove(&held.own);
+            self.dedup.waiting_on.remove(&held.own);
             self.keep(held);
         }
         for held in &onward {
-            self.waiting_on.insert(held.own.clone(), to.clone());
+            self.dedup.waiting_on.insert(held.own.clone(), to.clone());
         }
-        self.held.entry(to.clone()).or_default().extend(onward);
-        if self.settled.contains(&to) {
+        self.dedup
+            .held
+            .entry(to.clone())
+            .or_default()
+            .extend(onward);
+        if self.dedup.settled.contains(&to) {
             self.settle(to);
         }
     }
 
     pub(super) fn release_held(&mut self) -> bool {
-        self.waiting_on.clear();
-        let keys: Vec<String> = self.held.keys().cloned().collect();
+        self.dedup.waiting_on.clear();
+        let keys: Vec<String> = self.dedup.held.keys().cloned().collect();
         for key in &keys {
             self.settle(key.clone());
         }
@@ -162,7 +166,7 @@ impl Crawl {
 
     fn follow(&mut self, base: &Url, html: &str, depth: usize) {
         for anchor in html::links(html) {
-            let nofollow = self.respect.is_some()
+            let nofollow = self.settings.respect.is_some()
                 && anchor.rel().is_some_and(|rel| {
                     rel.split_ascii_whitespace()
                         .any(|token| token.eq_ignore_ascii_case(NOFOLLOW))
@@ -174,8 +178,27 @@ impl Crawl {
     }
 }
 
+#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+pub(super) struct Dedup {
+    kept: HashSet<String>,
+    texts: HashSet<u64>,
+    held: HashMap<String, Vec<Held>>,
+    waiting_on: HashMap<String, String>,
+    settled: HashSet<String>,
+}
+
+impl Dedup {
+    pub(super) fn holding(&self) -> usize {
+        self.held.values().map(Vec::len).sum()
+    }
+
+    pub(super) fn kept(&self) -> usize {
+        self.kept.len()
+    }
+}
+
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub(super) struct Held {
+struct Held {
     own: String,
     claimed: Option<String>,
     print: Option<u64>,

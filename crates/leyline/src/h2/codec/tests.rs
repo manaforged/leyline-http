@@ -22,7 +22,7 @@ async fn write_and_read_settings() {
 
     let mut client = client;
     let mut writer = FrameWriter::new();
-    writer.write_frame(&frame).expect("SETTINGS frame buffers");
+    frame.encode(writer.out());
     writer
         .flush(&mut client)
         .await
@@ -51,12 +51,11 @@ async fn write_and_read_preface_then_settings() {
     let mut client = client;
     let mut writer = FrameWriter::new();
     writer.write_preface();
-    writer
-        .write_frame(&SettingsFrame {
-            ack: false,
-            params: vec![(0x4, 6291456)],
-        })
-        .expect("SETTINGS frame buffers");
+    SettingsFrame {
+        ack: false,
+        params: vec![(0x4, 6291456)],
+    }
+    .encode(writer.out());
     writer
         .flush(&mut client)
         .await

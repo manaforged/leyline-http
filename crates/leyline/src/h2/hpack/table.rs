@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 use bytes::Bytes;
 use http::{HeaderName, HeaderValue};
 
-use crate::h2::config::DEFAULT_HEADER_TABLE_SIZE;
+use crate::h2::frame::DEFAULT_HEADER_TABLE_SIZE;
 
 pub(crate) const ENTRY_OVERHEAD: usize = 32;
 

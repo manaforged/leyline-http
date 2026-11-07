@@ -1,4 +1,3 @@
-
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -8,46 +7,25 @@ use futures_util::future::join_all;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
-use leyline::h2::{H2Client, Head};
-use leyline::pool::TransportResponse;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
 };
-use leyline::h2::hpack;
+use leyline::internals::h2::hpack;
+use leyline::internals::h2::{H2Client, Head};
+use leyline::internals::pool::TransportResponse;
 
 const MOCK_PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 
 fn test_config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65535),
-            (SettingId::MaxFrameSize, 16384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100_000,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 20,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            rst_stream_flood_threshold: 100_000,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
@@ -137,7 +115,7 @@ fn req() -> (
     PseudoHeaders,
     Vec<(
         std::borrow::Cow<'static, str>,
-        leyline::h2::HeaderStr,
+        leyline::internals::h2::HeaderStr,
     )>,
 ) {
     (
@@ -155,7 +133,7 @@ fn req() -> (
 async fn build_client() -> (H2Client, tokio::task::JoinHandle<()>) {
     let (client_io, server_io) = tokio::io::duplex(1024 * 1024);
     let server = tokio::spawn(run_mock_server(server_io));
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
     (handle, server)
@@ -212,9 +190,7 @@ fn bench_concurrent_100(c: &mut Criterion) {
                     for _ in 0..N {
                         let h = handle.clone();
                         let (p, hh) = req();
-                        futs.push(tokio::spawn(async move {
-                            send(&h, p, hh).await
-                        }));
+                        futs.push(tokio::spawn(async move { send(&h, p, hh).await }));
                     }
                     let results = join_all(futs).await;
                     total += start.elapsed();
@@ -259,10 +235,17 @@ criterion_main!(multiplex_benches);
 async fn send(
     handle: &H2Client,
     pseudo: PseudoHeaders,
-    headers: Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
+    headers: Vec<(
+        std::borrow::Cow<'static, str>,
+        leyline::internals::h2::HeaderStr,
+    )>,
 ) -> TransportResponse {
     handle
-        .send_shared(Arc::new(Head { pseudo, headers }), leyline::Body::default(), false)
+        .send_shared(
+            Arc::new(Head::new(pseudo, headers)),
+            leyline::Body::default(),
+            false,
+        )
         .await
         .expect("req ok")
 }

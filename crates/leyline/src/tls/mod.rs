@@ -1,49 +1,25 @@
 pub(crate) mod alpn;
-mod blocking;
 pub(crate) mod builder;
 mod connector;
 pub(crate) mod error;
-mod happy_eyeballs;
 mod hello;
 mod keylog;
 #[cfg(target_os = "macos")]
 mod macos_trust;
-mod nonblocking;
 pub(crate) mod proxy;
-mod resolver;
 mod session_cache;
 mod stream;
 pub(crate) mod trust;
 #[cfg(windows)]
 mod windows_trust;
 
-pub(crate) use blocking::{BlockingTcp, probing};
-pub(crate) use error::TlsError;
-pub(crate) use happy_eyeballs::HappyEyeballs;
-pub(crate) use resolver::Coalesced;
-pub use resolver::Resolver;
-pub(crate) use resolver::{ResolveFuture, SystemResolver};
-pub(crate) use trust::Tls;
+pub use alpn::AlpnPlan;
 
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
 pub use connector::FingerprintConnector;
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use connector::FingerprintConnector;
 
-#[cfg(any(feature = "http3", feature = "bench-internals", leyline_unstable_bssl))]
-pub(crate) use builder::TlsMinVersion;
-#[cfg(feature = "http3")]
-pub(crate) use builder::apply_tls_with_trust;
-#[cfg(feature = "http3")]
 pub(crate) use hello::HelloOptions;
-pub(crate) use session_cache::SessionCache;
 pub(crate) use stream::TlsIo;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
 pub use stream::TlsStream;
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use stream::TlsStream;
 #[cfg(feature = "http3")]
 pub(crate) use trust::install_verifier_ctx;
 
@@ -63,9 +39,9 @@ pub struct TlsContext(
 impl TlsContext {
     pub fn from_profile(
         profile: &crate::profile::BrowserProfile,
-        min_version: TlsMinVersion,
-    ) -> Result<Self, TlsError> {
-        profile.build_ssl_context(min_version).map(Self)
+        min_version: crate::profile::TlsMinVersion,
+    ) -> Result<Self, error::TlsError> {
+        builder::ssl_context(profile, min_version).map(Self)
     }
 
     #[cfg(leyline_unstable_bssl)]

@@ -1,6 +1,6 @@
 use super::super::{Session, SessionBuilder};
-use crate::core::error::Kind;
 use crate::core::response::Response;
+use crate::error::Kind;
 use crate::{Body, Encoding};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

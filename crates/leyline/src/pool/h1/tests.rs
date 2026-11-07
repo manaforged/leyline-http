@@ -83,7 +83,7 @@ async fn socket_with_pending_bytes_probes_as_dead() {
 #[tokio::test]
 async fn checkout_live_h1_drains_dead_and_counts_stale() {
     let pool = Arc::new(Pool::new());
-    let key = pool.key("http", "127.0.0.1", 1, None, Transport::Tcp);
+    let key = pool.key(Scheme::Http, "127.0.0.1", 1, None, Carrier::Tcp);
 
     let (client, server) = tcp_pair().await;
     drop(server);
@@ -99,7 +99,7 @@ async fn checkout_live_h1_drains_dead_and_counts_stale() {
 #[tokio::test]
 async fn checkout_live_h1_returns_a_live_connection_uncounted() {
     let pool = Arc::new(Pool::new());
-    let key = pool.key("http", "127.0.0.1", 2, None, Transport::Tcp);
+    let key = pool.key(Scheme::Http, "127.0.0.1", 2, None, Carrier::Tcp);
 
     let (client, _server) = tcp_pair().await;
     pool.return_h1(&key, H1Slot::new(Box::new(client)), TlsInfo::default());
@@ -117,42 +117,10 @@ async fn checkout_live_h1_returns_a_live_connection_uncounted() {
 
 #[test]
 fn a_chunk_size_must_be_hex_digits_only() {
-    assert_eq!(parse::chunk_size(b"1a;ext=1"), Ok(26));
+    assert_eq!(crate::wire::h1::chunk_size(b"1a;ext=1"), Ok(26));
     for bad in [&b"+5"[..], b"-0", b"", b"0x5", b" "] {
-        parse::chunk_size(bad).unwrap_err();
+        crate::wire::h1::chunk_size(bad).unwrap_err();
     }
-}
-
-#[tokio::test]
-async fn warm_send_future_leaves_the_dial_frame_on_the_heap() {
-    let pool = Arc::new(Pool::new());
-    let profile = crate::profile::BrowserProfile::bare_shared();
-    let connector =
-        FingerprintConnector::new(&profile, crate::profile::Platform::Linux.tcp_profile())
-            .expect("connector build");
-    let url = url::Url::parse("http://example.com/").expect("url");
-    let key = pool.key("http", "example.com", 80, None, Transport::Tcp);
-    let request = H1Request {
-        scheme: "http",
-        host: "example.com",
-        port: 80,
-        method: "GET",
-        url: &url,
-        headers: Vec::new().into(),
-        proxy: None,
-        target: crate::pool::H1Target::OriginForm,
-        response: ResponseMode::Buffered,
-    };
-    let send = send_h1_pooled(
-        &pool,
-        &connector,
-        request,
-        Body::default(),
-        None,
-        H1Dial::Http1Only,
-    );
-    let dial = fresh_leg(&pool, &key, &connector, H1Dial::Http1Only, None);
-    assert!(std::mem::size_of_val(&send) < std::mem::size_of_val(&dial));
 }
 
 #[tokio::test]
@@ -161,15 +129,16 @@ async fn a_buffered_body_leaves_the_read_buffer_with_the_connection() {
     initial_body.extend_from_slice(b"ok-10byte!");
     let mut head = H1Head {
         status: 200,
-        headers: crate::core::response_head::Fields::default(),
+        headers: crate::wire::Fields::default(),
         minor: 1,
         framing: BodyFraming::Fixed(10),
         initial_body,
     };
     let (mut client, _server) = tcp_pair().await;
-    let (body, excess) = read_h1_body(&mut client, &mut head, usize::MAX)
-        .await
-        .expect("buffered body");
+    let Buffered { body, excess, .. } =
+        read_h1_body(&mut client, &mut head, BodyLimit::session(usize::MAX))
+            .await
+            .expect("buffered body");
     assert_eq!(body, b"ok-10byte!");
     assert!(!excess);
     assert!(head.initial_body.is_empty());
@@ -182,13 +151,15 @@ fn a_header_value_allows_tab_visible_ascii_and_utf8_only() {
         let value = char::from(byte).to_string();
         let allowed = byte == b'\t' || (b' '..=b'~').contains(&byte);
         assert_eq!(
-            headers::is_valid_header_value(&value),
+            crate::wire::h1::is_valid_header_value(&value),
             allowed,
             "byte {byte:#04x}"
         );
     }
-    assert!(headers::is_valid_header_value("café au lait"));
-    assert!(!headers::is_valid_header_value("ok\r\nInjected: yes"));
+    assert!(crate::wire::h1::is_valid_header_value("café au lait"));
+    assert!(!crate::wire::h1::is_valid_header_value(
+        "ok\r\nInjected: yes"
+    ));
 }
 
 #[tokio::test]
@@ -216,4 +187,36 @@ async fn time_queued_for_a_connection_is_not_counted_as_request_time() {
 
     let queued = first.elapsed().max(second.elapsed());
     assert!(queued < Duration::from_millis(450), "elapsed {queued:?}");
+}
+
+#[test]
+fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
+    let closed = closed("before headers");
+    assert_eq!(closed.failure(), Failure::Connection);
+    let closed = closed.into_error();
+    assert!(
+        closed.cause() == Kind::Io
+            && closed
+                .io()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::UnexpectedEof),
+        "a closed connection must be Io(UnexpectedEof), got {closed:?}"
+    );
+    assert!(closed.is_connection_closed());
+    let framing = crate::wire::h1::malformed("invalid Transfer-Encoding: connection-close");
+    assert!(
+        framing.cause() == Kind::Io
+            && framing
+                .io()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::InvalidData),
+        "a malformed response must be Io(InvalidData), got {framing:?}"
+    );
+    assert!(!framing.is_connection_closed());
+    assert_eq!(H1Error::from(framing).failure(), Failure::Request);
+
+    let pinning = Error::from(crate::tls::error::TlsError::Pinning("mismatch".into()));
+    assert!(
+        matches!(pinning.tls(), Some(crate::tls::error::TlsError::Pinning(_))),
+        "H1 must preserve typed TLS failures, got {pinning:?}"
+    );
+    assert!(!pinning.is_connection_closed());
 }

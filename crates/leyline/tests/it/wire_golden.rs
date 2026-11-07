@@ -55,7 +55,10 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
                 browser.id()
             );
             let hello = describe_client_hello(&record);
-            let hello: String = if browser.profile().tls.permute_extensions {
+            let hello: String = if leyline::internals::browser_profile(browser)
+                .tls
+                .permute_extensions
+            {
                 hello
                     .lines()
                     .filter(|line| !line.starts_with("tls extension_order "))
@@ -109,11 +112,11 @@ async fn client_hello(browser: Browser, platform: Platform) -> Vec<u8> {
 }
 
 fn saved_ja4(browser: Browser, platform: Platform) -> Option<String> {
-    let profile = browser.for_platform(platform).branded_profile();
+    let profile = leyline::internals::branded_profile(browser.for_platform(platform));
     let saved = profile.tls.fingerprint.as_ref()?;
     saved
         .platforms
-        .get(platform.identity_key())
+        .get(leyline::internals::identity_key(platform))
         .and_then(|own| own.ja4.clone())
         .or_else(|| saved.ja4.clone())
 }

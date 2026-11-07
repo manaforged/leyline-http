@@ -1,6 +1,6 @@
 #![no_main]
 
-use leyline::fuzz::validate_connect_response;
+use leyline::internals::fuzz::validate_connect_response;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

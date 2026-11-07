@@ -1,7 +1,6 @@
-
 use bytes::Bytes;
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
-use leyline::h2::frame::{Frame, FrameHeader};
+use leyline::internals::h2::frame::{Frame, FrameHeader};
 
 fn hdr(length: u32, frame_type: u8, flags: u8, stream_id: u32) -> FrameHeader {
     FrameHeader {

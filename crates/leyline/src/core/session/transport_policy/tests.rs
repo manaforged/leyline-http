@@ -1,5 +1,5 @@
-use super::Protocol;
 use crate::Session;
+use crate::core::Protocol;
 use crate::profile::Browser;
 #[cfg(feature = "http3")]
 use crate::profile::ChromiumBrand;
@@ -21,7 +21,7 @@ fn rotate() {
         rotated
             .proxy_for(&url, None)
             .expect("valid proxy url")
-            .map(crate::core::ProxyUrl::as_str),
+            .map(crate::net::ProxyUrl::as_str),
         Some("http://second:2"),
         "with_proxy must win over the build-time proxy"
     );
@@ -31,7 +31,7 @@ fn rotate() {
 #[test]
 fn race() {
     let session = Session::builder()
-        .identity(Browser::default_browser())
+        .identity(Browser::default())
         .protocol(Protocol::Race)
         .build()
         .expect("chrome race session builds");
@@ -50,9 +50,7 @@ fn chrome_race() {
 fn http1_then_edge_keeps_http1() {
     let session = Session::builder()
         .protocol(Protocol::Http1)
-        .identity(
-            crate::core::Identity::from(Browser::default_browser()).with_brand(ChromiumBrand::Edge),
-        )
+        .identity(crate::core::Identity::from(Browser::default()).with_brand(ChromiumBrand::Edge))
         .build()
         .expect("edge http1 session builds");
     assert_eq!(session.protocol_policy(), Protocol::Http1);
@@ -63,7 +61,7 @@ fn http1_then_edge_keeps_http1() {
 fn http1_then_chrome_keeps_http1() {
     let session = Session::builder()
         .protocol(Protocol::Http1)
-        .identity(Browser::default_browser())
+        .identity(Browser::default())
         .build()
         .expect("chrome http1 session builds");
     assert_eq!(session.protocol_policy(), Protocol::Http1);

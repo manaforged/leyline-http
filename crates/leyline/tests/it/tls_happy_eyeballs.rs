@@ -1,4 +1,5 @@
-use leyline::{Browser, Session, Tls, TlsError};
+use leyline::internals::TlsError;
+use leyline::{Browser, Session, Tls};
 
 #[test]
 fn invalid_der_root_is_rejected_at_build_time() {
@@ -8,7 +9,8 @@ fn invalid_der_root_is_rejected_at_build_time() {
         .build()
         .expect_err("invalid DER CA should fail TLS setup");
     assert!(matches!(
-        std::error::Error::source(&err).and_then(|s| s.downcast_ref::<leyline::TlsError>()),
+        std::error::Error::source(&err)
+            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>()),
         Some(TlsError::SslConfig(_))
     ));
 }

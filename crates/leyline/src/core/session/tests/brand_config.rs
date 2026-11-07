@@ -68,7 +68,7 @@ fn opera_overlay_on_unverified_anchor_errors() {
 
 #[test]
 fn builder_edge_impersonates() {
-    let s = branded(Browser::default_browser(), ChromiumBrand::Edge);
+    let s = branded(Browser::default(), ChromiumBrand::Edge);
     assert_eq!(s.identity().http(), Some(Browser::edge()));
     assert_eq!(s.brand(), Some(ChromiumBrand::Edge));
 }
@@ -103,7 +103,7 @@ fn firefox_and_bare_have_no_chromium_brand() {
 
 #[tokio::test]
 async fn user_dnt_override_wins_over_edge_default() {
-    let session = branded(Browser::default_browser(), ChromiumBrand::Edge);
+    let session = branded(Browser::default(), ChromiumBrand::Edge);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {

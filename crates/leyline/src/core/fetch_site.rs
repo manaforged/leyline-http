@@ -1,30 +1,21 @@
 use url::Url;
 
-use crate::core::registrable_domain;
+use crate::core::config::Origin;
+use crate::util::registrable_domain;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub(crate) enum FetchSite {
+    None,
     SameOrigin,
     SameSite,
     CrossSite,
 }
 
-fn same_origin(a: &Url, b: &Url) -> bool {
-    if a.scheme() == "blob" || b.scheme() == "blob" {
-        return a.origin() == b.origin();
-    }
-    matches!(a.scheme(), "http" | "https" | "ws" | "wss" | "ftp")
-        && (std::ptr::eq(a, b)
-            || a.scheme() == b.scheme()
-                && a.host() == b.host()
-                && a.port_or_known_default() == b.port_or_known_default())
-}
-
 impl FetchSite {
     #[must_use]
     pub(crate) fn of(context: &Url, request: &Url) -> Self {
-        if same_origin(context, request) {
+        if Origin::same(context, request) {
             return Self::SameOrigin;
         }
         let same_site = context.scheme() == request.scheme()
@@ -47,16 +38,30 @@ impl FetchSite {
             .into_iter()
             .map(|url| Self::of(context, url))
             .max_by_key(|site| match site {
-                Self::SameOrigin => 0,
+                Self::None | Self::SameOrigin => 0,
                 Self::SameSite => 1,
                 Self::CrossSite => 2,
             })
             .unwrap_or(Self::SameOrigin)
     }
 
+    const ALL: [Self; 4] = [
+        Self::None,
+        Self::SameOrigin,
+        Self::SameSite,
+        Self::CrossSite,
+    ];
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|site| value.eq_ignore_ascii_case(site.as_str()))
+    }
+
     #[must_use]
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::None => "none",
             Self::SameOrigin => "same-origin",
             Self::SameSite => "same-site",
             Self::CrossSite => "cross-site",

@@ -7,7 +7,7 @@ mod sitemap;
 mod sites;
 mod visit;
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::future::{Future, poll_fn};
 use std::pin::Pin;
 
@@ -20,19 +20,17 @@ use frontier::{Frontier, Queued, page_key, same_site};
 use page::CrawlStats;
 pub use page::{Page, SkipReason};
 use sitemap::SitemapRead;
-use sites::{Site, SitemapFile};
-use visit::Held;
+use sites::{Site, SitemapFile, Sitemaps};
+use visit::Dedup;
 
-use crate::core::config::{HostLimits, Origin};
-use crate::core::error::{Error, Result};
+use crate::core::config::{HostGates, HostLimits, Origin};
 use crate::core::into_url::IntoUrl;
 use crate::core::retry::Retry;
-use crate::core::robots::{Purpose, Robots};
+use crate::core::robots::{ANY_AGENT, MAX_REDIRECTS, Purpose, Robots};
 use crate::core::session::Session;
+use crate::error::Result;
 
-const ANY_AGENT: &str = "*";
 const NOFOLLOW: &str = "nofollow";
-const MAX_REDIRECTS: usize = 5;
 const PAGE_RETRIES: u32 = 2;
 const MIN_PRINT_WORDS: usize = 20;
 const MAX_IN_FLIGHT: usize = 16;
@@ -46,7 +44,7 @@ enum Event {
     Robots {
         origin: Origin,
         url: Url,
-        robots: Box<Robots>,
+        robots: Result<Box<Robots>>,
     },
     Page {
         origin: Origin,
@@ -74,32 +72,30 @@ pub enum Respect {
 pub struct Crawl {
     session: Session,
     limits: Option<HostLimits>,
-    pace: HostLimits,
+    pace: HostGates,
     seeds: Vec<Result<Url>>,
-    respect: Option<Respect>,
-    agent: String,
-    max_body: Option<usize>,
-    max_pages: Option<usize>,
+    settings: Settings,
     started: bool,
     frontier: Frontier,
     sites: HashMap<Origin, Site>,
     busy: HashMap<Origin, usize>,
-    sitemap_files: HashSet<String>,
-    sitemap_queue: VecDeque<SitemapFile>,
-    sitemaps_in_flight: usize,
+    sitemaps: Sitemaps,
     trusted: Option<Url>,
     page_retry: Retry,
     clock: clock::Clock,
-    holding: usize,
     tasks: FuturesUnordered<Task>,
     pages_in_flight: usize,
     ready: VecDeque<Result<Page>>,
-    kept: HashSet<String>,
-    texts: HashSet<u64>,
-    held: HashMap<String, Vec<Held>>,
-    waiting_on: HashMap<String, String>,
-    settled: HashSet<String>,
+    dedup: Dedup,
     stats: CrawlStats,
+}
+
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+struct Settings {
+    respect: Option<Respect>,
+    agent: String,
+    max_body: Option<usize>,
+    max_pages: Option<usize>,
 }
 
 fn polite_limits() -> HostLimits {
@@ -107,6 +103,13 @@ fn polite_limits() -> HostLimits {
         .max_in_flight(POLITE_IN_FLIGHT)
         .per_second(POLITE_PER_SECOND)
         .pause_on(PAUSE_STATUSES)
+}
+
+fn page_retry(session: &Retry) -> Retry {
+    match session.is_none() {
+        true => Retry::new(PAGE_RETRIES),
+        false => session.clone(),
+    }
 }
 
 impl Session {
@@ -121,31 +124,26 @@ impl Crawl {
         Crawl {
             session: session.clone(),
             limits: None,
-            pace: HostLimits::new(),
+            pace: HostGates::new(HostLimits::new()),
             seeds,
-            respect: Some(Respect::Robots),
-            agent: ANY_AGENT.to_owned(),
-            max_body: None,
-            max_pages: None,
+            settings: Settings {
+                respect: Some(Respect::Robots),
+                agent: ANY_AGENT.to_owned(),
+                max_body: None,
+                max_pages: None,
+            },
             started: false,
             frontier: Frontier::default(),
             sites: HashMap::new(),
             busy: HashMap::new(),
-            sitemap_files: HashSet::new(),
-            sitemap_queue: VecDeque::new(),
-            sitemaps_in_flight: 0,
+            sitemaps: Sitemaps::default(),
             trusted: None,
             page_retry: Retry::new(0),
             clock: clock::Clock::default(),
-            holding: 0,
             tasks: FuturesUnordered::new(),
             pages_in_flight: 0,
             ready: VecDeque::new(),
-            kept: HashSet::new(),
-            texts: HashSet::new(),
-            held: HashMap::new(),
-            waiting_on: HashMap::new(),
-            settled: HashSet::new(),
+            dedup: Dedup::default(),
             stats: CrawlStats::default(),
         }
     }
@@ -154,19 +152,19 @@ impl Crawl {
 impl Crawl {
     /// Sets which site signals the crawl obeys; `None` ignores them all.
     pub fn respect(mut self, respect: impl Into<Option<Respect>>) -> Self {
-        self.respect = respect.into();
+        self.settings.respect = respect.into();
         self
     }
 
     /// Sets the robots.txt group and meta robots name the crawl obeys, falling back to `*`.
     pub fn agent(mut self, agent: impl Into<String>) -> Self {
-        self.agent = agent.into();
+        self.settings.agent = agent.into();
         self
     }
 
     /// Sets the largest page body the crawl reads, overriding the session's `max_body_size`.
     pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.max_body = Some(bytes);
+        self.settings.max_body = Some(bytes);
         self
     }
 
@@ -178,7 +176,7 @@ impl Crawl {
 
     /// Stops the crawl after it yields `pages` pages; unlimited by default.
     pub fn limit(mut self, pages: usize) -> Self {
-        self.max_pages = Some(pages);
+        self.settings.max_pages = Some(pages);
         self
     }
 
@@ -218,7 +216,7 @@ impl Crawl {
     }
 
     fn purpose(&self) -> Option<Purpose> {
-        match self.respect? {
+        match self.settings.respect? {
             Respect::Robots => None,
             Respect::AiTraining => Some(Purpose::AiTrain),
         }
@@ -229,32 +227,25 @@ impl Crawl {
             return;
         }
         let pace = match self.limits.take() {
-            Some(limits) => match limits.config_error() {
-                Some(message) => {
-                    let error = Error::config(message);
+            Some(limits) => match limits.validate() {
+                Err(error) => {
                     self.ready.push_back(Err(error));
                     self.seeds.clear();
                     return;
                 }
-                None => limits.armed(),
+                Ok(()) => HostGates::new(limits),
             },
-            None => self.session.crawl_limits(|| {
-                self.session
-                    .host_limits()
-                    .clone()
-                    .filled_from(&polite_limits())
-            }),
+            None => self
+                .session
+                .host_limits()
+                .derived(|own| own.clone().filled_from(&polite_limits())),
         };
-        let pace = match self.respect {
+        let pace = match self.settings.respect {
             Some(_) => pace,
             None => pace.without_floors(),
         };
-        self.session = self.session.with_crawl_pace(pace.clone());
-        self.page_retry = self
-            .session
-            .default_retry()
-            .clone()
-            .or(Retry::new(PAGE_RETRIES));
+        self.session = self.session.with_extra_gates(pace.clone());
+        self.page_retry = page_retry(self.session.default_retry());
         self.clock.stopped = Some(self.session.stopped());
         self.pace = pace;
         for seed in std::mem::take(&mut self.seeds) {
@@ -269,13 +260,14 @@ impl Crawl {
     }
 
     fn limit_met(&self) -> bool {
-        self.max_pages
+        self.settings
+            .max_pages
             .is_some_and(|max| self.stats.pages() as usize >= max)
     }
 
     fn budget_spent(&self) -> bool {
-        self.max_pages.is_some_and(|max| {
-            self.stats.pages() as usize + self.pages_in_flight + self.holding >= max
+        self.settings.max_pages.is_some_and(|max| {
+            self.stats.pages() as usize + self.pages_in_flight + self.dedup.holding() >= max
         })
     }
 
@@ -285,7 +277,7 @@ impl Crawl {
         self.stats.request();
         let session = self.session.clone();
         let (retry, trusted) = (self.page_retry.clone(), self.trusted.clone());
-        let (attempt, max_body) = (queued.attempts, self.max_body);
+        let (attempt, max_body) = (queued.attempts, self.settings.max_body);
         self.tasks.push(Box::pin(async move {
             let fetched = fetch(
                 session,
@@ -351,8 +343,16 @@ impl Crawl {
             Event::Robots {
                 origin,
                 url,
-                robots,
+                robots: Ok(robots),
             } => self.robots_read(origin, url, *robots),
+            Event::Robots {
+                origin,
+                robots: Err(error),
+                ..
+            } => {
+                self.sites.remove(&origin);
+                self.ready.push_back(Err(error));
+            }
             Event::Sitemap { file, read } => self.sitemap_read(file, read),
             Event::Page {
                 origin,
@@ -384,7 +384,7 @@ impl Crawl {
 impl std::fmt::Debug for Crawl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Crawl")
-            .field("respect", &self.respect)
+            .field("respect", &self.settings.respect)
             .field("in_flight", &self.tasks.len())
             .field("stats", &self.stats)
             .finish()

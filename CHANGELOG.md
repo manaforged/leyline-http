@@ -20,7 +20,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 
 ### Added
 
-- `SessionBuilder::run_per_core`, which runs one single-threaded runtime with its own session per CPU core for maximum request rate.
+- `SessionBuilder::run_per_core`, which runs one single-threaded runtime per CPU core for maximum request rate; the cores share cookies, cache, tokens and HSTS and keep their own connections.
 - Resumable `RequestBuilder::download_to`, strong ETag checks, SHA-256 verification, and download progress callbacks.
 - An opt-in, bounded HTTP cache with conditional revalidation, `Vary` matching, and mutation invalidation.
 - `RequestBuilder::events`, `Events`, and `Event` for parsed SSE with `Last-Event-ID` recovery. The retry policy bounds reconnects in a row; each delivered event resets the count.

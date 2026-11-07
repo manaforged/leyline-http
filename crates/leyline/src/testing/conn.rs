@@ -4,8 +4,8 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::types::{CLOSE, CONNECTION, ChunkedBody, Handler, Recorder, Request, Response};
-use crate::pool::h1::MAX_H1_HEADER_BYTES;
 use crate::pool::h1::parse::read_chunked_body;
+use crate::wire::h1::MAX_H1_HEADER_BYTES;
 
 const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 const HEAD_END: &[u8] = b"\r\n\r\n";
@@ -202,6 +202,6 @@ fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
 }
 
-fn to_io(err: crate::Error) -> io::Error {
+fn to_io(err: crate::error::Error) -> io::Error {
     err.into_io()
 }

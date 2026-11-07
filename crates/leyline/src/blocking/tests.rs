@@ -226,11 +226,11 @@ fn a_post_after_the_server_dropped_a_fresh_connection_redials() {
 fn a_panic_inside_a_deadline_leaves_no_expiry_behind() {
     let at = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
     let panicked = std::panic::catch_unwind(|| {
-        crate::core::deadline::expiring(Some(at), || panic!("inside the deadline"))
+        crate::deadline::expiring(Some(at), || panic!("inside the deadline"))
     });
 
     assert!(panicked.is_err());
-    assert_eq!(crate::core::deadline::expiry(), None);
+    assert_eq!(crate::deadline::expiry(), None);
 }
 
 #[test]

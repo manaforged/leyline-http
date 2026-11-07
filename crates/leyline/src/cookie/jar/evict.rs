@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-use crate::cookie::record::Cookie;
+use crate::cookie::Cookie;
 
 use super::JarInner;
 

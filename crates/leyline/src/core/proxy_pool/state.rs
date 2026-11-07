@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use super::ProxyPool;
-use crate::core::Result;
 use crate::core::config::{Origin, Proxy};
 use crate::core::response::Response;
 use crate::core::session::Session;
+use crate::error::Result;
 use crate::util::saturating_after;
 
 #[derive(Debug, Default, Clone, Copy)]

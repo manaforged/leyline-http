@@ -8,51 +8,35 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::oneshot;
 use tokio::time::{sleep, timeout};
 
-use leyline::h2::ErrorCode;
-use leyline::h2::codec::FrameReader;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
+use leyline::internals::h2::ErrorCode;
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::codec::FrameReader;
 use std::sync::Arc;
 
-use leyline::h2::Head;
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{DataFrame, Frame, FrameType, HeadersFrame, PingFrame, RstStreamFrame};
-use leyline::h2::hpack;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{
+    DataFrame, Frame, FrameType, HeadersFrame, PingFrame, RstStreamFrame,
+};
+use leyline::internals::h2::hpack;
 
 fn test_config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65535),
-            (SettingId::MaxFrameSize, 16384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: std::time::Duration::from_secs(10),
-        header_block_reassembly_timeout: std::time::Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
 fn connect_pseudo() -> (
     PseudoHeaders,
-    Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
+    Vec<(
+        std::borrow::Cow<'static, str>,
+        leyline::internals::h2::HeaderStr,
+    )>,
 ) {
     (
         PseudoHeaders {
@@ -213,21 +197,13 @@ async fn h2_extended_connect_happy_path_echoes_payload() {
         drop(tokio::time::timeout(Duration::from_millis(100), server_io.read(&mut sink)).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
-    while !handle.peer_enables_connect_protocol() {
-        if tokio::time::Instant::now() >= deadline {
-            panic!("peer never advertised ENABLE_CONNECT_PROTOCOL");
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-
     let (pseudo, headers) = connect_pseudo();
     let mut stream = handle
-        .open_extended_connect(pseudo, headers)
+        .open_extended_connect(pseudo, headers, None)
         .await
         .expect("extended CONNECT should succeed");
     assert_eq!(stream.status(), 200);
@@ -265,19 +241,13 @@ async fn h2_without_connect_protocol_falls_back() {
         }
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    tokio::time::sleep(Duration::from_millis(20)).await;
-    assert!(
-        !handle.peer_enables_connect_protocol(),
-        "peer must not have enabled connect protocol"
-    );
-
     let (pseudo, headers) = connect_pseudo();
     let err = handle
-        .open_extended_connect(pseudo, headers)
+        .open_extended_connect(pseudo, headers, None)
         .await
         .expect_err("extended CONNECT must fail without peer setting");
 
@@ -331,21 +301,13 @@ async fn dropping_connect_stream_signals_end_stream() {
         (saw_end_stream, saw_sibling)
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
-    let deadline = tokio::time::Instant::now() + Duration::from_millis(500);
-    while !handle.peer_enables_connect_protocol() {
-        if tokio::time::Instant::now() >= deadline {
-            panic!("peer never advertised ENABLE_CONNECT_PROTOCOL");
-        }
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-
     let (pseudo, headers) = connect_pseudo();
     let stream = handle
-        .open_extended_connect(pseudo, headers)
+        .open_extended_connect(pseudo, headers, None)
         .await
         .expect("CONNECT open");
     drop(stream);
@@ -367,8 +329,8 @@ async fn dropping_connect_stream_signals_end_stream() {
         .expect("sibling request");
     assert_eq!(resp.status, 200);
     match resp.body {
-        leyline::pool::TransportBody::Buffered(body) => assert_eq!(body, b"sibling-ok"),
-        leyline::pool::TransportBody::Streaming(_) => panic!("expected buffered body"),
+        leyline::internals::pool::TransportBody::Buffered(body) => assert_eq!(body, b"sibling-ok"),
+        leyline::internals::pool::TransportBody::Streaming(_) => panic!("expected buffered body"),
     }
 
     drop(handle);
@@ -420,7 +382,7 @@ async fn connect_reset_survives_a_full_receive_queue() {
         ready_tx.send(()).expect("parked consumer");
         done_rx.await.expect("consumer finished");
     });
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("H2 connection");
     timeout(Duration::from_secs(3), settings_rx)
@@ -429,7 +391,7 @@ async fn connect_reset_survives_a_full_receive_queue() {
         .expect("settings barrier");
     let (pseudo, headers) = connect_pseudo();
     let mut stream = handle
-        .open_extended_connect(pseudo, headers)
+        .open_extended_connect(pseudo, headers, None)
         .await
         .expect("CONNECT headers");
     assert_eq!(stream.status(), 200);

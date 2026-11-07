@@ -12,7 +12,8 @@ async fn limits(session: Option<Session>) -> (u32, usize, bool) {
         Some(session) => session
             .inner
             .connector
-            .dial_tcp("127.0.0.1", address.port())
+            .dialer()
+            .dial("127.0.0.1", address.port())
             .await
             .expect("session TCP connection"),
         None => TcpStream::connect(address).await.expect("loopback socket"),
@@ -92,7 +93,8 @@ async fn each_address_family_keeps_its_own_local_address() {
     let stream = session
         .inner
         .connector
-        .dial_tcp("127.0.0.1", port)
+        .dialer()
+        .dial("127.0.0.1", port)
         .await
         .expect("an IPv4 dial binds the IPv4 address");
     assert_eq!(

@@ -2,36 +2,88 @@ use std::borrow::Cow;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use http::Version;
 use http::header::SEC_WEBSOCKET_PROTOCOL;
 use tokio_tungstenite::tungstenite::Error as WireError;
 use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::http::{HeaderName, HeaderValue};
 
 use crate::core::config::WebSocketOptions;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::headers::reorder;
+use crate::error::{Error, Kind, Result};
 use crate::header_str::HeaderStr;
-use crate::profile::preset::HeaderPair;
+use crate::wire::{HeaderPair, Scheme, sent_on, strip_connection_specific_headers};
 
-pub(super) const H2_NO_CONNECT_PROTOCOL: &str = "h2-no-connect-protocol";
-
-pub(super) fn handshake_target(url: &str) -> Result<(url::Url, String, u16)> {
-    let mut parsed = url::Url::parse(url).map_err(Error::from)?;
-    let host = parsed
-        .host_str()
-        .ok_or_else(|| Error::config("no host in WebSocket URL"))?
-        .to_owned();
-    let port = parsed.port_or_known_default().unwrap_or(443);
-    parsed
-        .set_scheme("https")
-        .map_err(|()| Error::config("WebSocket URL must use wss://"))?;
-    Ok((parsed, host, port))
+/// Returns the `https` URL that the handshake for a `wss` URL uses, or rejects any other scheme.
+pub(crate) fn http_equivalent(url: &url::Url) -> Result<url::Url> {
+    match url.scheme() {
+        "wss" => {}
+        "ws" => {
+            return Err(Error::new(Kind::Request)
+                .with_message("plaintext ws:// is not supported; use wss://"));
+        }
+        other => {
+            return Err(Error::new(Kind::Request)
+                .with_message(format!("websocket URL must use wss://, not {other}")));
+        }
+    }
+    let mut http = url.clone();
+    http.set_scheme(Scheme::Https.as_str())
+        .map_err(|()| Error::new(Kind::Request).with_message("websocket URL must use wss://"))?;
+    Ok(http)
 }
 
-pub(super) fn overlay_headers(request: &mut Vec<HeaderPair>, extra: &[(String, String)]) {
+/// The fields of one WebSocket opening handshake, shared by the HTTP/1.1 and HTTP/2 legs.
+pub(crate) struct Handshake<'a> {
+    pub(crate) url: &'a url::Url,
+    pub(crate) proxy: Option<&'a crate::net::ProxyUrl>,
+    pub(crate) user_agent: &'a str,
+    pub(crate) origin: &'a str,
+    pub(crate) extra_headers: &'a [(String, String)],
+    pub(crate) header_order: Option<&'a [String]>,
+    pub(crate) options: &'a WebSocketOptions,
+}
+
+impl Handshake<'_> {
+    pub(super) fn headers(&self, version: Version, sec_key: &str) -> Result<Vec<HeaderPair>> {
+        for (name, value) in self
+            .extra_headers
+            .iter()
+            .filter(|(name, value)| forwards(version, name, value))
+        {
+            drop(ws_header_pair(name, value)?);
+        }
+        let mut headers: Vec<HeaderPair> = Vec::with_capacity(6 + self.extra_headers.len());
+        if version == Version::HTTP_11 {
+            headers.push(("Connection".into(), "Upgrade".into()));
+            headers.push(("Upgrade".into(), "websocket".into()));
+        }
+        headers.extend([
+            ("User-Agent".into(), self.user_agent.to_owned().into()),
+            ("Origin".into(), self.origin.to_owned().into()),
+            ("Sec-WebSocket-Version".into(), "13".into()),
+            ("Sec-WebSocket-Key".into(), sec_key.to_owned().into()),
+        ]);
+        overlay_headers(&mut headers, self.extra_headers, version);
+        if let Some(order) = self.header_order {
+            reorder(&mut headers, order);
+        }
+        if version != Version::HTTP_11 {
+            strip_connection_specific_headers(&mut headers)?;
+        }
+        Ok(headers)
+    }
+}
+
+pub(super) fn overlay_headers(
+    request: &mut Vec<HeaderPair>,
+    extra: &[(String, String)],
+    version: Version,
+) {
     let defaults = request.len();
     for (name, value) in extra
         .iter()
-        .filter(|(name, _)| !is_reserved_ws_header(name))
+        .filter(|(name, value)| forwards(version, name, value))
     {
         match request
             .iter_mut()
@@ -93,17 +145,25 @@ pub(super) fn ws_header_pair(name: &str, value: &str) -> Result<(HeaderName, Hea
     Ok((hn, hv))
 }
 
-pub(super) fn is_reserved_ws_header(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "host"
-            | "connection"
-            | "upgrade"
-            | "sec-websocket-key"
-            | "sec-websocket-version"
-            | "sec-websocket-extensions"
-            | "content-length"
-    )
+const HANDSHAKE_OWNED: [&str; 8] = [
+    "host",
+    "connection",
+    "upgrade",
+    "sec-websocket-key",
+    "sec-websocket-version",
+    "sec-websocket-extensions",
+    "content-length",
+    "transfer-encoding",
+];
+
+fn is_reserved_ws_header(name: &str) -> bool {
+    HANDSHAKE_OWNED
+        .iter()
+        .any(|owned| name.eq_ignore_ascii_case(owned))
+}
+
+pub(super) fn forwards(version: Version, name: &str, value: &str) -> bool {
+    !is_reserved_ws_header(name) && sent_on(version, name, value)
 }
 
 fn fail(m: String) -> Result<()> {

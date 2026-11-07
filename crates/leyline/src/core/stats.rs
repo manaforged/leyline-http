@@ -41,21 +41,13 @@ impl Stats {
     /// Returns how many checkouts on `version` reused a pooled connection.
     #[must_use]
     pub fn hits(&self, version: http::Version) -> u64 {
-        match version {
-            http::Version::HTTP_2 => self.pool.h2_hits,
-            http::Version::HTTP_3 => self.pool.h3_hits,
-            _ => self.pool.h1_hits,
-        }
+        self.pool.hits(version)
     }
 
     /// Returns how many checkouts on `version` opened a connection.
     #[must_use]
     pub fn misses(&self, version: http::Version) -> u64 {
-        match version {
-            http::Version::HTTP_2 => self.pool.h2_misses,
-            http::Version::HTTP_3 => self.pool.h3_misses,
-            _ => self.pool.h1_misses,
-        }
+        self.pool.misses(version)
     }
 
     /// Returns how many connections the pool closed for idling too long.

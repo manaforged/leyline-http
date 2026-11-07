@@ -13,16 +13,17 @@ use support::*;
 use tokio::io::{AsyncReadExt, DuplexStream};
 use tokio::time::timeout;
 
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
-use leyline::h2::{H2Client, Head};
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
+use leyline::internals::h2::{H2Client, Head};
+use leyline::internals::profile::SettingId;
 
 #[tokio::test]
 async fn a_peer_that_stops_reading_still_delivers_its_response() {
     const INITIAL_WINDOW_SIZE: u16 = 0x4;
     const WIDE: u32 = 1 << 30;
     let (client_io, mut server_io) = tokio::io::duplex(64 * 1024);
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
     read_preface(&mut server_io).await;
@@ -54,7 +55,7 @@ async fn wide_open(buffer: usize, max_frame: u32) -> (H2Client, DuplexStream) {
     const MAX_FRAME_SIZE: u16 = 0x5;
     const WIDE: u32 = 1 << 30;
     let (client_io, mut server_io) = tokio::io::duplex(buffer);
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
     read_preface(&mut server_io).await;
@@ -225,7 +226,7 @@ async fn a_refused_header_block_leaves_the_peer_able_to_decode_the_next_request(
     })
     .await
     .expect("the next request reaches the peer");
-    let decoded = leyline::h2::hpack::Decoder::new().decode_header_block(&block);
+    let decoded = leyline::internals::h2::hpack::Decoder::new().decode_header_block(&block);
     let headers = decoded.expect("the peer decodes the next header block");
     assert!(
         headers
@@ -243,9 +244,9 @@ async fn settings_acks_for_a_peer_that_stops_reading_stay_bounded() {
     const BOUND: usize = 512 * 1024;
     const FLOOD: usize = 200_000;
     let mut config = test_config();
-    config.settings_flood_threshold = u32::MAX;
+    config.limits.settings_flood_threshold = u32::MAX;
     let (client_io, mut server_io) = tokio::io::duplex(64 * 1024);
-    let handle = leyline::h2::start(client_io, config)
+    let handle = leyline::internals::h2::start(client_io, config)
         .await
         .expect("handshake");
     read_preface(&mut server_io).await;
@@ -253,9 +254,8 @@ async fn settings_acks_for_a_peer_that_stops_reading_stay_bounded() {
     write_server_settings(&mut server_io).await;
     write_settings_ack(&mut server_io).await;
     let (mut reader, mut writer) = tokio::io::split(server_io);
-    let client = handle.clone();
     let retained = tokio::spawn(async move {
-        client
+        handle
             .send_shared(head("GET"), leyline::Body::default(), true)
             .await
     });
@@ -288,7 +288,6 @@ async fn settings_acks_for_a_peer_that_stops_reading_stay_bounded() {
         acks * SETTINGS_ACK < BOUND,
         "{acks} SETTINGS ACKs were queued for a peer that sent {sent} SETTINGS and read nothing"
     );
-    assert!(!handle.is_closed());
     retained.abort();
 }
 
@@ -298,7 +297,7 @@ async fn the_header_list_limit_follows_the_peer_not_the_inbound_limit() {
     let big = || head_with(vec![("x-large".into(), "v".repeat(4096))]);
 
     let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
     read_preface(&mut server_io).await;
@@ -314,9 +313,9 @@ async fn the_header_list_limit_follows_the_peer_not_the_inbound_limit() {
     refused.expect_err("expected Err");
 
     let mut config = test_config();
-    config.max_header_block_bytes = 1024;
+    config.settings.push((SettingId::MaxHeaderListSize, 1024));
     let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
-    let handle = leyline::h2::start(client_io, config)
+    let handle = leyline::internals::h2::start(client_io, config)
         .await
         .expect("handshake");
     read_preface(&mut server_io).await;

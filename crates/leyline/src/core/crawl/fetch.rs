@@ -1,16 +1,16 @@
 use std::time::Duration;
 
-use http::header::LOCATION;
 use http::{HeaderMap, HeaderName, StatusCode};
 use url::Url;
 
 use super::SkipReason;
-use crate::core::config::Redirect;
-use crate::core::error::Result;
-use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
-use crate::core::retry::{Retry, RetryPlan};
+use crate::core::retry::Retry;
+use crate::core::robots::Reply;
 use crate::core::session::Session;
+use crate::error::Result;
+use crate::html::X_ROBOTS_TAG;
+use crate::util::{is_redirect_status, redirect_location};
 
 const HTML_TYPES: [&str; 2] = ["text/html", "application/xhtml+xml"];
 const HTML_SIGNATURES: [&[u8]; 17] = [
@@ -37,7 +37,6 @@ const COMMENT: &[u8] = b"<!--";
 const TAG_ENDS: [u8; 6] = [b'\t', b'\n', 0x0c, b'\r', b' ', b'>'];
 const SNIFF_BYTES: usize = 512;
 const MAX_UNTYPED_BYTES: usize = 8 * 1024 * 1024;
-pub(super) const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
 pub(super) const CONTENT_USAGE: HeaderName = HeaderName::from_static("content-usage");
 const KEPT_HEADERS: [HeaderName; 2] = [X_ROBOTS_TAG, CONTENT_USAGE];
 
@@ -74,20 +73,6 @@ fn sniffs_html(body: &[u8]) -> bool {
     })
 }
 
-pub(super) fn request(
-    session: &Session,
-    url: &Url,
-    retry: Retry,
-    trusted: Option<Url>,
-) -> RequestBuilder {
-    let mut builder = session
-        .get(url.as_str())
-        .redirect(Redirect::none())
-        .retry(retry);
-    builder.draft.trusted_origin = trusted;
-    builder
-}
-
 fn kept_headers(all: &HeaderMap) -> HeaderMap {
     let mut kept = HeaderMap::new();
     for name in KEPT_HEADERS {
@@ -106,27 +91,22 @@ pub(super) async fn fetch(
     trusted: Option<Url>,
     max_body: Option<usize>,
 ) -> Result<Fetched> {
-    let mut builder = request(&session, &url, retry.once(), trusted);
-    if let Some(bytes) = max_body {
-        builder = builder.max_body_size(bytes);
-    }
-    let result = builder.stream().send().await;
-    if let RetryPlan::Backoff(wait) = retry.plan(&result, attempt, true, || true) {
-        return Ok(Fetched::Later(wait));
-    }
-    session.deadline(None).total(read(result?, &url)).await
+    let response = match Reply::send(&session, &url, &retry, attempt, trusted, max_body).await {
+        Reply::Later(wait) => return Ok(Fetched::Later(wait)),
+        Reply::Sent(result) => result?,
+    };
+    session.deadline(None).total(read(response, &url)).await
 }
 
 async fn read(response: Response, url: &Url) -> Result<Fetched> {
     let status = response.status();
-    if status.is_redirection() {
-        let target = response
-            .header(LOCATION.as_str())
-            .and_then(|to| url.join(to).ok());
-        return Ok(match target {
-            Some(to) => Fetched::Redirect { to },
-            None => Fetched::Skip(SkipReason::Status),
-        });
+    if is_redirect_status(status.as_u16()) {
+        return Ok(
+            match redirect_location(status.as_u16(), response.headers(), url) {
+                Some(to) => Fetched::Redirect { to },
+                None => Fetched::Skip(SkipReason::Status),
+            },
+        );
     }
     if response.block().is_some() {
         return Ok(Fetched::Skip(SkipReason::Blocked));

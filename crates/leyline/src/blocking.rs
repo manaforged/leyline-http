@@ -4,13 +4,14 @@ use std::cell::Cell;
 use std::ops::Deref;
 use std::task::{Context, Poll, Waker};
 
-use crate::{Result, SessionBuilder};
+use crate::core::SessionBuilder;
+use crate::error::Result;
 
 const SKIP_AFTER_PENDING: u8 = 16;
 
 /// A session whose calls block the calling thread until they finish.
 pub struct Session {
-    session: crate::Session,
+    session: crate::core::session::Session,
     runtime: tokio::runtime::Runtime,
     skips: Cell<u8>,
 }
@@ -57,9 +58,9 @@ impl Session {
 }
 
 impl Deref for Session {
-    type Target = crate::Session;
+    type Target = crate::core::session::Session;
 
-    fn deref(&self) -> &crate::Session {
+    fn deref(&self) -> &crate::core::session::Session {
         &self.session
     }
 }

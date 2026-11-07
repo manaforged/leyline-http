@@ -2,7 +2,7 @@
 
 use std::hint::black_box;
 
-use leyline::fuzz::{parse_cookie_date, parse_set_cookie};
+use leyline::internals::fuzz::{parse_cookie_date, parse_set_cookie};
 use libfuzzer_sys::fuzz_target;
 
 const ORIGINS: [&str; 4] = [

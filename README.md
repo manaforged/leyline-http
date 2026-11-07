@@ -58,7 +58,8 @@ measured HTTP/2 workloads. [BENCHMARKS.md](BENCHMARKS.md) has every workload, HT
 confidence intervals, and the commands to reproduce them.
 
 For the highest request rate, `SessionBuilder::run_per_core` runs one runtime
-and session per CPU core. In that layout Leyline is ahead of fasthttp over
+per CPU core; the cores share cookies, cache and tokens and keep their own
+connections. In that layout Leyline is ahead of fasthttp over
 HTTP/1.1 at 8 and 64 workers and ahead of the bare h2 crate with 256 requests in
 flight over eight HTTP/2 connections.
 

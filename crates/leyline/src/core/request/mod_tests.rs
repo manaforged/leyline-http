@@ -37,25 +37,43 @@ fn content_type_infers_the_preset_on_the_builder_path() {
         .header("content-type", "application/json")
         .body("{}");
     json.prepare().unwrap();
-    assert_eq!(json.draft.preset, Some(RequestKind::Xhr));
+    assert_eq!(json.draft.carry.preset, Some(RequestKind::Xhr));
 
     let mut form = session
         .post("https://example.test/")
         .header("content-type", "application/x-www-form-urlencoded")
         .body("a=1");
     form.prepare().unwrap();
-    assert_eq!(form.draft.preset, Some(RequestKind::Form));
+    assert_eq!(form.draft.carry.preset, Some(RequestKind::Form));
 
     let mut get = session
         .get("https://example.test/")
         .header("content-type", "application/json");
     get.prepare().unwrap();
-    assert_eq!(get.draft.preset, Some(RequestKind::Navigate));
+    assert_eq!(get.draft.carry.preset, Some(RequestKind::Navigate));
 
     let mut pinned = session
         .post("https://example.test/")
         .kind(RequestKind::Navigate)
         .header("content-type", "application/json");
     pinned.prepare().unwrap();
-    assert_eq!(pinned.draft.preset, Some(RequestKind::Navigate));
+    assert_eq!(pinned.draft.carry.preset, Some(RequestKind::Navigate));
+}
+
+#[test]
+fn session_retry_default_is_inherited_by_requests() {
+    use crate::Retry;
+    let policy = Retry::new(7);
+    let session = Session::builder().retry(policy).build().unwrap();
+    let req = session.request(http::Method::GET, "https://example.test/");
+    assert_eq!(req.draft.carry.retry_policy.count(), 7);
+    let overridden = session
+        .request(http::Method::GET, "https://example.test/")
+        .retry(0);
+    assert_eq!(overridden.draft.carry.retry_policy.count(), 0);
+    let bare = Session::builder()
+        .build()
+        .unwrap()
+        .request(http::Method::GET, "https://example.test/");
+    assert_eq!(bare.draft.carry.retry_policy.count(), 0);
 }

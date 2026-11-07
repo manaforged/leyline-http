@@ -99,7 +99,7 @@ The jar follows Chrome:
 
 - A cookie is stored under the exact domain the `Set-Cookie` names: its
   `Domain=` value, or the request host.
-- `Secure` cookies go only over HTTPS.
+- `Secure` cookies go only over HTTPS, or over HTTP to `localhost`, `127.0.0.1`, `[::1]`, or a `*.localhost` host.
 - `SameSite` uses the `sec-fetch-site` value the request sends. Leyline
   computes it from the sending page and every URL in the redirect chain, schemes
   included, so `http://` to `https://` on one host is cross-site. The

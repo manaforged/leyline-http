@@ -1,9 +1,9 @@
-use crate::core::ProxyUrl;
-use crate::core::error::{Error, Result};
+use crate::error::{Error, Result};
+use crate::net::ProxyUrl;
 
-use super::SavedIn;
+use super::SavedFile;
 
-impl SavedIn {
+impl SavedFile {
     pub(super) fn resolved_proxy(&self) -> Result<Option<ProxyUrl>> {
         let (Some(proxy), Some(var)) = (&self.proxy, &self.proxy_password_env) else {
             return Ok(self.proxy.clone());

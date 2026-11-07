@@ -4,9 +4,9 @@
 )]
 use std::time::{Duration, Instant};
 
-use leyline::h2::H2Error;
-use leyline::h2::connection::RstFloodDetector;
-use leyline::h2::error::ErrorCode;
+use leyline::internals::h2::H2Error;
+use leyline::internals::h2::connection::{Flood, FloodGuard};
+use leyline::internals::h2::error::ErrorCode;
 
 fn assert_calm(err: &H2Error) {
     match err {
@@ -19,7 +19,7 @@ fn assert_calm(err: &H2Error) {
 
 #[test]
 fn threshold_plus_one_trips_flood_guard() {
-    let mut d = RstFloodDetector::new(100, Duration::from_secs(10));
+    let mut d = FloodGuard::new(Flood::RstStream, 100, Duration::from_secs(10));
     let base = Instant::now();
     for i in 0..100 {
         d.record(base + Duration::from_millis(i)).unwrap();
@@ -32,7 +32,7 @@ fn threshold_plus_one_trips_flood_guard() {
 
 #[test]
 fn events_outside_window_are_evicted() {
-    let mut d = RstFloodDetector::new(5, Duration::from_secs(1));
+    let mut d = FloodGuard::new(Flood::RstStream, 5, Duration::from_secs(1));
     let base = Instant::now();
     for i in 0..5 {
         d.record(base + Duration::from_millis(i)).unwrap();
@@ -49,7 +49,7 @@ fn events_outside_window_are_evicted() {
 
 #[test]
 fn under_threshold_never_trips() {
-    let mut d = RstFloodDetector::new(10, Duration::from_secs(10));
+    let mut d = FloodGuard::new(Flood::RstStream, 10, Duration::from_secs(10));
     let base = Instant::now();
     for i in 0..10 {
         d.record(base + Duration::from_millis(i * 50))
@@ -59,12 +59,7 @@ fn under_threshold_never_trips() {
 
 #[test]
 fn settings_flood_label_is_distinct() {
-    let mut d = RstFloodDetector::with_label(
-        3,
-        Duration::from_secs(10),
-        "leyline::h2::settings_flood",
-        "peer sent excessive SETTINGS updates",
-    );
+    let mut d = FloodGuard::new(Flood::Settings, 3, Duration::from_secs(10));
     let base = Instant::now();
     for i in 0..3 {
         d.record(base + Duration::from_millis(i)).unwrap();

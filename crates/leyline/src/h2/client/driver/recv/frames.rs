@@ -1,10 +1,10 @@
 use std::time::Instant;
 
-use crate::h2::config::SettingId;
+use crate::h2::frame::DEFAULT_HEADER_TABLE_SIZE;
+use crate::profile::SettingId;
 
 use super::*;
-
-const UNSET_MAX_CONCURRENT_STREAMS: usize = 1000;
+use crate::h2::client::handle::UNLIMITED_STREAM_CAPACITY;
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) fn on_settings(&mut self, s: SettingsFrame) -> Result<(), H2Error> {
@@ -30,17 +30,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             }
         }
         self.peer_greeted = true;
-        self.load.capacity.store(
+        self.streams.set_capacity(
             self.peer_settings
                 .max_concurrent_streams
-                .map_or(UNSET_MAX_CONCURRENT_STREAMS, |limit| limit as usize),
-            std::sync::atomic::Ordering::Relaxed,
+                .map_or(UNLIMITED_STREAM_CAPACITY, |limit| limit as usize),
         );
-        self.peer_snapshot
-            .set_enable_connect_protocol(self.peer_settings.enable_connect_protocol);
-        self.writer.write_frame(&SettingsFrame::ack())?;
-        let encoder_cap = (self.peer_settings.header_table_size as usize)
-            .min(crate::h2::config::DEFAULT_HEADER_TABLE_SIZE as usize);
+        SettingsFrame::ack().encode(self.writer.out());
+        let encoder_cap =
+            (self.peer_settings.header_table_size as usize).min(DEFAULT_HEADER_TABLE_SIZE as usize);
         self.encoder.set_max_table_size(encoder_cap);
         Ok(())
     }
@@ -68,10 +65,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             match checked_window_add(actor.send_window, w.increment as i64) {
                 Ok(v) => actor.send_window = v,
                 Err(_) => {
-                    self.writer.write_frame(&RstStreamFrame {
+                    RstStreamFrame {
                         stream_id: w.stream_id,
                         error_code: ErrorCode::FlowControlError,
-                    })?;
+                    }
+                    .encode(self.writer.out());
                     let err = H2Error::Stream {
                         stream_id: w.stream_id,
                         code: ErrorCode::FlowControlError,
@@ -88,10 +86,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) fn on_ping(&mut self, p: PingFrame) -> Result<(), H2Error> {
         if !p.ack {
             self.control_flood.record(Instant::now())?;
-            self.writer.write_frame(&PingFrame {
+            PingFrame {
                 ack: true,
                 payload: p.payload,
-            })?;
+            }
+            .encode(self.writer.out());
             return Ok(());
         }
         if let Some(index) = self
@@ -166,10 +165,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             });
         }
         let decoded = self.decoder.decode_block(&pp.fragment, |_, _, _| {});
-        self.writer.write_frame(&RstStreamFrame {
+        RstStreamFrame {
             stream_id: pp.promised_stream_id,
             error_code: ErrorCode::Cancel,
-        })?;
+        }
+        .encode(self.writer.out());
         decoded.map_err(H2Error::Hpack)?;
         Ok(())
     }

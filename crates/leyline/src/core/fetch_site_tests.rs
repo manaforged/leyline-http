@@ -1,6 +1,6 @@
 use url::Url;
 
-use super::same_origin;
+use crate::core::config::Origin;
 
 #[test]
 fn same_origin_matches_the_url_origin_rule() {
@@ -23,7 +23,7 @@ fn same_origin_matches_the_url_origin_rule() {
     for a in urls {
         for b in urls {
             let (a, b) = (Url::parse(a).unwrap(), Url::parse(b).unwrap());
-            assert_eq!(same_origin(&a, &b), a.origin() == b.origin(), "{a} vs {b}");
+            assert_eq!(Origin::same(&a, &b), a.origin() == b.origin(), "{a} vs {b}");
         }
     }
 }

@@ -210,21 +210,21 @@ async fn a_saved_tls_session_resumes_only_under_the_trust_that_made_it() {
     let unpinned = http1_session(bare_trust().ca_der(server.der.clone()));
     let first = unpinned.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = unpinned.connection_state();
+    let state = leyline::internals::connection_state(&unpinned);
 
     let pinned = http1_session(bare_trust().ca_der(server.der.clone()).pin_sha256([7; 32]));
-    pinned.restore(&state);
+    leyline::internals::restore(&pinned, &state);
     let refused = pinned.get(server.url.clone()).send().await.unwrap_err();
     assert!(
         std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
             .is_some(),
         "{refused:?}"
     );
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
 
     let same = http1_session(bare_trust().ca_der(server.der));
-    same.restore(&state);
+    leyline::internals::restore(&same, &state);
     let again = same.get(server.url).send().await.unwrap();
     assert_eq!(again.text().await.unwrap(), "ok");
     assert_eq!(server.resumed.load(Ordering::SeqCst), 1);
@@ -258,14 +258,14 @@ async fn a_fresh_pool_labels_its_tickets_with_the_roots_it_loaded() {
     std::fs::write(&ca_file, unrelated_pem()).unwrap();
     let first = copy.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = copy.connection_state();
+    let state = leyline::internals::connection_state(&copy);
 
     let rotated = http1_session(bare_trust().ca_file(&ca_file));
-    rotated.restore(&state);
+    leyline::internals::restore(&rotated, &state);
     let refused = rotated.get(server.url).send().await.unwrap_err();
     assert!(
         std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
             .is_some(),
         "{refused:?}"
     );
@@ -283,18 +283,18 @@ async fn a_saved_tls_session_does_not_resume_after_environment_roots_change() {
     let before = http1_session(env_trust());
     let first = before.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = before.connection_state();
+    let state = leyline::internals::connection_state(&before);
 
     // SAFETY: see above.
     unsafe { std::env::set_var("SSL_CERT_FILE", &other) };
     let after = http1_session(env_trust());
     // SAFETY: see above.
     unsafe { std::env::remove_var("SSL_CERT_FILE") };
-    after.restore(&state);
+    leyline::internals::restore(&after, &state);
     let refused = after.get(server.url).send().await.unwrap_err();
     assert!(
         std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
             .is_some(),
         "{refused:?}"
     );
@@ -317,13 +317,13 @@ async fn a_saved_tls_session_does_not_resume_after_the_client_certificate_rotate
     let before = with_identity();
     let first = before.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = before.connection_state();
+    let state = leyline::internals::connection_state(&before);
 
     let (next_cert, next_key) = tls_support::self_signed();
     std::fs::write(&chain, next_cert.to_pem().unwrap()).unwrap();
     std::fs::write(&private, next_key.private_key_to_pem_pkcs8().unwrap()).unwrap();
     let after = with_identity();
-    after.restore(&state);
+    leyline::internals::restore(&after, &state);
     let again = after.get(server.url.clone()).send().await.unwrap();
     assert_eq!(again.text().await.unwrap(), "ok");
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
@@ -422,13 +422,13 @@ async fn restored_tickets_for_other_trust_are_not_kept() {
     let unpinned = http1_session(bare_trust().ca_der(server.der.clone()));
     let first = unpinned.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = unpinned.connection_state();
+    let state = leyline::internals::connection_state(&unpinned);
     let saved = serde_json::to_value(&state).unwrap();
     assert!(!saved["tls_sessions"].as_array().unwrap().is_empty());
 
     let pinned = http1_session(bare_trust().ca_der(server.der).pin_sha256([7; 32]));
-    pinned.restore(&state);
-    let kept = serde_json::to_value(pinned.connection_state()).unwrap();
+    leyline::internals::restore(&pinned, &state);
+    let kept = serde_json::to_value(leyline::internals::connection_state(&pinned)).unwrap();
     assert_eq!(kept["tls_sessions"].as_array().map(Vec::len), Some(0));
 }
 
@@ -487,7 +487,7 @@ async fn saved_tickets_through_a_proxy_hold_no_proxy_credentials() {
         .unwrap();
     let response = session.get(server.url).send().await.unwrap();
     assert_eq!(response.text().await.unwrap(), "ok");
-    let saved = serde_json::to_string(&session.connection_state()).unwrap();
+    let saved = serde_json::to_string(&leyline::internals::connection_state(&session)).unwrap();
     assert!(saved.contains("tls_sessions"), "{saved}");
     assert!(
         !saved.contains("tunneluser"),

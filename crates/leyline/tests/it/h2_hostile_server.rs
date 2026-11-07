@@ -3,7 +3,7 @@ use crate::h2_support as support;
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::h2::frame::FrameType;
+use leyline::internals::h2::frame::FrameType;
 use support::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -28,7 +28,7 @@ async fn peer_max_frame_size_does_not_raise_our_inbound_cap() {
         drop(server_io.shutdown().await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -49,7 +49,7 @@ async fn peer_max_frame_size_does_not_raise_our_inbound_cap() {
         .expect("driver must terminate on an oversized frame")
         .expect_err("driver must report an error");
     match err {
-        leyline::h2::H2Error::FrameTooLarge { size, max } => {
+        leyline::internals::h2::H2Error::FrameTooLarge { size, max } => {
             assert_eq!(
                 max, 16384,
                 "inbound cap must be OUR advertised MAX_FRAME_SIZE, not the peer's"
@@ -105,7 +105,7 @@ async fn bad_status_fails_stream_but_not_connection() {
             drop(server_io.read(&mut sink).await);
         });
 
-        let handle = leyline::h2::start(client_io, test_config())
+        let handle = leyline::internals::h2::start(client_io, test_config())
             .await
             .expect("handshake");
 
@@ -151,7 +151,7 @@ async fn trailers_without_end_stream_fail_the_stream() {
         drop(server_io.read(&mut sink).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -191,7 +191,7 @@ async fn pseudo_header_in_trailers_fails_the_stream() {
         drop(server_io.read(&mut sink).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -250,11 +250,11 @@ async fn push_promise_field_block_is_hpack_decoded_before_reset() {
 
     let mut config = test_config();
     for (id, value) in &mut config.settings {
-        if *id == leyline::h2::config::SettingId::EnablePush {
+        if *id == leyline::internals::profile::SettingId::EnablePush {
             *value = 1;
         }
     }
-    let handle = leyline::h2::start(client_io, config)
+    let handle = leyline::internals::h2::start(client_io, config)
         .await
         .expect("handshake");
 
@@ -300,7 +300,7 @@ async fn trailers_with_end_stream_reach_the_response() {
         drop(server_io.read(&mut sink).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -310,7 +310,7 @@ async fn trailers_with_end_stream_reach_the_response() {
         .await
         .expect("response");
     assert_eq!(resp.status, 200);
-    let leyline::pool::TransportBody::Buffered(body) = resp.body else {
+    let leyline::internals::pool::TransportBody::Buffered(body) = resp.body else {
         panic!("buffered body")
     };
     assert_eq!(body, b"body");
@@ -339,7 +339,7 @@ async fn a_non_utf8_header_value_reaches_the_response_byte_exact() {
         let (h, _) = read_frame(&mut server_io).await;
         assert_eq!(h.frame_type, FrameType::Headers as u8);
         let fragment = vec![0x88, 0x00, 0x01, b'x', 0x02, b'a', 0xff];
-        let frame = leyline::h2::frame::HeadersFrame {
+        let frame = leyline::internals::h2::frame::HeadersFrame {
             stream_id: 1,
             end_stream: true,
             end_headers: true,
@@ -353,7 +353,7 @@ async fn a_non_utf8_header_value_reaches_the_response_byte_exact() {
         drop(server_io.read(&mut sink).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
     let resp = handle
@@ -388,7 +388,7 @@ async fn a_status_below_100_fails_the_stream() {
         drop(server_io.read(&mut sink).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -400,8 +400,8 @@ async fn a_status_below_100_fails_the_stream() {
     assert!(
         matches!(
             err,
-            leyline::h2::H2Error::Stream {
-                code: leyline::h2::ErrorCode::ProtocolError,
+            leyline::internals::h2::H2Error::Stream {
+                code: leyline::internals::h2::ErrorCode::ProtocolError,
                 ..
             }
         ),
@@ -446,7 +446,7 @@ async fn a_stream_level_frame_error_resets_only_that_stream() {
             drop(server_io.read(&mut sink).await);
         });
 
-        let handle = leyline::h2::start(client_io, test_config())
+        let handle = leyline::internals::h2::start(client_io, test_config())
             .await
             .expect("handshake");
         let a = tokio::time::timeout(
@@ -480,7 +480,7 @@ async fn a_server_that_enables_push_fails_the_connection() {
         while server_io.read(&mut sink).await.is_ok_and(|n| n > 0) {}
     });
     let attempt = async {
-        let handle = leyline::h2::start(client_io, test_config()).await?;
+        let handle = leyline::internals::h2::start(client_io, test_config()).await?;
         handle
             .send_shared(Arc::new(get_head("/")), leyline::Body::default(), false)
             .await
@@ -492,8 +492,8 @@ async fn a_server_that_enables_push_fails_the_connection() {
     assert!(
         matches!(
             err,
-            leyline::h2::H2Error::Connection {
-                code: leyline::h2::error::ErrorCode::ProtocolError,
+            leyline::internals::h2::H2Error::Connection {
+                code: leyline::internals::h2::error::ErrorCode::ProtocolError,
                 ..
             }
         ),

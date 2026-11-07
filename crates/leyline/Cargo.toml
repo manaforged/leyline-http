@@ -66,8 +66,7 @@ multipart = []
 websocket = ["dep:tokio-tungstenite"]
 http3 = ["dep:leyline-quiche"]
 socks = []
-# Exposes pub bench-only probes into otherwise pub(crate) pool internals
-# (checkout + evict path). Off by default; only leyline-benches enables it.
+# Unsupported `leyline::internals` facade for the benches, fuzz targets, and integration tests.
 bench-internals = []
 tower = ["dep:tower-service"]
 test-util = []

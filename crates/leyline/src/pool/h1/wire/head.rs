@@ -1,14 +1,18 @@
 use super::*;
-use crate::core::BodyKind;
+use crate::wire::BodyKind;
+
+pub(in crate::pool::h1) fn invalid_method(method: &str) -> Error {
+    Error::config(format!(
+        "invalid HTTP method `{method}`: non-token bytes not allowed"
+    ))
+}
 
 pub(in crate::pool::h1) fn validate<K: AsRef<str>, V: AsRef<str>>(
-    method: &str,
+    method: &Method,
     headers: &[(K, V)],
 ) -> Result<(), Error> {
-    if !is_valid_token(method) {
-        return Err(Error::config(format!(
-            "invalid HTTP method `{method}`: non-token bytes not allowed"
-        )));
+    if !is_valid_token(method.as_str()) {
+        return Err(invalid_method(method.as_str()));
     }
     for (name, value) in headers {
         let (name, value) = (name.as_ref(), value.as_ref());
@@ -30,8 +34,8 @@ pub(super) fn target(
     url: &url::Url,
     target: H1Target,
 ) -> Result<(Cow<'_, str>, Cow<'_, str>), Error> {
-    let (host, port) = crate::util::host_port(url)?;
-    let authority = crate::util::authority(url, host, port);
+    let (host, port) = crate::wire::host_port(url)?;
+    let authority = crate::wire::authority(url, host, port);
     let path = crate::util::request_target(url);
     let request_target = match target {
         H1Target::OriginForm => Cow::Borrowed(path),
@@ -47,13 +51,13 @@ pub(super) fn target(
 
 pub(super) type Length = Option<(&'static str, Cow<'static, str>)>;
 
-pub(super) fn frame(method: &str, headers: &[HeaderPair], body: Body) -> (Framing, Length) {
+pub(super) fn frame(method: &Method, headers: &[HeaderPair], body: Body) -> (Framing, Length) {
     let has_cl = contains_header(headers, "content-length");
     let has_te = contains_header(headers, "transfer-encoding");
     let length = |n: String| (!has_cl && !has_te).then_some(("Content-Length", Cow::Owned(n)));
     match body.0 {
         BodyKind::Empty => {
-            let zero = method_typically_has_body(method) && !has_cl && !has_te;
+            let zero = crate::wire::has_body_by_default(method) && !has_cl && !has_te;
             (
                 Framing::None,
                 zero.then_some(("Content-Length", Cow::Borrowed("0"))),
@@ -130,29 +134,4 @@ impl Head<'_> {
         }
         req.extend_from_slice(b"\r\n");
     }
-}
-
-fn put(req: &mut Vec<u8>, name: &str, value: &str) {
-    req.extend_from_slice(name.as_bytes());
-    req.extend_from_slice(b": ");
-    req.extend_from_slice(value.as_bytes());
-    req.extend_from_slice(b"\r\n");
-}
-
-pub(crate) fn field_lines(headers: &[HeaderPair]) -> Option<Vec<u8>> {
-    let size = headers
-        .iter()
-        .map(|(name, value)| name.len() + value.len() + 4)
-        .sum();
-    let mut lines = Vec::with_capacity(size);
-    for (name, value) in headers {
-        if !crate::core::transport::sent_on(http::Version::HTTP_11, name, value) {
-            continue;
-        }
-        if !is_valid_token(name) || !is_valid_header_value(value) {
-            return None;
-        }
-        put(&mut lines, h1_header_name(name), value);
-    }
-    Some(lines)
 }

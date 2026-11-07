@@ -1,20 +1,24 @@
 use std::borrow::Cow;
 
-use http::header::{AUTHORIZATION, HOST};
+use http::Method;
+use http::header::AUTHORIZATION;
 use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
 use super::journey::Journey;
 use super::{RequestContext, SiteContext, fetch_site_for, referer_for};
-use crate::FetchSite;
-use crate::core::Session;
-use crate::core::body::{Body, BodyKind};
+use crate::core::FetchSite;
+use crate::core::config::Origin;
 use crate::core::headers::{HeaderList, reorder};
-use crate::core::request_headers::{self, HeaderKey, RequestHeaders};
+use crate::core::request_headers::{self, HeaderKey};
+use crate::core::session::Session;
 use crate::header_str::HeaderStr;
 use crate::profile::RequestKind;
-use crate::profile::preset::{HeaderContext, HeaderPair, Plan};
-use crate::util::sensitive_header;
+use crate::profile::preset::{HeaderContext, Plan};
+use crate::util::{cross_origin_header, header_first};
+use crate::wire::HeaderPair;
+use crate::wire::RequestHeaders;
+use crate::wire::{Body, BodyKind, Scheme};
 
 impl Session {
     #[expect(
@@ -26,7 +30,7 @@ impl Session {
         plan: &Plan,
         request: RequestContext<'_>,
         current_url: &Url,
-        current_method: &str,
+        current_method: &Method,
         current_body: &Body,
         extra_headers: Option<&HeaderList>,
         strip_sensitive: bool,
@@ -45,7 +49,7 @@ impl Session {
         self.merge_session_headers(&mut headers, &caller_has, strip_sensitive, current_url);
 
         if let Some(extra) = extra_headers {
-            apply_extra_headers(&mut headers, extra, strip_sensitive, &cross_origin_stripped);
+            apply_extra_headers(&mut headers, extra, strip_sensitive);
         }
         if request.initiated {
             add_referer(&mut headers, referer);
@@ -74,7 +78,7 @@ impl Session {
             navigation_site: if request.initiated {
                 request.site.fetch_site.as_str()
             } else {
-                "none"
+                FetchSite::None.as_str()
             },
             navigation_referer: if request.initiated { referer } else { "" },
             ..HeaderContext::session(
@@ -96,22 +100,20 @@ impl Session {
         let origin = journey.origin_of(&journey.url);
         let referrer = (journey.initiated || plan.reads_referer()).then(|| journey.referrer());
         let referer = referrer.as_deref().map_or(Cow::Borrowed(""), |referrer| {
-            referer_for(Some(referrer), &origin)
+            referer_for(Some(referrer), &journey.url, &origin)
         });
-        let fetch_site = if plan.reads_site() || !self.inner.cookie_jar.is_empty() {
+        let fetch_site = if plan.reads_site() || !self.inner.inputs.jar().is_empty() {
             fetch_site_for(journey.initiator.as_deref(), &journey.chain, &journey.url)
         } else {
             FetchSite::CrossSite
         };
-        let strip_sensitive = journey.strips_credentials(&origin);
-        let initiator_origin = journey
+        let strip_sensitive = journey.strips_credentials();
+        let initiator = journey
             .initiator
             .as_deref()
-            .filter(|url| matches!(url.scheme(), "http" | "https"))
-            .map(|url| journey.origin_of(url));
-        let downgrade = initiator_origin
-            .as_deref()
-            .is_some_and(|origin| origin.starts_with("https:") && journey.url.scheme() != "https");
+            .filter(|url| Scheme::of(url).is_some());
+        let initiator_origin = initiator.map(|url| journey.origin_of(url));
+        let downgrade = initiator.is_some_and(|url| Origin::downgrades(url, &journey.url));
         let original_origin = journey.original_origin();
         let request_origin = match (&initiator_origin, journey.tainted) {
             (_, true) => "null",
@@ -134,7 +136,7 @@ impl Session {
                     },
                 },
                 &journey.url,
-                journey.method.as_str(),
+                &journey.method,
                 &journey.body,
                 extra,
                 strip_sensitive,
@@ -160,18 +162,8 @@ impl Session {
     fn caches_headers(&self, journey: &Journey) -> bool {
         !journey.initiated
             && matches!(journey.body.0, BodyKind::Empty)
-            && self.inner.bearer.is_none()
-            && self.inner.cookie_jar.is_empty()
-    }
-
-    bench_pub! {
-        #[cfg_attr(
-            not(feature = "bench-internals"),
-            expect(dead_code, reason = "benches read the header cache counts")
-        )]
-        fn header_cache_counts() -> (u64, u64) {
-            request_headers::counts()
-        }
+            && self.inner.inputs.bearer.is_none()
+            && self.inner.inputs.jar().is_empty()
     }
 
     pub(super) fn audit_copy(&self, headers: &[HeaderPair]) -> Vec<(String, String)> {
@@ -192,7 +184,7 @@ impl Session {
         target: &Url,
     ) {
         for (k, v) in self.session_defaults(target) {
-            if caller_has(k) || (strip_sensitive && cross_origin_stripped(k)) {
+            if caller_has(k) || (strip_sensitive && cross_origin_header(k)) {
                 continue;
             }
             match headers
@@ -208,6 +200,7 @@ impl Session {
     fn session_defaults<'a>(&'a self, target: &Url) -> impl Iterator<Item = (&'a str, HeaderStr)> {
         let bearer = self
             .inner
+            .inputs
             .bearer
             .as_ref()
             .filter(|_| self.bearer_in_scope(target));
@@ -226,9 +219,10 @@ impl Session {
 
     pub(in crate::core::session) fn bearer_in_scope(&self, target: &Url) -> bool {
         self.inner
+            .inputs
             .base_url
             .as_ref()
-            .is_none_or(|base| base.origin() == target.origin())
+            .is_none_or(|base| Origin::same(base, target))
     }
 
     pub(in crate::core::session) fn add_jar_cookie(
@@ -236,9 +230,9 @@ impl Session {
         headers: &mut Vec<HeaderPair>,
         url: &Url,
         site: &SiteContext<'_>,
-        method: &str,
+        method: &Method,
     ) {
-        if self.inner.cookie_jar.is_empty()
+        if self.inner.inputs.jar().is_empty()
             || headers
                 .iter()
                 .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
@@ -254,24 +248,25 @@ impl Session {
                     .is_none_or(|initiator| FetchSite::of(initiator, url) == FetchSite::CrossSite)
             }
         };
-        let cross_site = match header_value(headers, "sec-fetch-site") {
-            Some(sent) if sent.eq_ignore_ascii_case(site.fetch_site.as_str()) => computed(),
-            Some(sent) if sent.eq_ignore_ascii_case("none") => {
+        let cross_site = match header_first(headers, "sec-fetch-site").map(FetchSite::parse) {
+            Some(sent) if sent == Some(site.fetch_site) => computed(),
+            Some(Some(FetchSite::None)) => {
                 chain_rule
                     && site.chain.first().is_some_and(|first| {
                         FetchSite::across(first, site.chain.iter().chain([url]))
                             == FetchSite::CrossSite
                     })
             }
-            Some(sent) => sent.eq_ignore_ascii_case(FetchSite::CrossSite.as_str()),
+            Some(sent) => sent == Some(FetchSite::CrossSite),
             None => computed(),
         };
-        let safe_method = is_safe_method(method);
-        let top_level = header_value(headers, "sec-fetch-dest")
+        let safe_method = crate::wire::is_retrieval(method);
+        let top_level = header_first(headers, "sec-fetch-dest")
             .is_none_or(|dest| dest.eq_ignore_ascii_case("document"));
         if let Some(cookie_val) =
             self.inner
-                .cookie_jar
+                .inputs
+                .jar()
                 .cookie_header_for(url, cross_site, safe_method && top_level)
         {
             headers.push(("cookie".into(), HeaderStr::from(cookie_val)));
@@ -282,7 +277,7 @@ impl Session {
         self.inner
             .identity
             .as_ref()
-            .and_then(super::super::Identity::http)
+            .and_then(crate::core::Identity::http)
             .or(self.inner.browser)
             .is_some_and(|browser| browser.family().samesite_checks_redirect_chain())
     }
@@ -299,7 +294,7 @@ impl Session {
 const CORS_MODES: [&str; 2] = ["cors", "websocket"];
 
 fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
-    if !referer.is_empty() && header_value(headers, "referer").is_none() {
+    if !referer.is_empty() && header_first(headers, "referer").is_none() {
         headers.push(("referer".into(), HeaderStr::from(referer)));
     }
 }
@@ -316,18 +311,7 @@ fn set_content_length(headers: &mut Vec<HeaderPair>, body: &Body) {
     }
 }
 
-fn cross_origin_stripped(name: &str) -> bool {
-    sensitive_header(name) || name.eq_ignore_ascii_case(HOST.as_str())
-}
-
-fn header_value<'a>(headers: &'a [HeaderPair], name: &str) -> Option<&'a str> {
-    headers
-        .iter()
-        .find(|(k, _)| k.eq_ignore_ascii_case(name))
-        .map(|(_, v)| v.as_ref())
-}
-
-fn shape_origin(headers: &mut Vec<HeaderPair>, method: &str, downgrade: bool) {
+fn shape_origin(headers: &mut Vec<HeaderPair>, method: &Method, downgrade: bool) {
     if !sends_origin(method, headers) {
         headers.retain(|(k, _)| !k.eq_ignore_ascii_case("origin"));
     } else if downgrade && !cors_mode(headers) {
@@ -340,22 +324,16 @@ fn shape_origin(headers: &mut Vec<HeaderPair>, method: &str, downgrade: bool) {
 }
 
 fn cors_mode(headers: &[HeaderPair]) -> bool {
-    header_value(headers, "sec-fetch-mode")
+    header_first(headers, "sec-fetch-mode")
         .is_some_and(|mode| CORS_MODES.iter().any(|m| mode.eq_ignore_ascii_case(m)))
 }
 
-fn is_safe_method(method: &str) -> bool {
-    ["GET", "HEAD"]
-        .iter()
-        .any(|m| method.eq_ignore_ascii_case(m))
-}
-
-fn sends_origin(method: &str, headers: &[HeaderPair]) -> bool {
-    if !is_safe_method(method) {
+fn sends_origin(method: &Method, headers: &[HeaderPair]) -> bool {
+    if !crate::wire::is_retrieval(method) {
         return true;
     }
     let cors = cors_mode(headers);
-    let cross_origin = header_value(headers, "sec-fetch-site")
-        .is_some_and(|site| !site.eq_ignore_ascii_case(crate::FetchSite::SameOrigin.as_str()));
+    let cross_origin = header_first(headers, "sec-fetch-site")
+        .is_some_and(|site| FetchSite::parse(site) != Some(FetchSite::SameOrigin));
     cors && cross_origin
 }

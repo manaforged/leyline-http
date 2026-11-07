@@ -40,9 +40,12 @@ const HTTP11_ARR: [u8; wire_len(HTTP11_ONLY)] = wire(HTTP11_ONLY);
 pub(crate) const BROWSER_WIRE: &[u8] = &BROWSER_ARR;
 pub(crate) const HTTP11_WIRE: &[u8] = &HTTP11_ARR;
 
+/// The ALPN list a TLS connection offers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AlpnPlan {
+pub enum AlpnPlan {
+    /// Offers `h2` and `http/1.1` with the profile's ALPS.
     Browser,
+    /// Offers only `http/1.1`.
     Http11,
 }
 

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
 use crate::core::attempt::Attempt;
+use crate::error::{Error, Kind, Result};
+
+const CUSTOM_MAX_REDIRECTS: usize = 32;
 
 #[doc = include_str!("../../../docs/redirect.md")]
 #[derive(Clone)]
@@ -66,12 +69,18 @@ impl Redirect {
         }
     }
 
-    pub(crate) fn max_redirects_hint(&self) -> usize {
-        match self.kind {
+    pub(crate) fn check_hops(&self, hops: usize) -> Result<()> {
+        let max = match self.kind {
             RedirectKind::Limited(n) => n,
             RedirectKind::None => 0,
-            RedirectKind::Custom(_) => 32,
+            RedirectKind::Custom(_) => CUSTOM_MAX_REDIRECTS,
+        };
+        if hops > max {
+            return Err(
+                Error::new(Kind::Redirect).with_message(format!("too many redirects (max {max})"))
+            );
         }
+        Ok(())
     }
 
     pub(crate) fn follows(&self, attempt: &Attempt<'_>) -> bool {

@@ -6,10 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use leyline::BrowserProfile;
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{FrameType, PingFrame, RstStreamFrame};
-use leyline::h2::{ErrorCode, H2Client, H2Config, Head};
+use leyline::internals::BrowserProfile;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{FrameType, PingFrame, RstStreamFrame};
+use leyline::internals::h2::{ErrorCode, H2Client, H2Config, Head};
 use support::{
     read_frame, read_preface, write_data, write_raw_headers, write_response_headers,
     write_server_settings, write_settings_ack,
@@ -111,7 +111,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
             done_rx.await.expect("consumer finished");
         }
     });
-    let handle = leyline::h2::start(client, config)
+    let handle = leyline::internals::h2::start(client, config)
         .await
         .expect("H2 connection");
     let response = handle
@@ -132,7 +132,7 @@ async fn transfer(ending: Ending) -> (usize, Option<io::Error>) {
         .await
         .expect("response headers");
     assert_eq!(response.status, 200);
-    let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
+    let leyline::internals::pool::TransportBody::Streaming(mut body) = response.body else {
         panic!("streaming body");
     };
     timeout(Duration::from_secs(3), ready_rx)

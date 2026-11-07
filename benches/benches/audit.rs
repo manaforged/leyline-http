@@ -1,10 +1,9 @@
-
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use leyline::audit::{
+use leyline::internals::audit::{
     Ja3Input, Ja4Input, Ja4hInput, compute_ja3, compute_ja4, compute_ja4h, compute_ja4t,
 };
-use leyline::fuzz::extension_ids;
-use leyline::profile::ProfileRegistry;
+use leyline::internals::fuzz::extension_ids;
+use leyline::internals::profile::ProfileRegistry;
 use leyline::{Browser, Platform};
 
 fn chrome_147_inputs() -> (Vec<String>, Vec<String>, Vec<String>, Vec<u16>) {
@@ -42,9 +41,8 @@ fn bench_ja4(c: &mut Criterion) {
                 ciphers: black_box(&ciphers),
                 sigalgs: black_box(&sigalgs),
                 extension_ids: black_box(&ext_ids),
-                tls_version: "1.3",
                 has_sni: true,
-                alpn: "h2",
+                hello: leyline::internals::audit::ClientHello::TcpH2,
             };
             black_box(compute_ja4(&input));
         });
@@ -97,7 +95,7 @@ fn bench_ja4h(c: &mut Criterion) {
         b.iter(|| {
             let input = Ja4hInput {
                 method: black_box("GET"),
-                http_version: black_box("2"),
+                version: black_box(leyline::http::Version::HTTP_2),
                 headers: black_box(&headers),
             };
             black_box(compute_ja4h(&input));

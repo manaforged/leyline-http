@@ -3,51 +3,56 @@ use std::time::SystemTime;
 
 use url::Url;
 
-use super::super::decompress::{buffer_and_strip, decompress_and_strip};
 use super::super::helpers::header_values;
 use super::journey::Journey;
 use crate::core::BodyRules;
-use crate::core::Session;
-use crate::core::deadline::Deadline;
-use crate::core::error::Result;
+use crate::core::decompress::{buffer_and_strip, decompress_and_strip};
 use crate::core::response::Response;
-use crate::core::response_head::Fields;
 use crate::core::saved::{ConnectionState, StateParts};
-use crate::core::transport::{ResponseMode, TransportResponse};
+use crate::core::session::Session;
+use crate::deadline::Deadline;
+use crate::error::{BodyLimit, Result};
 use crate::util::lock;
 use crate::util::since_epoch;
+use crate::wire::Fields;
+use crate::wire::{ResponseMode, TransportResponse};
 
 impl Session {
-    pub(super) fn store_cookies(&self, resp_headers: &http::HeaderMap, url: &Url) {
+    pub(in crate::core::session) fn store_cookies(
+        &self,
+        resp_headers: &http::HeaderMap,
+        url: &Url,
+    ) {
         let set_cookies: Vec<&str> = header_values(resp_headers, http::header::SET_COOKIE)
             .filter_map(|v| v.to_str().ok())
             .collect();
         if !set_cookies.is_empty() {
             self.inner
-                .cookie_jar
+                .inputs
+                .jar()
                 .store_response_cookies(set_cookies.as_slice(), url);
         }
     }
 
-    bench_pub! {
     #[must_use]
-    fn connection_state(&self) -> ConnectionState {
+    pub(crate) fn connection_state(&self) -> ConnectionState {
         let now = SystemTime::now();
         ConnectionState::from_parts(StateParts {
-            tls_sessions: self.inner.connector.session_cache().export(since_epoch(now).as_secs()),
+            tls_sessions: self
+                .inner
+                .connector
+                .session_cache()
+                .export(since_epoch(now).as_secs()),
             #[cfg(feature = "http3")]
             alt_svc: self.inner.pool.alt_svc_entries(),
             #[cfg(not(feature = "http3"))]
             alt_svc: Vec::new(),
-            hsts: lock(&self.inner.pool.hsts).export(now),
+            hsts: lock(&self.inner.hsts).export(now),
         })
     }
-    }
 
-    bench_pub! {
-    fn restore(&self, state: &ConnectionState) {
+    pub(crate) fn restore(&self, state: &ConnectionState) {
         self.restore_state(&state.parts());
-    }
     }
 
     pub(crate) fn restore_state(&self, parts: &StateParts) {
@@ -58,11 +63,11 @@ impl Session {
             .import(&parts.tls_sessions, since_epoch(now).as_secs());
         #[cfg(feature = "http3")]
         self.inner.pool.restore_alt_svc(&parts.alt_svc);
-        lock(&self.inner.pool.hsts).import(&parts.hsts, now);
+        lock(&self.inner.hsts).import(&parts.hsts, now);
     }
 
     pub(super) fn note_hsts(&self, url: &Url, resp_headers: &http::HeaderMap) {
-        if self.inner.tls_trust.accepts_invalid_certs() {
+        if self.inner.inputs.tls_trust.accepts_invalid_certs() {
             return;
         }
         let values: Vec<&str> =
@@ -70,7 +75,7 @@ impl Session {
                 .filter_map(|v| v.to_str().ok())
                 .collect();
         if !values.is_empty() {
-            lock(&self.inner.pool.hsts).note(url, &values, SystemTime::now());
+            lock(&self.inner.hsts).note(url, &values, SystemTime::now());
         }
     }
 
@@ -78,7 +83,7 @@ impl Session {
         if !crate::core::hsts::HstsStore::applies(url) {
             return Arc::clone(url);
         }
-        lock(&self.inner.pool.hsts)
+        lock(&self.inner.hsts)
             .upgrade(url, SystemTime::now())
             .map_or_else(|| Arc::clone(url), Arc::new)
     }
@@ -97,9 +102,7 @@ impl Session {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| crate::util::delta_seconds(v.split(',').next().unwrap_or_default()))
             .map_or(std::time::Duration::ZERO, std::time::Duration::from_secs);
-        if let Some(host) = url.host_str()
-            && let Some(port) = url.port_or_known_default()
-        {
+        if let Ok((host, port)) = crate::wire::host_port(url) {
             self.inner.pool.note_alt_svc(host, port, &fields, age);
         }
     }
@@ -133,7 +136,7 @@ impl Session {
             .await?;
         let audited = self.inner.audit_tls.is_some();
         let mut audit_headers = audit_headers;
-        audit_headers.retain(|(name, value)| crate::core::transport::sent_on(version, name, value));
+        audit_headers.retain(|(name, value)| crate::wire::sent_on(version, name, value));
         let mut response = Response::from_parts(crate::core::response::Parts {
             status,
             headers,
@@ -144,11 +147,7 @@ impl Session {
             trailers,
             request_headers: audit_headers,
             tls,
-            request_method: if audited {
-                journey.method.to_string()
-            } else {
-                String::new()
-            },
+            request_method: audited.then_some(journey.method),
             audit_tls: self.inner.audit_tls.clone(),
             audit_cache: std::sync::OnceLock::new(),
             compression: rules,
@@ -157,20 +156,21 @@ impl Session {
             proxy: None,
             block: None,
         });
-        response.parts.block = self.inner.block_rules.check(&response);
+        response.parts.block = self.inner.inputs.block_rules.check(&response);
         Ok(response)
     }
 
     pub(super) async fn finalize_response_body(
         &self,
-        resp_body_shape: crate::core::transport::TransportBody,
+        resp_body_shape: crate::wire::TransportBody,
         resp_headers: Fields,
         keep_stream: bool,
         rules: &BodyRules,
         deadline: &Deadline,
     ) -> Result<(crate::core::response::ResponseBody, Fields)> {
         Ok(match resp_body_shape {
-            crate::core::transport::TransportBody::Streaming(mut bs) if keep_stream => {
+            crate::wire::TransportBody::Streaming(channel) if keep_stream => {
+                let mut bs = Box::new(crate::core::body_stream::BodyStream::from(channel));
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
                 bs.stop_on(&self.inner.shutdown);
@@ -180,8 +180,8 @@ impl Session {
                     resp_headers,
                 )
             }
-            crate::core::transport::TransportBody::Streaming(bs) => {
-                let mut bs = *bs;
+            crate::wire::TransportBody::Streaming(channel) => {
+                let mut bs = crate::core::body_stream::BodyStream::from(channel);
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
                 let (buf, resp_headers) =
@@ -191,7 +191,10 @@ impl Session {
                     resp_headers.into(),
                 )
             }
-            crate::core::transport::TransportBody::Buffered(buf) => {
+            crate::wire::TransportBody::Buffered(buf) => {
+                BodyLimit::session(rules.max_body_size)
+                    .admit(0, buf.len())
+                    .map_err(BodyLimit::error)?;
                 if keep_stream {
                     let mut bs =
                         crate::core::body_stream::BodyStream::from_bytes(bytes::Bytes::from(buf));

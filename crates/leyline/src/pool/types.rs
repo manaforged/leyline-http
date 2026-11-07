@@ -1,3 +1,6 @@
+use crate::wire::{Scheme, TlsInfo};
+use foldhash::HashMap;
+use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
@@ -7,31 +10,7 @@ use crate::h2::client::H2Client;
 use crate::quic::H3Client;
 
 use crate::pool::h1::H1Io;
-
-#[derive(Debug, Clone, Default)]
-pub struct TlsInfo(std::sync::Arc<TlsFacts>);
-
-#[derive(Debug, Default)]
-#[non_exhaustive]
-pub struct TlsFacts {
-    pub peer_cert_der: Option<Vec<u8>>,
-    pub version: Option<String>,
-    pub cipher: Option<String>,
-}
-
-impl From<TlsFacts> for TlsInfo {
-    fn from(facts: TlsFacts) -> Self {
-        Self(std::sync::Arc::new(facts))
-    }
-}
-
-impl std::ops::Deref for TlsInfo {
-    type Target = TlsFacts;
-
-    fn deref(&self) -> &TlsFacts {
-        &self.0
-    }
-}
+use crate::profile::Carrier;
 
 pub(crate) struct Opened<C> {
     pub(crate) conn: C,
@@ -67,7 +46,7 @@ impl<C> Opened<C> {
             conn,
             tls,
             started,
-            connect_ms: Some(crate::ResponseTiming::millis(started)),
+            connect_ms: Some(crate::wire::ResponseTiming::millis(started)),
             lane: 0,
             slot: None,
             probe: None,
@@ -97,25 +76,32 @@ impl<C> Opened<C> {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-pub(crate) enum Transport {
-    Tcp,
-    #[cfg_attr(
-        not(feature = "http3"),
-        allow(dead_code, reason = "QUIC transport exists only with http3")
-    )]
-    Quic,
-}
-
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct PoolKey {
     pub(crate) host: String,
     pub(crate) port: u16,
-    pub(crate) scheme: std::borrow::Cow<'static, str>,
-    pub(crate) proxy: Option<crate::core::ProxyUrl>,
-    pub(crate) transport: Transport,
-    pub(crate) partition: u64,
+    pub(crate) scheme: Scheme,
+    pub(crate) proxy: Option<crate::net::ProxyUrl>,
+    pub(crate) transport: Carrier,
+    pub(crate) partition: Option<u64>,
     pub(crate) lane: u8,
+}
+
+impl PoolKey {
+    pub(crate) fn host_key(&self) -> Cow<'_, PoolKey> {
+        if self.partition.is_none() {
+            Cow::Borrowed(self)
+        } else {
+            Cow::Owned(PoolKey {
+                partition: None,
+                ..self.clone()
+            })
+        }
+    }
+
+    pub(crate) fn h1_key(self) -> PoolKey {
+        PoolKey { lane: 0, ..self }
+    }
 }
 
 pub struct H1Slot {
@@ -137,6 +123,20 @@ pub(crate) enum Proto {
     H1,
     H2,
     H3,
+}
+
+impl Proto {
+    const COUNT: usize = Self::H3 as usize + 1;
+}
+
+impl From<http::Version> for Proto {
+    fn from(version: http::Version) -> Self {
+        match version {
+            http::Version::HTTP_2 => Self::H2,
+            http::Version::HTTP_3 => Self::H3,
+            _ => Self::H1,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -165,12 +165,16 @@ impl MuxHandle {
 }
 
 pub(crate) trait MuxClient: Clone {
+    const VERSION: http::Version;
     fn into_handle(self) -> MuxHandle;
     fn in_handle(handle: &MuxHandle) -> Option<&Self>;
     fn same(&self, other: &Self) -> bool;
+    fn is_closed(&self) -> bool;
 }
 
 impl MuxClient for H2Client {
+    const VERSION: http::Version = http::Version::HTTP_2;
+
     fn into_handle(self) -> MuxHandle {
         MuxHandle::H2(self)
     }
@@ -186,10 +190,16 @@ impl MuxClient for H2Client {
     fn same(&self, other: &Self) -> bool {
         H2Client::same(self, other)
     }
+
+    fn is_closed(&self) -> bool {
+        H2Client::is_closed(self)
+    }
 }
 
 #[cfg(feature = "http3")]
 impl MuxClient for H3Client {
+    const VERSION: http::Version = http::Version::HTTP_3;
+
     fn into_handle(self) -> MuxHandle {
         MuxHandle::H3(self)
     }
@@ -203,6 +213,10 @@ impl MuxClient for H3Client {
 
     fn same(&self, other: &Self) -> bool {
         H3Client::same(self, other)
+    }
+
+    fn is_closed(&self) -> bool {
+        H3Client::is_closed(self)
     }
 }
 
@@ -253,32 +267,64 @@ impl Stamp {
     }
 }
 
-pub(crate) enum PooledConn {
-    Mux {
-        handle: MuxHandle,
-        last_use: Stamp,
-        tls: TlsInfo,
-    },
-    H1 {
-        idle: H1Idle,
-        last_use: Instant,
-        tls: TlsInfo,
-    },
+pub(crate) struct MuxEntry {
+    pub(crate) handle: MuxHandle,
+    pub(crate) last_use: Stamp,
+    pub(crate) tls: TlsInfo,
 }
 
-impl PooledConn {
-    pub(crate) fn last_use(&self) -> Instant {
-        match self {
-            PooledConn::Mux { last_use, .. } => last_use.get(),
-            PooledConn::H1 { last_use, .. } => *last_use,
-        }
+impl MuxEntry {
+    pub(crate) fn is_dead(&self) -> bool {
+        self.handle.is_closed()
+    }
+}
+
+pub(crate) struct H1Entry {
+    pub(crate) idle: H1Idle,
+    pub(crate) last_use: Instant,
+    pub(crate) tls: TlsInfo,
+}
+
+#[derive(Default)]
+pub(crate) struct Entries {
+    pub(crate) h1: HashMap<PoolKey, H1Entry>,
+    pub(crate) mux: HashMap<PoolKey, MuxEntry>,
+}
+
+enum Victim {
+    H1(PoolKey),
+    Mux(PoolKey),
+}
+
+impl Entries {
+    pub(crate) fn len(&self) -> usize {
+        self.h1.len() + self.mux.len()
     }
 
-    pub(crate) fn is_dead(&self) -> bool {
-        match self {
-            PooledConn::Mux { handle, .. } => handle.is_closed(),
-            PooledConn::H1 { idle, .. } => idle.len() == 0,
+    pub(crate) fn evict_lru(&mut self, cap: usize) -> u64 {
+        let mut evicted = 0u64;
+        while self.len() >= cap {
+            let h1 = self.h1.iter().min_by_key(|(_, entry)| entry.last_use);
+            let mux = self
+                .mux
+                .iter()
+                .map(|(key, entry)| (key, entry.last_use.get()))
+                .min_by_key(|(_, last_use)| *last_use);
+            let victim = match (h1, mux) {
+                (Some((key, entry)), Some((_, last_use))) if entry.last_use <= last_use => {
+                    Victim::H1(key.clone())
+                }
+                (_, Some((key, _))) => Victim::Mux(key.clone()),
+                (Some((key, _)), None) => Victim::H1(key.clone()),
+                (None, None) => break,
+            };
+            match victim {
+                Victim::H1(key) => drop(self.h1.remove(&key)),
+                Victim::Mux(key) => drop(self.mux.remove(&key)),
+            }
+            evicted += 1;
         }
+        evicted
     }
 }
 
@@ -286,12 +332,8 @@ impl PooledConn {
 pub struct ConnectionStats {
     pub entries: usize,
     pub max_connections: usize,
-    pub h2_hits: u64,
-    pub h2_misses: u64,
-    pub h1_hits: u64,
-    pub h1_misses: u64,
-    pub h3_hits: u64,
-    pub h3_misses: u64,
+    pub hits: [u64; Proto::COUNT],
+    pub misses: [u64; Proto::COUNT],
     pub evictions_idle: u64,
     pub evictions_lru: u64,
     pub evictions_dead: u64,
@@ -302,10 +344,20 @@ pub struct ConnectionStats {
     pub idle: usize,
 }
 
+impl ConnectionStats {
+    /// Returns how many checkouts on `version` reused a pooled connection.
+    pub fn hits(&self, version: http::Version) -> u64 {
+        self.hits[Proto::from(version) as usize]
+    }
+
+    /// Returns how many checkouts on `version` opened a connection.
+    pub fn misses(&self, version: http::Version) -> u64 {
+        self.misses[Proto::from(version) as usize]
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Counter {
-    Hit(Proto),
-    Miss(Proto),
     EvictionsIdle,
     EvictionsLru,
     EvictionsDead,
@@ -315,51 +367,40 @@ pub(crate) enum Counter {
 }
 
 impl Counter {
-    const COUNT: usize = 12;
-
-    fn index(self) -> usize {
-        match self {
-            Counter::Hit(proto) => proto as usize,
-            Counter::Miss(proto) => 3 + proto as usize,
-            Counter::EvictionsIdle => 6,
-            Counter::EvictionsLru => 7,
-            Counter::EvictionsDead => 8,
-            Counter::StaleProbed => 9,
-            Counter::H2PingFailures => 10,
-            Counter::Installs => 11,
-        }
-    }
+    const COUNT: usize = Self::Installs as usize + 1;
 }
 
 #[derive(Default)]
-pub(crate) struct PoolCounters([AtomicU64; Counter::COUNT]);
+pub(crate) struct PoolCounters {
+    hits: [AtomicU64; Proto::COUNT],
+    misses: [AtomicU64; Proto::COUNT],
+    events: [AtomicU64; Counter::COUNT],
+}
 
 impl PoolCounters {
     pub(crate) fn add(&self, counter: Counter, n: u64) {
-        self.0[counter.index()].fetch_add(n, Ordering::Relaxed);
+        self.events[counter as usize].fetch_add(n, Ordering::Relaxed);
     }
 
     pub(crate) fn checkout(&self, proto: Proto, hit: bool) {
-        let counter = if hit {
-            Counter::Hit(proto)
-        } else {
-            Counter::Miss(proto)
-        };
-        self.add(counter, 1);
+        let counts = if hit { &self.hits } else { &self.misses };
+        counts[proto as usize].fetch_add(1, Ordering::Relaxed);
     }
 
     fn get(&self, counter: Counter) -> u64 {
-        self.0[counter.index()].load(Ordering::Relaxed)
+        self.events[counter as usize].load(Ordering::Relaxed)
     }
 
     pub(crate) fn snapshot(&self) -> ConnectionStats {
         ConnectionStats {
-            h2_hits: self.get(Counter::Hit(Proto::H2)),
-            h2_misses: self.get(Counter::Miss(Proto::H2)),
-            h1_hits: self.get(Counter::Hit(Proto::H1)),
-            h1_misses: self.get(Counter::Miss(Proto::H1)),
-            h3_hits: self.get(Counter::Hit(Proto::H3)),
-            h3_misses: self.get(Counter::Miss(Proto::H3)),
+            hits: self
+                .hits
+                .each_ref()
+                .map(|count| count.load(Ordering::Relaxed)),
+            misses: self
+                .misses
+                .each_ref()
+                .map(|count| count.load(Ordering::Relaxed)),
             evictions_idle: self.get(Counter::EvictionsIdle),
             evictions_lru: self.get(Counter::EvictionsLru),
             evictions_dead: self.get(Counter::EvictionsDead),

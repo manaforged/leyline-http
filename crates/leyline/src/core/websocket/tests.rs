@@ -1,12 +1,16 @@
-use super::{
-    WebSocket, is_reserved_ws_header, overlay_headers, tungstenite_config, ws_header_pair,
-};
+use super::handshake::{forwards, overlay_headers, tungstenite_config, ws_header_pair};
 use crate::core::config::WebSocketOptions;
-use crate::core::error::{Error, Kind};
-use crate::profile::preset::HeaderPair;
+use crate::wire::HeaderPair;
+use http::Version;
 
 #[test]
 fn reserved_headers_gate_the_handshake_but_forwardable_pass() {
+    for version in [Version::HTTP_11, Version::HTTP_2] {
+        reserved_and_forwardable(version);
+    }
+}
+
+fn reserved_and_forwardable(version: Version) {
     for h in [
         "Host",
         "connection",
@@ -16,7 +20,7 @@ fn reserved_headers_gate_the_handshake_but_forwardable_pass() {
         "sec-websocket-extensions",
         "Content-Length",
     ] {
-        assert!(is_reserved_ws_header(h), "{h} must be reserved");
+        assert!(!forwards(version, h, "x"), "{h} must be reserved");
     }
     for h in [
         "cookie",
@@ -25,7 +29,7 @@ fn reserved_headers_gate_the_handshake_but_forwardable_pass() {
         "User-Agent",
         "Sec-WebSocket-Protocol",
     ] {
-        assert!(!is_reserved_ws_header(h), "{h} must be forwardable");
+        assert!(forwards(version, h, "x"), "{h} must be forwardable");
     }
 }
 
@@ -47,16 +51,6 @@ fn invalid_header_value_is_err() {
 #[test]
 fn valid_header_pair_ok() {
     ws_header_pair("x-request-id", "1").expect("expected Ok");
-}
-
-#[test]
-fn only_missing_connect_protocol_falls_back() {
-    assert!(WebSocket::is_h2_fallback_trigger(
-        &Error::new(Kind::Request).with_message("h2-no-connect-protocol")
-    ));
-    assert!(!WebSocket::is_h2_fallback_trigger(
-        &Error::new(Kind::Request).with_message("peer reset")
-    ));
 }
 
 #[test]
@@ -87,7 +81,7 @@ fn caller_headers_replace_only_the_handshake_user_agent_and_origin() {
         ("x-trace".to_owned(), "1".to_owned()),
         ("x-trace".to_owned(), "2".to_owned()),
     ];
-    overlay_headers(&mut request, &extra);
+    overlay_headers(&mut request, &extra, Version::HTTP_2);
     let sent: Vec<(&str, &str)> = request
         .iter()
         .map(|(name, value)| (name.as_ref(), value.as_ref()))

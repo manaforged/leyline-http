@@ -1,43 +1,16 @@
-#[cfg(not(all(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-zstd",
-    feature = "compression-deflate"
-)))]
-use crate::core::error::Kind;
-use crate::core::error::{Error, Result};
+#[cfg(leyline_any_codec)]
+use crate::error::Error;
+#[cfg(not(leyline_all_codecs))]
+use crate::error::Kind;
+use crate::error::Result;
+use crate::profile::Encoding;
 
-/// A content encoding for compressing a request body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Encoding {
-    /// The gzip encoding.
-    Gzip,
-    /// The Brotli encoding.
-    Brotli,
-    /// The Zstandard encoding.
-    Zstd,
-    /// The deflate encoding.
-    Deflate,
-}
-
-impl Encoding {
-    pub(crate) fn header_value(self) -> &'static str {
-        match self {
-            Encoding::Gzip => "gzip",
-            Encoding::Brotli => "br",
-            Encoding::Zstd => "zstd",
-            Encoding::Deflate => "deflate",
-        }
-    }
-
-    pub(crate) fn encode(self, data: &[u8]) -> Result<Vec<u8>> {
-        match self {
-            Encoding::Gzip => gzip(data),
-            Encoding::Brotli => brotli(data),
-            Encoding::Zstd => zstd(data),
-            Encoding::Deflate => deflate(data),
-        }
+pub(crate) fn encode(encoding: Encoding, data: &[u8]) -> Result<Vec<u8>> {
+    match encoding {
+        Encoding::Gzip => gzip(data),
+        Encoding::Brotli => brotli(data),
+        Encoding::Zstd => zstd(data),
+        Encoding::Deflate => deflate(data),
     }
 }
 
@@ -54,7 +27,7 @@ fn gzip(data: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(not(feature = "compression-gzip"))]
 fn gzip(_data: &[u8]) -> Result<Vec<u8>> {
-    Err(feature_off("gzip", "compression-gzip"))
+    Err(Encoding::Gzip.feature_off(Kind::Body, COMPRESSION_REQUESTED))
 }
 
 #[cfg(feature = "compression-brotli")]
@@ -69,7 +42,7 @@ fn brotli(data: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(not(feature = "compression-brotli"))]
 fn brotli(_data: &[u8]) -> Result<Vec<u8>> {
-    Err(feature_off("brotli", "compression-brotli"))
+    Err(Encoding::Brotli.feature_off(Kind::Body, COMPRESSION_REQUESTED))
 }
 
 #[cfg(feature = "compression-zstd")]
@@ -79,7 +52,7 @@ fn zstd(data: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(not(feature = "compression-zstd"))]
 fn zstd(_data: &[u8]) -> Result<Vec<u8>> {
-    Err(feature_off("zstd", "compression-zstd"))
+    Err(Encoding::Zstd.feature_off(Kind::Body, COMPRESSION_REQUESTED))
 }
 
 #[cfg(feature = "compression-deflate")]
@@ -95,20 +68,11 @@ fn deflate(data: &[u8]) -> Result<Vec<u8>> {
 
 #[cfg(not(feature = "compression-deflate"))]
 fn deflate(_data: &[u8]) -> Result<Vec<u8>> {
-    Err(feature_off("deflate", "compression-deflate"))
+    Err(Encoding::Deflate.feature_off(Kind::Body, COMPRESSION_REQUESTED))
 }
 
-#[cfg(not(all(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-zstd",
-    feature = "compression-deflate"
-)))]
-fn feature_off(codec: &str, feature: &str) -> Error {
-    Error::new(Kind::Body).with_message(format!(
-        "{codec} request compression requested but the `{feature}` feature is not compiled in"
-    ))
-}
+#[cfg(not(leyline_all_codecs))]
+const COMPRESSION_REQUESTED: &str = "request compression requested";
 
 #[cfg(test)]
 mod tests;

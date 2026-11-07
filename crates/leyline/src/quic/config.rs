@@ -1,10 +1,5 @@
-use std::time::Duration;
-
-use crate::Error;
-use crate::h2::config::{PseudoOrder, parse_pseudo_order};
-use crate::profile::{BrowserProfile, H3Profile, TlsProfile};
-
-const SETTINGS_MAX_FIELD_SECTION_SIZE: u64 = 0x06;
+use crate::error::Error;
+use crate::profile::{BrowserProfile, H3Profile, PseudoOrder, TlsProfile, parse_pseudo_order};
 
 const DEFAULT_PSEUDO_ORDER: [PseudoOrder; 4] = [
     PseudoOrder::Method,
@@ -17,32 +12,9 @@ const DEFAULT_PSEUDO_ORDER: [PseudoOrder; 4] = [
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct H3Config {
-    /// The connection-level flow control limit in bytes.
-    pub initial_max_data: u64,
-    /// The flow control limit for locally opened bidirectional streams.
-    pub initial_max_stream_data_bidi_local: u64,
-    /// The flow control limit for peer-opened bidirectional streams.
-    pub initial_max_stream_data_bidi_remote: u64,
-    /// The flow control limit for unidirectional streams.
-    pub initial_max_stream_data_uni: u64,
-    /// The number of bidirectional streams the peer may open.
-    pub initial_max_streams_bidi: u64,
-    /// The number of unidirectional streams the peer may open.
-    pub initial_max_streams_uni: u64,
-    /// The idle time after which the connection closes.
-    pub max_idle_timeout: Duration,
-    /// The largest UDP payload the client accepts.
-    pub max_udp_payload_size: u16,
-    /// The number of connection IDs the client keeps.
-    pub active_connection_id_limit: u64,
-
-    /// The largest response body the client reads.
-    pub max_response_body_bytes: u64,
-
-    pub(crate) wire: H3Profile,
+    pub(crate) h3: H3Profile,
     pub(crate) tls: TlsProfile,
     pub(crate) pseudo_order: [PseudoOrder; 4],
-    pub(crate) max_header_list_bytes: u64,
 }
 
 impl H3Config {
@@ -59,33 +31,15 @@ impl H3Config {
             None => DEFAULT_PSEUDO_ORDER,
         };
         Ok(Self {
-            initial_max_data: h3.initial_max_data,
-            initial_max_stream_data_bidi_local: h3.initial_max_stream_data_bidi_local,
-            initial_max_stream_data_bidi_remote: h3.initial_max_stream_data_bidi_remote,
-            initial_max_stream_data_uni: h3.initial_max_stream_data_uni,
-            initial_max_streams_bidi: h3.initial_max_streams_bidi,
-            initial_max_streams_uni: h3.initial_max_streams_uni,
-            max_idle_timeout: Duration::from_secs(h3.max_idle_timeout_secs),
-            max_udp_payload_size: h3.max_udp_payload_size,
-            active_connection_id_limit: h3.active_connection_id_limit,
-            max_response_body_bytes: crate::core::DEFAULT_MAX_BODY_SIZE as u64,
             tls: h3.tls.clone().unwrap_or_else(|| profile.tls.clone()),
-            wire: h3.clone(),
+            h3: h3.clone(),
             pseudo_order,
-            max_header_list_bytes: h3
-                .advertised_field_section_size()
-                .unwrap_or(crate::core::DEFAULT_MAX_HEADER_LIST_BYTES as u64),
         })
     }
-}
 
-impl H3Profile {
-    fn advertised_field_section_size(&self) -> Option<u64> {
-        self.settings
-            .iter()
-            .flatten()
-            .find(|setting| setting.id == Some(SETTINGS_MAX_FIELD_SECTION_SIZE))
-            .and_then(|setting| setting.value)
-            .or(self.max_field_section_size)
+    /// Returns the `[h3]` profile table this config applies.
+    #[cfg(feature = "bench-internals")]
+    pub fn h3(&self) -> &H3Profile {
+        &self.h3
     }
 }

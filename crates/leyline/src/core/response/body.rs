@@ -7,11 +7,13 @@ use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::prefix::stop_reason;
 use super::{Response, ResponseBody, StopReason};
-use crate::core::Body;
 use crate::core::body_stream::BodyStream;
-use crate::core::deadline::{Deadline, within};
-use crate::core::error::{Error, Kind, Result};
-use crate::core::session::decompress::{BodyLimit, Decoder, buffer_decoded, content_codings};
+use crate::core::config::Codings;
+use crate::core::decompress::{Decoder, buffer_decoded};
+use crate::deadline::{Deadline, within};
+use crate::error::BodyLimit;
+use crate::error::{Error, Kind, Result};
+use crate::wire::Body;
 
 impl Response {
     /// Reads the body as text in the charset from `content-type`, defaulting to UTF-8.
@@ -22,13 +24,13 @@ impl Response {
 
     /// Reads the body as UTF-8 text and replaces invalid bytes.
     #[cfg(not(feature = "charset"))]
-    pub async fn text(self) -> crate::core::Result<String> {
+    pub async fn text(self) -> crate::error::Result<String> {
         Ok(String::from_utf8_lossy(&self.bytes().await?).into_owned())
     }
 
     /// Reads the body as text in the charset from `content-type`, defaulting to `default_encoding`.
     #[cfg(feature = "charset")]
-    pub async fn text_with_charset(self, default_encoding: &str) -> crate::core::Result<String> {
+    pub async fn text_with_charset(self, default_encoding: &str) -> crate::error::Result<String> {
         let label = self.charset_label().map(str::to_owned);
         let bytes = self.bytes().await?;
         let encoding = encoding_rs::Encoding::for_label(
@@ -38,14 +40,12 @@ impl Response {
         Ok(encoding.decode(&bytes).0.into_owned())
     }
 
-    #[cfg(any(feature = "charset", feature = "html"))]
     fn content_type(&self) -> Option<(&str, &str)> {
         let ct = self.header("content-type")?;
         let (media, params) = ct.split_once(';').unwrap_or((ct, ""));
         Some((media.trim(), params))
     }
 
-    #[cfg(feature = "html")]
     pub(crate) fn media_type(&self) -> Option<&str> {
         self.content_type().map(|(media, _)| media)
     }
@@ -62,7 +62,7 @@ impl Response {
     }
 
     /// Reads the whole decoded body and fails when it exceeds the size limit.
-    pub async fn bytes(self) -> crate::core::Result<Bytes> {
+    pub async fn bytes(self) -> crate::error::Result<Bytes> {
         let stream = match self.parts.body {
             ResponseBody::Buffered(b) => return Ok(Bytes::from(b)),
             ResponseBody::Taken => {
@@ -72,13 +72,13 @@ impl Response {
             }
             ResponseBody::Streaming(s) => *s,
         };
-        let encoding = coding(&self.parts.headers);
-        let (buf, _) = buffer_decoded(stream, encoding.as_deref(), &self.parts.compression).await?;
+        let codings = coding(&self.parts.headers);
+        let (buf, _) = buffer_decoded(stream, &codings, &self.parts.compression).await?;
         Ok(Bytes::from(buf))
     }
 
     /// Reads the body and deserializes it from JSON.
-    pub async fn json<T: serde::de::DeserializeOwned>(self) -> crate::core::Result<T> {
+    pub async fn json<T: serde::de::DeserializeOwned>(self) -> crate::error::Result<T> {
         serde_json::from_slice(&self.bytes().await?).map_err(Error::from_json)
     }
 
@@ -91,7 +91,7 @@ impl Response {
         }
     }
 
-    pub(super) fn content_coding(&self) -> Option<String> {
+    pub(crate) fn content_coding(&self) -> Codings {
         coding(&self.parts.headers)
     }
 
@@ -101,21 +101,21 @@ impl Response {
     }
 
     pub(crate) fn body_stream(self) -> Result<BodyStream> {
-        let encoding = self.content_coding();
-        if encoding.is_none() || !self.parts.compression.decode {
+        let codings = self.content_coding();
+        if codings == Codings::Absent || !self.parts.compression.decode {
             self.refuse_declared_overflow()?;
         }
-        let decoder = Decoder::capped(encoding.as_deref(), &self.parts.compression)?;
+        let decoder = Decoder::capped(&codings, &self.parts.compression)?;
         Ok(BodyStream::decoded(self.take_stream()?, decoder))
     }
 
     fn refuse_declared_overflow(&self) -> Result<()> {
         let cap = BodyLimit::session(self.parts.compression.max_body_size);
         match self.content_length() {
-            Some(declared) if declared > u64::try_from(cap.bytes).unwrap_or(u64::MAX) => {
-                Err(cap.error())
-            }
-            _ => Ok(()),
+            Some(declared) => cap
+                .admit(0, usize::try_from(declared).unwrap_or(usize::MAX))
+                .map_err(BodyLimit::error),
+            None => Ok(()),
         }
     }
 
@@ -178,8 +178,8 @@ impl Response {
         if limit == 0 {
             return Ok(StopReason::LimitReached);
         }
-        let encoding = self.content_coding();
-        let mut decoder = Decoder::truncated(encoding.as_deref(), &self.parts.compression, limit)?;
+        let codings = self.content_coding();
+        let mut decoder = Decoder::truncated(&codings, &self.parts.compression, limit)?;
         *decodes = decoder.is_some();
         let mut stream = self.take_stream()?;
         while let Some(chunk) = stream.next().await {
@@ -222,9 +222,9 @@ where
     Ok(total)
 }
 
-fn coding(headers: &crate::core::response_head::Fields) -> Option<String> {
+fn coding(headers: &crate::wire::Fields) -> Codings {
     if !headers.seen().encoded {
-        return None;
+        return Codings::Absent;
     }
-    content_codings(headers.map().get_all(http::header::CONTENT_ENCODING))
+    Codings::of(headers.map().get_all(http::header::CONTENT_ENCODING))
 }

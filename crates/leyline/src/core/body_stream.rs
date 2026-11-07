@@ -10,8 +10,8 @@ use tokio::time::Sleep;
 
 use crate::core::config::HostPass;
 
-use crate::core::session::decompress::Decoder;
-use crate::core::session::shutdown::{Shutdown, Stopped};
+use crate::core::decompress::Decoder;
+use crate::core::shutdown::{Shutdown, Stopped};
 use crate::trace::BodyWatch;
 
 pub struct BodyStream {
@@ -64,6 +64,15 @@ impl Decoded {
     }
 }
 
+impl From<crate::wire::BodyChannel> for BodyStream {
+    fn from(channel: crate::wire::BodyChannel) -> Self {
+        Self {
+            pump: channel.pump.map(|pump| std::sync::Mutex::new(*pump)),
+            ..Self::new(channel.rx)
+        }
+    }
+}
+
 impl BodyStream {
     pub(crate) fn new(rx: mpsc::Receiver<std::io::Result<Bytes>>) -> Self {
         Self {
@@ -79,11 +88,6 @@ impl BodyStream {
             pass: None,
             pump: None,
         }
-    }
-
-    pub(crate) fn pumped_by(mut self, pump: impl Future<Output = ()> + Send + 'static) -> Self {
-        self.pump = Some(std::sync::Mutex::new(Box::pin(pump)));
-        self
     }
 
     pub(crate) fn decoded(mut raw: BodyStream, decoder: Decoder) -> Self {
@@ -193,7 +197,7 @@ impl BodyStream {
         let pump = pump
             .get_mut()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if crate::core::deadline::expiring(until, || pump.as_mut().poll(cx)).is_ready() {
+        if crate::deadline::expiring(until, || pump.as_mut().poll(cx)).is_ready() {
             self.pump = None;
         }
     }
@@ -243,7 +247,7 @@ impl Stream for BodyStream {
             return Poll::Ready(None);
         }
         if this.poll_shutdown(cx) {
-            return this.end_with(std::io::Error::other(crate::core::error::Error::shut_down()));
+            return this.end_with(std::io::Error::other(crate::error::Error::shut_down()));
         }
         if let Poll::Ready(err) = this.poll_body_deadline(cx) {
             return this.end_with(err);

@@ -1,7 +1,7 @@
 use leyline_bssl::ssl::{SslContextBuilder, SslOptions, SslVersion};
 
 use crate::iana::{boring_curve_name, sigalg_id};
-use crate::profile::TlsProfile;
+use crate::profile::{CertCompression, TlsMinVersion, TlsProfile};
 use crate::tls::error::TlsError;
 
 #[cfg(feature = "compression-brotli")]
@@ -10,12 +10,7 @@ use super::cert::Brotli;
 use super::cert::Zlib;
 #[cfg(feature = "compression-zstd")]
 use super::cert::Zstd;
-#[cfg(any(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-deflate",
-    feature = "compression-zstd"
-))]
+#[cfg(leyline_any_codec)]
 use super::cert::add_decompressor;
 #[cfg(not(all(
     feature = "compression-brotli",
@@ -23,7 +18,7 @@ use super::cert::add_decompressor;
     any(feature = "compression-gzip", feature = "compression-deflate")
 )))]
 use super::missing;
-use super::{TlsMinVersion, partition_ciphers, profile_min_version};
+use super::{Transport, partition_ciphers};
 
 pub(super) fn ciphers(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Result<(), TlsError> {
     let (tls13, tls12) = partition_ciphers(&tls.ciphers)?;
@@ -58,33 +53,20 @@ pub(super) fn sigalgs(builder: &mut SslContextBuilder, tls: &TlsProfile) -> Resu
                 .ok_or_else(|| TlsError::Profile(format!("unknown signature algorithm: {name}")))
         })
         .collect::<Result<Vec<u16>, _>>()?;
-    if let Err(e) = builder.set_sigalgs(&ids) {
-        if !e.to_string().contains("DUPLICATE_SIGNATURE_ALGORITHM") {
-            return Err(TlsError::SslConfig(e.to_string()));
-        }
-        let mut deduped = ids.clone();
-        deduped.dedup();
-        builder
-            .set_sigalgs(&deduped)
-            .map_err(TlsError::from_stack)?;
-    }
-    Ok(())
+    builder
+        .set_sigalgs(&exact::sigalg_list(ids))
+        .map_err(TlsError::from_stack)
 }
 
 pub(super) fn compression(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,
 ) -> Result<(), TlsError> {
-    for algo in &tls.cert_compression {
-        match algo.as_str() {
-            "brotli" => add_brotli(builder)?,
-            "zlib" => add_zlib(builder)?,
-            "zstd" => add_zstd(builder)?,
-            other => {
-                return Err(TlsError::Profile(format!(
-                    "unknown cert compression algorithm: {other:?}"
-                )));
-            }
+    for algo in tls.cert_compressions() {
+        match algo.map_err(TlsError::Profile)? {
+            CertCompression::Brotli => add_brotli(builder)?,
+            CertCompression::Zlib => add_zlib(builder)?,
+            CertCompression::Zstd => add_zstd(builder)?,
         }
     }
     Ok(())
@@ -92,32 +74,32 @@ pub(super) fn compression(
 
 #[cfg(feature = "compression-brotli")]
 fn add_brotli(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    add_decompressor::<Brotli>(builder)
+    add_decompressor(builder, Brotli)
 }
 
 #[cfg(not(feature = "compression-brotli"))]
 fn add_brotli(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    Err(missing("brotli", "compression-brotli"))
+    Err(missing("brotli", crate::profile::Encoding::Brotli))
 }
 
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
 fn add_zlib(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    add_decompressor::<Zlib>(builder)
+    add_decompressor(builder, Zlib)
 }
 
 #[cfg(not(any(feature = "compression-gzip", feature = "compression-deflate")))]
 fn add_zlib(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    Err(missing("zlib", "compression-deflate"))
+    Err(missing("zlib", crate::profile::Encoding::Deflate))
 }
 
 #[cfg(feature = "compression-zstd")]
 fn add_zstd(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    add_decompressor::<Zstd>(builder)
+    add_decompressor(builder, Zstd)
 }
 
 #[cfg(not(feature = "compression-zstd"))]
 fn add_zstd(_builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    Err(missing("zstd", "compression-zstd"))
+    Err(missing("zstd", crate::profile::Encoding::Zstd))
 }
 
 pub(super) fn extensions(
@@ -188,6 +170,10 @@ mod exact {
         Ok(())
     }
 
+    pub(super) fn sigalg_list(ids: Vec<u16>) -> Vec<u16> {
+        ids
+    }
+
     pub(super) fn extension_order(
         builder: &mut SslContextBuilder,
         tls: &TlsProfile,
@@ -225,6 +211,16 @@ mod exact {
         Ok(())
     }
 
+    pub(super) fn sigalg_list(ids: Vec<u16>) -> Vec<u16> {
+        let mut unique = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !unique.contains(&id) {
+                unique.push(id);
+            }
+        }
+        unique
+    }
+
     pub(super) fn extension_order(
         _builder: &mut SslContextBuilder,
         tls: &TlsProfile,
@@ -242,13 +238,15 @@ mod exact {
 pub(super) fn versions(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,
-    default_min: TlsMinVersion,
+    transport: Transport,
     floor: TlsMinVersion,
 ) -> Result<(), TlsError> {
-    let base = if default_min == TlsMinVersion::Tls13 {
-        TlsMinVersion::Tls13
-    } else {
-        profile_min_version(&tls.min_tls_version)?.unwrap_or(default_min)
+    let base = match transport {
+        Transport::Quic => TlsMinVersion::Tls13,
+        Transport::Tcp(default_min) => tls
+            .min_version()
+            .map_err(TlsError::Profile)?
+            .unwrap_or(default_min),
     };
     let min = match base.max(floor) {
         TlsMinVersion::Tls10 => SslVersion::TLS1,

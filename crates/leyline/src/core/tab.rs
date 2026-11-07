@@ -4,11 +4,11 @@ use std::sync::{Arc, Mutex};
 use http::Method;
 use url::Url;
 
-use crate::core::error::{Error, Kind, Result};
 use crate::core::into_url::IntoUrl;
 use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
 use crate::core::session::Session;
+use crate::error::{Error, Kind, Result};
 use crate::profile::RequestKind;
 
 #[doc = include_str!("../../docs/tab.md")]
@@ -147,9 +147,8 @@ impl Tab {
         Ok(response)
     }
 
-    fn trusted(&self, mut builder: RequestBuilder) -> RequestBuilder {
-        builder.draft.trusted_origin = self.current();
-        builder
+    fn trusted(&self, builder: RequestBuilder) -> RequestBuilder {
+        builder.trusting(self.current())
     }
 
     fn build(&self, method: Method, url: impl IntoUrl, page: Option<&Url>) -> RequestBuilder {

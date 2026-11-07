@@ -2,12 +2,8 @@ use std::io;
 
 use leyline_bssl::ssl::ErrorCode;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ProxyReply {
-    HttpStatus(u16),
-    Socks5(u8),
-}
+use crate::error::{Cause, Error, Kind};
+use crate::net::NetError;
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -43,22 +39,8 @@ pub enum TlsError {
     #[error("certificate pin: {0}")]
     Pinning(String),
 
-    #[error("tcp connect")]
-    TcpConnect(#[source] io::Error),
-
-    #[error("dns resolution")]
-    Dns(#[source] io::Error),
-
-    #[error("proxy: {detail}")]
-    Proxy {
-        status: Option<u16>,
-        detail: String,
-        #[source]
-        source: Option<io::Error>,
-    },
-
-    #[error("proxy could not reach the target: {detail}")]
-    ProxyTargetUnreachable { reply: ProxyReply, detail: String },
+    #[error(transparent)]
+    Net(#[from] NetError),
 }
 
 fn peer_closed(kind: io::ErrorKind) -> bool {
@@ -72,6 +54,19 @@ fn peer_closed(kind: io::ErrorKind) -> bool {
 }
 
 impl TlsError {
+    pub(crate) fn kind(&self) -> Kind {
+        match self {
+            Self::Net(net) => net.kind(),
+            Self::SslConfig(_) | Self::Profile(_) | Self::TrustStore(_) => Kind::Config,
+            Self::Handshake(_)
+            | Self::Rejected(_)
+            | Self::HandshakeIo(_)
+            | Self::Certificate { .. }
+            | Self::Hostname(_)
+            | Self::Pinning(_) => Kind::Tls,
+        }
+    }
+
     pub(crate) fn from_handshake<S>(e: &leyline_bssl_tokio::HandshakeError<S>) -> Self {
         if let Some(io) = e.as_io_error() {
             let copy = io::Error::new(io.kind(), io.to_string());
@@ -92,61 +87,22 @@ impl TlsError {
         Self::SslConfig(e.to_string())
     }
 
-    pub(crate) fn proxy(detail: impl Into<String>) -> Self {
-        Self::Proxy {
-            status: None,
-            detail: detail.into(),
-            source: None,
-        }
-    }
-
-    pub(crate) fn proxy_io(source: io::Error) -> Self {
-        Self::Proxy {
-            status: None,
-            detail: "proxy connection failed".into(),
-            source: Some(source),
-        }
-    }
-
-    pub(crate) fn proxy_target(reply: ProxyReply, detail: impl Into<String>) -> Self {
-        Self::ProxyTargetUnreachable {
-            reply,
-            detail: detail.into(),
+    fn net(&self) -> Option<&NetError> {
+        match self {
+            Self::Net(e) => Some(e),
+            _ => None,
         }
     }
 
     pub(crate) fn into_proxy(self) -> Self {
         match self {
-            Self::Proxy { .. } | Self::ProxyTargetUnreachable { .. } => self,
-            Self::Dns(e) | Self::TcpConnect(e) | Self::HandshakeIo(e) | Self::Rejected(e) => {
-                Self::proxy_io(e)
-            }
-            other => Self::proxy(other.to_string()),
+            Self::Net(e) => Self::Net(e.into_proxy()),
+            Self::HandshakeIo(e) | Self::Rejected(e) => Self::Net(NetError::proxy_io(e)),
+            other => Self::Net(NetError::proxy(other.to_string())),
         }
     }
 
-    pub(crate) fn is_handshake(&self) -> bool {
-        matches!(
-            self,
-            Self::Handshake(_) | Self::HandshakeIo(_) | Self::Rejected(_)
-        )
-    }
-
-    pub(crate) fn is_connect_phase(&self) -> bool {
-        matches!(self, Self::Dns(_) | Self::TcpConnect(_)) || self.is_handshake()
-    }
-
-    pub(crate) fn io_source(&self) -> Option<&io::Error> {
-        match self {
-            Self::TcpConnect(e) | Self::Dns(e) | Self::HandshakeIo(e) | Self::Rejected(e) => {
-                Some(e)
-            }
-            Self::Proxy { source, .. } => source.as_ref(),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn duplicate(&self) -> Self {
+    fn copy(&self) -> Self {
         let io = |e: &io::Error| io::Error::new(e.kind(), e.to_string());
         match self {
             Self::SslConfig(m) => Self::SslConfig(m.clone()),
@@ -166,21 +122,67 @@ impl TlsError {
             },
             Self::Hostname(m) => Self::Hostname(m.clone()),
             Self::Pinning(m) => Self::Pinning(m.clone()),
-            Self::TcpConnect(e) => Self::TcpConnect(io(e)),
-            Self::Dns(e) => Self::Dns(io(e)),
-            Self::Proxy {
-                status,
-                detail,
-                source,
-            } => Self::Proxy {
-                status: *status,
-                detail: detail.clone(),
-                source: source.as_ref().map(io),
-            },
-            Self::ProxyTargetUnreachable { reply, detail } => Self::ProxyTargetUnreachable {
-                reply: *reply,
-                detail: detail.clone(),
-            },
+            Self::Net(e) => Self::Net(e.copy()),
         }
+    }
+}
+
+impl Cause for TlsError {
+    fn kind(&self) -> Option<Kind> {
+        Some(TlsError::kind(self))
+    }
+
+    fn is_connect_phase(&self) -> bool {
+        self.net().is_some_and(Cause::is_connect_phase) || self.is_handshake()
+    }
+
+    fn is_handshake(&self) -> bool {
+        matches!(
+            self,
+            Self::Handshake(_) | Self::HandshakeIo(_) | Self::Rejected(_)
+        )
+    }
+
+    fn is_proxy(&self) -> bool {
+        self.net().is_some_and(Cause::is_proxy)
+    }
+
+    fn proxy_status(&self) -> Option<u16> {
+        self.net()?.proxy_status()
+    }
+
+    fn is_transient(&self) -> bool {
+        self.net().is_some_and(Cause::is_transient)
+    }
+
+    fn io_source(&self) -> Option<&io::Error> {
+        match self {
+            Self::HandshakeIo(e) | Self::Rejected(e) => Some(e),
+            Self::Net(e) => e.io_source(),
+            _ => None,
+        }
+    }
+
+    fn duplicate(&self) -> Option<Box<dyn Cause>> {
+        Some(Box::new(self.copy()))
+    }
+}
+
+impl From<TlsError> for Error {
+    fn from(e: TlsError) -> Self {
+        Error::new(e.kind()).with_cause(e)
+    }
+}
+
+impl From<NetError> for Error {
+    fn from(e: NetError) -> Self {
+        Error::from(TlsError::from(e))
+    }
+}
+
+#[cfg(test)]
+impl Error {
+    pub(crate) fn tls(&self) -> Option<&TlsError> {
+        self.source_as()
     }
 }

@@ -6,20 +6,24 @@ use super::scan::{Scanner, Tag};
 const META_KEYS: [&str; 2] = ["name", "property"];
 const CANONICAL: &str = "canonical";
 
-pub(super) fn meta(document: &str, name: &str) -> Option<String> {
+/// Returns the content of the `<meta>` tag named `name`, or `None` when the page has none.
+#[must_use]
+pub fn meta(document: &str, name: &str) -> Option<String> {
     Scanner::new(document)
         .filter(|tag| !tag.closing && tag.name == "meta")
         .find(|tag| tag.names(name))
         .and_then(|tag| tag.attr("content").map(str::to_owned))
 }
 
-pub(super) fn base(document: &str) -> Option<String> {
+pub(crate) fn base(document: &str) -> Option<String> {
     Scanner::new(document)
         .filter(|tag| !tag.closing && Element::of(&tag.name) == Element::Base)
         .find_map(|tag| tag.attr("href").map(|href| href.trim().to_owned()))
 }
 
-pub(super) fn canonical(document: &str) -> Option<String> {
+/// Returns the page's canonical URL, or `None` when the page declares none.
+#[must_use]
+pub fn canonical(document: &str) -> Option<String> {
     Scanner::new(document)
         .filter(|tag| !tag.closing && Element::of(&tag.name) == Element::Link)
         .find(|tag| {
@@ -46,7 +50,9 @@ struct Open {
     text: String,
 }
 
-pub(super) fn links(document: &str) -> Vec<Anchor> {
+/// Returns every link in the document.
+#[must_use]
+pub fn links(document: &str) -> Vec<Anchor> {
     let mut done = Vec::new();
     let mut open: Option<Open> = None;
     for tag in Scanner::new(document) {
@@ -209,7 +215,9 @@ impl Text {
     }
 }
 
-pub(super) fn text(document: &str) -> String {
+/// Returns the readable text of the document.
+#[must_use]
+pub fn text(document: &str) -> String {
     let mut text = Text::default();
     let mut scanner = Scanner::new(document);
     text.block = scanner.lead();

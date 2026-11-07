@@ -2,7 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::core::domain_match;
+use crate::util::domain_match;
 use crate::util::epoch_plus;
 
 const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);

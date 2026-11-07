@@ -1,3 +1,5 @@
+use crate::h2::frame::U31_MAX;
+
 #[inline]
 pub fn encode(value: usize, prefix_bits: u8, prefix_pattern: u8, dst: &mut Vec<u8>) {
     let max_prefix = (1 << prefix_bits) - 1;
@@ -15,12 +17,7 @@ pub fn encode(value: usize, prefix_bits: u8, prefix_pattern: u8, dst: &mut Vec<u
     }
 }
 
-pub fn decode(
-    first_byte: u8,
-    prefix_bits: u8,
-    src: &[u8],
-    pos: usize,
-) -> Result<(usize, usize), &'static str> {
+pub fn decode(first_byte: u8, prefix_bits: u8, src: &[u8]) -> Result<(usize, usize), &'static str> {
     let max_prefix = (1usize << prefix_bits) - 1;
     let value = (first_byte & max_prefix as u8) as usize;
 
@@ -30,7 +27,7 @@ pub fn decode(
 
     let mut result = max_prefix;
     let mut shift = 0u32;
-    let mut i = pos;
+    let mut i = 0;
 
     loop {
         if i >= src.len() {
@@ -46,7 +43,7 @@ pub fn decode(
         result += ((byte & 0x7F) as usize) << shift;
         shift += 7;
 
-        if result > 0x7FFF_FFFF {
+        if result > U31_MAX as usize {
             return Err("integer overflow");
         }
 
@@ -55,7 +52,7 @@ pub fn decode(
         }
     }
 
-    Ok((result, i - pos))
+    Ok((result, i))
 }
 
 #[cfg(kani)]

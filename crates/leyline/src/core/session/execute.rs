@@ -2,18 +2,19 @@ use std::borrow::Cow;
 
 use url::Url;
 
-use crate::FetchSite;
-use crate::core::transport::Prepared;
+use crate::core::FetchSite;
+use crate::pool::Prepared;
 
 use self::auth::{DigestLeg, unreplayable_body};
-use self::journey::{Journey, redirect_location};
+use self::journey::Journey;
 use super::Session;
 use crate::core::Redirect;
-use crate::core::body::Body;
-use crate::core::error::{Error, Kind, Result};
+use crate::core::config::Origin;
 use crate::core::request::Draft;
 use crate::core::response::{Response, ResponseBody};
-use crate::util::without_userinfo;
+use crate::error::{Error, Result};
+use crate::util::{is_redirect_status, redirect_target, without_userinfo};
+use crate::wire::Body;
 
 mod auth;
 mod headers;
@@ -21,38 +22,29 @@ mod journey;
 mod response;
 
 impl Session {
-    pub(super) async fn execute_inner(&self, mut attempt: Box<Draft>) -> Result<Response> {
+    pub(super) async fn execute_inner(&self, attempt: Box<Draft>) -> Result<Response> {
         let url = attempt
             .url
-            .take()
             .expect("invariant: send stores the prepared URL before the attempt");
-        let headers = std::mem::take(&mut attempt.headers);
+        let response = attempt.response;
         let mut journey = Journey::begin(
             self.hsts_upgrade(&url),
-            std::mem::take(&mut attempt.method),
-            std::mem::take(&mut attempt.body),
-            (!headers.is_empty()).then_some(headers),
-            attempt.initiator.take(),
+            attempt.method,
+            attempt.body,
+            (!attempt.headers.is_empty()).then_some(attempt.headers),
+            attempt.carry.initiator,
             self.session_referer(),
         )
-        .trusting(attempt.trusted_origin.as_ref());
-        let digest = attempt.digest_auth.take();
-        let Draft {
-            preset,
-            deadline,
-            response,
-            body_rules,
-            ..
-        } = *attempt;
+        .trusting(attempt.trusted_origin);
         let redirect_policy = attempt
+            .carry
             .redirect
             .as_ref()
-            .unwrap_or(&self.inner.redirect_policy);
-        let request_proxy = attempt.proxy.as_ref();
-        let header_order = attempt.header_order.as_deref();
+            .unwrap_or(&self.inner.inputs.redirect_policy);
+        let request_proxy = attempt.carry.proxy.as_ref();
+        let header_order = attempt.carry.header_order.as_deref();
 
-        let mut digest = digest.map(DigestLeg::new);
-        let redirect_cap = redirect_policy.max_redirects_hint();
+        let mut digest = attempt.carry.digest_auth.map(DigestLeg::new);
         let mut pass = None;
         let mut answered = false;
         let mut refreshed = false;
@@ -62,7 +54,7 @@ impl Session {
             let refresh = self
                 .refresh_version(&journey, digest.as_ref())
                 .filter(|_| !refreshed);
-            let headers = self.leg_headers(&journey, preset, header_order);
+            let headers = self.leg_headers(&journey, attempt.carry.preset, header_order);
             journey.authorized = None;
             let audit_headers = self.audit_copy(&headers);
 
@@ -74,14 +66,15 @@ impl Session {
                 .map_err(leg_error(answered))?;
             let leg = {
                 let send = std::pin::pin!(self.send_with_policy(Prepared {
-                    method: journey.method.as_str(),
+                    method: &journey.method,
                     url: &journey.url,
                     headers,
                     body: step_body,
                     proxy,
                     response,
+                    body_limit: crate::error::BodyLimit::session(attempt.carry.body_rules.max_body_size),
                 }));
-                deadline.response_header(send).await
+                attempt.deadline.response_header(send).await
             }
             .map_err(leg_error(answered))?;
             answered |= leg.status != http::StatusCode::UNAUTHORIZED;
@@ -107,11 +100,12 @@ impl Session {
             {
                 let token = self
                     .inner
+                    .inputs
                     .bearer
                     .as_ref()
                     .expect("invariant: refresh version requires bearer auth");
                 drop(leg);
-                self.unless_shut_down(deadline.total(token.renew(version)))
+                self.unless_shut_down(attempt.deadline.total(token.renew(version)))
                     .await?;
                 journey.body =
                     replay_body.expect("invariant: replayable body checked before refresh");
@@ -123,7 +117,6 @@ impl Session {
                 code: leg.status.as_u16(),
                 headers: &leg.headers,
                 redirect_policy,
-                redirect_cap,
             };
             if next.take(&mut journey, digest.as_mut(), replay_body)? {
                 drop(leg.body);
@@ -132,7 +125,14 @@ impl Session {
             }
 
             let mut response = self
-                .assemble_response(leg, journey, audit_headers, response, body_rules, &deadline)
+                .assemble_response(
+                    leg,
+                    journey,
+                    audit_headers,
+                    response,
+                    attempt.carry.body_rules,
+                    &attempt.deadline,
+                )
                 .await?;
             if let ResponseBody::Streaming(body) = &mut response.parts.body {
                 body.hold(pass.take());
@@ -141,14 +141,13 @@ impl Session {
         }
     }
 
-    pub(crate) fn download_key(&self, draft: &Draft) -> Result<[u8; 32]> {
+    pub(crate) fn download_key(
+        &self,
+        url: &Url,
+        headers: &crate::core::headers::HeaderList,
+    ) -> Result<[u8; 32]> {
         use sha2::{Digest, Sha256};
-        let url = draft
-            .url
-            .as_ref()
-            .expect("invariant: download prepares its URL");
-        let headers: Vec<_> = draft
-            .headers
+        let headers: Vec<_> = headers
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_bytes()))
             .collect();
@@ -192,18 +191,11 @@ fn leg_error(answered: bool) -> impl Fn(Error) -> Error {
     move |err| if answered { err.after_response() } else { err }
 }
 
-pub(crate) fn url_origin(url: &Url) -> Cow<'_, str> {
-    if url.has_authority() && url.username().is_empty() && url.password().is_none() {
-        return Cow::Borrowed(&url[..url::Position::BeforePath]);
-    }
-    let host = url.host_str().unwrap_or("");
-    Cow::Owned(match url.port() {
-        Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
-        None => format!("{}://{}", url.scheme(), host),
-    })
-}
-
-pub(crate) fn referer_for<'a>(prev: Option<&'a str>, current_origin: &str) -> Cow<'a, str> {
+pub(crate) fn referer_for<'a>(
+    prev: Option<&'a str>,
+    current: &Url,
+    current_origin: &str,
+) -> Cow<'a, str> {
     let Some(prev) = prev else {
         return Cow::Owned(format!("{current_origin}/"));
     };
@@ -213,10 +205,10 @@ pub(crate) fn referer_for<'a>(prev: Option<&'a str>, current_origin: &str) -> Co
     let Ok(parsed) = Url::parse(prev) else {
         return Cow::Owned(format!("{current_origin}/"));
     };
-    if parsed.scheme() == "https" && !current_origin.starts_with("https:") {
+    if Origin::downgrades(&parsed, current) {
         return Cow::Borrowed("");
     }
-    let origin = url_origin(&parsed);
+    let origin = Origin::ascii(&parsed);
     if origin != current_origin {
         return Cow::Owned(format!("{origin}/"));
     }
@@ -236,9 +228,8 @@ mod reorder_tests;
 
 struct Turn<'a> {
     code: u16,
-    headers: &'a crate::core::response_head::Fields,
+    headers: &'a crate::wire::Fields,
     redirect_policy: &'a Redirect,
-    redirect_cap: usize,
 }
 
 impl Turn<'_> {
@@ -248,14 +239,12 @@ impl Turn<'_> {
         digest: Option<&mut DigestLeg>,
         replay_body: Option<Body>,
     ) -> Result<bool> {
-        if let Some(location) = redirect_location(self.code, self.headers)
+        if is_redirect_status(self.code)
+            && let Some(location) = redirect_target(self.code, self.headers.map())
             && let Some(hop) = journey.approved_hop(self.redirect_policy, self.code, &location)
         {
             journey.follow(hop, self.code, &location, replay_body)?;
-            if journey.chain.len() > self.redirect_cap {
-                return Err(Error::new(Kind::Redirect)
-                    .with_message(format!("too many redirects (max {})", self.redirect_cap)));
-            }
+            self.redirect_policy.check_hops(journey.chain.len())?;
             if let Some(digest) = digest {
                 journey.authorized = digest.next_hop(journey)?;
             }

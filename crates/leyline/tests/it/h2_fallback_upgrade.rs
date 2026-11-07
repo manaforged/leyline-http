@@ -8,7 +8,7 @@ use crate::tls_support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use leyline::h2::frame::FrameType;
+use leyline::internals::h2::frame::FrameType;
 use leyline::{Session, Tls};
 use leyline_bssl_tokio::SslStream;
 use support::{

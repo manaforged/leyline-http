@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
 use leyline::{Session, Tls};
 use leyline_bssl_tokio::SslStream;
 use support::{

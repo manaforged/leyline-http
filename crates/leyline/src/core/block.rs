@@ -3,9 +3,9 @@ use std::sync::{Arc, LazyLock};
 use http::{HeaderName, StatusCode};
 use serde::Deserialize;
 
-use crate::core::error::{Error, Result};
 use crate::core::response::Response;
-use crate::core::response_head::text;
+use crate::error::{Error, Result};
+use crate::wire::text;
 
 const STATUS_VENDOR: &str = "status";
 const BUILTIN: &str = include_str!("../../profiles/blocks.toml");
@@ -80,8 +80,8 @@ impl Rules {
     }
 
     pub(crate) fn from_toml(source: &str) -> Result<Self> {
-        let file: RulesFile =
-            toml::from_str(source).map_err(|e| Error::new(crate::Kind::Config).with_source(e))?;
+        let file: RulesFile = toml::from_str(source)
+            .map_err(|e| Error::new(crate::error::Kind::Config).with_source(e))?;
         let rules = file
             .rule
             .into_iter()
@@ -92,21 +92,25 @@ impl Rules {
         })
     }
 
-    pub(crate) fn statuses(statuses: impl IntoIterator<Item = u16>) -> Self {
+    pub(crate) fn statuses(statuses: impl IntoIterator<Item = u16>) -> Result<Self> {
         let rules = statuses
             .into_iter()
-            .filter_map(|code| StatusCode::from_u16(code).ok())
-            .map(|status| BlockRule {
-                vendor: STATUS_VENDOR.to_string(),
-                kind: Kind::Denied,
-                status: Some(status),
-                header: None,
-                value: None,
+            .map(|code| {
+                let status = StatusCode::from_u16(code).map_err(|e| {
+                    Error::config(format!("block status {code} is not a status code: {e}"))
+                })?;
+                Ok(BlockRule {
+                    vendor: STATUS_VENDOR.to_string(),
+                    kind: Kind::Denied,
+                    status: Some(status),
+                    header: None,
+                    value: None,
+                })
             })
-            .collect();
-        Self {
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
             rules: Arc::new(rules),
-        }
+        })
     }
 
     pub(crate) fn extend(&mut self, other: Rules) {
@@ -142,12 +146,12 @@ impl TryFrom<RuleEntry> for BlockRule {
             .status
             .map(StatusCode::from_u16)
             .transpose()
-            .map_err(|e| Error::new(crate::Kind::Config).with_source(e))?;
+            .map_err(|e| Error::new(crate::error::Kind::Config).with_source(e))?;
         let header = entry
             .header
             .map(|name| HeaderName::from_bytes(name.as_bytes()))
             .transpose()
-            .map_err(|e| Error::new(crate::Kind::Config).with_source(e))?;
+            .map_err(|e| Error::new(crate::error::Kind::Config).with_source(e))?;
         Ok(Self {
             vendor: entry.vendor,
             kind: entry.kind,

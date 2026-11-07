@@ -2,6 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::cookie::record::{Cookie, MAX_NAME_VALUE_OCTETS, SameSite, capped_expiry};
 use crate::util::epoch_plus;
+use crate::wire::Scheme;
 
 mod attr;
 mod date;
@@ -35,14 +36,15 @@ fn parse_attributes(attrs_str: &str) -> CookieAttributes {
     a
 }
 
-fn secure_origin(request_url: &url::Url) -> bool {
-    let scheme = request_url.scheme();
-    let host = request_url.host_str().unwrap_or("");
-    scheme == "https"
-        || host == "localhost"
-        || host == "127.0.0.1"
-        || host == "[::1]"
-        || host.ends_with(".localhost")
+/// Reports whether `request_url` counts as a secure origin for `Secure` cookies.
+pub(crate) fn secure_origin(request_url: &url::Url) -> bool {
+    Scheme::of(request_url).is_some_and(Scheme::is_secure)
+        || match request_url.host() {
+            Some(url::Host::Domain(name)) => name == "localhost" || name.ends_with(".localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        }
 }
 
 fn prefix_rejected(name: &str, attrs: &CookieAttributes) -> bool {
@@ -76,7 +78,7 @@ fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Opti
     if !host_only && is_public_suffix(&cookie_domain) {
         return None;
     }
-    if !host_only && !crate::core::domain_match(&request_host, &cookie_domain) {
+    if !host_only && !crate::util::domain_match(&request_host, &cookie_domain) {
         return None;
     }
     Some((host_only, cookie_domain))

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
 use leyline::{Browser, Protocol, Session, SessionBuilder, Tls};
 use support::{read_preface, write_response, write_server_settings_with, write_settings_ack};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite};

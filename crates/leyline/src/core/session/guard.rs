@@ -1,17 +1,17 @@
 use super::Session;
 use crate::core::BodyRules;
-use crate::core::config::Timeout;
-use crate::core::deadline::Deadline;
-use crate::core::error::{Error, Kind, Result};
 use crate::core::request::Draft;
 use crate::core::response::Response;
-use crate::core::transport::ErrorBudget;
+use crate::deadline::Deadline;
+use crate::deadline::Timeout;
+use crate::error::{Error, Kind, Result};
 use crate::trace;
 use crate::util::redact;
+use crate::wire::ErrorBudget;
 
 impl Session {
     pub(crate) fn deadline(&self, request: Option<&Timeout>) -> Deadline {
-        Deadline::new(&self.inner.timeouts, request)
+        Deadline::new(&self.inner.inputs.timeouts, request)
     }
 
     pub(crate) fn error_budget(deadline: &Deadline, rules: &BodyRules) -> ErrorBudget {
@@ -25,18 +25,18 @@ impl Session {
         &self,
         attempt: Box<Draft>,
     ) -> impl std::future::Future<Output = Result<Response>> + '_ {
-        let timer = attempt.deadline.timer();
+        let timer = attempt.deadline().timer();
         let span = tracing::debug_span!(
             "session.execute",
-            http.method = attempt.method.as_str(),
-            http.url = redact(attempt.url.as_deref().map_or("", url::Url::as_str)),
+            http.method = attempt.method().as_str(),
+            http.url = redact(attempt.url().map_or("", url::Url::as_str)),
             pool.hit = tracing::field::Empty,
         );
         let fut: std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
         > = Box::pin(self.execute_inner(attempt));
         trace::scope(
-            self.inner.trace.as_ref(),
+            self.inner.inputs.trace.as_ref(),
             Guarded {
                 stop: self.inner.shutdown.wait(),
                 fut,
@@ -77,7 +77,7 @@ impl Session {
         crate::util::lock(&self.inner.writers)
     }
 
-    pub(crate) fn stopped(&self) -> super::shutdown::Stopped {
+    pub(crate) fn stopped(&self) -> crate::core::shutdown::Stopped {
         self.inner.shutdown.wait_owned()
     }
 
@@ -87,7 +87,7 @@ impl Session {
     }
 
     pub(crate) fn traces(&self) -> bool {
-        self.inner.trace.is_some()
+        self.inner.inputs.trace.is_some()
     }
 
     pub(crate) fn traced<'a, F>(
@@ -101,7 +101,7 @@ impl Session {
         F: std::future::Future<Output = (Result<Response>, u32)> + 'a,
     {
         use futures_util::FutureExt;
-        let hook = self.inner.trace.as_ref();
+        let hook = self.inner.inputs.trace.as_ref();
         trace::scope(
             hook,
             request.map(move |(out, attempts)| {
@@ -112,7 +112,13 @@ impl Session {
                         attempts,
                         streamed,
                     };
-                    trace::summary(&finish, out.as_ref());
+                    let answer = out.as_ref().map(|response| trace::Answer {
+                        url: response.url(),
+                        redirects: response.redirect_chain().len(),
+                        status: response.status(),
+                        version: response.version(),
+                    });
+                    trace::summary(&finish, answer);
                 }
                 out
             }),
@@ -123,7 +129,7 @@ impl Session {
 pin_project_lite::pin_project! {
     pub(crate) struct UnlessShutDown<'a, F> {
         #[pin]
-        stop: super::shutdown::Wait<'a>,
+        stop: crate::core::shutdown::Wait<'a>,
         #[pin]
         fut: F,
     }
@@ -150,7 +156,7 @@ where
 pin_project_lite::pin_project! {
     struct Guarded<'a, F> {
         #[pin]
-        stop: super::shutdown::Wait<'a>,
+        stop: crate::core::shutdown::Wait<'a>,
         #[pin]
         fut: F,
         #[pin]
@@ -179,7 +185,7 @@ where
         let out = if this.stop.shutdown().is_stopped() {
             Err(Error::shut_down())
         } else if let std::task::Poll::Ready(out) =
-            crate::core::deadline::expiring(at, || this.span.in_scope(|| this.fut.poll(cx)))
+            crate::deadline::expiring(at, || this.span.in_scope(|| this.fut.poll(cx)))
         {
             out
         } else if this

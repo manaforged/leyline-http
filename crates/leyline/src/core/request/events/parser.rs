@@ -2,7 +2,7 @@ use bytes::{Buf, Bytes};
 use std::time::Duration;
 
 use super::Event;
-use crate::core::{Error, Kind, Result};
+use crate::error::{Error, Kind, Result};
 
 pub(super) struct Parser {
     line: Vec<u8>,

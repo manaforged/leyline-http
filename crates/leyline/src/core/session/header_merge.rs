@@ -1,20 +1,19 @@
 use std::borrow::Cow;
 
 use crate::header_str::HeaderStr;
-use crate::profile::preset::HeaderPair;
 use crate::profile::{HeaderPosition, infer_anchor};
+use crate::wire::HeaderPair;
 
 use crate::core::headers::HeaderList;
 
 pub(crate) fn apply_extra_headers(
     headers: &mut Vec<HeaderPair>,
     extra: &HeaderList,
-    strip_sensitive: bool,
-    sensitive: &dyn Fn(&str) -> bool,
+    strip_cross_origin: bool,
 ) {
     let kept: Vec<&crate::core::headers::HeaderEntry> = extra
         .entries()
-        .filter(|e| !(strip_sensitive && sensitive(e.name.as_str())))
+        .filter(|e| !(strip_cross_origin && crate::util::cross_origin_header(e.name.as_str())))
         .collect();
 
     let mut consumed_names: Vec<String> = Vec::new();

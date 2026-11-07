@@ -6,40 +6,19 @@ use std::time::Duration;
 use support::*;
 use tokio::io::AsyncReadExt;
 
-use leyline::h2::Head;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::FrameType;
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::FrameType;
 
 fn test_config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65535),
-            (SettingId::MaxFrameSize, 16384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: std::time::Duration::from_secs(10),
-        header_block_reassembly_timeout: std::time::Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
@@ -86,7 +65,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         drop(server_io.read(&mut sink).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 

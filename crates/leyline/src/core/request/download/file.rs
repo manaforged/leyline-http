@@ -2,23 +2,45 @@ use std::fs::{File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::core::saved::FileVersion;
-use crate::core::{Error, Kind, Result};
-use crate::util::{atomic, lock};
+use crate::core::atomic::{self, Waiting};
+use crate::error::{Error, Kind, Result};
+use crate::util::lock;
+use crate::util::version::{self, Versioned};
 
 const CHECKPOINT_BYTES: u64 = 1024 * 1024;
 const CHECKPOINT_EVERY: Duration = Duration::from_secs(1);
 const MAX_METADATA_BYTES: u64 = 16 * 1024;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum MetadataVersion {
+    #[default]
+    V1,
+}
+
+impl Versioned for MetadataVersion {
+    fn number(self) -> u32 {
+        match self {
+            MetadataVersion::V1 => 1,
+        }
+    }
+
+    fn from_number(number: u32) -> Option<Self> {
+        match number {
+            1 => Some(MetadataVersion::V1),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 pub(super) struct Metadata {
-    pub(super) version: FileVersion,
+    #[serde(with = "version")]
+    pub(super) version: MetadataVersion,
     pub(super) request: [u8; 32],
     pub(super) url: String,
     pub(super) etag: Option<String>,
@@ -150,12 +172,10 @@ impl Partial {
         self.checkpoint_locked(&mut data)
     }
 
-    pub(super) fn commit(&self, waiting: &AtomicBool) -> Result<()> {
+    pub(super) fn commit(&self, waiting: &Waiting) -> Result<()> {
         let mut data = lock(&self.data);
         self.checkpoint_locked(&mut data)?;
-        if !waiting.load(Ordering::Acquire) {
-            return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
-        }
+        waiting.check()?;
         atomic::commit(&self.data_path, &self.target)?;
         match std::fs::remove_file(&self.metadata_path) {
             Ok(()) => Ok(()),

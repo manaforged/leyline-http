@@ -1,5 +1,5 @@
 use bytes::BytesMut;
-use leyline::h2::frame::*;
+use leyline::internals::h2::frame::*;
 
 fn roundtrip_buf() -> BytesMut {
     BytesMut::with_capacity(1024)
@@ -180,7 +180,7 @@ fn window_update_roundtrip() {
 fn rst_stream_roundtrip() {
     let frame = RstStreamFrame {
         stream_id: 5,
-        error_code: leyline::h2::error::ErrorCode::Cancel,
+        error_code: leyline::internals::h2::error::ErrorCode::Cancel,
     };
     let mut buf = roundtrip_buf();
     frame.encode(&mut buf);
@@ -190,7 +190,10 @@ fn rst_stream_roundtrip() {
     let parsed = RstStreamFrame::parse(header, payload).unwrap();
 
     assert_eq!(parsed.stream_id, 5);
-    assert_eq!(parsed.error_code, leyline::h2::error::ErrorCode::Cancel);
+    assert_eq!(
+        parsed.error_code,
+        leyline::internals::h2::error::ErrorCode::Cancel
+    );
 }
 
 #[test]
@@ -214,7 +217,7 @@ fn ping_roundtrip() {
 fn goaway_roundtrip() {
     let frame = GoAwayFrame {
         last_stream_id: 7,
-        error_code: leyline::h2::error::ErrorCode::NoError,
+        error_code: leyline::internals::h2::error::ErrorCode::NoError,
         debug_data: bytes::Bytes::from_static(b"bye"),
     };
     let mut buf = roundtrip_buf();
@@ -225,7 +228,10 @@ fn goaway_roundtrip() {
     let parsed = GoAwayFrame::parse(header, payload).unwrap();
 
     assert_eq!(parsed.last_stream_id, 7);
-    assert_eq!(parsed.error_code, leyline::h2::error::ErrorCode::NoError);
+    assert_eq!(
+        parsed.error_code,
+        leyline::internals::h2::error::ErrorCode::NoError
+    );
     assert_eq!(&parsed.debug_data[..], b"bye");
 }
 

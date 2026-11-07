@@ -2,88 +2,48 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::checkout_live_h1;
-use super::dial::{Dialed, H1Dial, open_new};
-use crate::core::Body;
-use crate::core::transport::TransportResponse;
+use super::streaming::Delivered;
 use crate::h2::client::H2Client;
 use crate::pool::types::{Opened, PoolKey};
-use crate::pool::{H1Slot, Pool, TlsInfo};
-use crate::tls::FingerprintConnector;
-use crate::{Error, Kind};
+use crate::pool::{H1Slot, Pool};
+use crate::wire::Body;
+use crate::wire::TransportResponse;
 
-pub(crate) enum H1Outcome {
+pub(crate) enum H1Outcome<W> {
     Response(TransportResponse),
     Upgraded {
         opened: Opened<H2Client>,
         body: Body,
+        _offered: W,
     },
 }
 
-impl H1Outcome {
-    pub(crate) fn upgraded_error() -> Error {
-        Error::new(Kind::Http2)
-            .with_message("the origin negotiated HTTP/2 on a new connection")
-            .with_alpn(String::from_utf8_lossy(crate::tls::alpn::H2))
-    }
-
-    pub(crate) fn response(self) -> Result<TransportResponse, Error> {
-        match self {
-            Self::Response(response) => Ok(response),
-            Self::Upgraded { .. } => Err(Self::upgraded_error()),
-        }
-    }
+pub(super) struct Upgrade<W> {
+    pub(super) opened: Opened<H2Client>,
+    pub(super) body: Body,
+    pub(super) offered: W,
 }
 
-pub(super) struct FirstLegs {
-    pub(super) started: Instant,
-    pub(super) pooled: Option<(H1Slot, TlsInfo)>,
-    pub(super) fresh: Option<Opened<H1Slot>>,
+pub(super) enum Reply<W> {
+    Answered(Box<Delivered>),
+    Upgraded(Box<Upgrade<W>>),
 }
 
-pub(super) fn first_legs(
+pub(super) fn first_leg(
     pool: &Arc<Pool>,
     key: &PoolKey,
     opened: Option<Opened<H1Slot>>,
     strict: bool,
     now: Instant,
-) -> FirstLegs {
+) -> (Instant, Option<Opened<H1Slot>>) {
     match opened {
-        Some(opened) if opened.connect_ms.is_some() => FirstLegs {
-            started: opened.started,
-            pooled: None,
-            fresh: Some(opened),
-        },
-        Some(opened) => FirstLegs {
-            started: opened.started,
-            pooled: Some((opened.conn, opened.tls)),
-            fresh: None,
-        },
-        None => FirstLegs {
-            started: now,
-            pooled: checkout_live_h1(pool, key, strict, now),
-            fresh: None,
-        },
-    }
-}
-
-pub(super) enum Leg {
-    H1(Opened<H1Slot>),
-    H2(Opened<H2Client>),
-}
-
-pub(super) async fn fresh_leg(
-    pool: &Pool,
-    key: &PoolKey,
-    connector: &FingerprintConnector,
-    dial: H1Dial<'_>,
-    fresh: Option<Opened<H1Slot>>,
-) -> Result<Leg, Error> {
-    if let Some(opened) = fresh {
-        return Ok(Leg::H1(opened));
-    }
-    let started = Instant::now();
-    match open_new(pool, key, connector, dial).await? {
-        Dialed::H1(io, tls) => Ok(Leg::H1(Opened::fresh((H1Slot::new(io), tls), started))),
-        Dialed::H2(conn, tls) => Ok(Leg::H2(Opened::fresh((conn, tls), started))),
+        Some(opened) => (opened.started, Some(opened)),
+        None => (
+            now,
+            checkout_live_h1(pool, key, strict, now).map(|hit| Opened {
+                started: now,
+                ..Opened::pooled(hit)
+            }),
+        ),
     }
 }

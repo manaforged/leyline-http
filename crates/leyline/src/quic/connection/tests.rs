@@ -1,7 +1,8 @@
-use super::{check_body_budget, resolve_peer, validate_connection_id_len};
+use super::{resolve_peer, validate_connection_id_len};
+use crate::error::BodyLimit;
 use crate::profile::BrowserProfile;
-use crate::quic::config::H3Config;
-use crate::tls::Tls;
+use crate::quic::H3Config;
+use crate::tls::trust::Tls;
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::BigNum;
 use leyline_bssl::hash::MessageDigest;
@@ -100,7 +101,7 @@ fn quic_verifier_checks_host_ca_and_pin() {
 
 #[tokio::test]
 async fn resolve_peer_prefers_ipv4_for_localhost() {
-    let addr = resolve_peer(&crate::tls::SystemResolver, "localhost", 443)
+    let addr = resolve_peer(&crate::net::SystemResolver, "localhost", 443)
         .await
         .expect("resolve localhost");
     assert!(addr.is_ipv4(), "got {addr}");
@@ -108,7 +109,7 @@ async fn resolve_peer_prefers_ipv4_for_localhost() {
 
 #[tokio::test]
 async fn resolve_peer_falls_back_on_ipv6_only_hosts() {
-    let addr = resolve_peer(&crate::tls::SystemResolver, "::1", 443)
+    let addr = resolve_peer(&crate::net::SystemResolver, "::1", 443)
         .await
         .expect("resolve ::1");
     assert!(addr.is_ipv6(), "got {addr}");
@@ -123,30 +124,32 @@ fn validates_profile_connection_id_lengths() {
 
 #[test]
 fn body_budget_allows_zero_chunks() {
-    check_body_budget(0, 0, 1024).expect("expected Ok");
-    check_body_budget(1024, 0, 1024).expect("expected Ok");
+    let limit = BodyLimit::session(1024);
+    limit.admit(0, 0).expect("expected Ok");
+    limit.admit(1024, 0).expect("expected Ok");
 }
 
 #[test]
 fn body_budget_allows_exactly_max() {
-    check_body_budget(0, 1024, 1024).expect("expected Ok");
-    check_body_budget(512, 512, 1024).expect("expected Ok");
+    let limit = BodyLimit::session(1024);
+    limit.admit(0, 1024).expect("expected Ok");
+    limit.admit(512, 512).expect("expected Ok");
 }
 
 #[test]
 fn body_budget_rejects_past_max_by_one_byte() {
-    let err = check_body_budget(1024, 1, 1024).unwrap_err();
-    assert_eq!(err, 1025);
+    let limit = BodyLimit::session(1024);
+    assert_eq!(limit.admit(1024, 1), Err(limit));
 }
 
 #[test]
 fn body_budget_rejects_large_chunk_past_cap() {
-    let err = check_body_budget(0, 100 * 1024 * 1024 + 1, 100 * 1024 * 1024).unwrap_err();
-    assert_eq!(err, (100 * 1024 * 1024 + 1) as u64);
+    let limit = BodyLimit::session(100 * 1024 * 1024);
+    assert_eq!(limit.admit(0, 100 * 1024 * 1024 + 1), Err(limit));
 }
 
 #[test]
 fn body_budget_saturates_on_usize_add_overflow() {
-    let err = check_body_budget(usize::MAX, 1, 100 * 1024 * 1024).unwrap_err();
-    assert_eq!(err, usize::MAX as u64);
+    let limit = BodyLimit::session(100 * 1024 * 1024);
+    assert_eq!(limit.admit(usize::MAX, 1), Err(limit));
 }

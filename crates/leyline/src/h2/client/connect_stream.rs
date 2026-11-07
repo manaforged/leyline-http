@@ -6,12 +6,14 @@ use bytes::Bytes;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::PollSender;
 
-use crate::h2::connection::{HeaderPair, PseudoHeaders};
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::H2Error;
+use crate::h2::connection::PseudoHeaders;
+use crate::h2::error::ErrorCode;
+use crate::wire::HeaderPair;
 
 use super::driver::{DriverCommand, Head, ResponseSink, STREAM_REQ_BODY_CAPACITY};
-use super::handle::H2Client;
-use crate::core::transport::TransportResponse;
+use super::handle::{H2Client, Slot};
+use crate::wire::TransportResponse;
 
 pub struct H2ConnectStream {
     pub(super) status: u16,
@@ -193,30 +195,17 @@ impl Drop for H2ConnectStream {
 }
 
 impl H2Client {
-    pub fn peer_enables_connect_protocol(&self) -> bool {
-        self.shared.peer_settings.enable_connect_protocol()
-    }
-
+    /// Opens an RFC 8441 stream once the peer's SETTINGS allow one, or returns `H2Error::NoExtendedConnect`.
     pub async fn open_extended_connect(
         &self,
         pseudo: PseudoHeaders,
         headers: Vec<HeaderPair>,
+        slot: Option<Slot>,
     ) -> Result<H2ConnectStream, H2Error> {
-        if !self.peer_enables_connect_protocol() {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "peer did not advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1; \
-                         fall back to the HTTP/1.1 path"
-                    .into(),
-            });
-        }
         if self.shared.closed.load(Ordering::Acquire) {
-            return Err(H2Error::Connection {
-                code: ErrorCode::NoError,
-                reason: "connection closed".into(),
-            });
+            return Err(H2Error::NotSent);
         }
-        if !pseudo.method.eq_ignore_ascii_case("CONNECT") || pseudo.protocol.is_none() {
+        if !pseudo.method_is(&http::Method::CONNECT) || pseudo.protocol.is_none() {
             return Err(H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: "extended CONNECT requires :method=CONNECT and :protocol".into(),
@@ -231,13 +220,11 @@ impl H2Client {
             head: Box::new(Head::new(pseudo, headers)),
             write_rx,
             sink,
+            slot,
         };
         self.shared.tx.send(cmd).await.map_err(|e| {
             tracing::debug!(error = %e, "h2 driver command channel closed");
-            H2Error::Stream {
-                stream_id: 0,
-                code: ErrorCode::RefusedStream,
-            }
+            H2Error::NotSent
         })?;
 
         let resp = match headers_rx.await {
@@ -254,7 +241,7 @@ impl H2Client {
         Ok(H2ConnectStream {
             shutdown_state: ShutdownState::Open,
             status: resp.status.as_u16(),
-            response_headers: crate::core::transport::string_pairs(resp.headers.map()),
+            response_headers: crate::wire::string_pairs(resp.headers.map()),
             write_tx: Some(PollSender::new(write_tx)),
             read_rx: body_rx,
             read_leftover: Bytes::new(),

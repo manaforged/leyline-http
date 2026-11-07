@@ -1,316 +1,161 @@
 use std::collections::VecDeque;
-#[cfg(feature = "websocket")]
-use std::io;
 
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
-#[cfg(feature = "websocket")]
-use tokio::sync::mpsc;
 
-use crate::core::{Body, BodyKind};
-use crate::h2::connection::PseudoHeaders;
-use crate::h2::error::{ErrorCode, H2Error};
 use crate::h2::stream_state::StreamEvent;
+use crate::wire::HeaderPair;
+use crate::wire::{Body, BodyKind, BoxedStream};
 
+use super::lifecycle::Admit;
+use super::send::DataEnd;
 use super::*;
 
-impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    pub(super) fn on_command(&mut self, cmd: DriverCommand) -> Result<(), H2Error> {
-        if cmd.is_cancelled() {
-            return Ok(());
+pub(super) enum Upload {
+    None,
+    Bytes(Bytes),
+    Stream(BoxedStream),
+}
+
+impl From<Body> for Upload {
+    fn from(body: Body) -> Self {
+        match body.0 {
+            BodyKind::Empty => Self::None,
+            BodyKind::Bytes(bytes) if bytes.is_empty() => Self::None,
+            BodyKind::Bytes(bytes) => Self::Bytes(bytes),
+            BodyKind::Stream { stream, .. } => Self::Stream(stream),
         }
-        if !self.peer_ready() {
+    }
+}
+
+impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
+    pub(super) fn on_command(&mut self, cmd: DriverCommand) {
+        if cmd.is_cancelled() {
+            return;
+        }
+        if !self.peer_greeted {
             self.pending.push_back(cmd);
-            return Ok(());
+            return;
         }
         match cmd {
-            DriverCommand::Ping { ack_tx, deadline } => {
-                self.ping_seq = self.ping_seq.wrapping_add(1);
-                let payload = self.ping_seq.to_be_bytes();
-                self.writer.write_frame(&PingFrame {
-                    ack: false,
-                    payload,
-                })?;
-                self.pings.push_back((payload, ack_tx, deadline));
-                Ok(())
-            }
+            DriverCommand::Ping(ping) => self.send_ping(ping),
             #[cfg(feature = "websocket")]
             DriverCommand::OpenConnect {
                 head,
                 write_rx,
                 sink,
-            } => {
-                if let Err(e) = self.reject_after_goaway() {
-                    send_err_to_sink(sink, e);
-                    return Ok(());
+                slot,
+            } if self.peer_settings.enable_connect_protocol => match self.admit() {
+                Admit::Open => {
+                    let upload = Upload::Stream(Box::pin(futures_util::stream::unfold(
+                        write_rx,
+                        |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
+                    )));
+                    self.open_stream(&head, upload, sink);
+                    drop(slot);
                 }
-                if !self.peer_settings.enable_connect_protocol {
-                    send_err_to_sink(
-                        sink,
-                        H2Error::Connection {
-                            code: ErrorCode::ProtocolError,
-                            reason: "peer does not advertise ENABLE_CONNECT_PROTOCOL".into(),
-                        },
-                    );
-                    return Ok(());
-                }
-                if let Err(e) = self.check_stream_capacity() {
-                    send_err_to_sink(sink, e);
-                    return Ok(());
-                }
-                self.start_extended_connect(&head.pseudo, &head.headers, write_rx, sink)
-            }
+                Admit::Defer => self.pending.push_back(DriverCommand::OpenConnect {
+                    head,
+                    write_rx,
+                    sink,
+                    slot,
+                }),
+                Admit::Refuse(e) => sink.fail(e),
+            },
+            #[cfg(feature = "websocket")]
+            DriverCommand::OpenConnect { sink, .. } => sink.fail(H2Error::NoExtendedConnect),
             DriverCommand::SendRequest {
                 head,
                 body,
                 sink,
                 slot,
-            } => {
-                if let Err(e) = self.admit_new_stream() {
-                    if Self::deferrable_capacity_error(&e) {
-                        self.pending.push_back(DriverCommand::SendRequest {
-                            head,
-                            body,
-                            sink,
-                            slot,
-                        });
-                        return Ok(());
-                    }
-                    send_err_to_sink(sink, e);
-                    return Ok(());
+            } => match self.admit() {
+                Admit::Open => {
+                    self.open_stream(&head, Upload::from(body), sink);
+                    drop(slot);
                 }
-                let started = self.start_request_ex(&head.pseudo, &head.headers, body, sink);
-                drop(slot);
-                started
-            }
+                Admit::Defer => self.pending.push_back(DriverCommand::SendRequest {
+                    head,
+                    body,
+                    sink,
+                    slot,
+                }),
+                Admit::Refuse(e) => sink.fail(e),
+            },
         }
     }
 
-    fn deferrable_capacity_error(e: &H2Error) -> bool {
-        matches!(
-            e,
-            H2Error::Connection {
-                code: ErrorCode::RefusedStream,
-                ..
-            }
-        )
-    }
-
-    pub(super) fn drain_pending(&mut self) -> Result<(), H2Error> {
-        while !self.pending.is_empty() && self.peer_ready() {
-            if let Err(e) = self.admit_new_stream()
-                && Self::deferrable_capacity_error(&e)
-            {
+    pub(super) fn drain_pending(&mut self) {
+        while !self.pending.is_empty() && self.peer_greeted {
+            if matches!(self.admit(), Admit::Defer) {
                 break;
             }
             let Some(cmd) = self.pending.pop_front() else {
                 break;
             };
-            self.on_command(cmd)?;
+            self.on_command(cmd);
         }
-        Ok(())
     }
 
-    fn start_upload(&mut self, stream_id: u32, body: crate::core::BoxedStream) {
+    fn start_upload(&mut self, stream_id: u32, body: BoxedStream) {
         let Some(actor) = self.streams.get_mut(stream_id) else {
             return;
         };
         let (tx, _) = self
             .body_chunks
             .get_or_insert_with(|| tokio::sync::mpsc::channel(STREAM_REQ_BODY_CAPACITY * 4));
-        let credit = crate::util::upload::upload_credit();
-        let pump = tokio::spawn(crate::util::upload::pump_request_body(
-            stream_id,
-            body,
-            tx.clone(),
-            Arc::clone(&credit),
-        ));
-        actor.upload_credit = Some(credit);
-        actor.pump = Some(pump.abort_handle());
+        actor.upload = Some(crate::wire::Upload::start(stream_id, body, tx.clone()));
     }
 
-    pub(super) fn start_request(
-        &mut self,
-        pseudo: &PseudoHeaders,
-        headers: &[crate::h2::connection::HeaderPair],
-        body: Option<Bytes>,
-        sink: ResponseSink,
-    ) -> Result<(), H2Error> {
+    fn open_stream(&mut self, head: &Head, upload: Upload, sink: ResponseSink) {
         let stream_id = self.alloc_stream_id();
-        let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
-
-        let (pseudo_list, pseudo_len) = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
-            Ok(l) => l,
-            Err(e) => {
-                send_err_to_sink(sink, e);
-                return Ok(());
-            }
-        };
-        if let Err(e) = self.check_header_list(&pseudo_list[..pseudo_len], headers) {
-            send_err_to_sink(sink, e);
-            return Ok(());
+        let (pseudo_list, pseudo_len) =
+            match head.pseudo.build_pseudo_list(&self.config.pseudo_order) {
+                Ok(list) => list,
+                Err(e) => {
+                    sink.fail(e);
+                    return;
+                }
+            };
+        let pseudo = &pseudo_list[..pseudo_len];
+        let headers: &[HeaderPair] = &head.headers;
+        if let Err(e) = self.check_header_list(pseudo, headers) {
+            sink.fail(e);
+            return;
         }
 
-        let end_stream_on_headers = body.is_none();
-
+        let end_stream = matches!(upload, Upload::None);
         let initial_send = self.peer_settings.initial_window_size as i64;
         let initial_recv = self.config.advertised_initial_window_size() as i64;
-        let mut actor = StreamActor::new(initial_send, initial_recv, sink, is_head);
-
-        if let Err(e) = actor.state.transition(StreamEvent::SendHeaders {
-            end_stream: end_stream_on_headers,
-        }) {
-            let err = map_state_err(stream_id, e);
-            actor.deliver_err(err);
-            return Ok(());
+        let is_head = head.pseudo.method_is(&http::Method::HEAD);
+        let mut actor =
+            StreamActor::new(initial_send, initial_recv, sink, is_head, head.body_limit);
+        if matches!(upload, Upload::Stream(_)) {
+            actor.send_body_input = SendBodyInput::Streaming {
+                pending_buf: VecDeque::new(),
+                closed: false,
+                error: None,
+            };
         }
-
-        self.streams.insert(stream_id, actor);
-
-        if let Err(e) = self.write_headers_block(
-            stream_id,
-            end_stream_on_headers,
-            (&pseudo_list[..pseudo_len], headers),
-            true,
-        ) {
-            self.fail_stream(stream_id, e);
-            return Ok(());
-        }
-
-        if let Some(body) = body
-            && let Err(e) = self.write_body_or_park(stream_id, body)
-        {
-            self.fail_stream(stream_id, e);
-        }
-
-        Ok(())
-    }
-
-    pub(super) fn start_request_ex(
-        &mut self,
-        pseudo: &PseudoHeaders,
-        headers: &[crate::h2::connection::HeaderPair],
-        body: Body,
-        sink: ResponseSink,
-    ) -> Result<(), H2Error> {
-        match body.0 {
-            BodyKind::Empty => self.start_request(pseudo, headers, None, sink),
-            BodyKind::Bytes(b) => {
-                let body = if b.is_empty() { None } else { Some(b) };
-                self.start_request(pseudo, headers, body, sink)
-            }
-            BodyKind::Stream { stream: body, .. } => {
-                let stream_id = self.alloc_stream_id();
-                let is_head = pseudo.method.eq_ignore_ascii_case("HEAD");
-
-                let (pseudo_list, pseudo_len) =
-                    match pseudo.build_pseudo_list(&self.config.pseudo_order) {
-                        Ok(l) => l,
-                        Err(e) => {
-                            send_err_to_sink(sink, e);
-                            return Ok(());
-                        }
-                    };
-                if let Err(e) = self.check_header_list(&pseudo_list[..pseudo_len], headers) {
-                    send_err_to_sink(sink, e);
-                    return Ok(());
-                }
-
-                let initial_send = self.peer_settings.initial_window_size as i64;
-                let initial_recv = self.config.advertised_initial_window_size() as i64;
-                let mut actor = StreamActor::new(initial_send, initial_recv, sink, is_head);
-                actor.send_body_input = SendBodyInput::Streaming {
-                    pending_buf: VecDeque::new(),
-                    closed: false,
-                    error: None,
-                };
-
-                if let Err(e) = actor
-                    .state
-                    .transition(StreamEvent::SendHeaders { end_stream: false })
-                {
-                    let err = map_state_err(stream_id, e);
-                    actor.deliver_err(err);
-                    return Ok(());
-                }
-
-                self.streams.insert(stream_id, actor);
-
-                if let Err(e) = self.write_headers_block(
-                    stream_id,
-                    false,
-                    (&pseudo_list[..pseudo_len], headers),
-                    true,
-                ) {
-                    self.fail_stream(stream_id, e);
-                    return Ok(());
-                }
-
-                self.start_upload(stream_id, body);
-                Ok(())
-            }
-        }
-    }
-
-    #[cfg(feature = "websocket")]
-    pub(super) fn start_extended_connect(
-        &mut self,
-        pseudo: &PseudoHeaders,
-        headers: &[crate::h2::connection::HeaderPair],
-        write_rx: mpsc::Receiver<io::Result<Bytes>>,
-        sink: ResponseSink,
-    ) -> Result<(), H2Error> {
-        let stream_id = self.alloc_stream_id();
-
-        let (pseudo_list, pseudo_len) = match pseudo.build_pseudo_list(&self.config.pseudo_order) {
-            Ok(l) => l,
-            Err(e) => {
-                send_err_to_sink(sink, e);
-                return Ok(());
-            }
-        };
-        if let Err(e) = self.check_header_list(&pseudo_list[..pseudo_len], headers) {
-            send_err_to_sink(sink, e);
-            return Ok(());
-        }
-
-        let initial_send = self.peer_settings.initial_window_size as i64;
-        let initial_recv = self.config.advertised_initial_window_size() as i64;
-        let mut actor = StreamActor::new(initial_send, initial_recv, sink, false);
-        actor.send_body_input = SendBodyInput::Streaming {
-            pending_buf: VecDeque::new(),
-            closed: false,
-            error: None,
-        };
-
         if let Err(e) = actor
             .state
-            .transition(StreamEvent::SendHeaders { end_stream: false })
+            .transition(StreamEvent::SendHeaders { end_stream })
         {
-            let err = map_state_err(stream_id, e);
-            actor.deliver_err(err);
-            return Ok(());
+            actor.deliver_err(map_state_err(stream_id, e));
+            return;
         }
 
         self.streams.insert(stream_id, actor);
+        self.write_headers_block(stream_id, end_stream, (pseudo, headers));
 
-        if let Err(e) = self.write_headers_block(
-            stream_id,
-            false,
-            (&pseudo_list[..pseudo_len], headers),
-            true,
-        ) {
-            self.fail_stream(stream_id, e);
-            return Ok(());
+        match upload {
+            Upload::None => {}
+            Upload::Bytes(body) => {
+                if let Err(e) = self.write_data_frames(stream_id, body, DataEnd::Buffered) {
+                    self.fail_stream(stream_id, e);
+                }
+            }
+            Upload::Stream(body) => self.start_upload(stream_id, body),
         }
-
-        self.start_upload(
-            stream_id,
-            Box::pin(futures_util::stream::unfold(
-                write_rx,
-                |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
-            )),
-        );
-        Ok(())
     }
 }

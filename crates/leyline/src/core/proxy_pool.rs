@@ -4,8 +4,8 @@ mod state;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::core::Identity;
 use crate::core::config::Proxy;
-use crate::core::session::Identity;
 use crate::profile::{Browser, Platform};
 
 use sessions::IdentitySessions;

@@ -25,9 +25,8 @@ fn section_a_chrome147() {
             0x0000, 0x0017, 0xff01, 0x000a, 0x000b, 0x0023, 0x0010, 0x0005, 0x0033, 0x002b, 0x000d,
             0x002d, 0x001b, 0x0012, 0x4469, 0xfe0d, 0x0029,
         ],
-        tls_version: "1.3",
         has_sni: true,
-        alpn: "h2",
+        hello: ClientHello::TcpH2,
     };
     let a = input.compute_section_a();
     assert_eq!(&a[..3], "t13");
@@ -68,9 +67,8 @@ fn section_b_chrome147() {
         ciphers: &ciphers,
         sigalgs: &[],
         extension_ids: &[],
-        tls_version: "1.3",
         has_sni: true,
-        alpn: "h2",
+        hello: ClientHello::TcpH2,
     };
     let b = input.compute_section_b();
     assert_eq!(b, "8daaf6152771");

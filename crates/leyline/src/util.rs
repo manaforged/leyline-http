@@ -69,22 +69,6 @@ pub(crate) fn without_userinfo(mut url: url::Url) -> url::Url {
     url
 }
 
-#[inline]
-pub(crate) fn host_port(url: &url::Url) -> crate::core::Result<(&str, u16)> {
-    match (url.host_str(), url.port_or_known_default()) {
-        (Some(host), Some(port)) => Ok((host, port)),
-        _ => Err(no_host_port(url)),
-    }
-}
-
-#[cold]
-fn no_host_port(url: &url::Url) -> crate::Error {
-    if url.host_str().is_none() {
-        return crate::Error::config("no host in URL");
-    }
-    crate::Error::config(format!("no default port for scheme {}", url.scheme()))
-}
-
 #[cfg(feature = "websocket")]
 pub(crate) fn header_values<'a, K: AsRef<str>, V: AsRef<[u8]>>(
     headers: &'a [(K, V)],
@@ -131,24 +115,41 @@ pub(crate) fn has_token(value: &str, token: &str) -> bool {
         .any(|part| part.trim().eq_ignore_ascii_case(token))
 }
 
-pub(crate) fn request_target(url: &url::Url) -> &str {
-    &url[url::Position::BeforePath..url::Position::AfterQuery]
+pub(crate) fn is_body_header(name: &str) -> bool {
+    name.get(..CONTENT_PREFIX.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CONTENT_PREFIX))
+        || name.eq_ignore_ascii_case("transfer-encoding")
 }
 
-pub(crate) fn authority<'a>(
-    url: &'a url::Url,
-    host: &'a str,
-    port: u16,
-) -> std::borrow::Cow<'a, str> {
-    let is_default_port =
-        (url.scheme() == "https" && port == 443) || (url.scheme() == "http" && port == 80);
-    if is_default_port {
-        std::borrow::Cow::Borrowed(host)
-    } else if url.port() == Some(port) && url.host_str() == Some(host) {
-        std::borrow::Cow::Borrowed(&url[url::Position::BeforeHost..url::Position::AfterPort])
-    } else {
-        std::borrow::Cow::Owned(format!("{host}:{port}"))
+const CONTENT_PREFIX: &str = "content-";
+
+pub(crate) fn is_redirect_status(status: u16) -> bool {
+    matches!(status, 301 | 302 | 303 | 307 | 308)
+}
+
+pub(crate) fn redirect_target(
+    status: u16,
+    headers: &http::HeaderMap,
+) -> Option<std::borrow::Cow<'_, str>> {
+    if !is_redirect_status(status) {
+        return None;
     }
+    headers
+        .get(http::header::LOCATION)
+        .map(|value| String::from_utf8_lossy(value.as_bytes()))
+}
+
+#[cfg(feature = "html")]
+pub(crate) fn redirect_location(
+    status: u16,
+    headers: &http::HeaderMap,
+    base: &url::Url,
+) -> Option<url::Url> {
+    redirect_target(status, headers).and_then(|to| base.join(&to).ok())
+}
+
+pub(crate) fn request_target(url: &url::Url) -> &str {
+    &url[url::Position::BeforePath..url::Position::AfterQuery]
 }
 
 pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -186,12 +187,14 @@ pub(crate) fn since_epoch(at: std::time::SystemTime) -> std::time::Duration {
         .unwrap_or_default()
 }
 
-const SENSITIVE_HEADERS: [&str; 4] = [
+const SECRET_HEADERS: [&str; 4] = [
     "authorization",
     "proxy-authorization",
     "cookie",
     "set-cookie",
 ];
+
+const CROSS_ORIGIN_EXTRA_HEADERS: [&str; 1] = ["host"];
 
 pub(crate) fn has_ascii_uppercase(text: &str) -> bool {
     const ASCII: u64 = 0x7f7f_7f7f_7f7f_7f7f;
@@ -210,9 +213,33 @@ pub(crate) fn has_ascii_uppercase(text: &str) -> bool {
 }
 
 pub(crate) fn sensitive_header(name: &str) -> bool {
-    SENSITIVE_HEADERS
-        .iter()
-        .any(|s| name.eq_ignore_ascii_case(s))
+    SECRET_HEADERS.iter().any(|s| name.eq_ignore_ascii_case(s))
+}
+
+pub(crate) fn masked<'a>(
+    fields: impl Iterator<Item = (&'a str, &'a [u8])>,
+) -> Vec<(&'a str, std::borrow::Cow<'a, str>)> {
+    fields
+        .map(|(name, value)| {
+            let shown = if sensitive_header(name) {
+                std::borrow::Cow::Borrowed("***")
+            } else {
+                String::from_utf8_lossy(value)
+            };
+            (name, shown)
+        })
+        .collect()
+}
+
+pub(crate) fn cross_origin_header(name: &str) -> bool {
+    sensitive_header(name)
+        || CROSS_ORIGIN_EXTRA_HEADERS
+            .iter()
+            .any(|s| name.eq_ignore_ascii_case(s))
+}
+
+pub(crate) fn basic_credentials(username: &str, password: &str) -> String {
+    format!("Basic {}", base64_encode(&format!("{username}:{password}")))
 }
 
 pub(crate) fn proxy_basic_auth(proxy: &url::Url) -> Option<String> {
@@ -221,10 +248,33 @@ pub(crate) fn proxy_basic_auth(proxy: &url::Url) -> Option<String> {
     }
     let username = percent_decode(proxy.username());
     let password = proxy.password().map(percent_decode).unwrap_or_default();
-    Some(format!(
-        "Basic {}",
-        base64_encode(&format!("{username}:{password}"))
-    ))
+    Some(basic_credentials(&username, &password))
+}
+
+pub(crate) fn quote(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 2);
+    out.push('"');
+    for c in text.chars() {
+        if c == '"' || c == '\\' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('"');
+    out
+}
+
+pub(crate) fn unquote(src: &str) -> (String, usize) {
+    let mut out = String::new();
+    let mut chars = src.char_indices().skip(1);
+    while let Some((offset, c)) = chars.next() {
+        match c {
+            '"' => return (out, offset + 1),
+            '\\' => out.extend(chars.next().map(|(_, escaped)| escaped)),
+            other => out.push(other),
+        }
+    }
+    (out, src.len())
 }
 
 pub(crate) fn bare_host(host: &str) -> &str {
@@ -272,19 +322,24 @@ pub(crate) fn delta_seconds(value: &str) -> Option<u64> {
     Some(value.parse().unwrap_or(u64::MAX))
 }
 
-pub(crate) fn is_idempotent(method: &str) -> bool {
-    ["GET", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE"]
-        .iter()
-        .any(|m| method.eq_ignore_ascii_case(m))
+pub(crate) fn domain_match(host: &str, domain: &str) -> bool {
+    let Some(rest) = host.len().checked_sub(domain.len()) else {
+        return false;
+    };
+    host.as_bytes()[rest..].eq_ignore_ascii_case(domain.as_bytes())
+        && (rest == 0 || host.as_bytes()[rest - 1] == b'.')
 }
 
-pub(crate) const MAX_INFORMATIONAL: usize = 16;
+pub(crate) fn registrable_domain(host: &str) -> Option<String> {
+    psl::domain(host.as_bytes()).map(|d| String::from_utf8_lossy(d.as_bytes()).into_owned())
+}
 
-pub(crate) mod atomic;
-pub(crate) mod autosave;
 pub(crate) mod coalesce;
 pub(crate) mod date;
+pub(crate) mod expiring;
 pub(crate) mod upload;
+pub(crate) mod version;
+pub(crate) mod wait;
 
 #[cfg(test)]
 mod tests;
@@ -320,4 +375,19 @@ fn next_input(digits: &mut Vec<usize>, base: usize, max_len: usize) -> bool {
     }
     digits.push(0);
     true
+}
+
+pub(crate) fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
+    table
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(key.trim()))
+        .map(|(_, value)| *value)
+}
+
+pub(crate) fn product_token(agent: &str) -> &str {
+    let agent = agent.trim();
+    let end = agent
+        .find(|c: char| !(c.is_ascii_alphabetic() || matches!(c, '_' | '-')))
+        .unwrap_or(agent.len());
+    &agent[..end]
 }

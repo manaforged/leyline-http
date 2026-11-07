@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use crate::util::date::{days_from_civil, month};
+use crate::util::date::{month, unix_seconds};
 
 const MIN_YEAR: u32 = 1601;
 
@@ -51,14 +51,11 @@ pub(super) fn stamp(d: &Date) -> Option<Duration> {
         return None;
     }
 
-    let days = days_from_civil(i32::try_from(d.year).ok()?, d.month, d.day)?;
-    if days < 0 {
-        return Some(Duration::ZERO);
-    }
-    let secs = (days as u64)
-        .checked_mul(86400)?
-        .checked_add(d.hour as u64 * 3600)?
-        .checked_add(d.minute as u64 * 60)?
-        .checked_add(d.second as u64)?;
-    Some(Duration::from_secs(secs))
+    let secs = unix_seconds(
+        i32::try_from(d.year).ok()?,
+        d.month,
+        d.day,
+        (d.hour, d.minute, d.second),
+    )?;
+    Some(Duration::from_secs(u64::try_from(secs).unwrap_or(0)))
 }

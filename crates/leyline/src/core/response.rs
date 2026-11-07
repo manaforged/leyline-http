@@ -5,9 +5,11 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use url::Url;
 
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Error, Kind};
-use crate::trace::masked;
+use crate::error::{Error, Kind};
+use crate::util::masked;
 use crate::util::redact;
+use crate::wire::ResponseTiming;
+use crate::wire::is_error_status;
 
 mod body;
 mod download;
@@ -27,62 +29,6 @@ pub(crate) enum ResponseBody {
     Taken,
 }
 
-pub(crate) fn ja4h_token(version: http::Version) -> &'static str {
-    if version == http::Version::HTTP_2 {
-        "2"
-    } else if version == http::Version::HTTP_3 {
-        "3"
-    } else {
-        "1"
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ResponseTiming {
-    pub(crate) reused: bool,
-    pub(crate) connect_ms: Option<u32>,
-    pub(crate) send_ms: u32,
-    pub(crate) total_ms: u32,
-}
-
-impl ResponseTiming {
-    pub(crate) fn accumulator() -> Self {
-        Self {
-            reused: true,
-            connect_ms: None,
-            send_ms: 0,
-            total_ms: 0,
-        }
-    }
-
-    pub(crate) fn leg(started: std::time::Instant, connect_ms: Option<u32>) -> Self {
-        let total_ms = Self::millis(started);
-        Self {
-            reused: connect_ms.is_none(),
-            connect_ms,
-            send_ms: total_ms.saturating_sub(connect_ms.unwrap_or(0)),
-            total_ms,
-        }
-    }
-
-    pub(crate) fn millis(start: std::time::Instant) -> u32 {
-        Self::span(start.elapsed())
-    }
-
-    pub(crate) fn span(elapsed: std::time::Duration) -> u32 {
-        u32::try_from(elapsed.as_millis()).unwrap_or(u32::MAX)
-    }
-
-    pub(crate) fn add_leg(&mut self, leg: &ResponseTiming) {
-        self.total_ms = self.total_ms.saturating_add(leg.total_ms);
-        self.send_ms = self.send_ms.saturating_add(leg.send_ms);
-        if let Some(c) = leg.connect_ms {
-            self.connect_ms = Some(self.connect_ms.unwrap_or(0).saturating_add(c));
-        }
-        self.reused &= leg.reused;
-    }
-}
-
 #[doc = include_str!("../../docs/response.md")]
 pub struct Response {
     pub(crate) parts: Box<Parts>,
@@ -91,14 +37,14 @@ pub struct Response {
 pub(crate) struct Parts {
     pub(crate) status: StatusCode,
     pub(crate) version: http::Version,
-    pub(crate) headers: crate::core::response_head::Fields,
+    pub(crate) headers: crate::wire::Fields,
     pub(crate) trailers: Option<Box<HeaderMap>>,
     pub(crate) body: ResponseBody,
     pub(crate) url: Arc<Url>,
     pub(crate) redirect_chain: Vec<Url>,
     pub(crate) request_headers: Vec<(String, String)>,
-    pub(crate) tls: Option<crate::pool::TlsInfo>,
-    pub(crate) request_method: String,
+    pub(crate) tls: Option<crate::wire::TlsInfo>,
+    pub(crate) request_method: Option<http::Method>,
     pub(crate) timing: ResponseTiming,
     pub(crate) audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     pub(crate) audit_cache: OnceLock<crate::audit::Fingerprint>,
@@ -249,7 +195,7 @@ impl Response {
     }
 
     /// Returns the response, or an error of kind `Kind::Status` when the status is an error.
-    pub fn error_for_status(&self) -> crate::core::Result<&Self> {
+    pub fn error_for_status(&self) -> crate::error::Result<&Self> {
         match self.status_error() {
             Some(err) => Err(err),
             None => Ok(self),
@@ -273,20 +219,14 @@ impl Response {
     pub fn fingerprint(&self) -> Option<&crate::audit::Fingerprint> {
         let tls = self.parts.audit_tls.as_ref()?;
         Some(self.parts.audit_cache.get_or_init(|| {
-            let ja4h = crate::audit::compute_ja4h(&crate::audit::Ja4hInput {
-                method: &self.parts.request_method,
-                http_version: ja4h_token(self.parts.version),
-                headers: &self.parts.request_headers,
-            });
-            crate::audit::Fingerprint {
-                ja4: tls.ja4.clone(),
-                ja3: tls.ja3.clone(),
-                h2_fingerprint: tls.h2_fingerprint.clone(),
-                ja4t: tls.ja4t.clone(),
-                ja4h,
-                permutes_extensions: tls.permutes_extensions,
-                request_headers: self.parts.request_headers.clone(),
-            }
+            tls.for_request(
+                self.parts
+                    .request_method
+                    .as_ref()
+                    .map_or("", http::Method::as_str),
+                self.parts.version,
+                &self.parts.request_headers,
+            )
         }))
     }
 
@@ -351,7 +291,3 @@ impl fmt::Debug for Response {
 
 #[cfg(test)]
 mod tests;
-
-pub(crate) fn is_error_status(status: u16) -> bool {
-    status >= 400
-}

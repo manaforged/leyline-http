@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use super::{Event, Trace};
-use crate::Kind;
+use crate::error::Kind;
 
 const LATENCY_BOUNDS_MS: [u64; 9] = [10, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000];
 const LATENCY_BUCKETS: usize = LATENCY_BOUNDS_MS.len() + 1;

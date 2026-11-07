@@ -5,12 +5,14 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use leyline::BrowserProfile;
-use leyline::h2::Head;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{DataFrame, FrameType, HeadersFrame, PingFrame};
-use leyline::h2::hpack;
+use leyline::internals::BrowserProfile;
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{DataFrame, FrameType, HeadersFrame, PingFrame};
+use leyline::internals::h2::hpack;
+use leyline::internals::profile::SettingId;
 use support::*;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
@@ -28,27 +30,12 @@ fn window_config() -> H2Config {
             (SettingId::InitialWindowSize, STREAM_WINDOW),
             (SettingId::MaxFrameSize, MAX_FRAME as u32),
         ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
         initial_connection_window_size: CONN_WINDOW,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
@@ -179,7 +166,7 @@ async fn transfer(config: H2Config, body_len: usize, bulk: bool) {
         }
     });
 
-    let handle = leyline::h2::start(client_io, config)
+    let handle = leyline::internals::h2::start(client_io, config)
         .await
         .expect("handshake");
 
@@ -205,7 +192,7 @@ async fn transfer(config: H2Config, body_len: usize, bulk: bool) {
     .expect("request failed");
 
     assert_eq!(resp.status, 200);
-    let leyline::pool::TransportBody::Buffered(body) = resp.body else {
+    let leyline::internals::pool::TransportBody::Buffered(body) = resp.body else {
         panic!("buffered body")
     };
     assert_eq!(body.len(), body_len);
@@ -299,7 +286,7 @@ async fn backpressure(orphaned: bool) {
             }
         }
     });
-    let handle = leyline::h2::start(client_io, config)
+    let handle = leyline::internals::h2::start(client_io, config)
         .await
         .expect("H2 connection");
     let response = handle
@@ -320,7 +307,7 @@ async fn backpressure(orphaned: bool) {
         .await
         .expect("streaming response");
     assert_eq!(response.status, 200);
-    let leyline::pool::TransportBody::Streaming(mut body) = response.body else {
+    let leyline::internals::pool::TransportBody::Streaming(mut body) = response.body else {
         panic!("streaming body");
     };
     timeout(Duration::from_secs(3), ready_rx)

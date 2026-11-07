@@ -2,7 +2,7 @@
 
 use std::hint::black_box;
 
-use leyline::fuzz::parse_links;
+use leyline::internals::fuzz::parse_links;
 use libfuzzer_sys::fuzz_target;
 
 const BASES: [&str; 3] = [

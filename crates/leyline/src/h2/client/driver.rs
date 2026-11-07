@@ -1,23 +1,24 @@
 use std::collections::VecDeque;
 use std::io;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 
 use bytes::{Bytes, BytesMut};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::{Semaphore, mpsc, oneshot};
-use tokio::task::AbortHandle;
+use tokio::sync::{mpsc, oneshot};
 
-use crate::core::ResponseMode;
+use crate::error::BodyLimit;
+use crate::h2::H2Config;
+use crate::h2::H2Error;
 use crate::h2::codec::{FrameReader, FrameWriter};
-use crate::h2::config::H2Config;
-use crate::h2::connection::{PeerSettings, RstFloodDetector};
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::connection::{FloodGuard, PeerSettings};
+use crate::h2::error::ErrorCode;
 use crate::h2::frame::*;
 use crate::h2::hpack;
 use crate::h2::stream_state::{StreamState, StreamStateError};
+use crate::wire::ResponseMode;
 
-use crate::core::transport::{ResponseState, TransportBody, TransportResponse};
+use crate::wire::{ResponseState, TransportBody, TransportResponse, Upload};
 
 mod bootstrap;
 mod command;
@@ -45,31 +46,6 @@ const SWEEP_PERIOD: std::time::Duration = std::time::Duration::from_millis(100);
 const FLUSH_PERIOD: std::time::Duration = std::time::Duration::from_millis(1);
 
 pub(super) const STREAM_REQ_BODY_CAPACITY: usize = 32;
-
-pub(super) const STREAM_RESP_BODY_CAPACITY: usize = 32;
-
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct PeerSettingsSnapshot {
-    enable_connect_protocol: std::sync::atomic::AtomicBool,
-}
-
-impl PeerSettingsSnapshot {
-    fn new() -> Self {
-        Self {
-            enable_connect_protocol: std::sync::atomic::AtomicBool::new(false),
-        }
-    }
-
-    fn set_enable_connect_protocol(&self, value: bool) {
-        self.enable_connect_protocol.store(value, Ordering::Relaxed);
-    }
-
-    #[cfg(feature = "websocket")]
-    pub fn enable_connect_protocol(&self) -> bool {
-        self.enable_connect_protocol.load(Ordering::Relaxed)
-    }
-}
 
 struct PendingSend {
     remaining: Bytes,
@@ -113,11 +89,7 @@ impl ResponseSink {
         tx: oneshot::Sender<Result<TransportResponse, H2Error>>,
         mode: ResponseMode,
     ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
-        let (body_tx, body_rx) = mpsc::channel(STREAM_RESP_BODY_CAPACITY + 1);
-        let terminal = body_tx
-            .clone()
-            .try_reserve_owned()
-            .expect("new body channel has an available slot");
+        let (body_tx, terminal, body_rx) = crate::wire::body_channel();
         (
             Self::Adaptive {
                 tx,
@@ -127,6 +99,22 @@ impl ResponseSink {
             },
             body_rx,
         )
+    }
+
+    pub(super) fn fail(self, err: H2Error) {
+        match self {
+            Self::Buffered(tx)
+            | Self::Adaptive { tx, .. }
+            | Self::StreamingEx {
+                headers_tx: Some(tx),
+                ..
+            } => drop(tx.send(Err(err))),
+            Self::StreamingEx {
+                headers_tx: None,
+                terminal,
+                ..
+            } => drop(terminal.send(Err(io::Error::other(format!("h2 stream failed: {err}"))))),
+        }
     }
 
     pub(super) fn settle(self, status: http::StatusCode) -> Self {
@@ -166,11 +154,12 @@ struct StreamActor {
     resp_headers: http::HeaderMap,
     body: Vec<u8>,
     trailers: http::HeaderMap,
-    drop_body: bool,
+    head_request: bool,
+    has_body: bool,
+    body_limit: BodyLimit,
     pending_send: Option<PendingSend>,
     send_body_input: SendBodyInput,
-    upload_credit: Option<Arc<Semaphore>>,
-    pump: Option<AbortHandle>,
+    upload: Option<Upload>,
     stalled: std::collections::VecDeque<Bytes>,
     remote_done: bool,
     declared_len: Option<u64>,
@@ -178,22 +167,29 @@ struct StreamActor {
 }
 
 impl StreamActor {
-    fn new(send_window: i64, recv_window: i64, sink: ResponseSink, drop_body: bool) -> Self {
+    fn new(
+        send_window: i64,
+        recv_window: i64,
+        sink: ResponseSink,
+        head_request: bool,
+        body_limit: BodyLimit,
+    ) -> Self {
         Self {
             state: StreamState::Idle,
             send_window,
             recv_window,
             response_tx: Some(sink),
             status: http::StatusCode::OK,
-            response: ResponseState::Initial(0),
+            response: ResponseState::default(),
             resp_headers: http::HeaderMap::new(),
             body: Vec::new(),
             trailers: http::HeaderMap::new(),
-            drop_body,
+            head_request,
+            has_body: !head_request,
+            body_limit,
             pending_send: None,
             send_body_input: SendBodyInput::None,
-            upload_credit: None,
-            pump: None,
+            upload: None,
             stalled: std::collections::VecDeque::new(),
             remote_done: false,
             declared_len: None,
@@ -202,19 +198,17 @@ impl StreamActor {
     }
 
     fn length_mismatch(&self) -> bool {
-        !self.drop_body && self.declared_len.is_some_and(|len| len != self.recv_len)
+        crate::wire::length_mismatch(self.has_body, self.declared_len, self.recv_len)
     }
 
     fn response(&mut self, body: Vec<u8>) -> TransportResponse {
-        TransportResponse {
-            status: self.status,
-            headers: std::mem::take(&mut self.resp_headers).into(),
-            trailers: crate::core::transport::trailers(std::mem::take(&mut self.trailers)),
-            body: TransportBody::Buffered(body),
-            version: http::Version::HTTP_2,
-            tls: None,
-            timing: crate::core::ResponseTiming::default(),
-        }
+        TransportResponse::new(
+            http::Version::HTTP_2,
+            self.status,
+            std::mem::take(&mut self.resp_headers).into(),
+            std::mem::take(&mut self.trailers),
+            TransportBody::Buffered(body),
+        )
     }
 
     fn deliver_headers_streaming(&mut self) {
@@ -245,34 +239,17 @@ impl StreamActor {
     }
 
     fn deliver_err(&mut self, err: H2Error) {
-        match self.response_tx.take() {
-            Some(ResponseSink::Buffered(tx) | ResponseSink::Adaptive { tx, .. }) => {
-                drop(tx.send(Err(err)));
-            }
-            Some(ResponseSink::StreamingEx {
-                headers_tx,
-                terminal,
-                ..
-            }) => {
-                if let Some(tx) = headers_tx {
-                    drop(tx.send(Err(err)));
-                } else {
-                    drop(terminal.send(Err(io::Error::other(format!("h2 stream failed: {err}")))));
-                }
-            }
-            None => {}
+        if let Some(sink) = self.response_tx.take() {
+            sink.fail(err);
         }
     }
 }
 
 impl StreamActor {
     fn cancel_upload(&mut self) {
-        if let Some(pump) = self.pump.take() {
-            pump.abort();
-        }
+        self.upload = None;
         self.pending_send = None;
         self.send_body_input = SendBodyInput::None;
-        self.upload_credit = None;
     }
 }
 
@@ -299,43 +276,26 @@ struct Driver<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> {
     peer_settings: PeerSettings,
     peer_greeted: bool,
     local_settings_acked: bool,
-    peer_snapshot: Arc<PeerSettingsSnapshot>,
     conn_send_window: i64,
     conn_recv_window: i64,
     streams: stream_map::StreamMap,
     next_stream_id: u32,
-    buffered_pending: VecDeque<u32>,
-    rst_flood: RstFloodDetector,
-    settings_flood: RstFloodDetector,
-    control_flood: RstFloodDetector,
+    rst_flood: FloodGuard,
+    settings_flood: FloodGuard,
+    control_flood: FloodGuard,
     config: H2Config,
     command_rx: protocol::CommandRx,
     ping_rx: mpsc::Receiver<Ping>,
     ping_armed: bool,
     closed: Arc<AtomicBool>,
     unanswered_timeout: Arc<AtomicBool>,
-    load: Arc<crate::h2::client::handle::Streams>,
     peer_goaway_last_stream: Option<u32>,
     pending: VecDeque<DriverCommand>,
     shutdown_started: bool,
     body_chunks: Option<(mpsc::Sender<BodyChunkIn>, mpsc::Receiver<BodyChunkIn>)>,
-    stalled: usize,
     output: output::OutputState,
     ping_seq: u64,
     pings: VecDeque<([u8; 8], oneshot::Sender<()>, std::time::Instant)>,
-}
-
-fn send_err_to_sink(sink: ResponseSink, err: H2Error) {
-    match sink {
-        ResponseSink::Buffered(tx) | ResponseSink::Adaptive { tx, .. } => {
-            drop(tx.send(Err(err)));
-        }
-        ResponseSink::StreamingEx { headers_tx, .. } => {
-            if let Some(tx) = headers_tx {
-                drop(tx.send(Err(err)));
-            }
-        }
-    }
 }
 
 pub(super) fn map_state_err(stream_id: u32, e: StreamStateError) -> H2Error {

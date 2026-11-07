@@ -5,8 +5,10 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use leyline::tls::FingerprintConnector;
-use leyline::{BrowserProfile, Platform, Tls};
+use leyline::internals::BrowserProfile;
+use leyline::internals::pool::ProxyUrl;
+use leyline::internals::tls::{AlpnPlan, FingerprintConnector};
+use leyline::{Platform, Tls};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
 use leyline_bssl::hash::MessageDigest;
@@ -180,7 +182,8 @@ async fn https_proxy_tunnels_with_encrypted_connect() {
         .connect(
             "right.example",
             443,
-            Some(&url::Url::parse(&proxy_url).unwrap()),
+            Some(&ProxyUrl::parse(&proxy_url).unwrap()),
+            AlpnPlan::Browser,
         )
         .await;
     assert!(
@@ -220,7 +223,8 @@ async fn https_proxy_refused_when_connector_has_origin_identity() {
         .connect(
             "right.example",
             443,
-            Some(&url::Url::parse("https://localhost:1").unwrap()),
+            Some(&ProxyUrl::parse("https://localhost:1").unwrap()),
+            AlpnPlan::Browser,
         )
         .await
     {

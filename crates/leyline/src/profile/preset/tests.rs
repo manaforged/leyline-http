@@ -43,21 +43,36 @@ fn build(
     kind: Option<RequestKind>,
     ctx: &HeaderContext<'_>,
 ) -> Vec<HeaderPair> {
-    HeaderPlan::new(style, ctx, None)
+    HeaderPlan::new(style, ctx, AcceptEncoding::of(style, None))
         .plan(kind)
         .headers(ctx, true)
 }
 
 #[test]
 fn same_identity_shares_one_plan() {
-    let cache = PlanCache::default();
+    let cache = Mutex::new(LruCache::new(PLAN_CACHE));
     let first_ctx = ctx();
-    let first = HeaderPlan::cached(&cache, HeaderStyle::Chromium, &first_ctx, None);
-    let second = HeaderPlan::cached(&cache, HeaderStyle::Chromium, &first_ctx, None);
+    let first = HeaderPlan::cached(
+        &cache,
+        HeaderStyle::Chromium,
+        &first_ctx,
+        AcceptEncoding::Template,
+    );
+    let second = HeaderPlan::cached(
+        &cache,
+        HeaderStyle::Chromium,
+        &first_ctx,
+        AcceptEncoding::Template,
+    );
     assert!(Arc::ptr_eq(&first, &second));
     let mut other = ctx();
     other.user_agent = shared("other-agent");
-    let different = HeaderPlan::cached(&cache, HeaderStyle::Chromium, &other, None);
+    let different = HeaderPlan::cached(
+        &cache,
+        HeaderStyle::Chromium,
+        &other,
+        AcceptEncoding::Template,
+    );
     assert!(!Arc::ptr_eq(&first, &different));
     assert_ne!(
         first.plan(None).headers(&first_ctx, false),

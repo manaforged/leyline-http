@@ -1,8 +1,9 @@
 use std::sync::{Mutex, Weak};
 
 use crate::cookie::Jar;
-use crate::core::Result;
-use crate::core::session::{Identity, Session, SessionInner};
+use crate::core::Identity;
+use crate::core::session::{Session, SessionInner};
+use crate::error::Result;
 
 struct Derived {
     base: Weak<SessionInner>,

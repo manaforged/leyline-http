@@ -1,5 +1,3 @@
-use std::marker::PhantomData;
-
 use leyline_bssl::ssl::{
     CertificateCompressionAlgorithm, CertificateCompressor, SslContextBuilder,
 };
@@ -26,32 +24,12 @@ fn read_limited_cert<R: std::io::Read>(mut decoder: R) -> std::io::Result<Vec<u8
     }
 }
 
-pub(super) trait CertCodec: Send + Sync + 'static {
-    const ALGORITHM: CertificateCompressionAlgorithm;
-
-    fn decode(input: &[u8]) -> std::io::Result<Vec<u8>>;
-}
-
-pub(super) struct CertDecompressor<C>(pub(super) PhantomData<C>);
-
-impl<C: CertCodec> CertificateCompressor for CertDecompressor<C> {
-    const ALGORITHM: CertificateCompressionAlgorithm = C::ALGORITHM;
-    const CAN_COMPRESS: bool = false;
-    const CAN_DECOMPRESS: bool = true;
-
-    fn decompress<W>(&self, input: &[u8], output: &mut W) -> std::io::Result<()>
-    where
-        W: std::io::Write,
-    {
-        output.write_all(&C::decode(input)?)
-    }
-}
-
-pub(super) fn add_decompressor<C: CertCodec>(
+pub(super) fn add_decompressor<C: CertificateCompressor>(
     builder: &mut SslContextBuilder,
+    codec: C,
 ) -> Result<(), TlsError> {
     builder
-        .add_certificate_compression_algorithm(CertDecompressor::<C>(PhantomData))
+        .add_certificate_compression_algorithm(codec)
         .map_err(TlsError::from_stack)
 }
 
@@ -59,11 +37,13 @@ pub(super) fn add_decompressor<C: CertCodec>(
 pub(super) struct Brotli;
 
 #[cfg(feature = "compression-brotli")]
-impl CertCodec for Brotli {
+impl CertificateCompressor for Brotli {
     const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::BROTLI;
+    const CAN_COMPRESS: bool = false;
+    const CAN_DECOMPRESS: bool = true;
 
-    fn decode(input: &[u8]) -> std::io::Result<Vec<u8>> {
-        read_limited_cert(brotli::Decompressor::new(input, 4096))
+    fn decompress<W: std::io::Write>(&self, input: &[u8], output: &mut W) -> std::io::Result<()> {
+        output.write_all(&read_limited_cert(brotli::Decompressor::new(input, 4096))?)
     }
 }
 
@@ -71,11 +51,13 @@ impl CertCodec for Brotli {
 pub(super) struct Zlib;
 
 #[cfg(any(feature = "compression-gzip", feature = "compression-deflate"))]
-impl CertCodec for Zlib {
+impl CertificateCompressor for Zlib {
     const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::ZLIB;
+    const CAN_COMPRESS: bool = false;
+    const CAN_DECOMPRESS: bool = true;
 
-    fn decode(input: &[u8]) -> std::io::Result<Vec<u8>> {
-        read_limited_cert(flate2::read::ZlibDecoder::new(input))
+    fn decompress<W: std::io::Write>(&self, input: &[u8], output: &mut W) -> std::io::Result<()> {
+        output.write_all(&read_limited_cert(flate2::read::ZlibDecoder::new(input))?)
     }
 }
 
@@ -83,10 +65,14 @@ impl CertCodec for Zlib {
 pub(super) struct Zstd;
 
 #[cfg(feature = "compression-zstd")]
-impl CertCodec for Zstd {
+impl CertificateCompressor for Zstd {
     const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::ZSTD;
+    const CAN_COMPRESS: bool = false;
+    const CAN_DECOMPRESS: bool = true;
 
-    fn decode(input: &[u8]) -> std::io::Result<Vec<u8>> {
-        read_limited_cert(zstd::stream::read::Decoder::new(input)?)
+    fn decompress<W: std::io::Write>(&self, input: &[u8], output: &mut W) -> std::io::Result<()> {
+        output.write_all(&read_limited_cert(zstd::stream::read::Decoder::new(
+            input,
+        )?)?)
     }
 }

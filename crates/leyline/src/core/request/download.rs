@@ -6,9 +6,10 @@ use http::{Method, StatusCode, header};
 use sha2::{Digest, Sha256};
 
 use super::RequestBuilder;
-use crate::core::saved::FileVersion;
-use crate::core::{Error, Kind, Response, Result};
-use crate::util::atomic::CallerWaits;
+use crate::core::atomic;
+use crate::core::response::Response;
+use crate::error::{Error, Kind, Result};
+use crate::profile::Encoding;
 
 mod file;
 #[cfg(test)]
@@ -55,12 +56,12 @@ impl RequestBuilder {
         let key = self.prepare_download()?;
         let options = self.draft.download.take().unwrap_or_default();
         let target = path.as_ref().to_path_buf();
-        let caller = CallerWaits::default();
         let resume = options.resume;
-        let partial = Arc::new(blocking(move || Partial::open(target, key, resume)).await?);
+        let partial =
+            Arc::new(atomic::blocking(move |_| Partial::open(target, key, resume)).await?);
         let old = partial.metadata();
         let offset = old.as_ref().map_or(0, |metadata| metadata.offset);
-        if offset > self.draft.body_rules.max_body_size as u64 {
+        if offset > self.draft.carry.body_rules.max_body_size as u64 {
             return Err(limit());
         }
         self.resume_headers(old.as_ref())?;
@@ -68,7 +69,7 @@ impl RequestBuilder {
         let checksum = options.checksum.is_some() && offset > 0;
         let hashing = async move {
             if checksum {
-                blocking(move || part.prefix()).await
+                atomic::blocking(move |_| part.prefix()).await
             } else {
                 Ok(Sha256::new())
             }
@@ -83,9 +84,9 @@ impl RequestBuilder {
         }
         let copy = metadata.clone();
         let part = Arc::clone(&partial);
-        blocking(move || part.begin(copy, append)).await?;
+        atomic::blocking(move |_| part.begin(copy, append)).await?;
         let digest = if append { digest } else { Sha256::new() };
-        transfer(response, partial, (metadata, digest), options, caller).await
+        transfer(response, partial, (metadata, digest), options).await
     }
 
     fn prepare_download(&mut self) -> Result<[u8; 32]> {
@@ -100,13 +101,15 @@ impl RequestBuilder {
         }
         self.draft
             .headers
-            .set(header::ACCEPT_ENCODING, "identity")?;
-        self.draft.body_rules.decode = false;
-        self.draft.stream_response = true;
-        let url = self.prepare()?;
-        self.draft.url = Some(url);
-        self.draft.query_params.clear();
-        self.session.download_key(&self.draft)
+            .set(header::ACCEPT_ENCODING, Encoding::IDENTITY)?;
+        self.draft.carry.body_rules.decode = false;
+        self.draft.carry.stream_response = true;
+        self.prepare_in_place()?;
+        let url = self
+            .draft
+            .url()
+            .expect("invariant: download prepares its URL");
+        self.session.download_key(url, &self.draft.headers)
     }
 
     fn resume_headers(&mut self, metadata: Option<&Metadata>) -> Result<()> {
@@ -134,7 +137,6 @@ async fn transfer(
     partial: Arc<Partial>,
     (metadata, mut digest): (Metadata, Sha256),
     options: Box<Download>,
-    caller: CallerWaits,
 ) -> Result<u64> {
     let cap = response.parts.compression.max_body_size as u64;
     let checksum = options.checksum.is_some();
@@ -164,9 +166,7 @@ async fn transfer(
     }
     verify_length(written, metadata.total)?;
     verify_checksum(Arc::clone(&partial), digest, options.checksum).await?;
-    let waiting = Arc::clone(&caller.0);
-    blocking(move || partial.commit(&waiting)).await?;
-    drop(caller);
+    atomic::blocking(move |waiting| partial.commit(waiting)).await?;
     Ok(written)
 }
 
@@ -190,7 +190,7 @@ async fn append(
         return Err(limit());
     }
     let failed = failure.is_some();
-    let chunks = blocking(move || {
+    let chunks = atomic::blocking(move |_| {
         for chunk in &chunks {
             partial.write(chunk)?;
         }
@@ -219,7 +219,7 @@ async fn verify_checksum(
     if let Some(expected) = expected
         && <[u8; 32]>::from(digest.finalize()) != expected
     {
-        blocking(move || partial.discard()).await?;
+        atomic::blocking(move |_| partial.discard()).await?;
         return Err(Error::new(Kind::Body).with_message("download SHA-256 mismatch"));
     }
     Ok(())
@@ -230,10 +230,7 @@ fn metadata(
     key: [u8; 32],
     old: Option<&Metadata>,
 ) -> Result<(Metadata, bool)> {
-    if response
-        .header(header::CONTENT_ENCODING.as_str())
-        .is_some_and(|coding| !coding.eq_ignore_ascii_case("identity"))
-    {
+    if !response.content_coding().is_identity() {
         return Err(Error::new(Kind::Body)
             .with_message("resumable download requires identity content encoding"));
     }
@@ -264,7 +261,7 @@ fn metadata(
     };
     Ok((
         Metadata {
-            version: FileVersion::default(),
+            version: file::MetadataVersion::default(),
             request: key,
             url: response.url().to_string(),
             etag,
@@ -358,12 +355,4 @@ fn bad_range() -> Error {
 fn limit() -> Error {
     Error::new(Kind::BodyLimit)
         .with_message("download exceeds the complete representation size limit")
-}
-
-async fn blocking<T: Send + 'static>(
-    run: impl FnOnce() -> Result<T> + Send + 'static,
-) -> Result<T> {
-    tokio::task::spawn_blocking(run)
-        .await
-        .map_err(|error| Error::from(std::io::Error::other(error)))?
 }

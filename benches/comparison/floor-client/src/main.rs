@@ -4,7 +4,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use leyline::pool::floor::{Floor, floor_connect, floor_connect_async};
+use leyline::internals::pool::floor::{Floor, floor_connect, floor_connect_async};
 
 fn request_headers() -> Vec<(String, String)> {
     env::var_os("CMP_HEADERS")

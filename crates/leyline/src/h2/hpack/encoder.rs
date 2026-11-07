@@ -63,13 +63,6 @@ impl Encoder {
         &self.block
     }
 
-    fn is_sensitive(name: &str) -> bool {
-        matches!(
-            name,
-            "authorization" | "cookie" | "set-cookie" | "proxy-authorization"
-        )
-    }
-
     fn indexed(&self, hit: Hit, name: &str, value: &str) -> Option<usize> {
         match hit {
             Hit::Static(index) => {
@@ -94,7 +87,7 @@ impl Encoder {
             name
         };
 
-        if Self::is_sensitive(name) {
+        if crate::util::sensitive_header(name) {
             if let Some((index, _exact)) = table::find_static(name, value) {
                 integer::encode(index, 4, 0x10, dst);
                 encode_string(value, dst);

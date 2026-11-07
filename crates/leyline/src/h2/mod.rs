@@ -8,12 +8,8 @@ pub mod frame;
 pub mod hpack;
 pub mod stream_state;
 
-#[cfg(feature = "bench-internals")]
-pub use crate::core::{ErrorBudget, ResponseMode};
-#[cfg(feature = "bench-internals")]
-pub use crate::header_str::HeaderStr;
 pub use client::start;
-#[cfg(feature = "bench-internals")]
-pub use client::{H2Client, Head};
 pub use config::H2Config;
-pub use error::{ErrorCode, H2Error};
+#[cfg(any(test, feature = "bench-internals"))]
+pub use error::ErrorCode;
+pub use error::H2Error;

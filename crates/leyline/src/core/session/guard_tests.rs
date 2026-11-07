@@ -1,7 +1,7 @@
 use std::mem::size_of_val;
 
 use crate::Session;
-use crate::core::deadline::within;
+use crate::deadline::within;
 
 async fn heavy() -> crate::Result<()> {
     let buf = [7u8; 4096];

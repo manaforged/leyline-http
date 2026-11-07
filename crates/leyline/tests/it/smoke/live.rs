@@ -17,7 +17,7 @@ pub(super) async fn exact_fingerprint(session: Session, browser: Browser) -> Res
         "http2.akamai_fingerprint",
     )?);
 
-    let profile = browser.profile();
+    let profile = leyline::internals::browser_profile(browser);
     let expected_ja4 = profile
         .tls
         .fingerprint

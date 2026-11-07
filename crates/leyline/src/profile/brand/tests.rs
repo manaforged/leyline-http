@@ -62,13 +62,14 @@ fn opera_overlay_only_accepts_verified_anchors() {
     let row = brand_row(ChromiumBrand::Opera).expect("Opera brand row");
     let mut anchors: Vec<u32> = row
         .versions
-        .keys()
-        .map(|k| k.parse().expect("Chromium major"))
+        .iter()
+        .map(|(k, _)| k.parse().expect("Chromium major"))
         .collect();
     anchors.sort_unstable();
     for chromium in &anchors {
         let expected_opera =
-            version_major(&row.versions[&chromium.to_string()][0]).expect("Opera major");
+            version_major(row.builds(&chromium.to_string()).expect("anchor builds")[0])
+                .expect("Opera major");
         let o = ChromiumBrand::Opera
             .overlay(*chromium, Platform::Windows, "ua")
             .unwrap()

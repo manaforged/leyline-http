@@ -1,8 +1,12 @@
 use std::borrow::Cow;
+use std::num::NonZeroUsize;
 use std::sync::{Arc, LazyLock, Mutex};
+
+use lru::LruCache;
 
 use crate::header_str::HeaderStr;
 use crate::profile::Platform;
+use crate::util::is_body_header;
 use foldhash::HashMap;
 
 use serde::Deserialize;
@@ -25,19 +29,17 @@ pub struct HeaderContext<'a> {
     pub navigation_referer: &'a str,
 }
 
-pub type HeaderPair = (Cow<'static, str>, HeaderStr);
+use crate::wire::HeaderPair;
 
-type HeaderTemplate = Vec<(String, String)>;
+type HeaderTemplate = &'static [(&'static str, &'static str)];
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct ShapeRow {
     fallback: Option<HeaderTemplate>,
-    #[serde(default)]
-    presets: HashMap<RequestKind, HeaderTemplate>,
+    presets: &'static [(RequestKind, HeaderTemplate)],
     extends: Option<HeaderStyle>,
-    #[serde(default)]
     append: HeaderTemplate,
-    order: Option<Vec<String>>,
+    order: Option<&'static [&'static str]>,
 }
 
 #[derive(Debug, Clone)]
@@ -111,10 +113,10 @@ impl Value {
 
 type Compiled = Vec<(String, Value)>;
 
-fn compile(template: &HeaderTemplate) -> Compiled {
+fn compile(template: HeaderTemplate) -> Compiled {
     template
         .iter()
-        .map(|(name, value)| (name.clone(), Value::of(value)))
+        .map(|&(name, value)| (name.to_owned(), Value::of(value)))
         .collect()
 }
 
@@ -122,26 +124,25 @@ fn compile(template: &HeaderTemplate) -> Compiled {
 struct HeaderShape {
     fallback: Compiled,
     presets: HashMap<RequestKind, Compiled>,
-    append: HeaderTemplate,
+    append: Vec<(String, String)>,
     order: Option<Vec<String>>,
 }
 
 const EXTRA_HEADERS: usize = 4;
 
 static SHAPES: LazyLock<HashMap<HeaderStyle, HeaderShape>> = LazyLock::new(|| {
-    let rows: HashMap<HeaderStyle, ShapeRow> =
-        toml::from_str(include_str!("../../profiles/headers.toml"))
-            .expect("built-in header table is statically valid");
-    rows.keys()
-        .map(|&style| (style, resolve_shape(&rows, style)))
+    SHAPE_ROWS
+        .iter()
+        .map(|&(style, _)| (style, resolve_shape(style)))
         .collect()
 });
 
-fn resolve_shape(rows: &HashMap<HeaderStyle, ShapeRow>, style: HeaderStyle) -> HeaderShape {
-    let row = rows
-        .get(&style)
+fn resolve_shape(style: HeaderStyle) -> HeaderShape {
+    let (_, row) = SHAPE_ROWS
+        .iter()
+        .find(|(known, _)| *known == style)
         .expect("build.rs checks every extends target");
-    let base = row.extends.map(|parent| resolve_shape(rows, parent));
+    let base = row.extends.map(resolve_shape);
     let mut presets = base
         .as_ref()
         .map(|base| base.presets.clone())
@@ -149,19 +150,24 @@ fn resolve_shape(rows: &HashMap<HeaderStyle, ShapeRow>, style: HeaderStyle) -> H
     presets.extend(
         row.presets
             .iter()
-            .map(|(&kind, template)| (kind, compile(template))),
+            .map(|&(kind, template)| (kind, compile(template))),
     );
     let fallback = row
         .fallback
-        .as_ref()
         .map(compile)
         .or_else(|| base.map(|base| base.fallback))
         .expect("build.rs checks every shape reaches a fallback");
     HeaderShape {
         fallback,
         presets,
-        append: row.append.clone(),
-        order: row.order.clone(),
+        append: row
+            .append
+            .iter()
+            .map(|&(name, value)| (name.to_owned(), value.to_owned()))
+            .collect(),
+        order: row
+            .order
+            .map(|names| names.iter().map(|&name| name.to_owned()).collect()),
     }
 }
 
@@ -269,13 +275,6 @@ impl HeaderStyle {
     }
 }
 
-const BODY_HEADERS: [&str; 4] = [
-    "content-encoding",
-    "content-language",
-    "content-location",
-    "content-type",
-];
-
 #[derive(Debug, Clone)]
 enum Slot {
     Fixed(HeaderStr),
@@ -305,13 +304,35 @@ pub(crate) struct HeaderPlan {
     order: Option<&'static [String]>,
 }
 
-const PLAN_CACHE: usize = 8;
-type PlanCache = Mutex<Vec<(PlanKey, Arc<HeaderPlan>)>>;
+const PLAN_CACHE: NonZeroUsize = match NonZeroUsize::new(8) {
+    Some(cap) => cap,
+    None => NonZeroUsize::MIN,
+};
+type PlanCache = Mutex<LruCache<PlanKey, Arc<HeaderPlan>>>;
 
-#[derive(PartialEq, Eq)]
+/// How a plan fills `Accept-Encoding`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum AcceptEncoding {
+    Template,
+    Fixed(&'static str),
+    Omit,
+}
+
+impl AcceptEncoding {
+    /// Bare plans send the session's codec list, or no field without one; others keep the template.
+    pub(crate) fn of(style: HeaderStyle, codecs: Option<&'static str>) -> Self {
+        match (style, codecs) {
+            (HeaderStyle::Bare, Some(list)) => Self::Fixed(list),
+            (HeaderStyle::Bare, None) => Self::Omit,
+            _ => Self::Template,
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Hash)]
 struct PlanKey {
     style: HeaderStyle,
-    codecs: Option<&'static str>,
+    encoding: AcceptEncoding,
     user_agent: String,
     sec_ch_ua: String,
     accept_language: String,
@@ -326,19 +347,19 @@ impl HeaderPlan {
         session: &HeaderContext<'_>,
         codecs: Option<&'static str>,
     ) -> Arc<Self> {
-        static CACHE: PlanCache = Mutex::new(Vec::new());
-        Self::cached(&CACHE, style, session, codecs)
+        static CACHE: LazyLock<PlanCache> = LazyLock::new(|| Mutex::new(LruCache::new(PLAN_CACHE)));
+        Self::cached(&CACHE, style, session, AcceptEncoding::of(style, codecs))
     }
 
     fn cached(
         cache: &PlanCache,
         style: HeaderStyle,
         session: &HeaderContext<'_>,
-        codecs: Option<&'static str>,
+        encoding: AcceptEncoding,
     ) -> Arc<Self> {
         let key = PlanKey {
             style,
-            codecs,
+            encoding,
             user_agent: session.user_agent.as_str().to_owned(),
             sec_ch_ua: session.sec_ch_ua.as_str().to_owned(),
             accept_language: session.accept_language.as_str().to_owned(),
@@ -346,24 +367,21 @@ impl HeaderPlan {
             sec_ch_ua_platform: session.sec_ch_ua_platform.to_owned(),
         };
         let mut cache = cache.lock().unwrap_or_else(|err| err.into_inner());
-        if let Some((_, plan)) = cache.iter().find(|(cached, _)| cached == &key) {
+        if let Some(plan) = cache.get(&key) {
             return Arc::clone(plan);
         }
-        let plan = Arc::new(Self::new(style, session, codecs));
-        if cache.len() < PLAN_CACHE {
-            cache.push((key, Arc::clone(&plan)));
-        }
+        let plan = Arc::new(Self::new(style, session, encoding));
+        cache.put(key, Arc::clone(&plan));
         plan
     }
 
     pub(crate) fn new(
         style: HeaderStyle,
         session: &HeaderContext<'_>,
-        codecs: Option<&'static str>,
+        encoding: AcceptEncoding,
     ) -> Self {
         let shape = style.shape();
-        let codecs = (style == HeaderStyle::Bare).then_some(codecs);
-        let plan = |template: &'static Compiled| Plan::new(template, session, codecs);
+        let plan = |template: &'static Compiled| Plan::new(template, session, encoding);
         Self {
             fallback: plan(&shape.fallback),
             presets: shape
@@ -394,17 +412,24 @@ impl Plan {
     fn new(
         template: &'static Compiled,
         session: &HeaderContext<'_>,
-        codecs: Option<Option<&'static str>>,
+        encoding: AcceptEncoding,
     ) -> Self {
         let mut plan = Self::default();
         for (name, value) in template {
             let site = value.reads(Field::FetchSite) || value.reads(Field::NavigationSite);
             let referer = value.reads(Field::Referer) || value.reads(Field::NavigationReferer);
-            let slot = match codecs.filter(|_| name.eq_ignore_ascii_case("accept-encoding")) {
-                Some(Some(list)) => Slot::Fixed(HeaderStr::from_static(list)),
-                Some(None) => continue,
-                None if site || referer || value.reads(Field::Origin) => Slot::Request(value),
-                None => match session.expand(value) {
+            let encoding = if name.eq_ignore_ascii_case("accept-encoding") {
+                encoding
+            } else {
+                AcceptEncoding::Template
+            };
+            let slot = match encoding {
+                AcceptEncoding::Fixed(list) => Slot::Fixed(HeaderStr::from_static(list)),
+                AcceptEncoding::Omit => continue,
+                AcceptEncoding::Template if site || referer || value.reads(Field::Origin) => {
+                    Slot::Request(value)
+                }
+                AcceptEncoding::Template => match session.expand(value) {
                     Some(fixed) => Slot::Fixed(fixed),
                     None => continue,
                 },
@@ -415,7 +440,7 @@ impl Plan {
             plan.entries.push(Entry {
                 name,
                 slot,
-                body: BODY_HEADERS.iter().any(|h| name.eq_ignore_ascii_case(h)),
+                body: is_body_header(name),
             });
         }
         plan

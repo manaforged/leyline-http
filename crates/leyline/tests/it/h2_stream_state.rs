@@ -6,8 +6,10 @@
     clippy::panic,
     reason = "test harness helper: explicit panic on unexpected error shape is the assertion"
 )]
-use leyline::h2::error::ErrorCode;
-use leyline::h2::stream_state::{ClosedReason, StreamEvent, StreamState, StreamStateError};
+use leyline::internals::h2::error::ErrorCode;
+use leyline::internals::h2::stream_state::{
+    ClosedReason, StreamEvent, StreamState, StreamStateError,
+};
 
 fn idle() -> StreamState {
     StreamState::Idle

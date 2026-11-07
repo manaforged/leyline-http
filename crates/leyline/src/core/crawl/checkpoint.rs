@@ -1,7 +1,6 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashSet, VecDeque};
 use std::io::Read;
 use std::path::Path;
-use std::sync::{Arc, atomic::Ordering};
 use std::time::SystemTime;
 
 use futures_util::StreamExt;
@@ -12,31 +11,49 @@ use url::Url;
 use super::frontier::{Frontier, Queued};
 use super::page::CrawlStats;
 use super::sites::SitemapFile;
-use super::visit::Held;
-use super::{Crawl, Page, Respect};
+use super::visit::Dedup;
+use super::{Crawl, Page, Settings};
+use crate::core::atomic::{self, FileMode};
 use crate::core::config::{HostLimits, Origin};
-use crate::core::saved::FileVersion;
-use crate::core::{Error, Kind, Result, Session};
-use crate::util::atomic::{self, CallerWaits, FileMode};
+use crate::core::session::Session;
+use crate::error::{Error, Kind, Result};
+use crate::util::version::{self, Versioned};
 
 const MAX_CHECKPOINT_BYTES: u64 = 64 * 1024 * 1024;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum CheckpointVersion {
+    #[default]
+    V1,
+}
+
+impl Versioned for CheckpointVersion {
+    fn number(self) -> u32 {
+        match self {
+            CheckpointVersion::V1 => 1,
+        }
+    }
+
+    fn from_number(number: u32) -> Option<Self> {
+        match number {
+            1 => Some(CheckpointVersion::V1),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 struct Checkpoint {
-    version: FileVersion,
+    #[serde(with = "version")]
+    version: CheckpointVersion,
     frontier: Frontier,
-    respect: Option<Respect>,
-    agent: String,
-    max_body: Option<usize>,
-    max_pages: Option<usize>,
+    #[serde(flatten)]
+    settings: Settings,
     pace: HostLimits,
     trusted: Option<Url>,
     ready: VecDeque<Page>,
-    kept: HashSet<String>,
-    texts: HashSet<u64>,
-    held: HashMap<String, Vec<Held>>,
-    waiting_on: HashMap<String, String>,
-    settled: HashSet<String>,
+    #[serde(flatten)]
+    dedup: Dedup,
     stats: CrawlStats,
     delayed: Vec<(SystemTime, Queued)>,
     sitemaps: Vec<(Url, u32, Option<SystemTime>)>,
@@ -53,22 +70,15 @@ impl Crawl {
             self.handle(event);
         }
         let saved = Checkpoint::capture(self)?;
-        let caller = CallerWaits::default();
-        let waiting = Arc::clone(&caller.0);
-        let written = tokio::task::spawn_blocking(move || {
+        atomic::blocking(move |waiting| {
             let bytes = serde_json::to_vec(&saved).map_err(Error::from_json)?;
             if bytes.len() as u64 > MAX_CHECKPOINT_BYTES {
                 return Err(too_large());
             }
-            if !waiting.load(Ordering::Acquire) {
-                return Err(std::io::Error::from(std::io::ErrorKind::Interrupted).into());
-            }
+            waiting.check()?;
             atomic::write_atomic(&path, &bytes, FileMode::Private)
         })
         .await
-        .map_err(|error| Error::from(std::io::Error::other(error)))?;
-        drop(caller);
-        written
     }
 
     /// Loads a checkpoint with a supplied session and rechecks robots.txt before sending new requests.
@@ -104,7 +114,8 @@ impl Checkpoint {
             .cloned()
             .chain(
                 crawl
-                    .sitemap_queue
+                    .sitemaps
+                    .queue
                     .iter()
                     .filter_map(|file| Origin::of(&file.url)),
             )
@@ -120,21 +131,13 @@ impl Checkpoint {
             })
             .collect::<Result<_>>()?;
         Ok(Self {
-            version: FileVersion::default(),
+            version: CheckpointVersion::default(),
             frontier: crawl.frontier.clone(),
-            respect: crawl.respect,
-            agent: crawl.agent.clone(),
-            max_body: crawl.max_body,
-            max_pages: crawl.max_pages,
-            pace: crawl.pace.clone(),
+            settings: crawl.settings.clone(),
+            pace: crawl.pace.limits().clone(),
             trusted: crawl.trusted.clone(),
             ready,
-            pauses,
-            kept: crawl.kept.clone(),
-            texts: crawl.texts.clone(),
-            held: crawl.held.clone(),
-            waiting_on: crawl.waiting_on.clone(),
-            settled: crawl.settled.clone(),
+            dedup: crawl.dedup.clone(),
             stats: crawl.stats.clone(),
             delayed: crawl
                 .clock
@@ -143,7 +146,8 @@ impl Checkpoint {
                 .map(|(at, queued)| Ok((wall_time(*at)?, queued.clone())))
                 .collect::<Result<_>>()?,
             sitemaps: crawl
-                .sitemap_queue
+                .sitemaps
+                .queue
                 .iter()
                 .map(|file| {
                     Ok((
@@ -153,42 +157,33 @@ impl Checkpoint {
                     ))
                 })
                 .collect::<Result<_>>()?,
-            sitemap_files: crawl.sitemap_files.clone(),
+            sitemap_files: crawl.sitemaps.files.clone(),
+            pauses,
         })
     }
 
     fn restore(self, session: &Session) -> Result<Crawl> {
         self.frontier.validate()?;
-        if self.stats.pages() > self.kept.len() as u64 {
+        if self.stats.pages() > self.dedup.kept() as u64 {
             return Err(Error::config(
                 "checkpoint page count exceeds its duplicate history",
             ));
         }
-        if let Some(message) = self.pace.config_error() {
-            return Err(Error::config(message));
-        }
+        self.pace.validate()?;
         let mut crawl = Crawl::new(session, Vec::new());
         crawl.frontier = self.frontier;
-        crawl.respect = self.respect;
-        crawl.agent = self.agent;
-        crawl.max_body = self.max_body;
-        crawl.max_pages = self.max_pages;
+        crawl.settings = self.settings;
         crawl.limits = Some(self.pace);
         crawl.trusted = self.trusted;
         crawl.ready = self.ready.into_iter().map(Ok).collect();
-        crawl.kept = self.kept;
-        crawl.texts = self.texts;
-        crawl.held = self.held;
-        crawl.holding = crawl.held.values().map(Vec::len).sum();
-        crawl.waiting_on = self.waiting_on;
-        crawl.settled = self.settled;
+        crawl.dedup = self.dedup;
         crawl.stats = self.stats;
         crawl.clock.delayed = self
             .delayed
             .into_iter()
             .map(|(at, queued)| Ok((monotonic(at)?, queued)))
             .collect::<Result<_>>()?;
-        crawl.sitemap_queue = self
+        crawl.sitemaps.queue = self
             .sitemaps
             .into_iter()
             .map(|(url, attempts, at)| {
@@ -199,7 +194,7 @@ impl Checkpoint {
                 })
             })
             .collect::<Result<_>>()?;
-        crawl.sitemap_files = self.sitemap_files;
+        crawl.sitemaps.files = self.sitemap_files;
         crawl.start();
         for (origin, at) in self.pauses {
             crawl.pace.pause_until(origin, monotonic(at)?);

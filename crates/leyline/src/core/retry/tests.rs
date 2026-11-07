@@ -1,6 +1,8 @@
-use super::wait::unix_from_ymd_hms;
 use super::*;
-use crate::core::error::{Error, Kind};
+use http::StatusCode;
+
+use crate::error::{Error, Kind};
+use crate::util::wait::{parse_retry_after, unix_from_ymd_hms};
 
 fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
     let mut headers = http::HeaderMap::new();
@@ -17,10 +19,10 @@ fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
         redirect_chain: Vec::new(),
         request_headers: Vec::new(),
         tls: None,
-        request_method: "GET".to_string(),
+        request_method: Some(http::Method::GET),
         audit_tls: None,
         audit_cache: std::sync::OnceLock::new(),
-        timing: crate::core::ResponseTiming::default(),
+        timing: crate::wire::ResponseTiming::default(),
         compression: crate::core::BodyRules::default(),
         attempts: 1,
         proxy: None,
@@ -44,7 +46,9 @@ fn grid() -> Vec<(&'static str, Result<Response>)> {
         ("connect refused", Err(Error::new(Kind::Connect))),
         (
             "tls handshake timeout",
-            Err(Error::from(crate::tls::TlsError::HandshakeIo(handshake))),
+            Err(Error::from(crate::tls::error::TlsError::HandshakeIo(
+                handshake,
+            ))),
         ),
         ("timeout after send", Err(Error::new(Kind::Timeout))),
         ("reset after send", Err(Error::from(reset))),
@@ -65,10 +69,10 @@ fn plan_label(plan: RetryPlan) -> &'static str {
 fn decisions_match_the_table_and_an_unsent_post_retries() {
     let mut table = String::new();
     for (name, retry) in [("transient", Retry::new(3)), ("none", Retry::new(0))] {
-        for method in ["GET", "POST"] {
+        for method in [http::Method::GET, http::Method::POST] {
             for attempt in [0, 3] {
                 for (label, result) in grid() {
-                    let plan = retry.plan(&result, attempt, retry.allows(method), || true);
+                    let plan = retry.plan_resend(&result, attempt, retry.allows(&method), || true);
                     table.push_str(&format!(
                         "{name} {method} attempt {attempt} {label}: {}\n",
                         plan_label(plan)
@@ -100,8 +104,7 @@ fn when_replaces_the_default_rule() {
     let limited = Ok(blocked);
     let on_conflict = Retry::new(3).when(|attempt| attempt.status() == Some(StatusCode::CONFLICT));
     let skip_blocks = Retry::new(3).when(|attempt| attempt.is_transient() && !attempt.is_block());
-    let plan =
-        |retry: &Retry, result: &Result<Response>| plan_label(retry.plan(result, 0, true, || true));
+    let plan = |retry: &Retry, result: &Result<Response>| plan_label(retry.plan(result, 0));
     assert_eq!(plan(&on_conflict, &conflict), "backoff");
     assert_eq!(plan(&on_conflict, &limited), "stop");
     assert_eq!(plan(&skip_blocks, &limited), "stop");
@@ -154,13 +157,13 @@ fn wait_formats_parse_header_values() {
 #[test]
 fn a_tls_handshake_timeout_is_unsent() {
     let timeout = std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake");
-    let error = Error::from(crate::tls::TlsError::HandshakeIo(timeout));
+    let error = Error::from(crate::tls::error::TlsError::HandshakeIo(timeout));
     assert_eq!(error.kind(), Kind::Timeout);
     assert!(error.is_unsent());
 }
 
 #[test]
 fn a_failed_tls_handshake_is_unsent() {
-    let error = Error::from(crate::tls::TlsError::Handshake("alert".into()));
+    let error = Error::from(crate::tls::error::TlsError::Handshake("alert".into()));
     assert!(error.is_unsent());
 }

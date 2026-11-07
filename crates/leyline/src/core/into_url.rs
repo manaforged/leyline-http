@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use url::Url;
 
-use crate::core::error::{Error, Kind, Result};
+use crate::error::{Error, Kind, Result};
 
 pub(crate) mod sealed {
     use std::sync::Arc;
 
     use url::Url;
 
-    use crate::core::error::Result;
+    use crate::error::Result;
 
     pub trait Sealed {
         fn shared_url(self, base: Option<&Url>) -> Result<Arc<Url>>

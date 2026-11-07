@@ -1,7 +1,7 @@
 #![no_main]
 
 use bytes::Bytes;
-use leyline::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {

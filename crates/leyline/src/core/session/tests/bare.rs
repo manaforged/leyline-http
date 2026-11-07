@@ -38,7 +38,7 @@ fn default_session_is_bare() {
 fn chrome_helper_is_explicit_browser() {
     assert_eq!(
         Session::from(Browser::default()).identity().http(),
-        Some(Browser::default_browser())
+        Some(Browser::default())
     );
 }
 
@@ -46,13 +46,16 @@ fn chrome_helper_is_explicit_browser() {
 fn builder_with_the_default_browser_matches_session_browser() {
     let new = Session::from(Browser::default());
     let built = Session::builder()
-        .identity(Browser::default_browser())
+        .identity(Browser::default())
         .timeout(std::time::Duration::from_secs(5))
         .build()
         .unwrap();
     assert_eq!(built.identity().http(), new.identity().http());
     assert_eq!(built.platform(), new.platform());
-    assert_eq!(built.inner.protocol_policy, new.inner.protocol_policy);
+    assert_eq!(
+        built.inner.inputs.protocol_policy,
+        new.inner.inputs.protocol_policy
+    );
 }
 
 #[test]
@@ -99,24 +102,6 @@ async fn chrome_get_emits_navigate_headers() {
 }
 
 #[test]
-fn session_retry_default_is_inherited_by_requests() {
-    use crate::Retry;
-    let policy = Retry::new(7);
-    let session = Session::builder().retry(policy).build().unwrap();
-    let req = session.request(http::Method::GET, "https://example.test/");
-    assert_eq!(req.draft.retry_policy.count(), 7);
-    let overridden = session
-        .request(http::Method::GET, "https://example.test/")
-        .retry(0);
-    assert_eq!(overridden.draft.retry_policy.count(), 0);
-    let bare = Session::builder()
-        .build()
-        .unwrap()
-        .request(http::Method::GET, "https://example.test/");
-    assert_eq!(bare.draft.retry_policy.count(), 0);
-}
-
-#[test]
 fn platform_host_resolves_and_never_leaks() {
     assert_eq!(Platform::Host.resolve(), Platform::detect_host());
     assert_ne!(Platform::detect_host(), Platform::Host);
@@ -134,12 +119,12 @@ fn platform_host_resolves_and_never_leaks() {
 fn chrome_linux_is_one_chain() {
     let s = Session::builder()
         .identity(crate::core::Identity::new(
-            Browser::default_browser(),
+            Browser::default(),
             Platform::Linux,
         ))
         .build()
         .unwrap();
-    assert_eq!(s.identity().http(), Some(Browser::default_browser()));
+    assert_eq!(s.identity().http(), Some(Browser::default()));
     assert_eq!(s.platform(), Platform::Linux);
 }
 

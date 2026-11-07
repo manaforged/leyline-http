@@ -1,12 +1,12 @@
 use std::future::Future;
-use std::time::Instant;
 
 use leyline_bssl::ssl::SslVerifyMode;
 use leyline_bssl::x509::X509VerifyError;
 use tokio::net::TcpStream;
 
-use super::FingerprintConnector;
-use crate::tls::alpn::{AlpnPlan, HTTP11_WIRE};
+use super::{FingerprintConnector, TCP};
+use crate::tls::AlpnPlan;
+use crate::tls::alpn::HTTP11_WIRE;
 use crate::tls::error::TlsError;
 use crate::tls::trust::{
     TrustFailure, VerificationFailure, install_verifier, take_verification_failure,
@@ -57,7 +57,6 @@ impl FingerprintConnector {
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
-        let started = Instant::now();
         let host = crate::util::bare_host(host);
         let (ssl, verification_failure) = self.prepare_ssl(host, session_key, plan)?;
 
@@ -90,7 +89,6 @@ impl FingerprintConnector {
                 tls_version.as_deref(),
                 tls_cipher.as_deref(),
                 proto.as_deref(),
-                started.elapsed(),
             );
         }
         Ok(TlsStream {
@@ -122,11 +120,7 @@ impl FingerprintConnector {
         if insecure {
             ssl.set_verify(SslVerifyMode::NONE);
         }
-        let pins = self.trust.pinned_leaf_sha256();
-        let system_roots = self.trust.uses_system_roots();
-        let verification_failure = (!insecure
-            && (!pins.is_empty() || cfg!(target_os = "macos") && system_roots))
-            .then(|| install_verifier(&mut ssl, pins, host, system_roots));
+        let verification_failure = install_verifier(&mut ssl, &self.trust, host, TCP);
         if !insecure {
             self.session_cache.attach(&mut ssl, session_key)?;
         }

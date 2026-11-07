@@ -2,26 +2,48 @@ use std::path::Path;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::cookie::record::Cookie;
-use crate::core::saved::FileVersion;
-use crate::core::{Error, Result};
+use crate::cookie::Cookie;
+use crate::error::{Error, Result};
 use crate::util::lock;
+use crate::util::version::{self, Versioned};
 
 use super::Jar;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum JarVersion {
+    #[default]
+    V1,
+}
+
+impl Versioned for JarVersion {
+    fn number(self) -> u32 {
+        match self {
+            JarVersion::V1 => 1,
+        }
+    }
+
+    fn from_number(number: u32) -> Option<Self> {
+        match number {
+            1 => Some(JarVersion::V1),
+            _ => None,
+        }
+    }
+}
 
 impl Jar {
     pub(crate) fn load_from(path: impl AsRef<Path>) -> Result<Jar> {
         let bytes = std::fs::read(path)?;
         let file: JarFileIn = serde_json::from_slice(&bytes).map_err(Error::from_json)?;
         match file.version {
-            FileVersion::V1 => Ok(file.cookies),
+            JarVersion::V1 => Ok(file.cookies),
         }
     }
 }
 
 #[derive(Deserialize)]
 struct JarFileIn {
-    version: FileVersion,
+    #[serde(with = "version")]
+    version: JarVersion,
     cookies: Jar,
 }
 

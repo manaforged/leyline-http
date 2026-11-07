@@ -1,17 +1,16 @@
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use futures_util::future::Either;
 
-use crate::Error;
-use crate::core::ResponseTiming;
+use crate::error::Error;
+use crate::wire::ResponseTiming;
 
 mod body;
 mod event;
 mod fanout;
-mod headers;
 mod metrics;
 mod notes;
 mod summary;
@@ -19,10 +18,9 @@ mod summary;
 pub(crate) use body::BodyWatch;
 pub use event::Event;
 pub(crate) use fanout::Fanout;
-pub(crate) use headers::masked;
 pub use metrics::Metrics;
 pub(crate) use notes::{note_browser, note_label, note_proxy};
-pub(crate) use summary::{Finish, summary};
+pub(crate) use summary::{Answer, Finish, summary};
 
 #[doc = include_str!("../docs/trace.md")]
 pub trait Trace: Send + Sync + 'static {
@@ -91,37 +89,31 @@ fn with(emit: impl FnOnce(&Ctx)) {
     CURRENT.try_with(emit).unwrap_or(())
 }
 
-pub(crate) fn dns(host: &str, port: u16, addrs: usize, elapsed: Duration) {
+pub(crate) fn dns(host: &str, port: u16, addrs: usize) {
     with(|ctx| {
         ctx.hook.event(&Event::Dns {
             id: ctx.id,
             host,
             port,
             addrs,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn connect(host: &str, port: u16, reused: bool, elapsed: Duration) {
+pub(crate) fn connect(host: &str, port: u16, reused: bool) {
     with(|ctx| {
         ctx.hook.event(&Event::Connect {
             id: ctx.id,
             host,
             port,
             reused,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn tls(
-    host: &str,
-    version: Option<&str>,
-    cipher: Option<&str>,
-    alpn: Option<&str>,
-    elapsed: Duration,
-) {
+pub(crate) fn tls(host: &str, version: Option<&str>, cipher: Option<&str>, alpn: Option<&str>) {
     with(|ctx| {
         ctx.hook.event(&Event::Tls {
             id: ctx.id,
@@ -129,18 +121,12 @@ pub(crate) fn tls(
             version,
             cipher,
             alpn,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn sent(
-    host: &str,
-    method: &str,
-    path: &str,
-    protocol: http::Version,
-    elapsed: Duration,
-) {
+pub(crate) fn sent(host: &str, method: &str, path: &str, protocol: http::Version) {
     with(|ctx| {
         ctx.hook.event(&Event::Sent {
             id: ctx.id,
@@ -148,7 +134,7 @@ pub(crate) fn sent(
             method,
             path,
             protocol,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
@@ -157,8 +143,7 @@ pub(crate) fn head(
     host: &str,
     status: u16,
     protocol: http::Version,
-    elapsed: Duration,
-    headers: &crate::core::response_head::Fields,
+    headers: &crate::wire::Fields,
 ) {
     with(|ctx| {
         ctx.hook.event(&Event::Head {
@@ -166,7 +151,7 @@ pub(crate) fn head(
             host,
             status,
             protocol,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
             headers: headers.map(),
         });
     });

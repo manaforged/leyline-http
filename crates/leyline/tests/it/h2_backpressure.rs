@@ -11,8 +11,8 @@ use tokio::io::{AsyncReadExt, DuplexStream, WriteHalf};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use leyline::h2::H2Client;
-use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
+use leyline::internals::h2::H2Client;
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
 
 const MAX_CONCURRENT_STREAMS: u16 = 0x3;
 const PEER_WINDOW: usize = 65_535;
@@ -22,7 +22,7 @@ type Frames = mpsc::UnboundedReceiver<(FrameHeader, Vec<u8>)>;
 
 async fn connect(settings: Vec<(u16, u32)>) -> (H2Client, WriteHalf<DuplexStream>, Frames) {
     let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
     read_preface(&mut server_io).await;

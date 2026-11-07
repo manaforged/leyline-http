@@ -1,8 +1,10 @@
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 
-use crate::core::session::decompress::BodyLimit;
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::error::ErrorCode;
+
+use crate::h2::H2Error;
+use crate::h2::frame::U31_MAX;
 use crate::h2::stream_state::StreamEvent;
 
 use super::*;
@@ -64,24 +66,21 @@ impl StreamActor {
         }
     }
 
-    fn buffer_chunk(&mut self, d: &DataFrame, max_body: usize) -> Result<usize, Failure> {
-        if self.body.len() + d.data.len() > max_body {
-            return Err((
-                H2Error::Io(BodyLimit::session(max_body).into_io()),
-                ErrorCode::Cancel,
-            ));
-        }
+    fn buffer_chunk(&mut self, d: &DataFrame) -> Result<usize, Failure> {
+        self.body_limit
+            .admit(self.body.len(), d.data.len())
+            .map_err(|limit| (H2Error::BodyLimit(limit), ErrorCode::Cancel))?;
         self.body.extend_from_slice(&d.data);
         Ok(0)
     }
 
-    fn store_chunk(&mut self, d: &DataFrame, max_body: usize) -> Result<usize, Failure> {
-        if self.drop_body {
+    fn store_chunk(&mut self, d: &DataFrame) -> Result<usize, Failure> {
+        if !self.has_body {
             Ok(0)
         } else if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
             self.forward_chunk(d)
         } else {
-            self.buffer_chunk(d, max_body)
+            self.buffer_chunk(d)
         }
     }
 
@@ -99,7 +98,7 @@ impl StreamActor {
         ))
     }
 
-    fn accept_data(&mut self, d: &DataFrame, len: i64, max_body: usize) -> Intake {
+    fn accept_data(&mut self, d: &DataFrame, len: i64) -> Intake {
         if self.response.data().is_err() {
             self.recv_window -= len;
             return Intake::Taken {
@@ -121,7 +120,7 @@ impl StreamActor {
             return Intake::Illegal(map_state_err(d.stream_id, e));
         }
         self.recv_len = self.recv_len.saturating_add(d.data.len() as u64);
-        let stored = self.store_chunk(d, max_body);
+        let stored = self.store_chunk(d);
         let overrun = self.charge_stream_window(d.stream_id, len);
         match stored {
             Ok(queued) => Intake::Taken {
@@ -185,14 +184,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let len = d.wire_len as i64;
         self.charge_conn_window(len)?;
         match self.receive_data(&d, len) {
-            Intake::NoStream => self.maybe_top_up_conn_window(),
+            Intake::NoStream => {
+                self.maybe_top_up_conn_window();
+                Ok(())
+            }
             Intake::Illegal(err) => self.reject_data(stream_id, err),
             Intake::Taken { queued, failure } => {
-                self.stalled += queued;
+                self.streams.add_stalled(queued);
                 match failure {
                     Some((err, code)) => {
                         self.reset_stream(stream_id, err, code)?;
-                        self.maybe_top_up_conn_window()
+                        self.maybe_top_up_conn_window();
+                        Ok(())
                     }
                     None => self.settle_data(stream_id, d.end_stream),
                 }
@@ -215,9 +218,8 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     }
 
     fn receive_data(&mut self, d: &DataFrame, len: i64) -> Intake {
-        let max_body = self.config.max_response_body_bytes;
         match self.streams.get_mut(d.stream_id) {
-            Some(actor) if !actor.state.is_reset_local() => actor.accept_data(d, len, max_body),
+            Some(actor) if !actor.state.is_reset_local() => actor.accept_data(d, len),
             Some(_) => Intake::NoStream,
             None => Intake::NoStream,
         }
@@ -225,12 +227,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     fn reject_data(&mut self, stream_id: u32, err: H2Error) -> Result<(), H2Error> {
         self.reset_stream(stream_id, err, ErrorCode::StreamClosed)?;
-        self.maybe_top_up_conn_window()
+        self.maybe_top_up_conn_window();
+        Ok(())
     }
 
     fn settle_data(&mut self, stream_id: u32, end_stream: bool) -> Result<(), H2Error> {
-        self.maybe_top_up_conn_window()?;
-        self.maybe_top_up_stream_window(stream_id)?;
+        self.maybe_top_up_conn_window();
+        self.maybe_top_up_stream_window(stream_id);
         if end_stream {
             self.finish_remote(stream_id)?;
         }
@@ -239,19 +242,19 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    pub(super) fn maybe_top_up_conn_window(&mut self) -> Result<(), H2Error> {
+    pub(super) fn maybe_top_up_conn_window(&mut self) {
         let initial = self.config.initial_connection_window_size as i64;
         if let Some(increment) = refill(initial, self.conn_recv_window) {
-            self.writer.write_frame(&WindowUpdateFrame {
+            WindowUpdateFrame {
                 stream_id: 0,
                 increment,
-            })?;
+            }
+            .encode(self.writer.out());
             self.conn_recv_window += increment as i64;
         }
-        Ok(())
     }
 
-    pub(super) fn maybe_top_up_stream_window(&mut self, stream_id: u32) -> Result<(), H2Error> {
+    pub(super) fn maybe_top_up_stream_window(&mut self, stream_id: u32) {
         let initial = self.config.advertised_initial_window_size() as i64;
         let increment = self
             .streams
@@ -259,18 +262,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .filter(|a| a.stalled.is_empty())
             .and_then(|a| refill(initial, a.recv_window));
         if let Some(increment) = increment {
-            self.writer.write_frame(&WindowUpdateFrame {
+            WindowUpdateFrame {
                 stream_id,
                 increment,
-            })?;
+            }
+            .encode(self.writer.out());
             if let Some(actor) = self.streams.get_mut(stream_id) {
                 actor.recv_window += increment as i64;
             }
         }
-        Ok(())
     }
 }
 
 fn refill(initial: i64, current: i64) -> Option<u32> {
-    (current < initial / 2).then(|| (initial - current).clamp(1, 0x7FFF_FFFF) as u32)
+    (current < initial / 2).then(|| (initial - current).clamp(1, i64::from(U31_MAX)) as u32)
 }

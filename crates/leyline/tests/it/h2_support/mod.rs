@@ -8,19 +8,19 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::{Context, Poll};
-use std::time::Duration;
 
 use bytes::{Bytes, BytesMut};
 use futures_util::Stream;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{
     DataFrame, FRAME_HEADER_LEN, FrameHeader, FrameType, HeadersFrame, SettingsFrame,
     WindowUpdateFrame,
 };
-use leyline::h2::{H2Client, Head, hpack};
+use leyline::internals::h2::{H2Client, Head, hpack};
 
 const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const END_HEADERS: u8 = 0x4;
@@ -130,33 +130,11 @@ pub async fn write_headers_without_end<S: AsyncWrite + Unpin>(s: &mut S, stream_
 
 pub fn test_config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65535),
-            (SettingId::MaxFrameSize, 16384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 

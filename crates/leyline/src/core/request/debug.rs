@@ -3,7 +3,7 @@ use std::fmt;
 use http::HeaderValue;
 
 use super::RequestBuilder;
-use crate::trace::masked;
+use crate::util::masked;
 use crate::util::redact;
 
 impl fmt::Debug for RequestBuilder {
@@ -25,18 +25,18 @@ impl fmt::Debug for RequestBuilder {
                 ),
             )
             .field("body", &self.draft.body)
-            .field("preset", &self.draft.preset)
-            .field("timeouts", &self.draft.timeouts)
-            .field("retry_policy", &self.draft.retry_policy)
-            .field("proxy", &self.draft.proxy)
-            .field("redirect", &self.draft.redirect)
+            .field("preset", &self.draft.carry.preset)
+            .field("timeouts", &self.draft.carry.timeouts)
+            .field("retry_policy", &self.draft.carry.retry_policy)
+            .field("proxy", &self.draft.carry.proxy)
+            .field("redirect", &self.draft.carry.redirect)
             .field(
                 "digest_auth",
-                &self.draft.digest_auth.as_ref().map(|_| "***"),
+                &self.draft.carry.digest_auth.as_ref().map(|_| "***"),
             )
             .field("compress", &self.draft.compress)
-            .field("stream_response", &self.draft.stream_response)
-            .field("header_order", &self.draft.header_order)
+            .field("stream_response", &self.draft.carry.stream_response)
+            .field("header_order", &self.draft.carry.header_order)
             .field("error", &self.draft.builder_error)
             .finish_non_exhaustive()
     }
