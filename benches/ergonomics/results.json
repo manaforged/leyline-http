@@ -1,0 +1,4741 @@
+{
+ "node/axios": {
+  "t01": {
+   "concept_names": [
+    "axios",
+    "data",
+    "get"
+   ],
+   "concepts": 3,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.06,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 33
+  },
+  "t02": {
+   "concept_names": [
+    "axios",
+    "code",
+    "post",
+    "timeout"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 17,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.36,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 104
+  },
+  "t03": {
+   "concept_names": [
+    "CookieJar",
+    "axios",
+    "data",
+    "get",
+    "jar",
+    "password",
+    "post",
+    "wrapper"
+   ],
+   "concepts": 8,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "axios-cookiejar-support",
+    "tough-cookie"
+   ],
+   "imports": 3,
+   "lines": 10,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.08,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 82
+  },
+  "t04": {
+   "concept_names": [
+    "axios",
+    "axiosRetry",
+    "exponentialDelay",
+    "get",
+    "response",
+    "retries",
+    "retryCondition",
+    "retryDelay",
+    "status"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "axios-retry"
+   ],
+   "imports": 3,
+   "lines": 9,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.57,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.059,
+     0.451
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 70
+  },
+  "t05": {
+   "concept_names": [
+    "axios",
+    "get",
+    "pLimit",
+    "status",
+    "validateStatus"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "p-limit"
+   ],
+   "imports": 2,
+   "lines": 15,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.74,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 121
+  },
+  "t06": {
+   "concept_names": [
+    "axios",
+    "get",
+    "head",
+    "headers",
+    "responseType"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 17,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.11,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67161030,
+    "starts": [
+     0,
+     26802770,
+     46964813
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 164
+  },
+  "t07": {
+   "concept_names": [
+    "axios",
+    "postForm"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 10,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.06,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 57
+  },
+  "t08": {
+   "concept_names": [
+    "axios",
+    "data",
+    "event",
+    "get",
+    "responseType"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 26,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.34,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 178
+  },
+  "t09": {
+   "concept_names": [
+    "axios",
+    "get",
+    "host",
+    "port",
+    "proxy"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.06,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 46
+  },
+  "t10": {
+   "concept_names": [
+    "axios",
+    "code",
+    "get",
+    "maxRedirects",
+    "request"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 12,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 84
+  }
+ },
+ "node/fetch": {
+  "t01": {
+   "concept_names": [
+    "json"
+   ],
+   "concepts": 1,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 0,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.03,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 32
+  },
+  "t02": {
+   "concept_names": [
+    "body",
+    "headers",
+    "json",
+    "method",
+    "signal",
+    "status"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 0,
+   "lines": 21,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.33,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 137
+  },
+  "t03": {
+   "concept_names": [
+    "body",
+    "getSetCookie",
+    "headers",
+    "json",
+    "method"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 0,
+   "lines": 11,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.03,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 100
+  },
+  "t04": {
+   "concept_names": [
+    "get",
+    "headers",
+    "json",
+    "status"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 12,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.23,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.003,
+     0.201
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 109
+  },
+  "t05": {
+   "concept_names": [
+    "arrayBuffer",
+    "pLimit",
+    "status"
+   ],
+   "concepts": 3,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "p-limit"
+   ],
+   "imports": 1,
+   "lines": 13,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.59,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 111
+  },
+  "t06": {
+   "concept_names": [
+    "body",
+    "get",
+    "headers",
+    "method"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 19,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.09,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67485542,
+    "starts": [
+     0,
+     26587512,
+     46855559
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 172
+  },
+  "t07": {
+   "concept_names": [
+    "append",
+    "body",
+    "json",
+    "method",
+    "status"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 10,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.04,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 86
+  },
+  "t08": {
+   "concept_names": [
+    "EventSource",
+    "addEventListener",
+    "close",
+    "onmessage"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "eventsource"
+   ],
+   "imports": 1,
+   "lines": 8,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.22,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 71
+  },
+  "t09": {
+   "concept_names": [
+    "ProxyAgent",
+    "close",
+    "json",
+    "status"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "undici6"
+   ],
+   "imports": 1,
+   "lines": 8,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.11,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "connect",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 60
+  },
+  "t10": {
+   "concept_names": [
+    "arrayBuffer",
+    "get",
+    "headers",
+    "redirect",
+    "status"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 0,
+   "lines": 12,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.08,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 124
+  }
+ },
+ "node/got": {
+  "t01": {
+   "concept_names": [
+    "got",
+    "json"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.06,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 31
+  },
+  "t02": {
+   "concept_names": [
+    "TimeoutError",
+    "body",
+    "got",
+    "request",
+    "responseType",
+    "statusCode",
+    "timeout"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 18,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.36,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 121
+  },
+  "t03": {
+   "concept_names": [
+    "CookieJar",
+    "cookieJar",
+    "extend",
+    "got",
+    "json",
+    "password",
+    "user"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tough-cookie"
+   ],
+   "imports": 2,
+   "lines": 8,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.11,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 74
+  },
+  "t04": {
+   "concept_names": [
+    "body",
+    "got",
+    "limit",
+    "responseType",
+    "retry",
+    "statusCode"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 3.07,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.006,
+     2.009
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 44
+  },
+  "t05": {
+   "concept_names": [
+    "agent",
+    "extend",
+    "got",
+    "http",
+    "statusCode",
+    "throwHttpErrors"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 14,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.74,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 117
+  },
+  "t06": {
+   "concept_names": [
+    "end",
+    "got",
+    "headers",
+    "limit",
+    "retry",
+    "stream"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 18,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.12,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67168971,
+    "starts": [
+     0,
+     26792859,
+     46966783
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 161
+  },
+  "t07": {
+   "concept_names": [
+    "body",
+    "got",
+    "responseType",
+    "statusCode"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 10,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 87
+  },
+  "t08": {
+   "concept_names": [
+    "event",
+    "got",
+    "input",
+    "limit",
+    "retry",
+    "stream"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 26,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.34,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 179
+  },
+  "t09": {
+   "concept_names": [
+    "HttpProxyAgent",
+    "agent",
+    "body",
+    "got",
+    "http",
+    "proxy",
+    "responseType",
+    "statusCode"
+   ],
+   "concepts": 8,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "hpagent"
+   ],
+   "imports": 2,
+   "lines": 7,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "connect",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 59
+  },
+  "t10": {
+   "concept_names": [
+    "MaxRedirectsError",
+    "extend",
+    "got",
+    "maxRedirects",
+    "url"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 10,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.11,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 79
+  }
+ },
+ "node/leyline-http": {
+  "t01": {
+   "concept_names": [
+    "get",
+    "id",
+    "json"
+   ],
+   "concepts": 3,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 4,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.03,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 38
+  },
+  "t02": {
+   "concept_names": [
+    "TimeoutError",
+    "id",
+    "json",
+    "post",
+    "status",
+    "timeoutMs"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 17,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.33,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 107
+  },
+  "t03": {
+   "concept_names": [
+    "Session",
+    "get",
+    "json",
+    "password",
+    "post"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 7,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 62
+  },
+  "t04": {
+   "concept_names": [
+    "Session",
+    "get",
+    "json",
+    "maxRetries",
+    "retry",
+    "status"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 4,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.23,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.002,
+     0.199
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 52
+  },
+  "t05": {
+   "concept_names": [
+    "Session",
+    "get",
+    "maxInFlight",
+    "status"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.7,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 96
+  },
+  "t06": {
+   "concept_names": [
+    "Session",
+    "download",
+    "maxRetries",
+    "retry"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.54,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 39
+  },
+  "t07": {
+   "concept_names": [
+    "files",
+    "form",
+    "json",
+    "post",
+    "status"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 7,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.04,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 61
+  },
+  "t08": {
+   "concept_names": [
+    "Session",
+    "data",
+    "event",
+    "events"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 5,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.21,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 44
+  },
+  "t09": {
+   "concept_names": [
+    "get",
+    "json",
+    "proxy",
+    "status"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 5,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.03,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 40
+  },
+  "t10": {
+   "concept_names": [
+    "Session",
+    "get",
+    "redirect",
+    "status",
+    "url"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 66
+  }
+ },
+ "node/undici": {
+  "t01": {
+   "concept_names": [
+    "json",
+    "request"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 4,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.05,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 41
+  },
+  "t02": {
+   "concept_names": [
+    "HeadersTimeoutError",
+    "body",
+    "bodyTimeout",
+    "errors",
+    "headers",
+    "headersTimeout",
+    "json",
+    "method",
+    "request"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 24,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.05,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 149
+  },
+  "t03": {
+   "concept_names": [
+    "body",
+    "dump",
+    "headers",
+    "json",
+    "method",
+    "password",
+    "request"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 13,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.05,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 114
+  },
+  "t04": {
+   "concept_names": [
+    "Agent",
+    "RetryAgent",
+    "close",
+    "json",
+    "maxRetries",
+    "minTimeout",
+    "request",
+    "statusCodes"
+   ],
+   "concepts": 8,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 12,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.28,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.003,
+     0.201
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 86
+  },
+  "t05": {
+   "concept_names": [
+    "Agent",
+    "close",
+    "connections",
+    "dump",
+    "request"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 17,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.73,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 128
+  },
+  "t06": {
+   "concept_names": [
+    "body",
+    "bytesWritten",
+    "dump",
+    "headers",
+    "method",
+    "request"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 18,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.11,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67195147,
+    "starts": [
+     0,
+     26770229,
+     46963237
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 173
+  },
+  "t07": {
+   "concept_names": [
+    "FormData",
+    "append",
+    "body",
+    "json",
+    "method",
+    "request"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 14,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 98
+  },
+  "t08": {
+   "concept_names": [
+    "EventSource",
+    "addEventListener",
+    "close",
+    "data",
+    "onmessage"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 8,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.24,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 71
+  },
+  "t09": {
+   "concept_names": [
+    "ProxyAgent",
+    "close",
+    "json",
+    "request"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 9,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.06,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 64
+  },
+  "t10": {
+   "concept_names": [
+    "Agent",
+    "body",
+    "close",
+    "compose",
+    "dump",
+    "interceptors",
+    "maxRedirections",
+    "redirect",
+    "request",
+    "statusCode"
+   ],
+   "concepts": 10,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 15,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.12,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 121
+  }
+ },
+ "python/aiohttp": {
+  "t01": {
+   "concept_names": [
+    "ClientSession",
+    "get",
+    "json"
+   ],
+   "concepts": 3,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 8,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.1,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 59
+  },
+  "t02": {
+   "concept_names": [
+    "ClientSession",
+    "ClientTimeout",
+    "json",
+    "post",
+    "status",
+    "timeout",
+    "total"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 20,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.4,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 129
+  },
+  "t03": {
+   "concept_names": [
+    "ClientSession",
+    "get",
+    "json",
+    "post"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 11,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.15,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 79
+  },
+  "t04": {
+   "concept_names": [
+    "AsyncRetrying",
+    "ClientSession",
+    "get",
+    "headers",
+    "json",
+    "multiplier",
+    "outcome",
+    "result",
+    "retry",
+    "retry_if_result",
+    "status",
+    "stop",
+    "stop_after_attempt",
+    "wait",
+    "wait_exponential"
+   ],
+   "concepts": 15,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tenacity"
+   ],
+   "imports": 6,
+   "lines": 25,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.31,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.002,
+     0.201
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 153
+  },
+  "t05": {
+   "concept_names": [
+    "ClientSession",
+    "TCPConnector",
+    "connector",
+    "get",
+    "limit",
+    "status"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 11,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.41,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 101
+  },
+  "t06": {
+   "concept_names": [
+    "ClientError",
+    "ClientSession",
+    "content",
+    "content_length",
+    "get",
+    "head",
+    "headers",
+    "iter_chunked"
+   ],
+   "concepts": 8,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 19,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.13,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 131
+  },
+  "t07": {
+   "concept_names": [
+    "ClientSession",
+    "data",
+    "json",
+    "post",
+    "status"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 12,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.11,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 88
+  },
+  "t08": {
+   "concept_names": [
+    "EventSource",
+    "client",
+    "data",
+    "type"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "aiohttp_sse_client2"
+   ],
+   "imports": 2,
+   "lines": 9,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.38,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 51
+  },
+  "t09": {
+   "concept_names": [
+    "ClientSession",
+    "get",
+    "json",
+    "proxy",
+    "status"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 10,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.11,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 62
+  },
+  "t10": {
+   "concept_names": [
+    "ClientSession",
+    "TooManyRedirects",
+    "get",
+    "max_redirects",
+    "url"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 16,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.1,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 5
+   },
+   "stderr_tail": "",
+   "tokens": 77
+  }
+ },
+ "python/curl_cffi": {
+  "t01": {
+   "concept_names": [
+    "get",
+    "json"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.06,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 26
+  },
+  "t02": {
+   "concept_names": [
+    "Timeout",
+    "json",
+    "post",
+    "status_code",
+    "timeout"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.36,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 75
+  },
+  "t03": {
+   "concept_names": [
+    "Session",
+    "get",
+    "json",
+    "post"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.1,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 43
+  },
+  "t04": {
+   "concept_names": [
+    "Session",
+    "get",
+    "headers",
+    "json",
+    "status_code"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 13,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.27,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.001,
+     0.201
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 85
+  },
+  "t05": {
+   "concept_names": [
+    "AsyncSession",
+    "get",
+    "max_clients",
+    "status_code"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 10,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.75,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 82
+  },
+  "t06": {
+   "concept_names": [
+    "RequestException",
+    "Session",
+    "content_callback",
+    "get",
+    "head",
+    "headers"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 13,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.1,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 96
+  },
+  "t07": {
+   "concept_names": [
+    "CurlMime",
+    "addpart",
+    "data",
+    "filename",
+    "json",
+    "local_path",
+    "multipart",
+    "post",
+    "status_code"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 8,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 77
+  },
+  "t08": {
+   "concept_names": [
+    "Session",
+    "get",
+    "headers",
+    "iter_lines",
+    "stream",
+    "value"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 25,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.36,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 145
+  },
+  "t09": {
+   "concept_names": [
+    "get",
+    "json",
+    "proxy",
+    "status_code"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 5,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 29
+  },
+  "t10": {
+   "concept_names": [
+    "Session",
+    "TooManyRedirects",
+    "get",
+    "max_redirects",
+    "url"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 8,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.1,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 46
+  }
+ },
+ "python/httpx": {
+  "t01": {
+   "concept_names": [
+    "get",
+    "json"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 26
+  },
+  "t02": {
+   "concept_names": [
+    "TimeoutException",
+    "json",
+    "post",
+    "status_code",
+    "timeout"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.38,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 73
+  },
+  "t03": {
+   "concept_names": [
+    "Client",
+    "get",
+    "json",
+    "post"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.12,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 43
+  },
+  "t04": {
+   "concept_names": [
+    "Retrying",
+    "get",
+    "headers",
+    "json",
+    "multiplier",
+    "outcome",
+    "result",
+    "retry",
+    "retry_if_result",
+    "status_code",
+    "stop",
+    "stop_after_attempt",
+    "wait",
+    "wait_exponential"
+   ],
+   "concepts": 14,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tenacity"
+   ],
+   "imports": 5,
+   "lines": 18,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.3,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.01,
+     0.21
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 112
+  },
+  "t05": {
+   "concept_names": [
+    "AsyncClient",
+    "Limits",
+    "get",
+    "limits",
+    "max_connections",
+    "status_code",
+    "timeout"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 11,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.8,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 96
+  },
+  "t06": {
+   "concept_names": [
+    "TransportError",
+    "head",
+    "headers",
+    "iter_bytes",
+    "stream"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 14,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.14,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 102
+  },
+  "t07": {
+   "concept_names": [
+    "data",
+    "files",
+    "json",
+    "post",
+    "status_code"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.08,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 60
+  },
+  "t08": {
+   "concept_names": [
+    "Client",
+    "connect_sse",
+    "data",
+    "event",
+    "headers",
+    "id",
+    "iter_sse"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "httpx_sse"
+   ],
+   "imports": 3,
+   "lines": 18,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.36,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 102
+  },
+  "t09": {
+   "concept_names": [
+    "Client",
+    "get",
+    "json",
+    "proxy",
+    "status_code"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 4,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.09,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 35
+  },
+  "t10": {
+   "concept_names": [
+    "Client",
+    "TooManyRedirects",
+    "follow_redirects",
+    "get",
+    "max_redirects",
+    "url"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 8,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.12,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 48
+  }
+ },
+ "python/leyline": {
+  "t01": {
+   "concept_names": [
+    "get",
+    "json"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.02,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 26
+  },
+  "t02": {
+   "concept_names": [
+    "TimeoutError",
+    "json",
+    "post",
+    "status",
+    "timeout"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.33,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 73
+  },
+  "t03": {
+   "concept_names": [
+    "Session",
+    "get",
+    "json",
+    "post"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.07,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 43
+  },
+  "t04": {
+   "concept_names": [
+    "Retry",
+    "Session",
+    "get",
+    "json",
+    "retry",
+    "status"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 3,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.16,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.001,
+     0.135
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 37
+  },
+  "t05": {
+   "concept_names": [
+    "AsyncSession",
+    "get",
+    "max_in_flight",
+    "status"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 10,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.72,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 79
+  },
+  "t06": {
+   "concept_names": [
+    "Retry",
+    "Session",
+    "download",
+    "retry"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 3,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.48,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 28
+  },
+  "t07": {
+   "concept_names": [
+    "files",
+    "form",
+    "json",
+    "post",
+    "status"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 8,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.03,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 50
+  },
+  "t08": {
+   "concept_names": [
+    "Session",
+    "data",
+    "event",
+    "events"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 5,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.2,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 30
+  },
+  "t09": {
+   "concept_names": [
+    "get",
+    "json",
+    "proxy",
+    "status"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 5,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.02,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 29
+  },
+  "t10": {
+   "concept_names": [
+    "Session",
+    "get",
+    "redirect",
+    "status",
+    "url"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 5,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.06,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 43
+  }
+ },
+ "python/niquests": {
+  "t01": {
+   "concept_names": [
+    "get",
+    "json"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.09,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 26
+  },
+  "t02": {
+   "concept_names": [
+    "Timeout",
+    "json",
+    "post",
+    "status_code",
+    "timeout"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.4,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 73
+  },
+  "t03": {
+   "concept_names": [
+    "Session",
+    "get",
+    "json",
+    "post"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.14,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 43
+  },
+  "t04": {
+   "concept_names": [
+    "Session",
+    "get",
+    "json",
+    "retries",
+    "status_code",
+    "total"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 6,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.3,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.001,
+     0.201
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 57
+  },
+  "t05": {
+   "concept_names": [
+    "AsyncSession",
+    "get",
+    "status_code"
+   ],
+   "concepts": 3,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 12,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.78,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 98
+  },
+  "t06": {
+   "concept_names": [
+    "RequestException",
+    "get",
+    "head",
+    "headers",
+    "iter_content",
+    "stream"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 14,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.13,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 105
+  },
+  "t07": {
+   "concept_names": [
+    "data",
+    "files",
+    "json",
+    "post",
+    "status_code"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.1,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 60
+  },
+  "t08": {
+   "concept_names": [
+    "Session",
+    "data",
+    "event",
+    "extension",
+    "get",
+    "headers",
+    "next_payload"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 17,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.38,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 100
+  },
+  "t09": {
+   "concept_names": [
+    "get",
+    "json",
+    "proxies",
+    "status_code"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 4,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.09,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 36
+  },
+  "t10": {
+   "concept_names": [
+    "Session",
+    "TooManyRedirects",
+    "get",
+    "max_redirects",
+    "url"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.14,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 46
+  }
+ },
+ "python/requests": {
+  "t01": {
+   "concept_names": [
+    "get",
+    "json"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 3,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.08,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 26
+  },
+  "t02": {
+   "concept_names": [
+    "Timeout",
+    "json",
+    "post",
+    "status_code",
+    "timeout"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.38,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 73
+  },
+  "t03": {
+   "concept_names": [
+    "Session",
+    "get",
+    "json",
+    "post"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 6,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.12,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 43
+  },
+  "t04": {
+   "concept_names": [
+    "HTTPAdapter",
+    "Retry",
+    "Session",
+    "adapters",
+    "backoff_factor",
+    "get",
+    "json",
+    "max_retries",
+    "mount",
+    "status_code",
+    "status_forcelist",
+    "total"
+   ],
+   "concepts": 12,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 8,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.28,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.001,
+     0.201
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 75
+  },
+  "t05": {
+   "concept_names": [
+    "get",
+    "status_code"
+   ],
+   "concepts": 2,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 2,
+   "lines": 7,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.42,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 65
+  },
+  "t06": {
+   "concept_names": [
+    "RequestException",
+    "get",
+    "head",
+    "headers",
+    "iter_content",
+    "stream"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 14,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.12,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 105
+  },
+  "t07": {
+   "concept_names": [
+    "data",
+    "files",
+    "json",
+    "post",
+    "status_code"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.09,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 60
+  },
+  "t08": {
+   "concept_names": [
+    "EventSource",
+    "data",
+    "type"
+   ],
+   "concepts": 3,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "requests_sse"
+   ],
+   "imports": 1,
+   "lines": 6,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.36,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 31
+  },
+  "t09": {
+   "concept_names": [
+    "get",
+    "json",
+    "proxies",
+    "status_code"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 4,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.08,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 36
+  },
+  "t10": {
+   "concept_names": [
+    "Session",
+    "TooManyRedirects",
+    "get",
+    "max_redirects",
+    "url"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 1,
+   "lines": 9,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.12,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 46
+  }
+ },
+ "rust/leyline-http": {
+  "t01": {
+   "concept_names": [
+    "Result",
+    "Value",
+    "get",
+    "json",
+    "main"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 3,
+   "lines": 11,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 81
+  },
+  "t02": {
+   "concept_names": [
+    "Result",
+    "Session",
+    "Value",
+    "as_u16",
+    "json",
+    "main",
+    "post",
+    "status",
+    "timeout"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 6,
+   "lines": 29,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.31,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 219
+  },
+  "t03": {
+   "concept_names": [
+    "Result",
+    "Session",
+    "Value",
+    "get",
+    "json",
+    "main",
+    "post"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 4,
+   "lines": 18,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.05,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 123
+  },
+  "t04": {
+   "concept_names": [
+    "Result",
+    "Session",
+    "Value",
+    "as_u16",
+    "get",
+    "json",
+    "main",
+    "retry",
+    "status"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 3,
+   "lines": 13,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.15,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.002,
+     0.139
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 97
+  },
+  "t05": {
+   "concept_names": [
+    "Result",
+    "Session",
+    "StreamExt",
+    "TryStreamExt",
+    "as_u16",
+    "futures",
+    "get",
+    "main",
+    "status",
+    "stream"
+   ],
+   "concepts": 10,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "futures",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 19,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.68,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 170
+  },
+  "t06": {
+   "concept_names": [
+    "Result",
+    "download_to",
+    "get",
+    "main",
+    "retry"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tokio"
+   ],
+   "imports": 2,
+   "lines": 9,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.46,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 55
+  },
+  "t07": {
+   "concept_names": [
+    "Form",
+    "Result",
+    "Session",
+    "Value",
+    "as_u16",
+    "file",
+    "json",
+    "main",
+    "multipart",
+    "post",
+    "status",
+    "text"
+   ],
+   "concepts": 12,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 4,
+   "lines": 21,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.01,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 141
+  },
+  "t08": {
+   "concept_names": [
+    "Result",
+    "Session",
+    "data",
+    "event",
+    "events",
+    "get",
+    "main"
+   ],
+   "concepts": 7,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tokio"
+   ],
+   "imports": 2,
+   "lines": 14,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.19,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 94
+  },
+  "t09": {
+   "concept_names": [
+    "Result",
+    "Session",
+    "Value",
+    "as_u16",
+    "get",
+    "json",
+    "main",
+    "proxy",
+    "status"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 3,
+   "lines": 13,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 105
+  },
+  "t10": {
+   "concept_names": [
+    "Result",
+    "Session",
+    "build",
+    "builder",
+    "get",
+    "is_redirection",
+    "main",
+    "redirect",
+    "status",
+    "url"
+   ],
+   "concepts": 10,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tokio"
+   ],
+   "imports": 2,
+   "lines": 17,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.05,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 111
+  }
+ },
+ "rust/reqwest": {
+  "t01": {
+   "concept_names": [
+    "Result",
+    "Value",
+    "get",
+    "json",
+    "main"
+   ],
+   "concepts": 5,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 3,
+   "lines": 10,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 77
+  },
+  "t02": {
+   "concept_names": [
+    "Client",
+    "Result",
+    "Value",
+    "as_u16",
+    "is_timeout",
+    "json",
+    "main",
+    "post",
+    "status",
+    "timeout"
+   ],
+   "concepts": 10,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 6,
+   "lines": 29,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.31,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 219
+  },
+  "t03": {
+   "concept_names": [
+    "Client",
+    "Result",
+    "Value",
+    "build",
+    "builder",
+    "cookie_store",
+    "get",
+    "json",
+    "main",
+    "post"
+   ],
+   "concepts": 10,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 4,
+   "lines": 18,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.05,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 133
+  },
+  "t04": {
+   "concept_names": [
+    "Client",
+    "Value",
+    "as_u16",
+    "get",
+    "headers",
+    "json",
+    "main",
+    "status",
+    "to_str"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 26,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.21,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.001,
+     0.202
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 227
+  },
+  "t05": {
+   "concept_names": [
+    "Client",
+    "Result",
+    "StreamExt",
+    "TryStreamExt",
+    "as_u16",
+    "futures",
+    "get",
+    "main",
+    "status",
+    "stream"
+   ],
+   "concepts": 10,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "futures",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 19,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.31,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 170
+  },
+  "t06": {
+   "concept_names": [
+    "AsyncWriteExt",
+    "Client",
+    "File",
+    "chunk",
+    "fs",
+    "get",
+    "head",
+    "header",
+    "io",
+    "main",
+    "to_str"
+   ],
+   "concepts": 11,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 25,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.02,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 227
+  },
+  "t07": {
+   "concept_names": [
+    "Client",
+    "Form",
+    "Value",
+    "as_u16",
+    "file",
+    "json",
+    "main",
+    "multipart",
+    "post",
+    "status",
+    "text"
+   ],
+   "concepts": 11,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 23,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.01,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 153
+  },
+  "t08": {
+   "concept_names": [
+    "Error",
+    "Event",
+    "EventSource",
+    "Message",
+    "Open",
+    "StreamEnded",
+    "StreamExt",
+    "close",
+    "futures",
+    "get",
+    "main"
+   ],
+   "concepts": 11,
+   "exit": 0,
+   "extra_deps": 3,
+   "extras": [
+    "futures",
+    "reqwest-eventsource",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 14,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.38,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 129
+  },
+  "t09": {
+   "concept_names": [
+    "Client",
+    "Proxy",
+    "Result",
+    "Value",
+    "as_u16",
+    "build",
+    "builder",
+    "get",
+    "http",
+    "json",
+    "main",
+    "proxy",
+    "status"
+   ],
+   "concepts": 13,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 4,
+   "lines": 16,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 126
+  },
+  "t10": {
+   "concept_names": [
+    "Client",
+    "Policy",
+    "Result",
+    "build",
+    "builder",
+    "get",
+    "is_redirect",
+    "limited",
+    "main",
+    "redirect",
+    "url"
+   ],
+   "concepts": 11,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tokio"
+   ],
+   "imports": 3,
+   "lines": 18,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 142
+  }
+ },
+ "rust/ureq": {
+  "t01": {
+   "concept_names": [
+    "Error",
+    "Value",
+    "body_mut",
+    "call",
+    "get",
+    "read_json"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "serde_json"
+   ],
+   "imports": 2,
+   "lines": 9,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 76
+  },
+  "t02": {
+   "concept_names": [
+    "Error",
+    "Timeout",
+    "Value",
+    "as_u16",
+    "body_mut",
+    "build",
+    "config",
+    "post",
+    "read_json",
+    "send_json",
+    "status",
+    "timeout_global"
+   ],
+   "concepts": 12,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "serde_json"
+   ],
+   "imports": 4,
+   "lines": 23,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.31,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 211
+  },
+  "t03": {
+   "concept_names": [
+    "Error",
+    "Value",
+    "agent",
+    "body_mut",
+    "call",
+    "get",
+    "post",
+    "read_json",
+    "send_json"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "serde_json"
+   ],
+   "imports": 3,
+   "lines": 14,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 109
+  },
+  "t04": {
+   "concept_names": [
+    "Agent",
+    "Value",
+    "as_u16",
+    "body_mut",
+    "build",
+    "call",
+    "config_builder",
+    "get",
+    "headers",
+    "http_status_as_error",
+    "read_json",
+    "status",
+    "to_str"
+   ],
+   "concepts": 13,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "serde_json"
+   ],
+   "imports": 5,
+   "lines": 29,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.2,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.001,
+     0.201
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 234
+  },
+  "t05": {
+   "concept_names": [
+    "Agent",
+    "as_u16",
+    "build",
+    "call",
+    "config_builder",
+    "get",
+    "http_status_as_error",
+    "into_inner",
+    "status"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 5,
+   "lines": 33,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.31,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 249
+  },
+  "t06": {
+   "concept_names": [
+    "call",
+    "get",
+    "head",
+    "header",
+    "headers",
+    "into_body",
+    "into_reader",
+    "to_str"
+   ],
+   "concepts": 8,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 4,
+   "lines": 20,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.03,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 198
+  },
+  "t07": {
+   "concept_names": [
+    "Error",
+    "Form",
+    "Value",
+    "as_u16",
+    "body_mut",
+    "file",
+    "multipart",
+    "post",
+    "read_json",
+    "status",
+    "text",
+    "unversioned"
+   ],
+   "concepts": 12,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "serde_json"
+   ],
+   "imports": 3,
+   "lines": 16,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.01,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 126
+  },
+  "t08": {
+   "concept_names": [
+    "call",
+    "get",
+    "header",
+    "into_reader"
+   ],
+   "concepts": 4,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 6,
+   "lines": 38,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.18,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 334
+  },
+  "t09": {
+   "concept_names": [
+    "Agent",
+    "Error",
+    "Proxy",
+    "Value",
+    "as_u16",
+    "body_mut",
+    "build",
+    "call",
+    "config_builder",
+    "get",
+    "proxy",
+    "read_json",
+    "status"
+   ],
+   "concepts": 13,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "serde_json"
+   ],
+   "imports": 4,
+   "lines": 14,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.04,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "connect",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 134
+  },
+  "t10": {
+   "concept_names": [
+    "Agent",
+    "Error",
+    "ResponseExt",
+    "TooManyRedirects",
+    "build",
+    "call",
+    "config_builder",
+    "get",
+    "max_redirects"
+   ],
+   "concepts": 9,
+   "exit": 0,
+   "extra_deps": 0,
+   "extras": [],
+   "imports": 3,
+   "lines": 12,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 129
+  }
+ },
+ "rust/wreq": {
+  "t01": {
+   "concept_names": [
+    "Result",
+    "Value",
+    "get",
+    "json",
+    "main",
+    "tokio"
+   ],
+   "concepts": 6,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 3,
+   "lines": 11,
+   "output": "42 ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "get_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 81
+  },
+  "t02": {
+   "concept_names": [
+    "Client",
+    "Result",
+    "Value",
+    "as_u16",
+    "is_timeout",
+    "json",
+    "main",
+    "post",
+    "status",
+    "timeout",
+    "tokio"
+   ],
+   "concepts": 11,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 6,
+   "lines": 29,
+   "output": "201 7 timeout",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.31,
+   "server_checks": {
+    "body": true,
+    "content_type": true,
+    "gave_up_early": true,
+    "slow_seen": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 219
+  },
+  "t03": {
+   "concept_names": [
+    "Client",
+    "Result",
+    "Value",
+    "build",
+    "builder",
+    "cookie_store",
+    "get",
+    "json",
+    "main",
+    "post",
+    "tokio"
+   ],
+   "concepts": 11,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 4,
+   "lines": 18,
+   "output": "ada",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.05,
+   "server_checks": {
+    "cookie_sent": true,
+    "login_body": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 133
+  },
+  "t04": {
+   "concept_names": [
+    "Client",
+    "Value",
+    "as_u16",
+    "get",
+    "headers",
+    "json",
+    "main",
+    "status",
+    "to_str",
+    "tokio"
+   ],
+   "concepts": 10,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 26,
+   "output": "200 3",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 1.21,
+   "server_checks": {
+    "backoff": true,
+    "retry_after_honored": true,
+    "three_attempts": true
+   },
+   "server_facts": {
+    "gaps": [
+     1.002,
+     0.202
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 227
+  },
+  "t05": {
+   "concept_names": [
+    "Client",
+    "Result",
+    "StreamExt",
+    "TryStreamExt",
+    "as_u16",
+    "futures",
+    "get",
+    "main",
+    "status",
+    "stream",
+    "tokio"
+   ],
+   "concepts": 11,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "futures",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 19,
+   "output": "90 10",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.31,
+   "server_checks": {
+    "all_requested": true,
+    "peak_at_least_8": true,
+    "peak_at_most_10": true
+   },
+   "server_facts": {
+    "peak": 10,
+    "seen": 100
+   },
+   "stderr_tail": "",
+   "tokens": 170
+  },
+  "t06": {
+   "concept_names": [
+    "AsyncWriteExt",
+    "Client",
+    "File",
+    "StreamExt",
+    "bytes_stream",
+    "fs",
+    "futures",
+    "get",
+    "head",
+    "header",
+    "io",
+    "main",
+    "to_str",
+    "tokio"
+   ],
+   "concepts": 14,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "futures",
+    "tokio"
+   ],
+   "imports": 6,
+   "lines": 27,
+   "output": "67108864",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.02,
+   "server_checks": {
+    "file_hash": true,
+    "no_full_redownload": true,
+    "resumed_with_range": true,
+    "two_drops_survived": true
+   },
+   "server_facts": {
+    "sent": 67108864,
+    "starts": [
+     0,
+     26843545,
+     46976204
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 246
+  },
+  "t07": {
+   "concept_names": [
+    "Client",
+    "Form",
+    "Value",
+    "as_u16",
+    "file",
+    "json",
+    "main",
+    "multipart",
+    "post",
+    "status",
+    "text",
+    "tokio"
+   ],
+   "concepts": 12,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 5,
+   "lines": 23,
+   "output": "200 262144 hello",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.01,
+   "server_checks": {
+    "field": true,
+    "file_hash": true,
+    "filename": true,
+    "multipart": true
+   },
+   "server_facts": {},
+   "stderr_tail": "",
+   "tokens": 153
+  },
+  "t08": {
+   "concept_names": [
+    "Client",
+    "StreamExt",
+    "drain",
+    "futures",
+    "get",
+    "header",
+    "main",
+    "tokio"
+   ],
+   "concepts": 8,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "futures",
+    "tokio"
+   ],
+   "imports": 6,
+   "lines": 42,
+   "output": "a b c",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.19,
+   "server_checks": {
+    "last_event_id": true,
+    "reconnected": true
+   },
+   "server_facts": {
+    "last_event_ids": [
+     null,
+     "2"
+    ]
+   },
+   "stderr_tail": "",
+   "tokens": 352
+  },
+  "t09": {
+   "concept_names": [
+    "Client",
+    "Proxy",
+    "Result",
+    "Value",
+    "as_u16",
+    "build",
+    "builder",
+    "get",
+    "http",
+    "json",
+    "main",
+    "proxy",
+    "status",
+    "tokio"
+   ],
+   "concepts": 14,
+   "exit": 0,
+   "extra_deps": 2,
+   "extras": [
+    "serde_json",
+    "tokio"
+   ],
+   "imports": 4,
+   "lines": 16,
+   "output": "200 proxy",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "target_host": true,
+    "via_proxy": true
+   },
+   "server_facts": {
+    "form": "absolute",
+    "host": "ergonomics.invalid"
+   },
+   "stderr_tail": "",
+   "tokens": 126
+  },
+  "t10": {
+   "concept_names": [
+    "Client",
+    "Policy",
+    "Result",
+    "build",
+    "builder",
+    "get",
+    "is_redirect",
+    "limited",
+    "main",
+    "redirect",
+    "tokio",
+    "uri"
+   ],
+   "concepts": 12,
+   "exit": 0,
+   "extra_deps": 1,
+   "extras": [
+    "tokio"
+   ],
+   "imports": 3,
+   "lines": 18,
+   "output": "http://127.0.0.1:18743/t10/final capped",
+   "output_ok": true,
+   "passed": true,
+   "seconds": 0.0,
+   "server_checks": {
+    "cap_enforced": true,
+    "final_reached": true
+   },
+   "server_facts": {
+    "loop_hits": 6
+   },
+   "stderr_tail": "",
+   "tokens": 142
+  }
+ }
+}

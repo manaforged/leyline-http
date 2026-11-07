@@ -140,7 +140,9 @@ pub async fn send_request_h1_pooled(
     proxy: Option<&crate::net::ProxyUrl>,
     stream: bool,
 ) -> Result<TransportResponse, Error> {
-    let method = Method::from_bytes(method.as_bytes()).map_err(|_| invalid_method(method))?;
+    let method = Method::from_bytes(method.as_bytes())
+        .ok()
+        .ok_or_else(|| invalid_method(method))?;
     let req = Prepared {
         method: &method,
         url,

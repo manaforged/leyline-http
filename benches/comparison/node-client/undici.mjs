@@ -1,9 +1,10 @@
 import { Client, Pool } from 'undici';
-import { caPem, run } from './harness.mjs';
+import { caPem, requestHeaders, run } from './harness.mjs';
 
 const ca = caPem();
 const tls = ca ? { ca } : { rejectUnauthorized: false };
 const h1 = process.env.CMP_PROTO === 'h1';
+const headers = requestHeaders();
 const concC = Number.parseInt(process.argv[6] ?? '', 10) || 64;
 
 const open = (url) => {
@@ -16,7 +17,7 @@ await run('undici', {
   open,
   get: async (client, url) => {
     const u = new URL(url);
-    const { statusCode, body } = await client.request({ path: u.pathname + u.search, method: 'GET' });
+    const { statusCode, body } = await client.request({ path: u.pathname + u.search, method: 'GET', headers });
     return { status: statusCode, body: Buffer.from(await body.arrayBuffer()) };
   },
   close: (client) => client.close(),

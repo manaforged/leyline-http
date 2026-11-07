@@ -5,9 +5,10 @@ use futures_util::{FutureExt, StreamExt};
 use http::{Method, StatusCode, header};
 use sha2::{Digest, Sha256};
 
-use super::RequestBuilder;
+use super::{Draft, RequestBuilder};
 use crate::core::atomic;
 use crate::core::response::Response;
+use crate::core::retry::RetryPlan;
 use crate::error::{Error, Kind, Result};
 use crate::profile::Encoding;
 
@@ -19,6 +20,7 @@ use file::{Metadata, Partial};
 
 type Progress = Arc<dyn Fn(u64, Option<u64>) + Send + Sync>;
 
+#[derive(Clone)]
 pub(super) struct Download {
     checksum: Option<[u8; 32]>,
     progress: Option<Progress>,
@@ -51,11 +53,57 @@ impl RequestBuilder {
         self.draft.download.get_or_insert_default().resume = resume;
         self
     }
-    /// Downloads atomically and resumes a saved prefix only when a strong ETag still matches.
+    /// Downloads atomically, retries a dropped transfer under the retry policy, and resumes a saved prefix only when a strong ETag still matches.
     pub async fn download_to(mut self, path: impl AsRef<Path>) -> Result<u64> {
         let key = self.prepare_download()?;
         let options = self.draft.download.take().unwrap_or_default();
         let target = path.as_ref().to_path_buf();
+        let retry = self.draft.carry.retry_policy.clone();
+        let mut attempt = 0;
+        loop {
+            let result = self
+                .next_transfer()
+                .transfer_to(target.clone(), key, options.clone())
+                .await;
+            let Err(error) = result else {
+                return result;
+            };
+            let failed = Err(error);
+            match retry.plan(&failed, attempt) {
+                RetryPlan::Backoff(wait) => tokio::time::sleep(wait).await,
+                _ => return failed.map(|_| 0),
+            }
+            attempt += 1;
+        }
+    }
+
+    fn next_transfer(&self) -> Self {
+        let draft = &self.draft;
+        Self {
+            session: self.session.clone(),
+            draft: Box::new(Draft {
+                method: draft.method.clone(),
+                url: draft.url.clone(),
+                body: crate::wire::Body::default(),
+                headers: draft.headers.clone(),
+                query_params: Vec::new(),
+                builder_error: None,
+                compress: None,
+                trusted_origin: draft.trusted_origin.clone(),
+                deadline: draft.deadline,
+                response: draft.response,
+                download: None,
+                carry: draft.carry.clone(),
+            }),
+        }
+    }
+
+    async fn transfer_to(
+        mut self,
+        target: std::path::PathBuf,
+        key: [u8; 32],
+        options: Box<Download>,
+    ) -> Result<u64> {
         let resume = options.resume;
         let partial =
             Arc::new(atomic::blocking(move |_| Partial::open(target, key, resume)).await?);

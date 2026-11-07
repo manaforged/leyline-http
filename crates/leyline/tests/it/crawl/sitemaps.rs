@@ -286,7 +286,7 @@ fn a_sitemap_retry_waiting_for_a_free_sitemap_slot_does_not_spin() {
                 "/busy.xml" => testing::Response::new(200).body(map.clone()),
                 "/slow1.xml" | "/slow2.xml" => testing::Response::new(200)
                     .body("<urlset></urlset>")
-                    .delay(Duration::from_secs(2)),
+                    .delay(Duration::from_millis(500)),
                 path => html(&format!("<p>{path}</p>")),
             })
             .unwrap();

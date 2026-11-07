@@ -9,7 +9,7 @@ You need rustup, Git, and a C and C++ compiler; on Windows, the MSVC build tools
 ```sh
 git clone --recurse-submodules https://github.com/manaforged/leyline-http
 cd leyline-http
-cargo test -p leyline-http --features full
+cargo test -p leyline-http --features full,bench-internals
 ```
 
 ## Focused checks

@@ -1,0 +1,75 @@
+{
+ "node/axios": {
+  "installed_bytes": 2984712
+ },
+ "node/fetch": {
+  "installed_bytes": 0
+ },
+ "node/got": {
+  "installed_bytes": 1639923
+ },
+ "node/leyline-http": {
+  "installed_bytes": 17476220
+ },
+ "node/undici": {
+  "installed_bytes": 2186078
+ },
+ "python/aiohttp": {
+  "installed_bytes": 13753404
+ },
+ "python/curl_cffi": {
+  "installed_bytes": 44095224
+ },
+ "python/httpx": {
+  "installed_bytes": 3889070
+ },
+ "python/leyline": {
+  "installed_bytes": 14565245
+ },
+ "python/niquests": {
+  "installed_bytes": 19679194
+ },
+ "python/requests": {
+  "installed_bytes": 3119090
+ },
+ "rust/leyline-http": {
+  "binary_bytes": 14459880,
+  "cold_build_seconds": [
+   56.1,
+   65.8,
+   59.5
+  ],
+  "crates_compiled": 142,
+  "stripped_bytes": 11806120
+ },
+ "rust/reqwest": {
+  "binary_bytes": 8073976,
+  "cold_build_seconds": [
+   22.0,
+   22.3,
+   23.0
+  ],
+  "crates_compiled": 105,
+  "stripped_bytes": 6387096
+ },
+ "rust/ureq": {
+  "binary_bytes": 3342608,
+  "cold_build_seconds": [
+   8.4,
+   9.0,
+   9.1
+  ],
+  "crates_compiled": 31,
+  "stripped_bytes": 2611264
+ },
+ "rust/wreq": {
+  "binary_bytes": 5605584,
+  "cold_build_seconds": [
+   36.0,
+   39.1,
+   38.9
+  ],
+  "crates_compiled": 104,
+  "stripped_bytes": 4279144
+ }
+}

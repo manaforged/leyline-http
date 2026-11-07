@@ -120,6 +120,16 @@ impl Form {
         }
     }
 
+    /// Appends the text field `name`.
+    pub fn text(self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.part(name, Part::text(value))
+    }
+
+    /// Appends the file at `path` under the field `name`.
+    pub fn file(self, name: impl Into<String>, path: impl AsRef<Path>) -> io::Result<Self> {
+        Ok(self.part(name, Part::file(path)?))
+    }
+
     /// Appends `part` under the field `name`.
     pub fn part(mut self, name: impl Into<String>, mut part: Part) -> Self {
         part.name = name.into();

@@ -205,7 +205,10 @@ async fn a_crawl_reads_robots_txt_again_after_a_day() {
         .host_limits(leyline::HostLimits::new().max_in_flight(4))
         .build()
         .unwrap();
-    let mut crawl = session.crawl(server.url("/")).respect(Respect::Robots);
+    let mut crawl = session
+        .crawl(server.url("/"))
+        .respect(Respect::Robots)
+        .host_limits(unpaced());
     crawl.next().await.unwrap().unwrap();
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(25 * 60 * 60)).await;

@@ -1,5 +1,5 @@
-core_revision e7379f27
-harness_revision bc9d4b48
+core_revision ccd20c60
+harness_revision 488180a0
 rustc rustc 1.99.1 (58cf8f9c3 2026-10-13)
 go go1.27.1
 independent_run 1

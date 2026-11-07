@@ -10,7 +10,7 @@ if [ "$PROFILE" = bare ]; then
 else
   unset CMP_HEADERS
   LIBS=${LIBS:-leyline wreq tlsclient}; kept=""
-  for lib in $LIBS; do case $lib in leyline|leyline-nt|leyline-cores|leyline-blocking|leyline-python|leyline-node|wreq|tlsclient) kept="$kept $lib" ;; *) echo "$lib has no browser profile; left out" >&2 ;; esac; done
+  for lib in $LIBS; do case $lib in leyline|leyline-nt|leyline-cores|leyline-tuned|leyline-blocking|leyline-python|leyline-python-sync|leyline-node|wreq|tlsclient) kept="$kept $lib" ;; *) echo "$lib has no browser profile; left out" >&2 ;; esac; done
   LIBS=${kept# }
   [[ " $LIBS " == *" leyline "* ]] || { echo "PROFILE=$PROFILE needs leyline in LIBS: its headers are the reference" >&2; exit 1; }
 fi
@@ -27,15 +27,10 @@ else
   LIBS=${LIBS:-leyline leyline-cores h2 hyper}
   CELLS=${CELLS:-seq:1:1:20000 1c64:1:64:200000 8c8:8:8:200000 8c256:8:256:400000}
 fi
-if [ "$PROFILE" = bare ]; then
-  for lib in $LIBS; do
-    case $lib in leyline-python|leyline-node) echo "$lib requires PROFILE=chrome or chrome<N>; bindings do not expose bare sessions" >&2; exit 1 ;; esac
-  done
-fi
 if [ "$TIMEOUT" != default ]; then
   for lib in $LIBS; do
     case $lib in
-      leyline|leyline-nt|leyline-cores|leyline-blocking|cand-*|reqwest|hyper|h2|curl|wreq|ureq|nethttp|tlsclient|fasthttp|pingora) ;;
+      leyline|leyline-nt|leyline-cores|leyline-tuned|leyline-blocking|cand-*|reqwest|hyper|h2|curl|wreq|ureq|nethttp|tlsclient|fasthttp|pingora) ;;
       floor) [ "$TIMEOUT" = none ] || { echo "floor has no request timeout; it cannot honour TIMEOUT=$TIMEOUT" >&2; exit 1; } ;;
       *) echo "$lib does not read CMP_TIMEOUT; it cannot honour TIMEOUT=$TIMEOUT" >&2; exit 1 ;;
     esac
@@ -49,14 +44,14 @@ if [ "${BUILD:-1}" = 1 ]; then
   (cd .. && cargo build --release -q --example origin && cp target/release/examples/origin comparison/bin/server) || exit 1
   for lib in $LIBS; do
     case $lib in
-      leyline|leyline-nt|leyline-cores|leyline-blocking)
+      leyline|leyline-nt|leyline-cores|leyline-tuned|leyline-blocking)
         (cd leyline-client && cargo build --release -q && cp target/release/leyline-cmp-client ../bin/leyline && cp target/release/leyline-blocking ../bin/leyline-blocking) && source_hash > bin/leyline.source_hash ;;
       reqwest|hyper|h2|curl|wreq|ureq|pingora)
         (cd "$lib-client" && cargo build --release -q && b=$lib-cmp-client && { [ -f "target/release/$b" ] || b=$lib; } && cp "target/release/$b" "../bin/$lib") ;;
       floor) (cd floor-client && cargo build --release -q && cp target/release/floor ../bin/floor) ;;
       nethttp|tlsclient|fasthttp) (cd go && go build -o "../bin/$lib" "./$lib") ;;
       dotnet-httpclient) (cd dotnet-client && $DOTNET publish -c Release -o bin --nologo -v q) ;;
-      undici|axios) (cd node-client && npm install --silent) ;;
+      undici|axios|fetch|got) (cd node-client && npm install --silent) ;;
       okhttp|apache-httpclient) sh java-client/fetch-deps.sh >/dev/null ;;
     esac || exit 1
   done
@@ -64,7 +59,7 @@ fi
 
 LCH=bare
 if [ "$PROFILE" != bare ]; then
-  versions() { case $1 in leyline|leyline-nt|leyline-cores|leyline-blocking) ls "$ROOT/crates/leyline/profiles/chrome" | sed -n 's/^\([0-9]*\)\.toml$/\1/p' ;; leyline-python) "$PYTHON" "$C/python-client/leyline_client.py" profiles ;; leyline-node) node "$C/node-client/leyline.mjs" profiles ;; *) "$C/bin/$1" profiles ;; esac; }
+  versions() { case $1 in leyline|leyline-nt|leyline-cores|leyline-tuned|leyline-blocking) ls "$ROOT/crates/leyline/profiles/chrome" | sed -n 's/^\([0-9]*\)\.toml$/\1/p' ;; leyline-python) "$PYTHON" "$C/python-client/leyline_client.py" profiles ;; leyline-node) node "$C/node-client/leyline.mjs" profiles ;; *) "$C/bin/$1" profiles ;; esac; }
   if [ "$PROFILE" = chrome ]; then
     N=$(for lib in $LIBS; do versions "$lib" | sort -u; done | sort -n | uniq -c | awk -v n="$(wc -w <<<"$LIBS")" '$1 == n {v = $2} END {print v}')
     [ -n "$N" ] || { echo "no Chrome version is common to: $LIBS" >&2; exit 1; }
@@ -79,18 +74,18 @@ OUT=$C/results/${TAG:-$(date -u +%F)-libs-$PROTO-$PROFILE-timeout-$TIMEOUT}; mkd
 
 CP=$(ls "$C"/java-client/lib/*.jar 2>/dev/null | paste -sd:)
 declare -A CMD=(
-  [leyline]="env LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-nt]="env CMP_TIMEOUT=none LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-cores]="env CMP_CORES=auto LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-blocking]="env LEYLINE_CHROME=$LCH $C/bin/leyline-blocking" [floor]="$C/bin/floor"
+  [leyline]="env LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-nt]="env CMP_TIMEOUT=none LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-cores]="env CMP_CORES=auto LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-tuned]="env CMP_EVENT_INTERVAL=4 LEYLINE_CHROME=$LCH $C/bin/leyline" [leyline-blocking]="env LEYLINE_CHROME=$LCH $C/bin/leyline-blocking" [floor]="$C/bin/floor"
   [reqwest]="$C/bin/reqwest" [hyper]="$C/bin/hyper" [pingora]="$C/bin/pingora"
   [h2]="$C/bin/h2" [curl]="$C/bin/curl" [wreq]="$C/bin/wreq" [nethttp]="$C/bin/nethttp" [tlsclient]="$C/bin/tlsclient"
-  [undici]="node $C/node-client/undici.mjs" [node-http2]="node $C/node-client/http2.mjs"
-  [httpx]="$PYTHON -I $C/python-client/httpx_client.py"
-  [leyline-python]="$PYTHON $C/python-client/leyline_client.py" [leyline-node]="node $C/node-client/leyline.mjs"
+  [undici]="node $C/node-client/undici.mjs" [node-http2]="node $C/node-client/http2.mjs" [fetch]="node $C/node-client/fetch.mjs" [got]="node $C/node-client/got.mjs"
+  [httpx]="$PYTHON -Es $C/python-client/httpx_client.py" [curl-cffi]="$PYTHON -Es $C/python-client/curl_cffi_client.py" [rnet]="$PYTHON -Es $C/python-client/rnet_client.py" [niquests]="$PYTHON -Es $C/python-client/niquests_client.py" [pycurl]="$PYTHON -Es $C/python-client/pycurl_client.py"
+  [leyline-python]="$PYTHON -Es $C/python-client/leyline_client.py" [leyline-python-sync]="$PYTHON -Es $C/python-client/leyline_sync_client.py" [leyline-node]="node $C/node-client/leyline.mjs"
   [jdk-httpclient]="java $C/java-client/JdkClient.java" [okhttp]="java -cp $CP $C/java-client/OkClient.java"
   [apache-httpclient]="java -cp $CP $C/java-client/ApacheClient.java" [dotnet-httpclient]="$DOTNET $C/dotnet-client/bin/dotnet-client.dll"
   [ureq]="$C/bin/ureq" [fasthttp]="$C/bin/fasthttp" [axios]="node $C/node-client/axios.mjs"
-  [requests]="$PYTHON -I $C/python-client/requests_client.py" [aiohttp]="$PYTHON -I $C/python-client/aiohttp_client.py"
+  [requests]="$PYTHON -Es $C/python-client/requests_client.py" [aiohttp]="$PYTHON -Es $C/python-client/aiohttp_client.py"
 )
-declare -A DIV=([httpx]=20 [requests]=20 [aiohttp]=10 [undici]=4 [node-http2]=4 [axios]=4 [jdk-httpclient]=2 [okhttp]=2 [apache-httpclient]=2)
+declare -A DIV=([httpx]=20 [requests]=20 [aiohttp]=10 [curl-cffi]=10 [rnet]=4 [niquests]=20 [pycurl]=4 [undici]=4 [node-http2]=4 [axios]=4 [fetch]=4 [got]=10 [jdk-httpclient]=2 [okhttp]=2 [apache-httpclient]=2)
 for lib in $LIBS; do case $lib in cand-*) CMD[$lib]="env LEYLINE_CHROME=$LCH $C/bin/$lib" ;; esac; done
 
 "${SPIN[@]}" bin/server "${SERVER_ADDR:-127.0.0.1:0}" > "$OUT/server.log" 2>&1 & SRV=$!
@@ -162,24 +157,62 @@ run() {
 
 : > "$OUT/rows.txt"
 declare -A SIZED
+busy_percent() {
+  local a b c d e f g h t1 i1 t2 i2
+  read -r _ a b c d e f g h _ < /proc/stat; t1=$((a+b+c+d+e+f+g+h)); i1=$((d+e)); sleep "${IDLE_GATE_SAMPLE:-0.2}"
+  read -r _ a b c d e f g h _ < /proc/stat; t2=$((a+b+c+d+e+f+g+h)); i2=$((d+e))
+  echo $(( 100 * ((t2-t1) - (i2-i1)) / (t2-t1) ))
+}
+idle_gate() {
+  [ -n "${IDLE_GATE:-}" ] || return 0
+  local waited=0 start=$SECONDS
+  until [ "$(busy_percent)" -lt "$IDLE_GATE" ]; do
+    waited=$((SECONDS - start))
+    [ "$waited" -ge "${IDLE_GATE_MAX:-1800}" ] && { echo "timeout $lib $name round $r" >> "$OUT/gate.log"; return 0; }
+  done
+  [ "$waited" -eq 0 ] || echo "waited $waited $lib $name round $r" >> "$OUT/gate.log"
+}
+calibrate() {
+  local lib=$1 name=$2 conns=$3 streams=$4 limit=$5 m a b dt
+  m=$(( streams > 0 ? streams * 8 : 256 ))
+  while :; do
+    a=$(run "$lib" "$conns" "$streams" "$m"); b=$(run "$lib" "$conns" "$streams" $((2 * m)))
+    dt=$(( ${b##* } - ${a##* } ))
+    [ "$dt" -lt 50000000 ] && [ $((2 * m)) -le "$limit" ] || break
+    m=$((2 * m))
+  done
+  m=$(( m * ${TARGET_MS:-1000} * 1000000 / (dt > 0 ? dt : 1) ))
+  [ "$m" -gt "$limit" ] && m=$limit
+  SIZED[$name.$lib]=$(( m > 0 ? m : 1 ))
+}
+declare -A DECIDED
+for cell in $CELLS; do IFS=: read -r name conns streams n <<<"$cell"; [ "$name" = seq ] && streams=0
+  for lib in $LIBS; do calibrate "$lib" "$name" "$conns" "$streams" $((n / ${DIV[$lib]:-1})); done
+done
 for r in $(seq 1 "$R"); do
   for cell in $CELLS; do IFS=: read -r name conns streams n <<<"$cell"; [ "$name" = seq ] && streams=0
     order=$LIBS; (( r % 2 )) || order=$(tr " " "\n" <<<"$LIBS" | tac | tr "\n" " ")
     for lib in $order; do
+      [ -z "${DECIDED[$name.$lib]:-}" ] || continue
       m=${SIZED[$name.$lib]:-$((n / ${DIV[$lib]:-1}))}; [ "$streams" -gt 0 ] && m=$((m / streams * streams))
       [ "$m" -gt 0 ] || { echo "$name: $lib gets no requests per stream" >&2; exit 1; }
+      idle_gate
       row="$r $name $lib $m $(run "$lib" "$conns" "$streams" "$m") $((2 * m)) $(run "$lib" "$conns" "$streams" $((2 * m)))"
       [ "$(wc -w <<<"$row")" = 11 ] || { echo "$lib failed in round $r of $name; see $OUT/stderr.$lib" >&2; exit 1; }
       echo "$row" | tee -a "$OUT/rows.txt"
       read -r -a f <<<"$row"
       SIZED[$name.$lib]=$(( m * ${TARGET_MS:-1000} * 1000000 / (f[10] - f[6] > 0 ? f[10] - f[6] : 1) ))
-      [ "${SIZED[$name.$lib]}" -gt "$m" ] && SIZED[$name.$lib]=$m
+      [ "${SIZED[$name.$lib]}" -gt $((n / ${DIV[$lib]:-1})) ] && SIZED[$name.$lib]=$((n / ${DIV[$lib]:-1}))
       [ "${SIZED[$name.$lib]}" -ge "${streams:-1}" ] || SIZED[$name.$lib]=$(( streams > 0 ? streams : 1 ))
     done
   done
+  if [ -n "${STOP_REF:-}" ]; then
+    while read -r name lib; do [ -n "$name" ] && DECIDED[$name.$lib]=1; done < <(python3 "$C/libs-stop.py" "$OUT/rows.txt" "$STOP_REF")
+  fi
 done
 
 {
+  echo "stop_ref ${STOP_REF:-none} stop_min_rounds ${STOP_MIN_ROUNDS:-3} stop_margin ${STOP_MARGIN:-0.05}"
   echo "date_utc $(date -u +%FT%TZ)"; echo "kernel $(uname -r)"; echo "loadavg_before $LOAD_BEFORE"; echo "loadavg_after $(cut -d' ' -f1-3 /proc/loadavg)"
   echo "governor $(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null)"
   echo "cpu $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs)"
@@ -201,13 +234,13 @@ done
     echo "ca_sha256 none"
   fi
   for lock in */Cargo.lock; do grep -A1 -E '^name = "(leyline-http|reqwest|hyper|hyper-util|h2|wreq|curl-sys|pingora-core)"$' "$lock" | paste -sd' ' | sed "s#^#$lock #"; done
-  echo "go $(go version 2>/dev/null)"; echo "node $(node --version) undici $(node -p "require('$C/node-client/node_modules/undici/package.json').version")"
-  echo "python $($PYTHON -V 2>&1) $($PYTHON -m pip freeze 2>/dev/null | grep -E '^(httpx|h2|httpcore)==' | paste -sd' ')"
+  echo "go $(go version 2>/dev/null)"; echo "node $(node --version) builtin_undici $(node -p 'process.versions.undici') $(for p in undici axios got; do echo "$p $(node -p "require('$C/node-client/node_modules/$p/package.json').version" 2>/dev/null)"; done | paste -sd' ')"
+  echo "python $($PYTHON -V 2>&1) $($PYTHON -m pip freeze 2>/dev/null | grep -E '^(httpx|h2|httpcore|aiohttp|requests|urllib3|curl_cffi|rnet|niquests|urllib3-future|jh2|qh3|pycurl)==' | paste -sd' ') $($PYTHON -c 'import pycurl; print(pycurl.version)' 2>/dev/null)"
   if [[ " $LIBS " == *" leyline-python "* ]]; then
-    "$PYTHON" -c 'import hashlib,pathlib,sys,leyline,leyline._leyline as native,leyline._session as wrapper; print("leyline_python_version",leyline.__version__); print("leyline_python_native_sha256",hashlib.sha256(pathlib.Path(native.__file__).read_bytes()).hexdigest()); paths=[native.__file__,wrapper.__file__,*sys.argv[1:]]; print("leyline_python_artifact_sha256",hashlib.sha256(b"".join(hashlib.sha256(pathlib.Path(p).read_bytes()).digest() for p in paths)).hexdigest())' "$C/python-client/leyline_client.py" "$C/python-client/httpx_client.py"
+    "$PYTHON" -c 'import hashlib,pathlib,sys,leyline,leyline._leyline as native,leyline._session as wrapper; print("leyline_python_version",leyline.__version__); print("leyline_python_native_sha256",hashlib.sha256(pathlib.Path(native.__file__).read_bytes()).hexdigest()); paths=[native.__file__,wrapper.__file__,*sys.argv[1:]]; print("leyline_python_artifact_sha256",hashlib.sha256(b"".join(hashlib.sha256(pathlib.Path(p).read_bytes()).digest() for p in paths)).hexdigest())' "$C/python-client/leyline_client.py" "$C/python-client/harness.py"
   fi
   if [[ " $LIBS " == *" leyline-node "* ]]; then
-    node -e 'const fs=require("node:fs"),crypto=require("node:crypto"),p=require("leyline-http"),digest=name=>crypto.createHash("sha256").update(fs.readFileSync(name)).digest(); console.log("leyline_node_version",p.version()); const native=Object.keys(require.cache).filter(n=>n.endsWith(".node")); for(const name of native) console.log("leyline_node_native_sha256",digest(name).toString("hex")); console.log("leyline_node_artifact_sha256",crypto.createHash("sha256").update(Buffer.concat([...native,require.resolve("leyline-http"),...process.argv.slice(1)].map(digest))).digest("hex"))' "$C/node-client/leyline.mjs" "$C/node-client/harness.mjs"
+    (cd "$C/node-client" && node -e 'const fs=require("node:fs"),crypto=require("node:crypto"),p=require("leyline-http"),digest=name=>crypto.createHash("sha256").update(fs.readFileSync(name)).digest(); console.log("leyline_node_version",p.version()); const native=Object.keys(require.cache).filter(n=>n.endsWith(".node")); for(const name of native) console.log("leyline_node_native_sha256",digest(name).toString("hex")); console.log("leyline_node_artifact_sha256",crypto.createHash("sha256").update(Buffer.concat([...native,require.resolve("leyline-http"),...process.argv.slice(1)].map(digest))).digest("hex"))' "$C/node-client/leyline.mjs" "$C/node-client/harness.mjs")
   fi
   echo "java $(java -version 2>&1 | head -1)"; echo "okhttp $(ls java-client/lib | paste -sd' ')"
   echo "dotnet $($DOTNET --version 2>/dev/null)"; echo "proto $PROTO"

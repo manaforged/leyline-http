@@ -15,6 +15,12 @@ pub struct FrameWriter {
     unflushed: bool,
 }
 
+impl Default for FrameWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrameWriter {
     pub fn new() -> Self {
         Self {

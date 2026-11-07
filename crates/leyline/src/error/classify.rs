@@ -4,7 +4,8 @@ use super::BodyLimit;
 use super::{Cause, Error, Kind};
 
 impl Error {
-    pub(crate) fn is_timeout(&self) -> bool {
+    /// Returns true when a connect, read, or total timeout ended the request.
+    pub fn is_timeout(&self) -> bool {
         self.inner.kind == Kind::Timeout
             || self
                 .io_cause()

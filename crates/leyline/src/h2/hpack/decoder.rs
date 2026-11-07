@@ -21,6 +21,12 @@ pub struct Header {
     pub value: Bytes,
 }
 
+impl Default for Decoder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Decoder {
     pub fn new() -> Self {
         Self {

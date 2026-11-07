@@ -12,6 +12,13 @@ version and publish as separate crates.
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The [upgrade guide](UPGRADE.md) maps the changed 0.1.6 names. The sections below list new features, behavior changes, removals without a replacement, and fixes.
 
+### Added since the first 0.2 draft
+
+- `leyline::get` sends a one-off request on a new default session.
+- `Error::is_timeout` is public.
+- `multipart::Form::text` and `Form::file` add a field without naming `Part`.
+- `RequestBuilder::download_to` retries a dropped transfer under the retry policy and resumes when the server sends a strong ETag.
+
 ### Breaking changes
 
 #### Upgrading from 0.1.6

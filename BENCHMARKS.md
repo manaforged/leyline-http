@@ -60,7 +60,7 @@ is retained rather than changing either fingerprint for the benchmark.
 Three independent runs used four alternating-order rounds each, bare profiles,
 identical request-header values, certificate verification against a local test
 CA, a 10-byte response, and a 30-second request timeout. The CPU frequency
-governor was set to `performance`. Leyline is commit `e7379f27`. `Leyline` is the
+governor was set to `performance`. Leyline is commit `ccd20c60`. `Leyline` is the
 default layout: one multi-threaded Tokio runtime and one shared session.
 `Leyline, one runtime per core` is the same client run through
 `SessionBuilder::run_per_core`; for HTTP/2 the harness caps its runtime count at

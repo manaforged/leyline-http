@@ -18,6 +18,12 @@ pub struct FrameReader {
     header: Option<FrameHeader>,
 }
 
+impl Default for FrameReader {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FrameReader {
     pub fn new() -> Self {
         Self {

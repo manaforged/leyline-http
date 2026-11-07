@@ -51,9 +51,10 @@ let again = Session::load("session.json")?.build()?;
 - Match on `err.kind()` or a predicate such as `err.is_retryable()`. Do not parse the error message.
 - Use `session.tab()` when requests belong to a page: each request after `open` sends the current page as its `from_page`, so its headers match the kind of request.
 - For the highest request rate from one process, call `Session::builder().run_per_core(|session| async move { ... })`: one single-threaded runtime per core, with cookies, cache and tokens shared and connections per core. It needs at least as many connections as cores to help.
+- On a shared multi-threaded runtime with many requests in flight, set Tokio's `event_interval(4)` on the runtime builder. See `docs/guide/throughput.md`.
 - Use `session.save(path)` and `Session::load(path)` to keep cookies and the identity across runs.
 - Enable a bounded HTTP cache with `Session::builder().cache(bytes)`; clones share it, and `session.clear_cache()` empties it.
-- Call `request.download_to(path).await?` to resume a download with a strong ETag; `sha256` and `progress` configure verification and reporting.
+- Call `request.retry(n).download_to(path).await?` to survive dropped transfers: each retry resumes when the server sends a strong ETag; `sha256` and `progress` configure verification and reporting.
 - Call `request.events()?` for parsed server-sent events, then await `next()`; `retry` bounds reconnections.
 - Pair `bearer_auth` and `base_url` with `refresh_token` to share an asynchronous token refresh after a 401.
 - Use `crawl.save(path).await?` and `Crawl::load(&session, path)?` to resume pending pages and duplicate history.

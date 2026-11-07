@@ -253,3 +253,8 @@ pub use crate::profile::TlsMinVersion;
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub use crate::tls::TlsContext;
 pub use crate::tls::trust::Tls;
+
+/// Returns a `GET` request builder on a new default [`Session`], for one-off requests.
+pub fn get(url: impl IntoUrl) -> RequestBuilder {
+    Session::new().get(url)
+}

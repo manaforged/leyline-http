@@ -1,0 +1,11 @@
+[package]
+name = "ergo-ureq"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+ureq = { version = "=3.5.1", features = ["json", "cookies", "multipart"] }
+serde_json = "1"

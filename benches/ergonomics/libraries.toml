@@ -1,0 +1,105 @@
+[[library]]
+name = "leyline-http"
+lang = "rust"
+version = "0.2.0 (path dependency)"
+install = "cargo add leyline-http tokio -F tokio/macros,tokio/rt-multi-thread"
+docs = "https://docs.rs/leyline-http"
+bundled = []
+[[library]]
+name = "reqwest"
+lang = "rust"
+version = "0.13.5"
+install = "cargo add reqwest tokio -F reqwest/json,tokio/macros,tokio/rt-multi-thread"
+docs = "https://docs.rs/reqwest/0.13.5/reqwest/"
+bundled = []
+[[library]]
+name = "ureq"
+lang = "rust"
+version = "3.5.1"
+install = "cargo add ureq -F json"
+docs = "https://docs.rs/ureq/3.5.1/ureq/"
+bundled = []
+[[library]]
+name = "wreq"
+lang = "rust"
+version = "0.16.3"
+install = "cargo add wreq tokio -F wreq/json,tokio/macros,tokio/rt-multi-thread"
+docs = "https://docs.rs/wreq/0.16.3/wreq/"
+bundled = []
+[[library]]
+name = "leyline"
+lang = "python"
+version = "0.1.0 (local build)"
+install = "pip install leyline-http"
+docs = "https://manaforged.github.io/leyline-http/"
+bundled = []
+[[library]]
+name = "requests"
+lang = "python"
+version = "2.34.2"
+install = "pip install requests"
+docs = "https://requests.readthedocs.io/en/latest/"
+bundled = ["urllib3"]
+[[library]]
+name = "httpx"
+lang = "python"
+version = "0.28.1"
+install = "pip install httpx"
+docs = "https://www.python-httpx.org/"
+bundled = []
+[[library]]
+name = "aiohttp"
+lang = "python"
+version = "3.14.5"
+install = "pip install aiohttp"
+docs = "https://docs.aiohttp.org/en/stable/"
+bundled = []
+[[library]]
+name = "curl_cffi"
+lang = "python"
+version = "0.17.0"
+install = "pip install curl_cffi"
+docs = "https://curl-cffi.readthedocs.io/en/latest/"
+bundled = []
+[[library]]
+name = "niquests"
+lang = "python"
+version = "3.21.2"
+install = "pip install niquests"
+docs = "https://niquests.readthedocs.io/en/latest/"
+bundled = []
+[[library]]
+name = "leyline-http"
+lang = "node"
+version = "0.1.0 (local build)"
+install = "npm install leyline-http"
+docs = "https://manaforged.github.io/leyline-http/"
+bundled = []
+[[library]]
+name = "fetch"
+lang = "node"
+version = "built into Node.js"
+install = "none"
+docs = "https://nodejs.org/api/globals.html#fetch"
+bundled = []
+[[library]]
+name = "axios"
+lang = "node"
+version = "1.21.0"
+install = "npm install axios"
+docs = "https://axios.rest/"
+bundled = []
+[[library]]
+name = "got"
+lang = "node"
+version = "16.2.0"
+install = "npm install got"
+docs = "https://github.com/sindresorhus/got/tree/main/documentation"
+bundled = []
+[[library]]
+name = "undici"
+lang = "node"
+version = "8.12.4"
+install = "npm install undici"
+docs = "https://undici.nodejs.org/"
+bundled = []

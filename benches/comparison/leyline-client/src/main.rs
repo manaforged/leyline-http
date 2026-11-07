@@ -48,9 +48,14 @@ impl Trace for Stages {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    tokio::spawn(run()).await.expect("client task");
+fn main() {
+    let mut runtime = tokio::runtime::Builder::new_multi_thread();
+    runtime.enable_all();
+    if let Some(interval) = env::var("CMP_EVENT_INTERVAL").ok().and_then(|v| v.parse().ok()) {
+        runtime.event_interval(interval);
+    }
+    let runtime = runtime.build().expect("client runtime");
+    runtime.block_on(async { tokio::spawn(run()).await.expect("client task") });
 }
 
 async fn run() {

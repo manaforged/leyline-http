@@ -1,5 +1,5 @@
 import http2 from 'node:http2';
-import { caPem, run } from './harness.mjs';
+import { caPem, requestHeaders, run } from './harness.mjs';
 
 if (process.env.CMP_PROTO === 'h1') {
   console.error('node-http2 speaks only HTTP/2; unset CMP_PROTO or set it to h2');
@@ -8,13 +8,14 @@ if (process.env.CMP_PROTO === 'h1') {
 
 const ca = caPem();
 const tls = ca ? { ca } : { rejectUnauthorized: false };
+const headers = requestHeaders();
 
 await run('node-http2', {
   open: (url) => http2.connect(new URL(url).origin, tls),
   get: (session, url) =>
     new Promise((resolve, reject) => {
       const u = new URL(url);
-      const req = session.request({ ':method': 'GET', ':path': u.pathname + u.search });
+      const req = session.request({ ':method': 'GET', ':path': u.pathname + u.search, ...headers });
       let status = 0;
       const chunks = [];
       req.on('response', (headers) => {

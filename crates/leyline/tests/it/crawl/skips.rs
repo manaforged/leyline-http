@@ -143,7 +143,7 @@ async fn a_stalled_page_body_ends_at_the_session_deadline() {
     .await
     .unwrap();
     let session = Session::builder()
-        .timeout(leyline::Timeout::new().total(Duration::from_secs(2)))
+        .timeout(leyline::Timeout::new().total(Duration::from_millis(500)))
         .build()
         .unwrap();
     let mut crawl = session

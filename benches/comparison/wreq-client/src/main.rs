@@ -21,7 +21,10 @@ fn emulation() -> Profile {
 }
 
 fn build(ca: Option<&[u8]>) -> Client {
-    let mut b = Client::builder().emulation(emulation());
+    let mut b = Client::builder();
+    if env::var_os("CMP_HEADERS").is_none() {
+        b = b.emulation(emulation());
+    }
     if h1() {
         b = b.http1_only();
     }

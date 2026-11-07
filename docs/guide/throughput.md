@@ -51,6 +51,26 @@ everything to one host over one connection is faster on a shared runtime.
 [BENCHMARKS.md](https://github.com/manaforged/leyline-http/blob/main/BENCHMARKS.md)
 lists both layouts as `leyline` and `leyline-cores`.
 
+## Check for I/O more often on a shared runtime
+
+If you keep one multi-threaded runtime and run many requests at once, lower
+Tokio's `event_interval`. A busy worker then checks for finished I/O after 4
+tasks instead of the default 61, so responses wait less in the kernel.
+
+```rust,no_run
+let runtime = tokio::runtime::Builder::new_multi_thread()
+    .enable_all()
+    .event_interval(4)
+    .build()?;
+# Ok::<(), std::io::Error>(())
+```
+
+In the repository's benchmark, this raised HTTP/1.1 at 64 streams by 17% and
+HTTP/2 at 8 connections with 256 streams by 7%. It left the other cells within
+noise and used up to 4% more CPU per request. Sequential requests gain nothing,
+so leave the default if you send one request at a time.
+`benches/comparison/libs.sh` lists this layout as `leyline-tuned`.
+
 ## Keep one session per runtime
 
 A session's connections, and the task that drives each HTTP/2 connection,

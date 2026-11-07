@@ -4,7 +4,7 @@ h11==0.16.0
 h2==4.4.1
 hpack==4.2.0
 hyperframe==6.1.0
-anyio==4.15.1
+anyio==4.16.0
 idna==3.20
 certifi==2026.10.23
 typing_extensions==4.16.0
@@ -19,3 +19,13 @@ frozenlist==1.8.0
 multidict==7.2.1
 propcache==0.5.4
 yarl==1.25.1
+curl_cffi==0.17.0
+cffi==2.1.1
+pycparser==3.12
+rnet==2.4.2
+niquests==3.21.2
+urllib3-future==2.25.905
+jh2==5.0.15
+qh3==2.1.0
+wassima==2.1.5
+pycurl==7.49.0

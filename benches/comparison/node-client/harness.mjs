@@ -1,10 +1,27 @@
-import { readFileSync } from 'node:fs';
-import { X509Certificate } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { X509Certificate, createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 export function caPem() {
   const path = process.env.CMP_CA;
   if (!path) return null;
   return new X509Certificate(readFileSync(path)).toString();
+}
+
+export function caPath() {
+  const pem = caPem();
+  if (!pem) return null;
+  const path = join(tmpdir(), `cmp-ca-${createHash('sha256').update(pem).digest('hex').slice(0, 16)}.pem`);
+  writeFileSync(path, pem);
+  return path;
+}
+
+export function requestHeaders() {
+  const path = process.env.CMP_HEADERS;
+  if (!path) return undefined;
+  const lines = readFileSync(path, 'utf8').split('\n').filter(Boolean);
+  return Object.fromEntries(lines.map((line) => line.split('\t')));
 }
 
 function expectedBody() {
