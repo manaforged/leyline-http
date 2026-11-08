@@ -37,7 +37,7 @@ use crate::wire::Body;
 use crate::wire::ResponseMode;
 
 #[doc = include_str!("../../../docs/request.md")]
-#[must_use = "builders are lazy: nothing happens until `.send()` / `.build()`"]
+#[must_use = "builders are lazy: nothing happens until `.await` or `.send()`"]
 pub struct RequestBuilder {
     session: Session,
     draft: Box<Draft>,

@@ -23,7 +23,7 @@ fn main() -> leyline::Result<()> {
         for _ in 0..64 {
             let session = session.clone();
             tasks.spawn(async move {
-                session.get("https://example.com/").send().await?.bytes().await
+                session.get("https://example.com/").bytes().await
             });
         }
         let mut done = 0;

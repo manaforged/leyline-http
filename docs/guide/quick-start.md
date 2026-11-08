@@ -28,15 +28,16 @@ jar.
 ```rust,no_run
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let resp = leyline::Session::new().get("https://example.com/").send().await?;
+    let resp = leyline::Session::new().get("https://example.com/").await?;
     println!("{} {}", resp.status(), resp.url());
     Ok(())
 }
 ```
 
 `Session::get` and its siblings return a `RequestBuilder`. Awaiting the
-builder sends the request. `.send()` does the same and returns a future you
-can hold in a variable.
+builder sends the request and returns a `Response`; `.text().await?` and
+`.bytes().await?` send the request and read the body in one step. `.send()`
+does the same as awaiting the builder and returns a named future.
 
 ## Choose a plain or a browser session
 
@@ -82,7 +83,7 @@ struct State {
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
-let page = session.get("https://example.com/").send().await?.text().await?;
+let page = session.get("https://example.com/").text().await?;
 let state = session
     .get("https://api.example/state")
     .send().await?
@@ -170,7 +171,7 @@ let token = std::fs::read_to_string("token.txt")?;
 let session = leyline::Session::builder()
     .bearer_auth(token.trim())
     .build()?;
-let body = session.get("https://api.example/me").send().await?.text().await?;
+let body = session.get("https://api.example/me").text().await?;
 std::fs::write("me.json", body)?;
 # Ok(())
 # }

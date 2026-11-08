@@ -402,7 +402,7 @@ of `<head>`, `<script>`, `<style>`, `<noscript>`, `<template>`, `<svg>`, and
 use leyline::html;
 
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
-let page = session.get("https://shop.example/about").send().await?.text().await?;
+let page = session.get("https://shop.example/about").text().await?;
 for line in html::text(&page).lines() {
     println!("{line}");
 }

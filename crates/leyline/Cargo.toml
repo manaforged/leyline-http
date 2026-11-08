@@ -1,6 +1,6 @@
 [package]
 name = "leyline-http"
-description = "Async HTTP client for APIs, crawlers, monitors, and bots: HTTP/1.1, HTTP/2, HTTP/3, sessions, caching, resumable downloads, and optional browser impersonation"
+description = "Fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust with batteries included for sessions, web crawling, proxies, resumable downloads, and browser TLS profiles."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

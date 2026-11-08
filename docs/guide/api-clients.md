@@ -187,8 +187,8 @@ let api = Session::builder()
     .base_url("https://api.example/v1/")
     .cache(64 * 1024 * 1024)
     .build()?;
-let first = api.get("catalog").send().await?.bytes().await?;
-let again = api.get("catalog").send().await?.bytes().await?;
+let first = api.get("catalog").bytes().await?;
+let again = api.get("catalog").bytes().await?;
 api.clear_cache();
 # drop((first, again));
 # Ok(())

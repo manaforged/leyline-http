@@ -1,4 +1,4 @@
-One request, built from a [`Session`](crate::Session) and sent with [`send`](crate::RequestBuilder::send).
+One request, built from a [`Session`](crate::Session) and sent with `.await`, [`send`](crate::RequestBuilder::send), [`text`](crate::RequestBuilder::text), or [`bytes`](crate::RequestBuilder::bytes).
 
 Request setters override the session for this request only. Sending is lazy.
 

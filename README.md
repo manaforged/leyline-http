@@ -5,17 +5,15 @@
 [![CI](https://github.com/manaforged/leyline-http/actions/workflows/ci.yml/badge.svg)](https://github.com/manaforged/leyline-http/actions/workflows/ci.yml)
 [![MIT licensed](https://img.shields.io/crates/l/leyline-http.svg)](https://github.com/manaforged/leyline-http/blob/main/LICENSE)
 
-A high-performance async HTTP client for Rust.
+Leyline is a fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust, with batteries included for sessions, web crawling, proxies, resumable downloads, and browser TLS profiles.
 
-- HTTP/1.1, HTTP/2, and HTTP/3 over BoringSSL
+- HTTP/1.1, HTTP/2, and HTTP/3 over BoringSSL, with a thread-per-core mode (`run_per_core`)
 - Sessions with shared connections, cookies, and caching
-- Retries, timeouts, redirects, and per-host rate limits
-- HTTP, HTTPS, and SOCKS5 proxies, with rotating pools
-- Resumable downloads, server-sent events, and WebSocket
-- Site crawling with robots.txt, sitemaps, and checkpoints
-- Optional browser profiles for Chrome, Firefox, Safari, Edge, Opera, and Brave
-
-Use it for API clients, web crawlers, scrapers, price trackers, stock monitors, sneaker bots, and AI agents.
+- Browser tabs that track referers, links, and HTML forms
+- Site crawling with `robots.txt`, sitemaps, rate limits, and checkpoints
+- Retries, timeouts, redirects, and rotating HTTP, HTTPS, and SOCKS5 proxy pools
+- Resumable downloads, server-sent events (SSE), and WebSocket
+- Optional TLS (JA3/JA4), HTTP/2, and HTTP/3 profiles for Chrome, Firefox, Safari, Edge, Opera, and Brave
 
 ## Example
 
@@ -26,12 +24,19 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```rust,no_run
-use leyline::Session;
+use std::time::Duration;
+
+use leyline::{Browser, Session};
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let session = Session::new();
-    let body = session.get("https://example.com/").send().await?.text().await?;
+    let session = Session::builder()
+        .browser(Browser::Chrome154)
+        .timeout(Duration::from_secs(15))
+        .retry(2)
+        .build()?;
+
+    let body = session.get("https://example.com/").text().await?;
     println!("{body}");
     Ok(())
 }
@@ -39,11 +44,34 @@ async fn main() -> leyline::Result<()> {
 
 Rust 1.96 or later. Building BoringSSL needs a C and C++ compiler and `git`.
 
+To crawl a site while respecting `robots.txt` and per-host rate limits:
+
+```rust,no_run
+use leyline::Session;
+
+# async fn run() -> leyline::Result<()> {
+let mut crawl = Session::new().crawl("https://example.com/").limit(100);
+while let Some(page) = crawl.next().await {
+    let page = page?;
+    println!("{} ({} bytes)", page.url(), page.text().len());
+}
+# Ok(())
+# }
+```
+
 ## Performance
 
 HTTP/2 requests per second against a local origin on a Ryzen 9 9950X3D, with
 identical request headers and verified TLS. Medians of three runs; higher is
 better.
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/bench-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="docs/assets/bench-light.svg">
+    <img alt="Leyline HTTP/2 throughput, browser profile speed, and client CPU per request" src="docs/assets/bench-light.svg">
+  </picture>
+</p>
 
 | Client | Sequential | 8 connections, 256 in flight |
 | --- | ---: | ---: |

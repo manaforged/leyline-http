@@ -6,8 +6,8 @@ Five types cover everyday requests and browsing. Configure them with setters and
 | --- | --- | --- |
 | `Session` | `Session::new()`, `Session::from(browser)`, `Session::builder()...build()?` | Send requests, and save the session to a file. Clones share the connections and the cookies. The builder's `browser`, `platform`, `languages`, `hello`, and `profile` choose what the server sees |
 | `Tab` | `session.tab()` | Open and follow pages, and submit forms with the page context |
-| `RequestBuilder` | `session.get(url)`, `post`, `put`, `patch`, `delete`, `head` | Add headers, a body, or a timeout, then `send().await?` |
-| `Response` | `send().await?` | Read the status and headers, then `text`, `json`, `bytes`, or `download_to(path)` |
+| `RequestBuilder` | `session.get(url)`, `post`, `put`, `patch`, `delete`, `head` | Add headers, a body, or a timeout, then `.await?`, `text().await?`, `bytes().await?`, or `download_to(path).await?` |
+| `Response` | `.await?` or `send().await?` | Read the status and headers, then `text`, `json`, or `bytes` |
 | `Error` | any `?` | `err.kind()` says what failed |
 
 A setter that takes a config type accepts `impl Into<Config>` where a shorthand exists, so the common case is one call:
@@ -19,7 +19,7 @@ use leyline::{Browser, Platform, Protocol, Session, Timeout};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::from(Browser::default());
-let body = session.get("https://example.com/").send().await?.text().await?;
+let body = session.get("https://example.com/").text().await?;
 
 let session = Session::builder()
     .browser(Browser::firefox()).platform(Platform::MacOS)

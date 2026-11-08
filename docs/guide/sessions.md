@@ -265,7 +265,7 @@ Code without an async runtime uses `blocking::Session`. It owns a small runtime 
 # fn run() -> leyline::Result<()> {
 let session = leyline::blocking::Session::new(leyline::Session::builder())?;
 let body = session.block_on(async {
-    session.get("https://example.com/").send().await?.text().await
+    session.get("https://example.com/").text().await
 })?;
 println!("{body}");
 # Ok(())

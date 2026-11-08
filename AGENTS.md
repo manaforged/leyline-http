@@ -20,8 +20,8 @@ The first build compiles BoringSSL and needs a C and C++ compiler and `git`.
 | --- | --- |
 | `Session` | Send requests. Build one per account or application and clone it; clones share connections and cookies. `Session::builder()` sets `browser`, `platform`, `languages`, `hello`, and `profile`. Edge and Opera are `Browser` variants |
 | `Tab` | Browse like one tab: `open` and `follow` pages, `submit` and `submit_form` forms with the page as referer |
-| `RequestBuilder` | Add headers, a body, or a timeout to one request, then `send().await?` |
-| `Response` | Read the status and headers, then `text`, `json`, `bytes`, or `download_to` |
+| `RequestBuilder` | Add headers, a body, or a timeout to one request, then `.await?`, `text().await?`, `bytes().await?`, or `download_to(path).await?` |
+| `Response` | Read the status and headers, then `text`, `json`, or `bytes` |
 | `Error` | Match on `err.kind()` |
 
 ```rust,no_run
@@ -35,7 +35,7 @@ let session = Session::builder()
     .timeout(Duration::from_secs(30))
     .retry(2)
     .build()?;
-let page = session.get("https://example.com/").send().await?.text().await?;
+let page = session.get("https://example.com/").text().await?;
 session.save("session.json")?;
 let again = Session::load("session.json")?.build()?;
 # drop((page, again));

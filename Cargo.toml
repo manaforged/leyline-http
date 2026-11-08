@@ -17,7 +17,7 @@ rust-version = "1.96" # MSRV: two releases behind stable
 authors = ["Thomas Gardiner <thomas@manaforge.tech>"]
 license = "MIT"
 repository = "https://github.com/manaforged/leyline-http"
-keywords = ["http", "http-client", "http2", "http3", "ja4"]
+keywords = ["http-client", "web-scraping", "crawler", "http3", "tls"]
 categories = ["web-programming::http-client", "network-programming"]
 
 [workspace.lints.rust]

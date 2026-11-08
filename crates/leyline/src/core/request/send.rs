@@ -23,6 +23,16 @@ impl RequestBuilder {
         self.run()
     }
 
+    /// Sends the request and decodes the response body as text.
+    pub async fn text(self) -> Result<String> {
+        self.send().await?.text().await
+    }
+
+    /// Sends the request and reads the decoded response body into bytes.
+    pub async fn bytes(self) -> Result<Bytes> {
+        self.send().await?.bytes().await
+    }
+
     fn run(self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
         match self.respond() {
             Ok(respond) => Box::pin(respond),
@@ -137,6 +147,15 @@ impl RequestBuilder {
             }
         }
         Ok(url)
+    }
+}
+
+impl std::future::IntoFuture for RequestBuilder {
+    type Output = Result<Response>;
+    type IntoFuture = Pin<Box<dyn Future<Output = Result<Response>> + Send>>;
+
+    fn into_future(self) -> Self::IntoFuture {
+        self.run()
     }
 }
 

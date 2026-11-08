@@ -8,7 +8,7 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
-## 0.2.0 - 2026-11-05
+## 0.2.0 - 2026-11-08
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The [upgrade guide](UPGRADE.md) maps the changed 0.1.6 names. The sections below list new features, behavior changes, removals without a replacement, and fixes.
 
@@ -21,6 +21,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 ### Added
 
 - `SessionBuilder::run_per_core`, which runs one single-threaded runtime per CPU core for maximum request rate; the cores share cookies, cache, tokens and HSTS and keep their own connections.
+- `RequestBuilder::text` and `RequestBuilder::bytes` send the request and read the decoded body in one `.await`.
 - Resumable `RequestBuilder::download_to`, strong ETag checks, SHA-256 verification, and download progress callbacks. A dropped transfer is retried under the retry policy and resumes when the server sends a strong ETag.
 - An opt-in, bounded HTTP cache with conditional revalidation, `Vary` matching, and mutation invalidation.
 - `RequestBuilder::events`, `Events`, and `Event` for parsed SSE with `Last-Event-ID` recovery. The retry policy bounds reconnects in a row; each delivered event resets the count.
@@ -81,7 +82,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 - `query`, `form`, and `Tab::submit` use the standard `Borrow<(K, V)>` bound instead of a custom pair-conversion trait. Pass owned `(key, value)` tuples or references to them. Explicit generic arguments change from `<I, P>` to `<I, K, V>`; inferred calls need no changes.
 - `RequestBuilder::header_order` takes any iterator of strings, as `SessionBuilder::header_order` does.
 - `Response::text_with_charset` needs the `charset` feature. Without it, the method ignored its argument. `text()` stays in every build.
-- `leyline::get(url)` returns a `RequestBuilder`; add `.send().await`.
+- `leyline::get(url)` returns a `RequestBuilder`, so request settings, `.text()`, and `.bytes()` chain before `.await`.
 - `multipart::Part::file` and `Form::file` return `leyline::Result`. A file that cannot be opened is `Kind::Io`.
 - `TcpProfile` fields are private; read them through its getters.
 - `TlsContext::new(browser, min_version)` replaces `TlsContext::from_profile`, whose profile argument no caller outside the crate could build. A build with only `--cfg leyline_unstable_bssl` compiles again.
