@@ -1,6 +1,0 @@
-leyline source: commit 4096c1cf (crates/ identical to d6d58d15).
-The leyline_git line in receipts.txt is the bench checkout's own HEAD; its files came from git archive of the commit above.
-Network: the origin ran in network namespace lnet behind a veth pair, <client-address> <-> <origin-address>, with tc netem delay 50us on each end (receipts show the host end). ping RTT 0.13-0.17 ms.
-The server certificate is a test leaf for 127.0.0.1 and <origin-address> signed by the same test CA.
-Run: ROUNDS=10 PROTO=h1 SERVER_NETNS=lnet SERVER_ADDR=<origin-address>:0 SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 libs.sh
-ureq: one Agent per thread, as leyline-blocking has one session per thread.

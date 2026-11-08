@@ -14,6 +14,4 @@ match Session::new().get("https://example.com/").send().await {
 # }
 ```
 
-`multipart::Part::file` returns `std::io::Result`, which has no `Kind`.
-
 See also: [Errors](https://manaforged.github.io/leyline-http/guide/errors.html).

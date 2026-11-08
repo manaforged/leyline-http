@@ -1,8 +1,0 @@
-Diagnostic baseline only. Runs were not on an exclusive host.
-No cross-run pooling, Rust overhead claim, or competitor ranking.
-p99 is the median of each process execution's p99, not a pooled request percentile.
-run client median_seq_rps median_conc_rps median_cold_rps median_conc_p99_us min_conc_rps max_conc_rps
-run-1 leyline-python 14228.499 52477.023 1427.219 2647.000 36850.289 52858.544
-run-1 leyline-node 19577.900 120233.326 1508.734 896.500 98647.353 121610.758
-run-2 leyline-python 10468.414 36764.435 1244.985 5003.500 7084.677 49373.767
-run-2 leyline-node 14932.730 69746.189 1252.389 1720.500 26310.900 98835.828

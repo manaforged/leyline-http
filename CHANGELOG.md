@@ -12,29 +12,6 @@ version and publish as separate crates.
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The [upgrade guide](UPGRADE.md) maps the changed 0.1.6 names. The sections below list new features, behavior changes, removals without a replacement, and fixes.
 
-### Fixed since the first 0.2 draft
-
-- `pool_idle_timeout` now closes idle connections on a session with no traffic. Before, they stayed open until the next request.
-- A response with several `Transfer-Encoding` lines is now read as one list, and `chunked` must end it exactly once. Before, only the first line counted, so `chunked` then `gzip` was framed as chunked, a response desync risk.
-- A session that talks to more hosts than `max_connections` no longer collapses. Eviction scanned every entry under one write lock and closed sockets inside it; at 20,000 hosts and 300,000 req/s on the default limit this held the client to about 190,000 req/s with latency of many seconds. The pool now has up to 64 shards, and sockets close outside the lock.
-- An HTTP/2 connection that uses its last stream id now retires, and later requests move to a new connection. Before, the connection stayed in the pool and every later request to that host failed.
-- `retry(n)` now reaches the origin at most `n + 2` times for an idempotent request: one resend on a stale pooled connection for the first attempt only. Before, every attempt could resend, up to `2 * (n + 1)` times.
-
-- HTTP/2 requests no longer wait until their deadline when more than 1,024 requests queue on a connection and the queue drains in a batch. A sender that waited now wakes the next one, and every waiting sender fails at once when the connection ends.
-
-### Added since the first 0.2 draft
-
-- `leyline::get` sends a one-off request on a new default session.
-- `Retry::budget` limits retries to a share of requests, so retries cannot multiply the load on an overloaded upstream or on the client itself.
-- `HostLimits::max_pending` and `HostLimits::max_total_pending` limit the requests that wait for a slot. Without one, a request queue on `max_total_in_flight` past origin capacity lets every request reach the origin as its deadline ends, and goodput falls to zero.
-- `pool_max_lifetime` stops reusing a connection a set time after it opened, so traffic moves after a DNS or load balancer change. Without it, a busy pool stays on the old address.
-- `max_pending_per_host` limits the HTTP/1.1 requests that wait for a connection to one host. A request over the limit fails at once with the new `Kind::Overloaded`, which `gateway_status` maps to 503 and `retry` does not resend. The default is 1024, as in Envoy, so one slow host cannot hold an unbounded queue; `max_pending_per_host(None)` removes the limit.
-- New connections to a host start on the next address of each family in turn, so a pool spreads its connections across every address DNS returns instead of opening them all on the first.
-- An address that keeps failing to connect moves to the back of the dial order for 30 seconds, longer each time it fails again, so new connections stop waiting on a dead address.
-- `Error::is_timeout` is public.
-- `multipart::Form::text` and `Form::file` add a field without naming `Part`.
-- `RequestBuilder::download_to` retries a dropped transfer under the retry policy and resumes when the server sends a strong ETag.
-
 ### Breaking changes
 
 #### Upgrading from 0.1.6
@@ -44,7 +21,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 ### Added
 
 - `SessionBuilder::run_per_core`, which runs one single-threaded runtime per CPU core for maximum request rate; the cores share cookies, cache, tokens and HSTS and keep their own connections.
-- Resumable `RequestBuilder::download_to`, strong ETag checks, SHA-256 verification, and download progress callbacks.
+- Resumable `RequestBuilder::download_to`, strong ETag checks, SHA-256 verification, and download progress callbacks. A dropped transfer is retried under the retry policy and resumes when the server sends a strong ETag.
 - An opt-in, bounded HTTP cache with conditional revalidation, `Vary` matching, and mutation invalidation.
 - `RequestBuilder::events`, `Events`, and `Event` for parsed SSE with `Last-Event-ID` recovery. The retry policy bounds reconnects in a row; each delivered event resets the count.
 - `SessionBuilder::refresh_token` shares an asynchronous bearer-token refresh after concurrent 401 responses, scoped to the base URL origin.
@@ -68,6 +45,13 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 - `Crawl::agent(name)` obeys the robots.txt group and meta robots name of a named crawler, and `Crawl::max_body_size(n)` reads pages larger than the session's cap without a new session.
 - `blocking::Session` runs requests on the calling thread for code without an async runtime: `blocking::Session::new(builder)`, then `session.block_on(future)`, with every `Session` method through `Deref`. Its direct HTTP/1.1 connections read and write blocking sockets, and every timeout still applies. A blocking session is `Send` but not `Sync`; build one per thread.
 - `leyline-bssl-tokio`: `RecordStream::try_map_io` moves a TLS 1.3 record stream onto another transport for the same connection.
+- `Retry::budget` limits retries to a share of requests, so retries cannot multiply the load on an overloaded upstream or on the client itself.
+- `HostLimits::max_pending` and `HostLimits::max_total_pending` limit the requests that wait for a slot. Without one, a request queue on `max_total_in_flight` past origin capacity lets every request reach the origin as its deadline ends, and goodput falls to zero.
+- `pool_max_lifetime` stops reusing a connection a set time after it opened, so traffic moves after a DNS or load balancer change. Without it, a busy pool stays on the old address.
+- `max_pending_per_host` limits the HTTP/1.1 requests that wait for a connection to one host. A request over the limit fails at once with the new `Kind::Overloaded`, which `gateway_status` maps to 503 and `retry` does not resend. The default is 1024, as in Envoy, so one slow host cannot hold an unbounded queue; `max_pending_per_host(None)` removes the limit.
+- New connections to a host start on the next address of each family in turn, so a pool spreads its connections across every address DNS returns instead of opening them all on the first.
+- An address that keeps failing to connect moves to the back of the dial order for 30 seconds, longer each time it fails again, so new connections stop waiting on a dead address.
+- `TcpProfile` has one getter per value: `ttl()`, `mss()`, `window_size()`, `df()`, `window_scale()`, `no_delay()`, and `options()`.
 
 ### Changed
 
@@ -76,7 +60,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 - A browser profile id no longer includes `profiles/bare.toml`, so an edit to the bare profile does not change browser profile ids. A saved session from before this change reports a changed profile id.
 - The bare profile advertises a 64 KiB HTTP/2 maximum frame size.
 - `Body` is `Send + Sync` and is the one body type for requests and responses: `bytes_stream()` and the `tower` service both return it.
-- A request uses less CPU: it parses its URL once, keeps its method, URL, and headers in typed values that the response shares, and TLS reads the socket in 16 KiB batches. [BENCHMARKS.md](BENCHMARKS.md#client-libraries) compares leyline with other HTTP clients over HTTP/2 and HTTP/1.1.
+- A request uses less CPU: it parses its URL once, keeps its method, URL, and headers in typed values that the response shares, and TLS reads the socket in 16 KiB batches. [BENCHMARKS.md](BENCHMARKS.md#general-clients-over-http2) compares leyline with other HTTP clients over HTTP/2 and HTTP/1.1.
 - HTTP/2 writes the requests that callers queue together in one write, and while requests wait for a stream slot it reads up to four frames before it writes.
 - A session without a browser profile opens another HTTP/2 connection to a host when every open one is at the server's stream limit, up to `max_connections_per_host`. Before the server announces its limit, a connection takes 100 requests, as Chrome and Go assume. A browser profile keeps one connection per host unless `max_connections_per_host` is set, and `max_connections_per_host(1)` keeps any session on one.
 - After a TLS 1.3 handshake, leyline seals and opens the connection's records itself and BoringSSL handles only the handshake and session tickets. A profile that sets a record size limit keeps BoringSSL's record layer, as does TLS 1.2.
@@ -97,6 +81,10 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 - `query`, `form`, and `Tab::submit` use the standard `Borrow<(K, V)>` bound instead of a custom pair-conversion trait. Pass owned `(key, value)` tuples or references to them. Explicit generic arguments change from `<I, P>` to `<I, K, V>`; inferred calls need no changes.
 - `RequestBuilder::header_order` takes any iterator of strings, as `SessionBuilder::header_order` does.
 - `Response::text_with_charset` needs the `charset` feature. Without it, the method ignored its argument. `text()` stays in every build.
+- `leyline::get(url)` returns a `RequestBuilder`; add `.send().await`.
+- `multipart::Part::file` and `Form::file` return `leyline::Result`. A file that cannot be opened is `Kind::Io`.
+- `TcpProfile` fields are private; read them through its getters.
+- `TlsContext::new(browser, min_version)` replaces `TlsContext::from_profile`, whose profile argument no caller outside the crate could build. A build with only `--cfg leyline_unstable_bssl` compiles again.
 
 ### Removed
 
@@ -104,6 +92,12 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 
 ### Fixed
 
+- `pool_idle_timeout` now closes idle connections on a session with no traffic. Before, they stayed open until the next request.
+- A response with several `Transfer-Encoding` lines is now read as one list, and `chunked` must end it exactly once. Before, only the first line counted, so `chunked` then `gzip` was framed as chunked, a response desync risk.
+- A session that talks to more hosts than `max_connections` no longer collapses. Eviction scanned every entry under one write lock and closed sockets inside it; at 20,000 hosts and 300,000 req/s on the default limit this held the client to about 190,000 req/s with latency of many seconds. The pool now has up to 64 shards, and sockets close outside the lock.
+- An HTTP/2 connection that uses its last stream id now retires, and later requests move to a new connection. Before, the connection stayed in the pool and every later request to that host failed.
+- `retry(n)` now reaches the origin at most `n + 2` times for an idempotent request: one resend on a stale pooled connection for the first attempt only. Before, every attempt could resend, up to `2 * (n + 1)` times.
+- HTTP/2 requests no longer wait until their deadline when more than 1,024 requests queue on a connection and the queue drains in a batch. A sender that waited now wakes the next one, and every waiting sender fails at once when the connection ends.
 - Dropping a session that uses `Proxy::identified` frees the per-proxy identity sessions and their TLS contexts; before, each derived session kept the pool alive through a reference cycle.
 - A connection failure no longer evicts the healthy HTTP/2 or HTTP/3 connection that replaced the failed one in the pool.
 - A retry that reuses a pooled connection is treated as a pooled attempt: it is replayed after a failure and reported as reused.

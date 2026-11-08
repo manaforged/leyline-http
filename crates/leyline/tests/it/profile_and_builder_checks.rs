@@ -151,28 +151,18 @@ fn session_builder_resolves_all_valid_combos() {
 
 #[test]
 fn crate_root_context_helpers_work() {
-    let tls = leyline::TlsContext::from_profile(
-        leyline::internals::browser_profile(Browser::Chrome147),
-        leyline::TlsMinVersion::Tls12,
-    );
+    let tls = leyline::TlsContext::new(Browser::Chrome147, leyline::TlsMinVersion::Tls12);
     assert!(tls.is_ok(), "tls context failed: {:?}", tls.err());
 
     #[cfg(feature = "http3")]
     {
-        let quic = leyline::TlsContext::from_profile(
-            leyline::internals::browser_profile(Browser::Chrome147),
-            leyline::TlsMinVersion::Tls13,
-        );
+        let quic = leyline::TlsContext::new(Browser::Chrome147, leyline::TlsMinVersion::Tls13);
         assert!(quic.is_ok(), "quic context failed: {:?}", quic.err());
     }
 
     for browser in Browser::all().iter().copied() {
         assert!(
-            leyline::TlsContext::from_profile(
-                leyline::internals::browser_profile(browser),
-                leyline::TlsMinVersion::Tls12
-            )
-            .is_ok(),
+            leyline::TlsContext::new(browser, leyline::TlsMinVersion::Tls12).is_ok(),
             "tls context failed for {browser}"
         );
     }

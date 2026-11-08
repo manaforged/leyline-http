@@ -1,5 +1,0 @@
-leyline source: commit 4096c1cf (crates/ identical to d6d58d15).
-The leyline_git line in receipts.txt is the bench checkout's own HEAD; its files came from git archive of the commit above.
-The sha256 lines in receipts.txt identify the exact binaries.
-Run: ROUNDS=10 PROTO=h1 SERVER_CPUS=0-6,16-22 CLIENT_CPUS=8-15,24-31 libs.sh
-ureq: one Agent per thread, as leyline-blocking has one session per thread.

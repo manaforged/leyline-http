@@ -152,14 +152,10 @@ fn chrome150_identity_matches_capture_on_every_supported_platform() {
     any(feature = "compression-gzip", feature = "compression-deflate")
 ))]
 fn every_builtin_profile_builds_ssl_context() {
-    let reg = ProfileRegistry::builtin();
     for browser in Browser::all().iter().copied() {
-        let profile = reg.get_browser(browser).expect("built-in profile");
         for min in [TlsMinVersion::Tls12, TlsMinVersion::Tls13] {
-            TlsContext::from_profile(profile, min).unwrap_or_else(|e| {
-                panic!(
-                    "{browser} failed TlsContext::from_profile (min {min:?}) after hardening: {e}"
-                )
+            TlsContext::new(browser, min).unwrap_or_else(|e| {
+                panic!("{browser} failed TlsContext::new (min {min:?}) after hardening: {e}")
             });
         }
     }

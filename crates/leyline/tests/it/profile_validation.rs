@@ -1,7 +1,7 @@
 use leyline::internals::BrowserProfile;
 use leyline::internals::h2::H2Config;
 use leyline::internals::profile::{H2Profile, ProfileRegistry};
-use leyline::{Browser, TlsContext, TlsMinVersion};
+use leyline::{Browser, TlsMinVersion};
 
 fn chrome_h2() -> H2Profile {
     chrome_profile().h2
@@ -152,7 +152,7 @@ fn unknown_cert_compression_algorithm_is_rejected() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["frobnicate".into()];
     assert!(
-        TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_err(),
+        leyline::internals::tls::context(&profile, TlsMinVersion::Tls13).is_err(),
         "a garbage cert-compression algorithm name was silently dropped from the ClientHello"
     );
 }
@@ -167,7 +167,7 @@ fn real_cert_compression_codepoints_still_build() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["zlib".into(), "brotli".into(), "zstd".into()];
     assert!(
-        TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_ok(),
+        leyline::internals::tls::context(&profile, TlsMinVersion::Tls13).is_ok(),
         "a real RFC 8879 cert-compression list (as Firefox ships) failed to build"
     );
 }
@@ -177,7 +177,7 @@ fn real_cert_compression_codepoints_still_build() {
 fn cert_compression_without_its_feature_names_the_feature() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["zstd".into()];
-    let err = match TlsContext::from_profile(&profile, TlsMinVersion::Tls13) {
+    let err = match leyline::internals::tls::context(&profile, TlsMinVersion::Tls13) {
         Err(err) => err,
         Ok(_) => panic!("zstd cert decompression built with `compression-zstd` off"),
     };

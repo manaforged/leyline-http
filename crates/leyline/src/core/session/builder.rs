@@ -190,9 +190,9 @@ impl SessionBuilder {
         self
     }
 
-    /// Stops reusing a connection this long after it opened, so traffic follows a DNS or load balancer change; no limit by default.
-    pub fn pool_max_lifetime(mut self, lifetime: Duration) -> Self {
-        self.pool_config.max_lifetime = Some(lifetime);
+    /// Stops reusing a connection this long after it opened, so traffic follows a DNS or load balancer change; no limit by default, and `None` removes the limit.
+    pub fn pool_max_lifetime(mut self, lifetime: impl Into<Option<Duration>>) -> Self {
+        self.pool_config.max_lifetime = lifetime.into();
         self
     }
 

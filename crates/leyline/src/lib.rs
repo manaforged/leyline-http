@@ -200,6 +200,15 @@ pub mod internals {
     /// The fingerprinting TLS connector.
     pub mod tls {
         pub use crate::tls::{AlpnPlan, FingerprintConnector};
+
+        /// Builds the TLS context for a custom `profile`, with `min_version` as the floor when it declares none.
+        pub fn context(
+            profile: &crate::profile::BrowserProfile,
+            min_version: crate::profile::TlsMinVersion,
+        ) -> Result<crate::tls::TlsContext, crate::tls::error::TlsError> {
+            crate::tls::builder::ssl_context(profile, min_version)
+                .map(crate::tls::TlsContext::from_builder)
+        }
     }
 }
 /// HTML parsing for links, forms, and crawl pages.

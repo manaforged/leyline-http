@@ -161,8 +161,8 @@ let resp = session.post("https://api.example/upload").multipart(form).send().awa
 `Part::file(path)` uses the last component of `path` as the filename, or
 `file` when it has none or is not UTF-8. The part has no `Content-Type`, so
 the server reads it as `text/plain` (RFC 7578); use
-`Part::file(path)?.mime(..)` to send a type. It returns `std::io::Result`,
-which `?` converts into `leyline::Error`.
+`Part::file(path)?.mime(..)` to send a type. A file that cannot be opened is a
+`leyline::Error` with `Kind::Io`.
 [`examples/multipart.rs`](../../crates/leyline/examples/multipart.rs) is a
 complete program.
 

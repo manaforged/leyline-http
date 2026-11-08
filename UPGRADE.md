@@ -94,7 +94,7 @@ Search for the old type or method name. A row marked removed has no direct repla
 | `resp.timing()`, `ResponseTiming` | `resp.reused()`, `connect_time()`, `send_time()`, `elapsed()`, as `Duration` values |
 | `into_stream()`, `into_decoded_stream(limit)`, `BodyStream` | `bytes_stream()`, a `Body` that yields the decoded body as `leyline::Result<Bytes>`; `.decode(false)` on the request gives the raw bytes |
 | `copy_to(writer)`, `copy_decoded_to(writer, limit)` | `write_to(writer)`; `.max_body_size(n)` on the request sets a limit |
-| `download_to(path, limit)`, `RequestBuilder::download(path)` | `.error_for_status().stream()` on the request, then `Response::download_to(path)` |
+| `download_to(path, limit)`, `RequestBuilder::download(path)` | `RequestBuilder::download_to(path)`, which checks the status, resumes on retry, and takes `.max_body_size(n)` for a limit |
 | `RequestBuilder::read_until(n, f)`, `PrefixRead { bytes, stopped_by }`, `StopReason` | `.stream()`, then `Response::read_until(n, f)` returning `(bytes, matched)` |
 | `error_for_status_ref()` | `error_for_status()`, which borrows the response |
 | `resp.link(rel)` | `resp.links()` and `Link::has_rel(rel)` |
@@ -103,7 +103,7 @@ Search for the old type or method name. A row marked removed has no direct repla
 | `Observed`, `audit.compare(&observed)`, `FingerprintReport`, `FieldOutcome`, `HeaderOutcome` | `Fingerprint::from_json(text)`, `sent.diff(&observed)` returning `(field, expected, observed)` tuples |
 | `audit::compute_ja3`, `compute_ja4`, `compute_ja4h`, `compute_ja4t`, `Ja3Input`, `Ja4Input`, `Ja4hInput` | removed; `Fingerprint` carries the values |
 | `ErrorCategory`, `Error::category()` | `Kind`, `Error::kind()` |
-| `is_timeout()`, `is_status()`, `is_body_limit()`, `is_dns()` | `err.kind()` compared with `Kind::Timeout`, `Kind::Status`, `Kind::BodyLimit`, or `Kind::Dns` |
+| `is_status()`, `is_body_limit()`, `is_dns()` | `err.kind()` compared with `Kind::Status`, `Kind::BodyLimit`, or `Kind::Dns`; `is_timeout()` stays |
 | `Error::io()`, `tls()`, `h2()`, and downcasts to `TlsError`, `H2Error`, `ErrorCode`, or `ProxyReply` | `Error::kind()`, `proxy_status()`, and `h2_code()` |
 | `Error::header(name)`, `body_text()` | `headers()?.get(name)`, `body().map(String::from_utf8_lossy)` |
 | `session.websocket(url).header(k, v).connect()`, `WebSocketBuilder` | `session.get(url).header(k, v).websocket()` |
@@ -121,13 +121,15 @@ Search for the old type or method name. A row marked removed has no direct repla
 | `Crawl::ignore_robots()` | `Crawl::respect(None)` |
 | `req.pages()` returning `Pages` | `req.pages()` returning a `Stream`; `StreamExt::take(n)` limits it |
 | `form.method()` returning `FormMethod`, `form.enctype()` returning `FormEnctype` | `http::Method`, and the MIME type as `&str` |
-| `multipart::Form::text(name, value)`, `Form::file(name, path)` | `Form::part(name, Part::text(value))`, `Form::part(name, Part::file(path)?)` |
+| `multipart::Form::file(name, path)` and `Part::file(path)` returning `std::io::Result` | the same calls, returning `leyline::Result`; `?` works as before |
 | `From<multipart::Form> for Body`, `Form::boundary` | `RequestBuilder::multipart(form)`, which sets the boundary header |
 | `Tab::xhr(url)`, `post_json(url, body)`, `subresource(url, kind)` | `Tab::fetch(Method::GET, url)`, `.json(body)`, `.kind(kind)` |
 | `Purpose::as_str()` | `Purpose::id()` |
 | `DigestAuth` | `.digest_auth(user, pass)` |
 | `LeylineService::new(session)` | `session`, which implements `tower::Service`; the response carries no timing extension, so use `Trace` |
-| `leyline::get(url)` | `Session::new().get(url).send()` |
+| `leyline::get(url).await` | `leyline::get(url).send().await` |
+| `tcp_profile.ttl`, `.mss`, `.window_size`, `.df`, `.window_scale`, `.no_delay`, `.options` | the methods of the same names, as `tcp_profile.ttl()` |
+| `TlsContext::from_profile(profile, min)` | `TlsContext::new(browser, min)` |
 | `.await` on a `RequestBuilder` or `WebSocketBuilder` | `.send().await` |
 | `Body::len_hint()` | removed |
 | `testing::TestServer`, `TestResponse`, `RecordedRequest` | `testing::Server`, `testing::Response`, `testing::Request` |

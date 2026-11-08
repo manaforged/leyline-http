@@ -66,7 +66,7 @@ or `estimated`. A Chrome or Brave profile is estimated because Chrome
 shuffles the extension order on every connection. JA4 sorts the extensions
 before it hashes them, so the JA4 stays the same; JA3 does not. To check a
 live session, see
-[Fingerprints](fingerprints.md#check-a-fingerprint-with-an-echo-service).
+[Fingerprints](fingerprints.md#audit-a-session).
 
 ## Next
 
