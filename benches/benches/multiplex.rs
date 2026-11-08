@@ -239,7 +239,7 @@ async fn send(
         std::borrow::Cow<'static, str>,
         leyline::internals::h2::HeaderStr,
     )>,
-) -> TransportResponse {
+) -> Box<TransportResponse> {
     handle
         .send_shared(
             Arc::new(Head::new(pseudo, headers)),

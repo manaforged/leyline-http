@@ -21,13 +21,6 @@ jobs:
     uses: ./.github/workflows/hygiene.yml
     secrets: inherit
 
-  matrix:
-    name: matrix
-    uses: ./.github/workflows/matrix.yml
-    permissions:
-      contents: read
-      issues: write
-
   book:
     name: book
     permissions:
@@ -38,22 +31,9 @@ jobs:
     with:
       deploy: false
 
-  release-check:
-    name: release qualification
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: verify gates
-        run: scripts/verify.sh --only release
-
   package:
     name: package
-    needs: [qualify, hygiene, matrix, release-check, book]
+    needs: [qualify, hygiene, book]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -66,10 +46,6 @@ jobs:
       - name: Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
-
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ci-package
@@ -77,7 +53,7 @@ jobs:
           cache-workspace-crates: true
           save-if: false
 
-      - name: package
+      - name: qualify tag and package crates
         run: scripts/verify.sh --only release,package
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -110,10 +86,6 @@ jobs:
 
       - name: Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '22'
 
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:

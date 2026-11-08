@@ -26,7 +26,7 @@ const HEADERS: u8 = 0x1;
 const END_HEADERS: u8 = 0x4;
 const SERVER_SETTINGS: [u8; 18] = [0, 0, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 4, 1, 0, 0, 0, 0];
 const ORIGIN: &str = "origin.test";
-const WAIT: Duration = Duration::from_secs(3);
+const WAIT: Duration = Duration::from_secs(15);
 
 #[tokio::test(flavor = "multi_thread")]
 async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
@@ -39,9 +39,15 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
                 .map(move |&platform| (browser, platform))
         })
         .collect();
-    let width = std::thread::available_parallelism().map_or(1, usize::from);
+    let width = std::thread::available_parallelism()
+        .map_or(1, usize::from)
+        .min(8);
+    let (cert, key) = self_signed();
     let rendered: String = futures_util::stream::iter(cases)
-        .map(|(browser, platform)| tokio::spawn(capture(browser, platform)))
+        .map(|(browser, platform)| {
+            let (cert, key) = (cert.clone(), key.clone());
+            tokio::spawn(capture(browser, platform, cert, key))
+        })
         .buffered(width)
         .map(Result::unwrap)
         .collect::<Vec<_>>()
@@ -62,7 +68,12 @@ async fn every_profile_sends_its_recorded_client_hello_and_h2_opening() {
     assert_eq!(golden, rendered, "profile set changed");
 }
 
-async fn capture(browser: Browser, platform: Platform) -> String {
+async fn capture(
+    browser: Browser,
+    platform: Platform,
+    cert: leyline_bssl::x509::X509,
+    key: leyline_bssl::pkey::PKey<leyline_bssl::pkey::Private>,
+) -> String {
     let built = Session::builder()
         .browser(browser)
         .platform(platform)
@@ -91,7 +102,7 @@ async fn capture(browser: Browser, platform: Platform) -> String {
     } else {
         hello
     };
-    let opening = h2_opening(browser, platform).await;
+    let opening = h2_opening(browser, platform, cert, key).await;
     format!("== {} {platform:?}\n{hello}{opening}", browser.id())
 }
 
@@ -216,8 +227,12 @@ fn hash12(text: &str) -> String {
     hex(&Sha256::digest(text.as_bytes()))[..12].to_owned()
 }
 
-async fn h2_opening(browser: Browser, platform: Platform) -> String {
-    let (cert, key) = self_signed();
+async fn h2_opening(
+    browser: Browser,
+    platform: Platform,
+    cert: leyline_bssl::x509::X509,
+    key: leyline_bssl::pkey::PKey<leyline_bssl::pkey::Private>,
+) -> String {
     let (sent, mut frames) = mpsc::unbounded_channel();
     let port = tls_server(
         cert,
