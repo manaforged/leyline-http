@@ -29,6 +29,7 @@ See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API
 - `Crawl::save` and `Crawl::load` preserve pending and buffered pages, duplicate history, crawl policies, and retry waits.
 - `HostLimits`, `Page`, `Respect`, `Scope`, and `SkipReason` implement serde `Serialize` and `Deserialize`.
 - A Chrome 157 profile, `Browser::Chrome157`, from Chrome 157.0.8103.38 on Linux and 157.0.8103.39 on macOS and Windows, with TCP and HTTP/3 captures for each desktop.
+- A Brave (Chromium 157) profile, `Browser::Brave157`, from captures of Brave 1.99.55 (Chromium 157) on macOS, Linux, and Windows.
 - Edge and Opera are `Browser` variants: `Browser::Edge145` to `Browser::Edge157`, and `Browser::Opera129` to `Browser::Opera139`, on the Chrome captures. `Browser::all()` lists them.
 - A Firefox 159 profile, `Browser::Firefox159`, from captures of Firefox 159.0 on macOS, Linux, and Windows.
 - `Browser` parses from its id with `FromStr`, as in `"chrome-154".parse()`. `Browser::chromium_major()` gives the Chromium base of a Chromium browser, and `Browser::next_hello()` gives the next distinct ClientHello in the same product.

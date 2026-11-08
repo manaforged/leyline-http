@@ -150,6 +150,10 @@ The facts behind the bundled profiles, from their captures in
   `initial_rtt` estimate of 42,401 microseconds. The profile omits this
   optional estimate. No Android or session resumption capture of 157 was
   taken; those values follow Chrome 156 with the version updated.
+- **Brave 157.** Brave 1.99.55 (Chromium 157) captured on macOS, Linux, and
+  Windows with `--headless=new` on 2026-11-08 sends the same ClientHello,
+  HTTP/2 frames, header order, and HTTP/3 fields as Brave 156. Only the user
+  agent changes, to `Chrome/157.0.0.0`.
 - **Firefox 159.** Firefox 159.0 captured on macOS, Linux, and Windows with
   `--headless` on 2026-10-29 sends the same ClientHello and HTTP/2 frames
   as Firefox 158.0. Linux HTTP/3 captures agree on JA4, settings, transport

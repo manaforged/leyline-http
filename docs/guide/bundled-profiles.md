@@ -17,6 +17,7 @@
 | Brave (Chromium 154) | `Brave154` | `browser` | `brave-154.1.96.59` | estimated | tls.peet.ws 2026-09-25 Brave 1.96.59 (Chromium 154.0.8037.58) macOS, Windows and Linux headful |
 | Brave (Chromium 155) | `Brave155` | `browser` | `brave-155.1.97.56` | estimated | tls.peet.ws 2026-10-09 Brave 1.97.56 (Chromium 155) macOS, Linux, and Windows --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
 | Brave (Chromium 156) | `Brave156` | `browser` | `brave-156.1.98.60` | estimated | tls.peet.ws 2026-10-23 Brave 1.98.60 (Chromium 156) macOS, Linux, and Windows --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
+| Brave (Chromium 157) | `Brave157` | `browser` | `brave-157.1.99.55` | estimated | tls.peet.ws 2026-11-08 Brave 1.99.55 (Chromium 157) macOS, Linux, and Windows --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
 | Firefox 148 | `Firefox148` | `browser` | `firefox-148.0.2` | gated | tls.peet.ws 2026-09-25 Firefox 148.0.2 macOS and Linux --headless, Windows headful |
 | Firefox 149 | `Firefox149` | `browser` | `firefox-149.0.2` | gated | tls.peet.ws 2026-09-25 Firefox 149.0.2 macOS and Linux --headless, Windows headful |
 | Firefox 150 | `Firefox150` | `browser` | `firefox-150.0` | gated | tls.peet.ws 2026-09-25 Firefox 150.0 macOS and Linux --headless, Windows headful |
