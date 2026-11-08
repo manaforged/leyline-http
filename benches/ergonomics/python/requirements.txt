@@ -7,4 +7,4 @@ tenacity==9.2.1
 httpx-sse==0.4.3
 requests-sse==0.5.3
 aiohttp-sse-client2==0.3.0
-black==25.9.0
+black==26.10.1
