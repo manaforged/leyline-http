@@ -12,10 +12,11 @@ use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, DuplexStream, ReadBuf};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{FrameHeader, FrameType, HeadersFrame, PingFrame};
-use leyline::h2::{Head, RequestBody, ResponseBody};
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{FrameHeader, FrameType, HeadersFrame, PingFrame};
 
 struct Counted {
     inner: DuplexStream,
@@ -61,33 +62,11 @@ impl AsyncWrite for Counted {
 
 fn test_config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65535),
-            (SettingId::MaxFrameSize, 16384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
@@ -95,7 +74,10 @@ fn get_req(
     path: &str,
 ) -> (
     PseudoHeaders,
-    Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>,
+    Vec<(
+        std::borrow::Cow<'static, str>,
+        leyline::internals::h2::HeaderStr,
+    )>,
 ) {
     (
         PseudoHeaders {
@@ -149,7 +131,7 @@ async fn eight_concurrent_requests_share_one_write() {
         server_io
     });
 
-    let handle = leyline::h2::start(counted, test_config())
+    let handle = leyline::internals::h2::start(counted, test_config())
         .await
         .expect("handshake");
     greeted_rx.await.expect("greeted");
@@ -158,14 +140,7 @@ async fn eight_concurrent_requests_share_one_write() {
     let reqs: Vec<_> = (0..8)
         .map(|i| {
             let (p, h) = get_req(&format!("/{i}"));
-            handle.send_shared(
-                Arc::new(Head {
-                    pseudo: p,
-                    headers: h,
-                }),
-                RequestBody::None,
-                false,
-            )
+            handle.send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
         })
         .collect();
     let mut all = Box::pin(futures_util::future::join_all(reqs));
@@ -249,7 +224,7 @@ async fn follow_up_requests_share_one_write() {
         (follow_ups, server_io)
     });
 
-    let handle = leyline::h2::start(counted, test_config())
+    let handle = leyline::internals::h2::start(counted, test_config())
         .await
         .expect("handshake");
     let callers: Vec<_> = (0..8)
@@ -259,7 +234,11 @@ async fn follow_up_requests_share_one_write() {
                 for round in 0..2 {
                     let (pseudo, headers) = get_req(&format!("/{i}/{round}"));
                     let response = handle
-                        .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+                        .send_shared(
+                            Arc::new(Head::new(pseudo, headers)),
+                            leyline::Body::default(),
+                            false,
+                        )
                         .await
                         .expect("response");
                     assert_eq!(response.status, 200);
@@ -332,7 +311,7 @@ async fn requests_queued_at_the_stream_limit_share_writes() {
         (costs, server_io)
     });
 
-    let handle = leyline::h2::start(counted, test_config())
+    let handle = leyline::internals::h2::start(counted, test_config())
         .await
         .expect("handshake");
     let callers: Vec<_> = (0..16)
@@ -341,7 +320,11 @@ async fn requests_queued_at_the_stream_limit_share_writes() {
             tokio::spawn(async move {
                 let (pseudo, headers) = get_req(&format!("/{i}"));
                 let response = handle
-                    .send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+                    .send_shared(
+                        Arc::new(Head::new(pseudo, headers)),
+                        leyline::Body::default(),
+                        false,
+                    )
                     .await
                     .expect("response");
                 assert_eq!(response.status, 200);
@@ -373,7 +356,7 @@ async fn buffered_pings_share_one_write() {
         writes: Arc::clone(&writes),
         read_chunk: usize::MAX,
     };
-    let handle = leyline::h2::start(counted, test_config())
+    let handle = leyline::internals::h2::start(counted, test_config())
         .await
         .expect("start client");
     timeout(Duration::from_secs(2), async {
@@ -412,7 +395,7 @@ async fn buffered_pings_share_one_write() {
 #[tokio::test]
 async fn ping_ack_precedes_continuation_wait() {
     let (client, mut peer) = tokio::io::duplex(65_536);
-    let handle = leyline::h2::start(client, test_config())
+    let handle = leyline::internals::h2::start(client, test_config())
         .await
         .expect("start client");
     let server = async move {
@@ -466,14 +449,18 @@ async fn ping_ack_precedes_continuation_wait() {
     let (peer, response) = timeout(Duration::from_secs(2), async {
         tokio::join!(
             server,
-            handle.send_shared(Arc::new(Head { pseudo, headers }), RequestBody::None, false)
+            handle.send_shared(
+                Arc::new(Head::new(pseudo, headers)),
+                leyline::Body::default(),
+                false
+            )
         )
     })
     .await
     .expect("request deadline");
     let response = response.expect("response");
     assert_eq!(response.status, 200);
-    let ResponseBody::Buffered(body) = response.body else {
+    let leyline::internals::pool::TransportBody::Buffered(body) = response.body else {
         panic!("buffered body")
     };
     assert!(body.is_empty());

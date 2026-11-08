@@ -1,47 +1,49 @@
-use std::sync::{Arc, Mutex};
+use std::num::NonZeroUsize;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use leyline_bssl::ssl::SslConnector;
-use tokio::net::TcpStream;
+use lru::LruCache;
 
-use crate::core::SocketOptions;
-use crate::core::deadline::{Elapsed, within};
+use crate::deadline::{Elapsed, within};
+use crate::net::{Dialer, NetError, ProxyUrl};
 use crate::profile::BrowserProfile;
-use crate::tcp::TcpProfile;
+use crate::profile::TcpProfile;
 
+use crate::profile::TlsMinVersion;
+use crate::tls::AlpnPlan;
+use crate::tls::HelloOptions;
 use crate::tls::TlsStream;
-use crate::tls::alpn::AlpnPlan;
-use crate::tls::builder::{TlsMinVersion, apply_tls_with_trust};
+use crate::tls::builder::{Transport, apply_tls_with_trust};
 use crate::tls::error::TlsError;
-use crate::tls::happy_eyeballs::{HappyEyeballs, happy_eyeballs_connect};
-use crate::tls::hello::HelloOptions;
-use crate::tls::nonblocking::connect_one;
-use crate::tls::resolver::{Resolver, SystemResolver};
+use crate::tls::proxy::{self, Route, Tunnel};
 use crate::tls::session_cache::SessionCache;
-use crate::tls::trust::{Tls, TrustIdentity};
-use crate::trace;
+use crate::tls::trust::{Tls, TrustIdentity, TrustKey};
 use crate::util::lock;
 
 mod handshake;
 #[cfg(test)]
 mod shared_tests;
 
+const TCP: Transport = Transport::Tcp(TlsMinVersion::Tls12);
+
 #[derive(Clone)]
 pub struct FingerprintConnector {
     ssl_connector: SslConnector,
-    tcp_profile: TcpProfile,
     trust: Tls,
     hello: HelloOptions,
     session_cache: SessionCache,
-    resolver: Arc<dyn Resolver>,
-    happy_eyeballs: HappyEyeballs,
+    dialer: Dialer,
     connect_timeout: Option<Duration>,
-    socket_config: SocketOptions,
 }
 
-const SHARED_CONTEXTS: usize = 8;
+const SHARED_CONTEXTS: NonZeroUsize = match NonZeroUsize::new(8) {
+    Some(n) => n,
+    None => NonZeroUsize::MIN,
+};
 
-static PLAIN_CONTEXTS: Mutex<Vec<(Tls, Context)>> = Mutex::new(Vec::new());
+static PLAIN_CONTEXTS: LazyLock<Mutex<LruCache<TrustKey, Context>>> =
+    LazyLock::new(|| Mutex::new(LruCache::new(SHARED_CONTEXTS)));
 
 #[derive(Clone)]
 struct Context {
@@ -54,8 +56,7 @@ impl Context {
     fn build(profile: &BrowserProfile, trust: &Tls) -> Result<Self, TlsError> {
         let mut builder = SslConnector::bare_builder(leyline_bssl::ssl::SslMethod::tls())
             .map_err(TlsError::from_stack)?;
-        let identity =
-            apply_tls_with_trust(&mut builder, &profile.tls, TlsMinVersion::Tls12, trust)?;
+        let identity = apply_tls_with_trust(&mut builder, &profile.tls, TCP, trust)?;
         let hello = HelloOptions::from_tls(&profile.tls)?;
         builder
             .set_alpn_protos(crate::tls::alpn::BROWSER_WIRE)
@@ -68,56 +69,50 @@ impl Context {
         })
     }
 
-    fn find(trust: &Tls) -> Option<Self> {
-        lock(&PLAIN_CONTEXTS)
-            .iter()
-            .find(|(kept, _)| kept.same_roots(trust))
-            .map(|(_, context)| context.clone())
-    }
-
-    fn keep(&self, trust: &Tls) {
-        let mut kept = lock(&PLAIN_CONTEXTS);
-        if kept.len() >= SHARED_CONTEXTS {
-            drop(kept.remove(0));
+    fn shared(profile: &BrowserProfile, trust: &Tls) -> Result<Self, TlsError> {
+        let key = std::ptr::eq(profile, &*BrowserProfile::bare_shared())
+            .then(|| trust.shared_key())
+            .flatten();
+        let Some(key) = key else {
+            return Self::build(profile, trust);
+        };
+        if let Some(context) = lock(&*PLAIN_CONTEXTS).get(&key) {
+            return Ok(context.clone());
         }
-        kept.push((trust.clone(), self.clone()));
+        let context = Self::build(profile, trust)?;
+        lock(&*PLAIN_CONTEXTS).put(key, context.clone());
+        Ok(context)
     }
 }
 
 impl FingerprintConnector {
-    #[cfg(any(test, feature = "bench-internals"))]
+    #[cfg(feature = "bench-internals")]
     pub fn new(profile: &BrowserProfile, tcp: TcpProfile) -> Result<Self, TlsError> {
         Self::new_with_trust(profile, tcp, &Tls::default())
     }
 
+    #[cfg(any(test, feature = "bench-internals"))]
     pub fn new_with_trust(
         profile: &BrowserProfile,
         tcp: TcpProfile,
         trust: &Tls,
     ) -> Result<Self, TlsError> {
-        let trust = trust.clone();
-        let shared = std::ptr::eq(profile, &*BrowserProfile::bare_shared()) && trust.shareable();
-        let context = match shared.then(|| Context::find(&trust)).flatten() {
-            Some(context) => context,
-            None => {
-                let context = Context::build(profile, &trust)?;
-                if shared {
-                    context.keep(&trust);
-                }
-                context
-            }
-        };
+        Self::with_dialer(profile, Dialer::new(tcp), trust)
+    }
 
+    pub(crate) fn with_dialer(
+        profile: &BrowserProfile,
+        dialer: Dialer,
+        trust: &Tls,
+    ) -> Result<Self, TlsError> {
+        let context = Context::shared(profile, trust)?;
         Ok(Self {
             ssl_connector: context.ssl_connector,
-            tcp_profile: tcp,
             hello: context.hello,
             session_cache: SessionCache::new(context.identity),
-            resolver: Arc::new(SystemResolver),
-            happy_eyeballs: HappyEyeballs::default(),
+            dialer,
             connect_timeout: None,
-            socket_config: SocketOptions::default(),
-            trust,
+            trust: trust.clone(),
         })
     }
 
@@ -126,11 +121,8 @@ impl FingerprintConnector {
         profile: &BrowserProfile,
         tcp: TcpProfile,
     ) -> Result<Self, TlsError> {
-        let mut next = Self::new_with_trust(profile, tcp, &self.trust)?;
-        next.resolver = self.resolver.clone();
-        next.happy_eyeballs = self.happy_eyeballs;
+        let mut next = Self::with_dialer(profile, self.dialer.clone().with_tcp(tcp), &self.trust)?;
         next.connect_timeout = self.connect_timeout;
-        next.socket_config = self.socket_config.clone();
         Ok(next)
     }
 
@@ -138,22 +130,17 @@ impl FingerprintConnector {
         &self.session_cache
     }
 
-    #[cfg(feature = "http3")]
-    pub(crate) fn resolver(&self) -> &Arc<dyn Resolver> {
-        &self.resolver
+    pub(crate) fn dialer(&self) -> &Dialer {
+        &self.dialer
     }
 
     pub(crate) fn has_origin_tls_identity(&self) -> bool {
         !self.trust.pinned_leaf_sha256().is_empty() || self.trust.has_client_identity()
     }
 
-    pub fn with_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
-        self.resolver = resolver;
-        self
-    }
-
-    pub(crate) fn with_happy_eyeballs_config(mut self, config: HappyEyeballs) -> Self {
-        self.happy_eyeballs = config;
+    #[cfg(feature = "bench-internals")]
+    pub fn with_resolver(mut self, resolver: std::sync::Arc<dyn crate::net::Resolver>) -> Self {
+        self.dialer = self.dialer.with_resolver(resolver);
         self
     }
 
@@ -162,42 +149,17 @@ impl FingerprintConnector {
         self
     }
 
-    pub(crate) fn with_socket_config(mut self, config: SocketOptions) -> Self {
-        self.socket_config = config;
-        self
-    }
-
     pub async fn connect(
         &self,
         host: &str,
         port: u16,
-        proxy: Option<&str>,
+        proxy: Option<&ProxyUrl>,
+        plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
         match proxy {
-            Some(proxy_url) => {
-                self.connect_via_proxy(host, port, proxy_url, AlpnPlan::Browser)
-                    .await
-            }
+            Some(proxy) => self.connect_via_proxy(host, port, proxy, plan).await,
             None => {
-                self.with_timeout(self.connect_direct(host, port, AlpnPlan::Browser))
-                    .await
-            }
-        }
-    }
-
-    pub async fn connect_h1(
-        &self,
-        host: &str,
-        port: u16,
-        proxy: Option<&str>,
-    ) -> Result<TlsStream, TlsError> {
-        match proxy {
-            Some(proxy_url) => {
-                self.connect_via_proxy(host, port, proxy_url, AlpnPlan::Http11)
-                    .await
-            }
-            None => {
-                self.with_timeout(self.connect_direct(host, port, AlpnPlan::Http11))
+                self.with_timeout(self.connect_direct(host, port, plan))
                     .await
             }
         }
@@ -207,35 +169,40 @@ impl FingerprintConnector {
         &self,
         host: &str,
         port: u16,
-        proxy_url: &str,
+        proxy: &ProxyUrl,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
-        let proxy = crate::tls::proxy::parse(proxy_url)?;
         let started = Instant::now();
         let tunnel = self
-            .with_timeout(crate::tls::proxy::open_tunnel(self, host, port, &proxy))
+            .with_timeout(proxy::open(self, host, port, proxy, Route::Connect))
             .await
             .map_err(TlsError::into_proxy)?;
         let remaining = self
             .connect_timeout
             .map(|budget| budget.saturating_sub(started.elapsed()));
-        let handshake = crate::tls::proxy::handshake(self, tunnel, host, port, &proxy, plan);
+        let session_key = SessionCache::key(host, port, Some(proxy.url()));
+        let handshake = async {
+            match tunnel {
+                Tunnel::Plain(tcp) => self.tls_handshake(tcp, host, &session_key, plan).await,
+                Tunnel::Tls(io) => {
+                    self.tls_handshake_nested(io, host, &session_key, plan)
+                        .await
+                }
+            }
+        };
         within(remaining, handshake)
             .await
-            .map_err(|Elapsed| connect_timeout())?
+            .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
     }
 
-    pub(crate) fn tcp_profile(&self) -> &TcpProfile {
-        &self.tcp_profile
-    }
-
-    pub(crate) async fn with_timeout<T, F>(&self, fut: F) -> Result<T, TlsError>
+    pub(crate) async fn with_timeout<T, E, F>(&self, fut: F) -> Result<T, E>
     where
-        F: std::future::Future<Output = Result<T, TlsError>>,
+        E: From<NetError>,
+        F: std::future::Future<Output = Result<T, E>>,
     {
         within(self.connect_timeout, fut)
             .await
-            .map_err(|Elapsed| connect_timeout())?
+            .map_err(|Elapsed| E::from(NetError::connect_timeout()))?
     }
 
     async fn connect_direct(
@@ -244,55 +211,17 @@ impl FingerprintConnector {
         port: u16,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
-        let tcp_stream = self.dial_tcp(host, port).await?;
+        let tcp_stream = self.dialer.dial(host, port).await?;
         let session_key = SessionCache::key(host, port, None);
         self.tls_handshake(tcp_stream, host, &session_key, plan)
             .await
     }
-
-    pub(crate) async fn dial_tcp(&self, host: &str, port: u16) -> Result<TcpStream, TlsError> {
-        let started = Instant::now();
-        let addrs = self
-            .resolver
-            .resolve(host, port)
-            .await
-            .map_err(TlsError::Dns)?;
-        trace::dns(host, port, addrs.len(), started.elapsed());
-
-        if addrs.is_empty() {
-            return Err(TlsError::Dns(std::io::Error::new(
-                std::io::ErrorKind::NotFound,
-                "no addresses resolved",
-            )));
-        }
-
-        let tcp_profile = self.tcp_profile.clone();
-        let socket_config = self.socket_config.clone();
-        let started = Instant::now();
-        let (tcp_stream, _addr) =
-            happy_eyeballs_connect(addrs, self.happy_eyeballs, move |sock_addr| {
-                let socket_config = socket_config.clone();
-                let tcp_profile = tcp_profile.clone();
-                async move { connect_one(sock_addr, &tcp_profile, &socket_config).await }
-            })
-            .await
-            .map_err(TlsError::TcpConnect)?;
-        trace::connect(host, port, false, started.elapsed());
-        Ok(tcp_stream)
-    }
-}
-
-fn connect_timeout() -> TlsError {
-    TlsError::TcpConnect(std::io::Error::new(
-        std::io::ErrorKind::TimedOut,
-        "connect timeout",
-    ))
 }
 
 impl std::fmt::Debug for FingerprintConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FingerprintConnector")
-            .field("tcp_profile", &self.tcp_profile)
+            .field("tcp_profile", self.dialer.tcp_profile())
             .field("ech_grease", &self.hello.ech_grease())
             .finish_non_exhaustive()
     }

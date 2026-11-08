@@ -2,11 +2,10 @@ use std::time::{Duration, SystemTime};
 
 use url::{Host, Url};
 
-use crate::pool::ExpiringSet;
 use crate::util::delta_seconds;
+use crate::util::expiring::ExpiringSet;
+use crate::wire::Scheme;
 
-const SECURE_SCHEME: &str = "https";
-const PLAIN_SCHEME: &str = "http";
 const MAX_AGE: &str = "max-age";
 const INCLUDE_SUBDOMAINS: &str = "includesubdomains";
 
@@ -23,7 +22,7 @@ struct Policy {
 
 impl HstsStore {
     pub(crate) fn note(&mut self, url: &Url, values: &[&str], now: SystemTime) {
-        if url.scheme() != SECURE_SCHEME {
+        if !Scheme::of(url).is_some_and(Scheme::is_secure) {
             return;
         }
         let (Some(host), Some(first)) = (domain(url), values.first()) else {
@@ -43,8 +42,12 @@ impl HstsStore {
         self.insert(host, policy.include_subdomains, expiry, now);
     }
 
+    pub(crate) fn applies(url: &Url) -> bool {
+        Scheme::of(url) == Some(Scheme::Http)
+    }
+
     pub(crate) fn upgrade(&mut self, url: &Url, now: SystemTime) -> Option<Url> {
-        if url.scheme() != PLAIN_SCHEME {
+        if !Self::applies(url) {
             return None;
         }
         let host = domain(url)?;
@@ -52,7 +55,7 @@ impl HstsStore {
             return None;
         }
         let mut upgraded = url.clone();
-        upgraded.set_scheme(SECURE_SCHEME).ok()?;
+        upgraded.set_scheme(Scheme::Https.as_str()).ok()?;
         Some(upgraded)
     }
 

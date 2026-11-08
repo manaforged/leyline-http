@@ -1,13 +1,7 @@
 use bytes::{BufMut, Bytes};
 
-use super::{FrameHeader, FrameType};
+use super::{FrameHeader, FrameType, Scope, check_scope, flags, padded_end};
 use crate::h2::H2Error;
-use crate::h2::error::ErrorCode;
-
-pub mod flags {
-    pub const END_STREAM: u8 = 0x1;
-    pub const PADDED: u8 = 0x8;
-}
 
 #[derive(Debug)]
 pub struct DataFrame {
@@ -19,31 +13,12 @@ pub struct DataFrame {
 
 impl DataFrame {
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
-        if header.stream_id == 0 {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "DATA frame on stream 0".into(),
-            });
-        }
+        check_scope(&header, Scope::Stream, "DATA")?;
 
         let end_stream = header.flags & flags::END_STREAM != 0;
-        let padded = header.flags & flags::PADDED != 0;
-
-        if padded && payload.is_empty() {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "padded DATA frame has no pad length".into(),
-            });
-        }
-        let data = if padded {
-            let pad_len = payload[0] as usize;
-            if pad_len >= payload.len() {
-                return Err(H2Error::Connection {
-                    code: ErrorCode::ProtocolError,
-                    reason: "DATA padding exceeds payload".into(),
-                });
-            }
-            payload.slice(1..payload.len() - pad_len)
+        let data = if header.flags & flags::PADDED != 0 {
+            let end = padded_end(&payload, true, 0)?;
+            payload.slice(1..end)
         } else {
             payload
         };

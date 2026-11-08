@@ -302,6 +302,11 @@ pub const __MAC_15_2: i32 = 150200;
 pub const __MAC_15_3: i32 = 150300;
 pub const __MAC_15_4: i32 = 150400;
 pub const __MAC_15_5: i32 = 150500;
+pub const __MAC_15_6: i32 = 150600;
+pub const __MAC_16_0: i32 = 160000;
+pub const __MAC_26_0: i32 = 260000;
+pub const __MAC_26_1: i32 = 260100;
+pub const __MAC_26_2: i32 = 260200;
 pub const __IPHONE_2_0: i32 = 20000;
 pub const __IPHONE_2_1: i32 = 20100;
 pub const __IPHONE_2_2: i32 = 20200;
@@ -354,7 +359,6 @@ pub const __IPHONE_14_1: i32 = 140100;
 pub const __IPHONE_14_2: i32 = 140200;
 pub const __IPHONE_14_3: i32 = 140300;
 pub const __IPHONE_14_5: i32 = 140500;
-pub const __IPHONE_14_4: i32 = 140400;
 pub const __IPHONE_14_6: i32 = 140600;
 pub const __IPHONE_14_7: i32 = 140700;
 pub const __IPHONE_14_8: i32 = 140800;
@@ -389,6 +393,11 @@ pub const __IPHONE_18_2: i32 = 180200;
 pub const __IPHONE_18_3: i32 = 180300;
 pub const __IPHONE_18_4: i32 = 180400;
 pub const __IPHONE_18_5: i32 = 180500;
+pub const __IPHONE_18_6: i32 = 180600;
+pub const __IPHONE_19_0: i32 = 190000;
+pub const __IPHONE_26_0: i32 = 260000;
+pub const __IPHONE_26_1: i32 = 260100;
+pub const __IPHONE_26_2: i32 = 260200;
 pub const __WATCHOS_1_0: i32 = 10000;
 pub const __WATCHOS_2_0: i32 = 20000;
 pub const __WATCHOS_2_1: i32 = 20100;
@@ -444,6 +453,11 @@ pub const __WATCHOS_11_2: i32 = 110200;
 pub const __WATCHOS_11_3: i32 = 110300;
 pub const __WATCHOS_11_4: i32 = 110400;
 pub const __WATCHOS_11_5: i32 = 110500;
+pub const __WATCHOS_11_6: i32 = 110600;
+pub const __WATCHOS_12_0: i32 = 120000;
+pub const __WATCHOS_26_0: i32 = 260000;
+pub const __WATCHOS_26_1: i32 = 260100;
+pub const __WATCHOS_26_2: i32 = 260200;
 pub const __TVOS_9_0: i32 = 90000;
 pub const __TVOS_9_1: i32 = 90100;
 pub const __TVOS_9_2: i32 = 90200;
@@ -499,6 +513,11 @@ pub const __TVOS_18_2: i32 = 180200;
 pub const __TVOS_18_3: i32 = 180300;
 pub const __TVOS_18_4: i32 = 180400;
 pub const __TVOS_18_5: i32 = 180500;
+pub const __TVOS_18_6: i32 = 180600;
+pub const __TVOS_19_0: i32 = 190000;
+pub const __TVOS_26_0: i32 = 260000;
+pub const __TVOS_26_1: i32 = 260100;
+pub const __TVOS_26_2: i32 = 260200;
 pub const __BRIDGEOS_2_0: i32 = 20000;
 pub const __BRIDGEOS_3_0: i32 = 30000;
 pub const __BRIDGEOS_3_1: i32 = 30100;
@@ -532,6 +551,10 @@ pub const __BRIDGEOS_9_2: i32 = 90200;
 pub const __BRIDGEOS_9_3: i32 = 90300;
 pub const __BRIDGEOS_9_4: i32 = 90400;
 pub const __BRIDGEOS_9_5: i32 = 90500;
+pub const __BRIDGEOS_9_6: i32 = 90600;
+pub const __BRIDGEOS_10_0: i32 = 100000;
+pub const __BRIDGEOS_10_1: i32 = 100100;
+pub const __BRIDGEOS_10_2: i32 = 100200;
 pub const __DRIVERKIT_19_0: i32 = 190000;
 pub const __DRIVERKIT_20_0: i32 = 200000;
 pub const __DRIVERKIT_21_0: i32 = 210000;
@@ -552,6 +575,10 @@ pub const __DRIVERKIT_24_2: i32 = 240200;
 pub const __DRIVERKIT_24_3: i32 = 240300;
 pub const __DRIVERKIT_24_4: i32 = 240400;
 pub const __DRIVERKIT_24_5: i32 = 240500;
+pub const __DRIVERKIT_24_6: i32 = 240600;
+pub const __DRIVERKIT_25_0: i32 = 250000;
+pub const __DRIVERKIT_25_1: i32 = 250100;
+pub const __DRIVERKIT_25_2: i32 = 250200;
 pub const __VISIONOS_1_0: i32 = 10000;
 pub const __VISIONOS_1_1: i32 = 10100;
 pub const __VISIONOS_1_2: i32 = 10200;
@@ -562,6 +589,11 @@ pub const __VISIONOS_2_2: i32 = 20200;
 pub const __VISIONOS_2_3: i32 = 20300;
 pub const __VISIONOS_2_4: i32 = 20400;
 pub const __VISIONOS_2_5: i32 = 20500;
+pub const __VISIONOS_2_6: i32 = 20600;
+pub const __VISIONOS_3_0: i32 = 30000;
+pub const __VISIONOS_26_0: i32 = 260000;
+pub const __VISIONOS_26_1: i32 = 260100;
+pub const __VISIONOS_26_2: i32 = 260200;
 pub const MAC_OS_X_VERSION_10_0: i32 = 1000;
 pub const MAC_OS_X_VERSION_10_1: i32 = 1010;
 pub const MAC_OS_X_VERSION_10_2: i32 = 1020;
@@ -632,10 +664,15 @@ pub const MAC_OS_VERSION_15_2: i32 = 150200;
 pub const MAC_OS_VERSION_15_3: i32 = 150300;
 pub const MAC_OS_VERSION_15_4: i32 = 150400;
 pub const MAC_OS_VERSION_15_5: i32 = 150500;
+pub const MAC_OS_VERSION_15_6: i32 = 150600;
+pub const MAC_OS_VERSION_16_0: i32 = 160000;
+pub const MAC_OS_VERSION_26_0: i32 = 260000;
+pub const MAC_OS_VERSION_26_1: i32 = 260100;
+pub const MAC_OS_VERSION_26_2: i32 = 260200;
 pub const __AVAILABILITY_VERSIONS_VERSION_HASH: i32 = 93585900;
 pub const __AVAILABILITY_VERSIONS_VERSION_STRING: &[u8; 6] = b"Local\0";
 pub const __AVAILABILITY_FILE: &[u8; 23] = b"AvailabilityVersions.h\0";
-pub const __MAC_OS_X_VERSION_MAX_ALLOWED: i32 = 150500;
+pub const __MAC_OS_X_VERSION_MAX_ALLOWED: i32 = 260200;
 pub const __ENABLE_LEGACY_MAC_AVAILABILITY: i32 = 1;
 pub const __DARWIN_WCHAR_MIN: i32 = -2147483648;
 pub const _FORTIFY_SOURCE: i32 = 2;
@@ -679,6 +716,7 @@ pub const USE_CLANG_STDDEF: i32 = 0;
 pub const SIGEV_NONE: i32 = 0;
 pub const SIGEV_SIGNAL: i32 = 1;
 pub const SIGEV_THREAD: i32 = 3;
+pub const SIGEV_KEVENT: i32 = 4;
 pub const ILL_NOOP: i32 = 0;
 pub const ILL_ILLOPC: i32 = 1;
 pub const ILL_ILLTRP: i32 = 2;
@@ -800,6 +838,7 @@ pub const IOPOL_TYPE_VFS_IGNORE_PERMISSIONS: i32 = 7;
 pub const IOPOL_TYPE_VFS_SKIP_MTIME_UPDATE: i32 = 8;
 pub const IOPOL_TYPE_VFS_ALLOW_LOW_SPACE_WRITES: i32 = 9;
 pub const IOPOL_TYPE_VFS_DISALLOW_RW_FOR_O_EVTONLY: i32 = 10;
+pub const IOPOL_TYPE_VFS_ENTITLED_RESERVE_ACCESS: i32 = 14;
 pub const IOPOL_SCOPE_PROCESS: i32 = 0;
 pub const IOPOL_SCOPE_THREAD: i32 = 1;
 pub const IOPOL_SCOPE_DARWIN_BG: i32 = 2;
@@ -816,6 +855,8 @@ pub const IOPOL_ATIME_UPDATES_OFF: i32 = 1;
 pub const IOPOL_MATERIALIZE_DATALESS_FILES_DEFAULT: i32 = 0;
 pub const IOPOL_MATERIALIZE_DATALESS_FILES_OFF: i32 = 1;
 pub const IOPOL_MATERIALIZE_DATALESS_FILES_ON: i32 = 2;
+pub const IOPOL_MATERIALIZE_DATALESS_FILES_ORIG: i32 = 4;
+pub const IOPOL_MATERIALIZE_DATALESS_FILES_BASIC_MASK: i32 = 3;
 pub const IOPOL_VFS_STATFS_NO_DATA_VOLUME_DEFAULT: i32 = 0;
 pub const IOPOL_VFS_STATFS_FORCE_NO_DATA_VOLUME: i32 = 1;
 pub const IOPOL_VFS_TRIGGER_RESOLVE_DEFAULT: i32 = 0;
@@ -833,6 +874,8 @@ pub const IOPOL_VFS_DISALLOW_RW_FOR_O_EVTONLY_DEFAULT: i32 = 0;
 pub const IOPOL_VFS_DISALLOW_RW_FOR_O_EVTONLY_ON: i32 = 1;
 pub const IOPOL_VFS_NOCACHE_WRITE_FS_BLKSIZE_DEFAULT: i32 = 0;
 pub const IOPOL_VFS_NOCACHE_WRITE_FS_BLKSIZE_ON: i32 = 1;
+pub const IOPOL_VFS_ENTITLED_RESERVE_ACCESS_OFF: i32 = 0;
+pub const IOPOL_VFS_ENTITLED_RESERVE_ACCESS_ON: i32 = 1;
 pub const WNOHANG: i32 = 1;
 pub const WUNTRACED: i32 = 2;
 pub const WCOREFLAG: i32 = 128;
@@ -856,6 +899,7 @@ pub const BYTE_ORDER: i32 = 1234;
 pub const EXIT_FAILURE: i32 = 1;
 pub const EXIT_SUCCESS: i32 = 0;
 pub const RAND_MAX: i32 = 2147483647;
+pub const _MALLOC_TYPE_MALLOC_BACKDEPLOY_PUBLIC: i32 = 1;
 pub const __DARWIN_FD_SETSIZE: i32 = 1024;
 pub const __DARWIN_NBBY: i32 = 8;
 pub const NBBY: i32 = 8;
@@ -890,6 +934,7 @@ pub const RENAME_SWAP: i32 = 2;
 pub const RENAME_EXCL: i32 = 4;
 pub const RENAME_RESERVED1: i32 = 8;
 pub const RENAME_NOFOLLOW_ANY: i32 = 16;
+pub const RENAME_RESOLVE_BENEATH: i32 = 32;
 pub const SEEK_SET: i32 = 0;
 pub const SEEK_CUR: i32 = 1;
 pub const SEEK_END: i32 = 2;
@@ -1277,6 +1322,7 @@ pub const V_ASN1_EXTERNAL: i32 = 8;
 pub const V_ASN1_REAL: i32 = 9;
 pub const V_ASN1_ENUMERATED: i32 = 10;
 pub const V_ASN1_UTF8STRING: i32 = 12;
+pub const V_ASN1_RELATIVE_OID: i32 = 13;
 pub const V_ASN1_SEQUENCE: i32 = 16;
 pub const V_ASN1_SET: i32 = 17;
 pub const V_ASN1_NUMERICSTRING: i32 = 18;
@@ -1532,6 +1578,8 @@ pub const ED25519_PUBLIC_KEY_LEN: i32 = 32;
 pub const ED25519_SIGNATURE_LEN: i32 = 64;
 pub const SPAKE2_MAX_MSG_SIZE: i32 = 32;
 pub const SPAKE2_MAX_KEY_SIZE: i32 = 64;
+pub const CPACE_MSG_LEN: i32 = 32;
+pub const CPACE_SHARED_SECRET_LEN: i32 = 64;
 pub const DES_ENCRYPT: i32 = 1;
 pub const DES_DECRYPT: i32 = 0;
 pub const DES_CBC_MODE: i32 = 0;
@@ -4142,6 +4190,7 @@ pub const CBS_ASN1_NULL: i32 = 5;
 pub const CBS_ASN1_OBJECT: i32 = 6;
 pub const CBS_ASN1_ENUMERATED: i32 = 10;
 pub const CBS_ASN1_UTF8STRING: i32 = 12;
+pub const CBS_ASN1_RELATIVE_OID: i32 = 13;
 pub const CBS_ASN1_SEQUENCE: i32 = 536870928;
 pub const CBS_ASN1_SET: i32 = 536870929;
 pub const CBS_ASN1_NUMERICSTRING: i32 = 18;
@@ -4930,8 +4979,6 @@ pub const SSL_ERROR_WANT_PRIVATE_KEY_OPERATION: i32 = 13;
 pub const SSL_ERROR_PENDING_TICKET: i32 = 14;
 pub const SSL_ERROR_EARLY_DATA_REJECTED: i32 = 15;
 pub const SSL_ERROR_WANT_CERTIFICATE_VERIFY: i32 = 16;
-pub const SSL_ERROR_HANDOFF: i32 = 17;
-pub const SSL_ERROR_HANDBACK: i32 = 18;
 pub const SSL_ERROR_WANT_RENEGOTIATE: i32 = 19;
 pub const SSL_ERROR_HANDSHAKE_HINTS_READY: i32 = 20;
 pub const DTLS1_VERSION_MAJOR: i32 = 254;
@@ -5444,6 +5491,7 @@ pub const SSL_R_INVALID_RAW_PUBLIC_KEY: i32 = 336;
 pub const SSL_R_UNUSABLE_ECH_CONFIG_LIST: i32 = 337;
 pub const SSL_R_INVALID_CIPHER_FLAGS: i32 = 338;
 pub const SSL_R_DUPLICATE_CIPHER: i32 = 339;
+pub const SSL_R_INVALID_TRUST_ANCHOR_ID: i32 = 340;
 pub const SSL_R_SSLV3_ALERT_CLOSE_NOTIFY: i32 = 1000;
 pub const SSL_R_SSLV3_ALERT_UNEXPECTED_MESSAGE: i32 = 1010;
 pub const SSL_R_SSLV3_ALERT_BAD_RECORD_MAC: i32 = 1020;
@@ -7909,6 +7957,12 @@ pub type CONF = conf_st;
 pub type CONF_VALUE = conf_value_st;
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
+pub struct cpace_ctx_st {
+    _unused: [u8; 0],
+}
+pub type CPACE_CTX = cpace_ctx_st;
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
 pub struct crypto_buffer_pool_st {
     _unused: [u8; 0],
 }
@@ -9373,6 +9427,13 @@ impl spake2_role_t {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct spake2_role_t(pub ::std::os::raw::c_uint);
+impl cpace_role_t {
+    pub const cpace_role_initiator: cpace_role_t = cpace_role_t(0);
+    pub const cpace_role_responder: cpace_role_t = cpace_role_t(1);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct cpace_role_t(pub ::std::os::raw::c_uint);
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct DES_cblock_st {
@@ -10900,7 +10961,6 @@ pub type AUTHORITY_INFO_ACCESS = stack_st_ACCESS_DESCRIPTION;
 pub struct DIST_POINT_NAME_st {
     pub type_: ::std::os::raw::c_int,
     pub name: DIST_POINT_NAME_st__bindgen_ty_1,
-    pub dpname: *mut X509_NAME,
 }
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -10930,14 +10990,12 @@ impl Default for DIST_POINT_NAME_st__bindgen_ty_1 {
 }
 #[allow(clippy::unnecessary_operation, clippy::identity_op)]
 const _: () = {
-    ["Size of DIST_POINT_NAME_st"][::std::mem::size_of::<DIST_POINT_NAME_st>() - 24usize];
+    ["Size of DIST_POINT_NAME_st"][::std::mem::size_of::<DIST_POINT_NAME_st>() - 16usize];
     ["Alignment of DIST_POINT_NAME_st"][::std::mem::align_of::<DIST_POINT_NAME_st>() - 8usize];
     ["Offset of field: DIST_POINT_NAME_st::type_"]
         [::std::mem::offset_of!(DIST_POINT_NAME_st, type_) - 0usize];
     ["Offset of field: DIST_POINT_NAME_st::name"]
         [::std::mem::offset_of!(DIST_POINT_NAME_st, name) - 8usize];
-    ["Offset of field: DIST_POINT_NAME_st::dpname"]
-        [::std::mem::offset_of!(DIST_POINT_NAME_st, dpname) - 16usize];
 };
 impl Default for DIST_POINT_NAME_st {
     fn default() -> Self {
@@ -12957,6 +13015,24 @@ impl ssl_select_cert_result_t {
 #[repr(transparent)]
 #[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub struct ssl_select_cert_result_t(pub ::std::os::raw::c_int);
+impl ssl_compliance_policy_t {
+    pub const ssl_compliance_policy_none: ssl_compliance_policy_t = ssl_compliance_policy_t(0);
+    pub const ssl_compliance_policy_fips_202205: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(1);
+    pub const ssl_compliance_policy_fips_202609: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(2);
+    pub const ssl_compliance_policy_wpa3_192_202304: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(3);
+    pub const ssl_compliance_policy_cnsa_202407: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(4);
+    pub const ssl_compliance_policy_cnsa1_202603: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(5);
+    pub const ssl_compliance_policy_cnsa2_202603: ssl_compliance_policy_t =
+        ssl_compliance_policy_t(6);
+}
+#[repr(transparent)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub struct ssl_compliance_policy_t(pub ::std::os::raw::c_uint);
 pub type COMP_METHOD = ::std::os::raw::c_void;
 pub type SSL_COMP = ssl_comp_st;
 #[repr(C)]
@@ -13009,24 +13085,6 @@ pub struct ssl_conf_ctx_st {
     _unused: [u8; 0],
 }
 pub type SSL_CONF_CTX = ssl_conf_ctx_st;
-impl ssl_compliance_policy_t {
-    pub const ssl_compliance_policy_none: ssl_compliance_policy_t = ssl_compliance_policy_t(0);
-    pub const ssl_compliance_policy_fips_202205: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(1);
-    pub const ssl_compliance_policy_fips_202609: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(2);
-    pub const ssl_compliance_policy_wpa3_192_202304: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(3);
-    pub const ssl_compliance_policy_cnsa_202407: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(4);
-    pub const ssl_compliance_policy_cnsa1_202603: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(5);
-    pub const ssl_compliance_policy_cnsa2_202603: ssl_compliance_policy_t =
-        ssl_compliance_policy_t(6);
-}
-#[repr(transparent)]
-#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
-pub struct ssl_compliance_policy_t(pub ::std::os::raw::c_uint);
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct trust_token_st {
@@ -13958,13 +14016,6 @@ unsafe extern "C" {
             unsafe extern "C" fn(arg1: *mut ::std::os::raw::c_void) -> ::std::os::raw::c_int,
         >,
     ) -> *mut FILE;
-    pub fn __sprintf_chk(
-        arg1: *mut ::std::os::raw::c_char,
-        arg2: ::std::os::raw::c_int,
-        arg3: usize,
-        arg4: *const ::std::os::raw::c_char,
-        ...
-    ) -> ::std::os::raw::c_int;
     pub fn __snprintf_chk(
         arg1: *mut ::std::os::raw::c_char,
         __maxlen: usize,
@@ -13973,16 +14024,23 @@ unsafe extern "C" {
         arg4: *const ::std::os::raw::c_char,
         ...
     ) -> ::std::os::raw::c_int;
-    pub fn __vsprintf_chk(
+    pub fn __vsnprintf_chk(
         arg1: *mut ::std::os::raw::c_char,
+        __maxlen: usize,
         arg2: ::std::os::raw::c_int,
         arg3: usize,
         arg4: *const ::std::os::raw::c_char,
         arg5: va_list,
     ) -> ::std::os::raw::c_int;
-    pub fn __vsnprintf_chk(
+    pub fn __sprintf_chk(
         arg1: *mut ::std::os::raw::c_char,
-        __maxlen: usize,
+        arg2: ::std::os::raw::c_int,
+        arg3: usize,
+        arg4: *const ::std::os::raw::c_char,
+        ...
+    ) -> ::std::os::raw::c_int;
+    pub fn __vsprintf_chk(
+        arg1: *mut ::std::os::raw::c_char,
         arg2: ::std::os::raw::c_int,
         arg3: usize,
         arg4: *const ::std::os::raw::c_char,
@@ -16580,6 +16638,31 @@ unsafe extern "C" {
         their_msg: *const u8,
         their_msg_len: usize,
     ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_CPACE_CTX_new"]
+    pub fn CPACE_CTX_new(
+        role: cpace_role_t,
+        password: *const u8,
+        password_len: usize,
+        channel_id: *const u8,
+        channel_id_len: usize,
+        assoc_data: *const u8,
+        assoc_data_len: usize,
+        session_id: *const u8,
+        session_id_len: usize,
+    ) -> *mut CPACE_CTX;
+    #[link_name = "\u{1}_LEYLINE_CPACE_CTX_free"]
+    pub fn CPACE_CTX_free(ctx: *mut CPACE_CTX);
+    #[link_name = "\u{1}_LEYLINE_CPACE_generate_msg"]
+    pub fn CPACE_generate_msg(ctx: *mut CPACE_CTX, out_msg: *mut u8) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_CPACE_process_msg"]
+    pub fn CPACE_process_msg(
+        ctx: *mut CPACE_CTX,
+        in_msg: *const u8,
+        peer_assoc_data: *const u8,
+        peer_assoc_data_len: usize,
+        shared_secret: *mut u8,
+        sid_out: *mut u8,
+    ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_DES_set_key"]
     pub fn DES_set_key(key: *const DES_cblock, schedule: *mut DES_key_schedule);
     #[link_name = "\u{1}_LEYLINE_DES_set_odd_parity"]
@@ -17783,6 +17866,8 @@ unsafe extern "C" {
     pub fn DSA_free(dsa: *mut DSA);
     #[link_name = "\u{1}_LEYLINE_DSA_up_ref"]
     pub fn DSA_up_ref(dsa: *mut DSA) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_DSA_dup_ref"]
+    pub fn DSA_dup_ref(dsa: *const DSA) -> *mut DSA;
     #[link_name = "\u{1}_LEYLINE_DSA_bits"]
     pub fn DSA_bits(dsa: *const DSA) -> ::std::os::raw::c_uint;
     #[link_name = "\u{1}_LEYLINE_DSA_get0_pub_key"]
@@ -18283,6 +18368,8 @@ unsafe extern "C" {
     pub fn EC_KEY_dup(src: *const EC_KEY) -> *mut EC_KEY;
     #[link_name = "\u{1}_LEYLINE_EC_KEY_up_ref"]
     pub fn EC_KEY_up_ref(key: *mut EC_KEY) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_EC_KEY_dup_ref"]
+    pub fn EC_KEY_dup_ref(key: *const EC_KEY) -> *mut EC_KEY;
     #[link_name = "\u{1}_LEYLINE_EC_KEY_is_opaque"]
     pub fn EC_KEY_is_opaque(key: *const EC_KEY) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_EC_KEY_get0_group"]
@@ -19881,6 +19968,8 @@ unsafe extern "C" {
     pub fn CRYPTO_BUFFER_POOL_free(pool: *mut CRYPTO_BUFFER_POOL);
     #[link_name = "\u{1}_LEYLINE_CRYPTO_BUFFER_POOL_up_ref"]
     pub fn CRYPTO_BUFFER_POOL_up_ref(pool: *mut CRYPTO_BUFFER_POOL) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_CRYPTO_BUFFER_POOL_dup_ref"]
+    pub fn CRYPTO_BUFFER_POOL_dup_ref(pool: *const CRYPTO_BUFFER_POOL) -> *mut CRYPTO_BUFFER_POOL;
     #[link_name = "\u{1}_LEYLINE_CRYPTO_BUFFER_new"]
     pub fn CRYPTO_BUFFER_new(
         data: *const u8,
@@ -19933,6 +20022,8 @@ unsafe extern "C" {
     pub fn RSA_free(rsa: *mut RSA);
     #[link_name = "\u{1}_LEYLINE_RSA_up_ref"]
     pub fn RSA_up_ref(rsa: *mut RSA) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_RSA_dup_ref"]
+    pub fn RSA_dup_ref(rsa: *const RSA) -> *mut RSA;
     #[link_name = "\u{1}_LEYLINE_RSA_bits"]
     pub fn RSA_bits(rsa: *const RSA) -> ::std::os::raw::c_uint;
     #[link_name = "\u{1}_LEYLINE_RSA_get0_n"]
@@ -21525,6 +21616,8 @@ unsafe extern "C" {
     pub fn X509_STORE_new() -> *mut X509_STORE;
     #[link_name = "\u{1}_LEYLINE_X509_STORE_up_ref"]
     pub fn X509_STORE_up_ref(store: *mut X509_STORE) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_X509_STORE_dup_ref"]
+    pub fn X509_STORE_dup_ref(store: *const X509_STORE) -> *mut X509_STORE;
     #[link_name = "\u{1}_LEYLINE_X509_STORE_free"]
     pub fn X509_STORE_free(store: *mut X509_STORE);
     #[link_name = "\u{1}_LEYLINE_X509_STORE_add_cert"]
@@ -23773,6 +23866,8 @@ unsafe extern "C" {
     pub fn SSL_CTX_new(method: *const SSL_METHOD) -> *mut SSL_CTX;
     #[link_name = "\u{1}_LEYLINE_SSL_CTX_up_ref"]
     pub fn SSL_CTX_up_ref(ctx: *mut SSL_CTX) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_CTX_dup_ref"]
+    pub fn SSL_CTX_dup_ref(ctx: *const SSL_CTX) -> *mut SSL_CTX;
     #[link_name = "\u{1}_LEYLINE_SSL_CTX_free"]
     pub fn SSL_CTX_free(ctx: *mut SSL_CTX);
     #[link_name = "\u{1}_LEYLINE_SSL_new"]
@@ -24414,6 +24509,8 @@ unsafe extern "C" {
     pub fn SSL_SESSION_new(ctx: *const SSL_CTX) -> *mut SSL_SESSION;
     #[link_name = "\u{1}_LEYLINE_SSL_SESSION_up_ref"]
     pub fn SSL_SESSION_up_ref(session: *mut SSL_SESSION) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_SESSION_dup_ref"]
+    pub fn SSL_SESSION_dup_ref(session: *const SSL_SESSION) -> *mut SSL_SESSION;
     #[link_name = "\u{1}_LEYLINE_SSL_SESSION_free"]
     pub fn SSL_SESSION_free(session: *mut SSL_SESSION);
     #[link_name = "\u{1}_LEYLINE_SSL_SESSION_to_bytes"]
@@ -24957,13 +25054,11 @@ unsafe extern "C" {
         id: *const u8,
         id_len: usize,
     ) -> ::std::os::raw::c_int;
-    #[link_name = "\u{1}_LEYLINE_SSL_CREDENTIAL_add1_trust_anchor_group_inclusion"]
-    pub fn SSL_CREDENTIAL_add1_trust_anchor_group_inclusion(
+    #[link_name = "\u{1}_LEYLINE_SSL_CREDENTIAL_add1_trust_anchor_group"]
+    pub fn SSL_CREDENTIAL_add1_trust_anchor_group(
         cred: *mut SSL_CREDENTIAL,
-        base: *const u8,
-        base_len: usize,
-        min: u64,
-        max: u64,
+        pattern: *const u8,
+        pattern_len: usize,
     ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_CTX_set1_requested_trust_anchors"]
     pub fn SSL_CTX_set1_requested_trust_anchors(
@@ -25428,6 +25523,8 @@ unsafe extern "C" {
     pub fn SSL_ECH_KEYS_new() -> *mut SSL_ECH_KEYS;
     #[link_name = "\u{1}_LEYLINE_SSL_ECH_KEYS_up_ref"]
     pub fn SSL_ECH_KEYS_up_ref(keys: *mut SSL_ECH_KEYS);
+    #[link_name = "\u{1}_LEYLINE_SSL_ECH_KEYS_dup_ref"]
+    pub fn SSL_ECH_KEYS_dup_ref(keys: *const SSL_ECH_KEYS) -> *mut SSL_ECH_KEYS;
     #[link_name = "\u{1}_LEYLINE_SSL_ECH_KEYS_free"]
     pub fn SSL_ECH_KEYS_free(keys: *mut SSL_ECH_KEYS);
     #[link_name = "\u{1}_LEYLINE_SSL_ECH_KEYS_add"]
@@ -25800,6 +25897,20 @@ unsafe extern "C" {
         tail: *const u16,
         tail_len: usize,
     ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_copy_traffic_secrets"]
+    pub fn SSL_copy_traffic_secrets(
+        ssl: *const SSL,
+        out_read: *mut u8,
+        out_write: *mut u8,
+        max_len: usize,
+        out_len: *mut usize,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_process_post_handshake"]
+    pub fn SSL_process_post_handshake(
+        ssl: *mut SSL,
+        msg: *const u8,
+        msg_len: usize,
+    ) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_set_permute_extensions"]
     pub fn SSL_set_permute_extensions(ssl: *mut SSL, enabled: ::std::os::raw::c_int);
     #[link_name = "\u{1}_LEYLINE_SSL_max_seal_overhead"]
@@ -25820,6 +25931,26 @@ unsafe extern "C" {
         in_: *const u8,
         len: usize,
     ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_CTX_set_compliance_policy"]
+    pub fn SSL_CTX_set_compliance_policy(
+        ctx: *mut SSL_CTX,
+        policy: ssl_compliance_policy_t,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_CTX_get_compliance_policy"]
+    pub fn SSL_CTX_get_compliance_policy(ctx: *const SSL_CTX) -> ssl_compliance_policy_t;
+    #[link_name = "\u{1}_LEYLINE_SSL_set_compliance_policy"]
+    pub fn SSL_set_compliance_policy(
+        ssl: *mut SSL,
+        policy: ssl_compliance_policy_t,
+    ) -> ::std::os::raw::c_int;
+    #[link_name = "\u{1}_LEYLINE_SSL_get_compliance_policy"]
+    pub fn SSL_get_compliance_policy(ssl: *const SSL) -> ssl_compliance_policy_t;
+    #[link_name = "\u{1}_LEYLINE_SSL_set_server_padding_request"]
+    pub fn SSL_set_server_padding_request(ssl: *mut SSL, num_bytes: u16);
+    #[link_name = "\u{1}_LEYLINE_SSL_set_server_padding_enabled"]
+    pub fn SSL_set_server_padding_enabled(ssl: *mut SSL, enabled: ::std::os::raw::c_int);
+    #[link_name = "\u{1}_LEYLINE_SSL_server_sent_requested_padding"]
+    pub fn SSL_server_sent_requested_padding(ssl: *const SSL) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_library_init"]
     pub fn SSL_library_init() -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_CIPHER_description"]
@@ -26219,26 +26350,6 @@ unsafe extern "C" {
     pub fn SSL_CTX_get_security_level(ctx: *const SSL_CTX) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_SSL_CTX_set0_buffer_pool"]
     pub fn SSL_CTX_set0_buffer_pool(ctx: *mut SSL_CTX, pool: *mut CRYPTO_BUFFER_POOL);
-    #[link_name = "\u{1}_LEYLINE_SSL_CTX_set_compliance_policy"]
-    pub fn SSL_CTX_set_compliance_policy(
-        ctx: *mut SSL_CTX,
-        policy: ssl_compliance_policy_t,
-    ) -> ::std::os::raw::c_int;
-    #[link_name = "\u{1}_LEYLINE_SSL_CTX_get_compliance_policy"]
-    pub fn SSL_CTX_get_compliance_policy(ctx: *const SSL_CTX) -> ssl_compliance_policy_t;
-    #[link_name = "\u{1}_LEYLINE_SSL_set_compliance_policy"]
-    pub fn SSL_set_compliance_policy(
-        ssl: *mut SSL,
-        policy: ssl_compliance_policy_t,
-    ) -> ::std::os::raw::c_int;
-    #[link_name = "\u{1}_LEYLINE_SSL_get_compliance_policy"]
-    pub fn SSL_get_compliance_policy(ssl: *const SSL) -> ssl_compliance_policy_t;
-    #[link_name = "\u{1}_LEYLINE_SSL_set_server_padding_request"]
-    pub fn SSL_set_server_padding_request(ssl: *mut SSL, num_bytes: u16);
-    #[link_name = "\u{1}_LEYLINE_SSL_set_server_padding_enabled"]
-    pub fn SSL_set_server_padding_enabled(ssl: *mut SSL, enabled: ::std::os::raw::c_int);
-    #[link_name = "\u{1}_LEYLINE_SSL_server_sent_requested_padding"]
-    pub fn SSL_server_sent_requested_padding(ssl: *const SSL) -> ::std::os::raw::c_int;
     #[link_name = "\u{1}_LEYLINE_TRUST_TOKEN_experiment_v1"]
     pub fn TRUST_TOKEN_experiment_v1() -> *const TRUST_TOKEN_METHOD;
     #[link_name = "\u{1}_LEYLINE_TRUST_TOKEN_experiment_v2_voprf"]

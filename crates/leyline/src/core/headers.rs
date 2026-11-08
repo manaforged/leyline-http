@@ -1,8 +1,8 @@
 use http::{HeaderName, HeaderValue};
 
-use crate::core::error::{Cause, Error, Result};
+use crate::error::{Error, Kind, Result};
 use crate::profile::HeaderPosition;
-use crate::profile::preset::HeaderPair;
+use crate::wire::HeaderPair;
 
 #[expect(
     clippy::map_err_ignore,
@@ -10,7 +10,7 @@ use crate::profile::preset::HeaderPair;
 )]
 pub(crate) fn name(n: impl TryInto<HeaderName>) -> Result<HeaderName> {
     n.try_into()
-        .map_err(|_| Error::new(Cause::Request).with_message("invalid header name"))
+        .map_err(|_| Error::new(Kind::Request).with_message("invalid header name"))
 }
 
 #[expect(
@@ -19,7 +19,7 @@ pub(crate) fn name(n: impl TryInto<HeaderName>) -> Result<HeaderName> {
 )]
 pub(crate) fn value(v: impl TryInto<HeaderValue>) -> Result<HeaderValue> {
     v.try_into()
-        .map_err(|_| Error::new(Cause::Request).with_message("invalid header value"))
+        .map_err(|_| Error::new(Kind::Request).with_message("invalid header value"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +37,7 @@ pub(crate) struct HeaderList {
 impl std::fmt::Debug for HeaderList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_list()
-            .entries(crate::trace::masked(
+            .entries(crate::util::masked(
                 self.inner
                     .iter()
                     .map(|entry| (entry.name.as_str(), entry.value.as_bytes())),
@@ -142,10 +142,6 @@ where
         Self::from_pairs(headers)
     }
 }
-
-#[cfg(test)]
-#[path = "headers_tests.rs"]
-mod tests;
 
 pub(crate) fn reorder(headers: &mut Vec<HeaderPair>, order: &[String]) {
     let rank = |name: &str| order.iter().position(|n| n.eq_ignore_ascii_case(name));

@@ -13,6 +13,16 @@ const CHUNK: usize = 1024;
 const TRUNCATED: usize = 256 * 1024;
 
 #[tokio::test]
+async fn a_streamed_head_waits_for_the_final_response_after_103() {
+    let server = h3_server(vec![Reply::EarlyHints(CHUNK)], Limits::default()).await;
+    let session = server.session().build().unwrap();
+    let response = session.get(server.url()).stream().send().await.unwrap();
+    assert_eq!(response.status().as_u16(), 201);
+    assert_eq!(response.header("x-final"), Some("yes"));
+    assert_eq!(response.bytes().await.unwrap().len(), CHUNK);
+}
+
+#[tokio::test]
 async fn a_dropped_response_body_stops_the_stream_as_request_cancelled() {
     let server = h3_server(vec![Reply::Hold(CHUNK)], Limits::default()).await;
     let session = server.session().build().unwrap();
@@ -180,9 +190,20 @@ async fn an_upload_that_fails_behind_a_full_unread_body_leaves_no_task_waiting_o
         .unwrap();
     tokio::time::sleep(Duration::from_millis(500)).await;
     fail_tx.send(()).unwrap();
-    tokio::time::sleep(Duration::from_millis(500)).await;
     let metrics = tokio::runtime::Handle::current().metrics();
-    let retained = metrics.num_alive_tasks();
+    let retained = tokio::time::timeout(Duration::from_secs(10), async {
+        let mut last = metrics.num_alive_tasks();
+        loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            let now = metrics.num_alive_tasks();
+            if now == last {
+                return now;
+            }
+            last = now;
+        }
+    })
+    .await
+    .expect("the task count settles after the upload fails");
     drop(body);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(

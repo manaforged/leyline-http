@@ -11,8 +11,8 @@ use tokio::io::{AsyncReadExt, DuplexStream, WriteHalf};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
-use leyline::h2::{H2Client, RequestBody};
+use leyline::internals::h2::H2Client;
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
 
 const MAX_CONCURRENT_STREAMS: u16 = 0x3;
 const PEER_WINDOW: usize = 65_535;
@@ -22,7 +22,7 @@ type Frames = mpsc::UnboundedReceiver<(FrameHeader, Vec<u8>)>;
 
 async fn connect(settings: Vec<(u16, u32)>) -> (H2Client, WriteHalf<DuplexStream>, Frames) {
     let (client_io, mut server_io) = tokio::io::duplex(1 << 20);
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
     read_preface(&mut server_io).await;
@@ -64,14 +64,14 @@ async fn next_of(frames: &mut Frames, kind: FrameType) -> (FrameHeader, Vec<u8>)
 #[tokio::test]
 async fn cancelled_queued_request_never_reaches_the_wire() {
     let (handle, mut writer, mut frames) = connect(vec![(MAX_CONCURRENT_STREAMS, 1)]).await;
-    let first = send(&handle, "GET", RequestBody::None);
+    let first = send(&handle, "GET", leyline::Body::default());
     let (active, _) = next_of(&mut frames, FrameType::Headers).await;
     assert_eq!(active.stream_id, 1);
 
     let queued = send(
         &handle,
         "POST",
-        RequestBody::Buffered(Bytes::from_static(b"x")),
+        leyline::Body::from(Bytes::from_static(b"x")),
     );
     tokio::time::sleep(Duration::from_millis(50)).await;
     queued.abort();
@@ -83,7 +83,7 @@ async fn cancelled_queued_request_never_reaches_the_wire() {
         .expect("first request completes")
         .expect("first task");
 
-    let probe = send(&handle, "GET", RequestBody::None);
+    let probe = send(&handle, "GET", leyline::Body::default());
     let (next, _) = next_of(&mut frames, FrameType::Headers).await;
     assert_eq!(next.stream_id, 3);
     assert_eq!(
@@ -104,10 +104,19 @@ async fn stalled_upload_stops_polling_the_producer() {
     while sent < PEER_WINDOW {
         sent += next_of(&mut frames, FrameType::Data).await.1.len();
     }
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    let stalled = producer.produced.load(Ordering::SeqCst);
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert_eq!(producer.produced.load(Ordering::SeqCst), stalled);
+    let stalled = timeout(Duration::from_secs(10), async {
+        let mut last = producer.produced.load(Ordering::SeqCst);
+        loop {
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            let now = producer.produced.load(Ordering::SeqCst);
+            if now == last {
+                return now;
+            }
+            last = now;
+        }
+    })
+    .await
+    .expect("the producer stops at the upload budget");
     assert!(
         stalled <= PEER_WINDOW + UPLOAD_BUDGET + 2 * CHUNK,
         "{stalled}"
@@ -145,13 +154,13 @@ async fn cancelled_endless_upload_resets_the_stream_and_drops_the_producer() {
 #[tokio::test]
 async fn ping_is_sent_while_a_request_waits_for_a_slot() {
     let (handle, _writer, mut frames) = connect(vec![(MAX_CONCURRENT_STREAMS, 1)]).await;
-    let first = send(&handle, "GET", RequestBody::None);
+    let first = send(&handle, "GET", leyline::Body::default());
     next_of(&mut frames, FrameType::Headers).await;
-    let second = send(&handle, "GET", RequestBody::None);
+    let second = send(&handle, "GET", leyline::Body::default());
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     let pinger = handle.clone();
-    let ping = tokio::spawn(async move { pinger.ping().await });
+    let ping = tokio::spawn(async move { pinger.probe(Duration::from_secs(5)).await });
     let (header, _) = next_of(&mut frames, FrameType::Ping).await;
     assert_eq!(header.flags & 0x1, 0);
     first.abort();
@@ -162,15 +171,23 @@ async fn ping_is_sent_while_a_request_waits_for_a_slot() {
 #[tokio::test]
 async fn request_beyond_the_command_queue_stays_with_the_caller() {
     let (handle, _writer, mut frames) = connect(vec![(MAX_CONCURRENT_STREAMS, 1)]).await;
-    let mut waiting = vec![send(&handle, "GET", RequestBody::None)];
+    let mut waiting = vec![send(&handle, "GET", leyline::Body::default())];
     next_of(&mut frames, FrameType::Headers).await;
-    waiting.extend((0..1100).map(|_| send(&handle, "GET", RequestBody::None)));
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    waiting.extend((0..1100).map(|_| send(&handle, "GET", leyline::Body::default())));
 
-    let producer = Arc::new(Producer::default());
-    let late = handle.send_shared(head("POST"), endless(&producer), false);
-    assert!(late.now_or_never().is_none());
-    assert!(producer.dropped.load(Ordering::SeqCst));
+    let producer = timeout(Duration::from_secs(10), async {
+        loop {
+            let producer = Arc::new(Producer::default());
+            let late = handle.send_shared(head("POST"), endless(&producer), false);
+            assert!(late.now_or_never().is_none());
+            if producer.dropped.load(Ordering::SeqCst) {
+                return producer;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("a request past the full queue stays with the caller");
     assert_eq!(producer.produced.load(Ordering::SeqCst), 0);
     waiting.iter().for_each(tokio::task::JoinHandle::abort);
 }

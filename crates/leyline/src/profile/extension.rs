@@ -1,9 +1,5 @@
-use crate::iana::is_grease;
+use crate::iana::{ALPN, SERVER_NAME, is_grease};
 use crate::profile::TlsProfile;
-
-pub(crate) const SERVER_NAME: u16 = 0x0000;
-
-pub(crate) const ALPN: u16 = 0x0010;
 
 pub(crate) const PADDING: u16 = 0x0015;
 
@@ -12,6 +8,15 @@ pub(crate) const PRE_SHARED_KEY: u16 = 0x0029;
 const ALPS_NEW: u16 = 0x44cd;
 
 const ALPS_OLD: u16 = 0x4469;
+
+/// The transport a ClientHello travels on, which decides the extensions it carries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum Carrier {
+    /// TLS over TCP.
+    Tcp,
+    /// The QUIC handshake of HTTP/3.
+    Quic,
+}
 
 #[derive(Clone, Copy)]
 enum Switch {
@@ -98,13 +103,19 @@ const NO_BASE_VALUE: &str =
     "the base profile sets no value for it; pass a base profile whose [tls] table sets one";
 
 impl Switch {
-    fn advertised(self, tls: &TlsProfile, quic: bool) -> bool {
+    fn advertised(self, tls: &TlsProfile, carrier: Carrier) -> bool {
         match self {
             Self::Always => true,
-            Self::Tls12 => !quic || tls.tls12_extensions,
-            Self::TcpOnly => !quic,
-            Self::QuicOnly => quic,
-            Self::SessionTickets => !quic && tls.session_tickets,
+            Self::Tls12 => carrier == Carrier::Tcp || tls.tls12_extensions,
+            Self::TcpOnly => carrier == Carrier::Tcp,
+            Self::QuicOnly => carrier == Carrier::Quic,
+            Self::SessionTickets => carrier == Carrier::Tcp && tls.session_tickets,
+            _ => self.configured(tls),
+        }
+    }
+
+    fn configured(self, tls: &TlsProfile) -> bool {
+        match self {
             Self::SupportedGroups => !tls.curves.is_empty(),
             Self::SignatureAlgorithms => !tls.sigalgs.is_empty(),
             Self::StatusRequest => tls.ocsp_stapling,
@@ -117,6 +128,9 @@ impl Switch {
             }
             Self::TrustAnchors => tls.request_trust_anchors,
             Self::EncryptedClientHello => tls.ech_grease,
+            Self::Always | Self::Tls12 | Self::TcpOnly | Self::QuicOnly | Self::SessionTickets => {
+                true
+            }
         }
     }
 
@@ -173,10 +187,10 @@ fn carried<T>(on: bool, base: Option<T>) -> Result<Option<T>, &'static str> {
 }
 
 impl TlsProfile {
-    pub(crate) fn advertised_extensions(&self, quic: bool) -> Vec<(u16, &'static str)> {
+    pub(crate) fn advertised_extensions(&self, carrier: Carrier) -> Vec<(u16, &'static str)> {
         EXTENSIONS
             .iter()
-            .filter(|ext| ext.switch.advertised(self, quic))
+            .filter(|ext| ext.switch.advertised(self, carrier))
             .map(|ext| (ext.id, ext.name))
             .collect()
     }

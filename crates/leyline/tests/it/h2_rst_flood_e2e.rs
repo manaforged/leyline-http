@@ -4,47 +4,30 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::error::ErrorCode;
-use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody};
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::error::ErrorCode;
+use leyline::internals::h2::frame::FrameType;
 use support::*;
 use tokio::io::AsyncWriteExt;
 
 fn flood_config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65535),
-            (SettingId::MaxFrameSize, 16384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 3,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            rst_stream_flood_threshold: 3,
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
-type CowHeaders = Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>;
+type CowHeaders = Vec<(
+    std::borrow::Cow<'static, str>,
+    leyline::internals::h2::HeaderStr,
+)>;
 
 fn get_req(path: &str) -> (PseudoHeaders, CowHeaders) {
     (
@@ -108,7 +91,7 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
         drop(server_io.shutdown().await);
     });
 
-    let handle = leyline::h2::start(client_io, flood_config())
+    let handle = leyline::internals::h2::start(client_io, flood_config())
         .await
         .expect("handshake");
 
@@ -118,14 +101,7 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
         let (p, h) = get_req(&format!("/{i}"));
         tasks.push(tokio::spawn(async move {
             handle
-                .send_shared(
-                    Arc::new(Head {
-                        pseudo: p,
-                        headers: h,
-                    }),
-                    RequestBody::None,
-                    false,
-                )
+                .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
                 .await
         }));
     }
@@ -141,10 +117,10 @@ async fn rst_stream_flood_trips_enhance_your_calm() {
     let err = results
         .into_iter()
         .filter_map(Result::err)
-        .find(|e| matches!(e, leyline::h2::H2Error::Connection { .. }))
+        .find(|e| matches!(e, leyline::internals::h2::H2Error::Connection { .. }))
         .expect("an in-flight request must carry the connection error");
     match err {
-        leyline::h2::H2Error::Connection { code, .. } => {
+        leyline::internals::h2::H2Error::Connection { code, .. } => {
             assert_eq!(
                 code,
                 ErrorCode::EnhanceYourCalm,

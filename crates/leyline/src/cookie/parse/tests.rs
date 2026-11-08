@@ -1,4 +1,5 @@
 use super::*;
+use crate::util::registrable_domain;
 
 fn test_url(s: &str) -> url::Url {
     url::Url::parse(s).unwrap()

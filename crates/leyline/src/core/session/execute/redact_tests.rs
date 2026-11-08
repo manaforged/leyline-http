@@ -1,4 +1,4 @@
-use super::redact;
+use crate::util::redact;
 
 #[test]
 fn userinfo_is_redacted() {

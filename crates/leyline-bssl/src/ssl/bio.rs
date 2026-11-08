@@ -12,6 +12,9 @@ use std::slice;
 
 use crate::cvt_p;
 use crate::error::ErrorStack;
+use crate::foreign_types::ForeignTypeRef;
+use crate::ssl::{Ssl, SslStream};
+use std::mem::ManuallyDrop;
 
 pub struct StreamState<S> {
     pub stream: S,
@@ -259,6 +262,22 @@ impl Drop for BIO_METHOD {
     fn drop(&mut self) {
         unsafe {
             ffi::BIO_meth_free(self.0);
+        }
+    }
+}
+
+impl<S> SslStream<S> {
+    /// Detaches the stream from the SSL and returns both; the SSL keeps no I/O of its own.
+    #[must_use]
+    pub fn detach(self) -> (S, Ssl) {
+        let mut this = ManuallyDrop::new(self);
+        // SAFETY: `this` is never dropped, so the stream, SSL, and BIO method each leave it once.
+        unsafe {
+            let stream = take_stream::<S>(this.ssl.get_raw_rbio());
+            ffi::SSL_set_bio(this.ssl.as_ptr(), ptr::null_mut(), ptr::null_mut());
+            let ssl = ManuallyDrop::take(&mut this.ssl);
+            ManuallyDrop::drop(&mut this.method);
+            (stream, ssl)
         }
     }
 }

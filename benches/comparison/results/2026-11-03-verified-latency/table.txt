@@ -1,0 +1,17 @@
+Three batches per peer, four alternating-order rounds per batch.
+Ratios and 95% intervals reuse libs-table.py ratio_ci and show unchanged.
+Intervals use three per-batch log-ratio means; medians pool the 12 observations.
+Closed-loop p99 only; no offered-load or coordinated-omission correction.
+wreq: native Chrome 146 profiles; reqwest: bare profiles with identical request headers.
+
+wreq
+conc_rps: leyline_median=181129.508 peer_median=150691.090; ratio 1.204 [1.182, 1.226] ahead
+conc_p99_us: leyline_median=557.000 peer_median=585.500; ratio 0.946 [0.910, 0.982] lower latency
+warm_rps: leyline_median=48996.995 peer_median=33132.738; ratio 1.491 [1.468, 1.516] ahead
+cold_rps: leyline_median=1878.340 peer_median=1862.370; ratio 0.975 [0.871, 1.092] unresolved
+
+reqwest
+conc_rps: leyline_median=200127.188 peer_median=176613.560; ratio 1.133 [1.124, 1.142] ahead
+conc_p99_us: leyline_median=561.000 peer_median=519.500; ratio 1.075 [1.036, 1.116] higher latency
+warm_rps: leyline_median=51483.780 peer_median=33797.315; ratio 1.546 [1.430, 1.672] ahead
+cold_rps: leyline_median=2316.232 peer_median=2466.601; ratio 0.966 [0.875, 1.067] unresolved

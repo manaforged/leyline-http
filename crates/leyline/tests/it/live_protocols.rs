@@ -58,6 +58,7 @@ async fn live_h3_cloudflare_firefox_profile() {
         "H3 status with Firefox profile: {}",
         resp.status()
     );
+    assert_eq!(resp.version(), http::Version::HTTP_3, "H3 ALPN");
     println!("✓ HTTP/3 to cloudflare-quic.com (Firefox 150 profile): status 200");
 }
 
@@ -76,6 +77,7 @@ async fn live_h3_google() {
         .await
         .expect("H3 request failed");
     assert_eq!(resp.status(), 200, "H3 status: {}", resp.status());
+    assert_eq!(resp.version(), http::Version::HTTP_3, "H3 ALPN");
     println!("✓ HTTP/3 to www.google.com: status 200");
 }
 
@@ -107,14 +109,14 @@ async fn live_h3_pool_reuse() {
     let after_second = session.stats();
 
     assert_eq!(
-        after_first.h3_hits(),
+        after_first.hits(leyline::http::Version::HTTP_3),
         0,
         "first request should open a fresh connection, not hit the pool"
     );
     assert!(
-        after_second.h3_hits() >= 1,
+        after_second.hits(leyline::http::Version::HTTP_3) >= 1,
         "second request must reuse the pooled QUIC connection (h3_hits={}, entries={})",
-        after_second.h3_hits(),
+        after_second.hits(leyline::http::Version::HTTP_3),
         after_second.entries()
     );
     assert_eq!(
@@ -125,7 +127,7 @@ async fn live_h3_pool_reuse() {
     );
     println!(
         "✓ HTTP/3 pool reuse: h3_hits={}, installs={}, entries={}",
-        after_second.h3_hits(),
+        after_second.hits(leyline::http::Version::HTTP_3),
         after_second.installs(),
         after_second.entries()
     );
@@ -154,8 +156,8 @@ async fn live_race() {
         "race must warm the winner (and optionally the loser leg), got {} entries \
          (h2_misses={}, h3_misses={})",
         after_first.entries(),
-        after_first.h2_misses(),
-        after_first.h3_misses()
+        after_first.misses(leyline::http::Version::HTTP_2),
+        after_first.misses(leyline::http::Version::HTTP_3)
     );
 
     let r2 = session
@@ -168,11 +170,13 @@ async fn live_race() {
 
     let after_second = session.stats();
     assert!(
-        after_second.h2_hits() + after_second.h3_hits() >= 1,
+        after_second.hits(leyline::http::Version::HTTP_2)
+            + after_second.hits(leyline::http::Version::HTTP_3)
+            >= 1,
         "second raced request must reuse the winning connection \
          (h2_hits={}, h3_hits={})",
-        after_second.h2_hits(),
-        after_second.h3_hits()
+        after_second.hits(leyline::http::Version::HTTP_2),
+        after_second.hits(leyline::http::Version::HTTP_3)
     );
 }
 
@@ -200,15 +204,15 @@ async fn live_h3_concurrent_cold_requests_single_flight() {
          (entries={}, h3_hits={}, h3_misses={})",
         stats.installs(),
         stats.entries(),
-        stats.h3_hits(),
-        stats.h3_misses()
+        stats.hits(leyline::http::Version::HTTP_3),
+        stats.misses(leyline::http::Version::HTTP_3)
     );
     assert_eq!(stats.entries(), 1, "exactly one pooled QUIC connection");
     println!(
         "✓ H3 single-flight: installs={}, entries={}, h3_hits={}",
         stats.installs(),
         stats.entries(),
-        stats.h3_hits()
+        stats.hits(leyline::http::Version::HTTP_3)
     );
 }
 

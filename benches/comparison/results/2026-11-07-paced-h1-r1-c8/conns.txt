@@ -1,0 +1,8 @@
+c8 leyline 8
+c8 hyper 20
+c8 reqwest 19
+c8 wreq 17
+c8 ureq 8
+c8 curl 8
+c8 nethttp 28
+c8 fasthttp 8

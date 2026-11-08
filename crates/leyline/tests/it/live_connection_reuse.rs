@@ -1,6 +1,6 @@
 use leyline::Browser;
 
-use super::tls_peet::{PEET_URL, peet};
+use super::tls_peet::peet;
 
 #[tokio::test]
 #[ignore = "live: needs network"]
@@ -38,20 +38,29 @@ async fn live_session_resumption_pre_shared_key() {
 #[ignore = "live: needs network"]
 async fn live_h2_connection_reuse() {
     let session = leyline::Session::from(Browser::default());
-    let resp1 = session.get(PEET_URL).send().await.unwrap();
+    let resp1 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp1.status(), 200);
-    let resp2 = session.get(PEET_URL).send().await.unwrap();
+    assert!(!resp1.reused(), "the first request opens a connection");
+    let resp2 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp2.status(), 200);
-    let resp3 = session.get(PEET_URL).send().await.unwrap();
+    assert!(
+        resp2.reused(),
+        "the second request must reuse the connection"
+    );
+    let resp3 = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp3.status(), 200);
-    println!("✓ Three sequential requests succeeded (pool reuse)");
+    assert!(
+        resp3.reused(),
+        "the third request must reuse the connection"
+    );
+    assert_eq!(session.stats().misses(http::Version::HTTP_2), 1);
 }
 
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_tls_peer_certificate_exposed() {
     let session = leyline::Session::from(Browser::default());
-    let resp = session.get(PEET_URL).send().await.unwrap();
+    let resp = session.get(crate::echo::URL).send().await.unwrap();
     assert_eq!(resp.status(), 200);
     let cert = resp
         .peer_certificate()

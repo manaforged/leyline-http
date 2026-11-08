@@ -26,7 +26,7 @@ async fn a_crawl_keeps_its_spacing_after_waiting_for_the_sessions_slot() {
             .unwrap()
             .push((request.target.clone(), Instant::now()));
         match request.target.as_str() {
-            "/hold" => html("<p>hold</p>").delay(Duration::from_secs(2)),
+            "/hold" => html("<p>hold</p>").delay(Duration::from_millis(600)),
             "/" => html(r#"<a href="/p1">1</a><a href="/p2">2</a>"#),
             _ => html("<p>page</p>"),
         }
@@ -40,7 +40,7 @@ async fn a_crawl_keeps_its_spacing_after_waiting_for_the_sessions_slot() {
     let mut crawl = session
         .crawl(server.url("/"))
         .respect(None)
-        .host_limits(HostLimits::new().max_in_flight(2).per_second(2.0));
+        .host_limits(HostLimits::new().max_in_flight(2).per_second(5.0));
     crawl.next().await.unwrap().unwrap();
     let holder = session.clone();
     let hold_url = server.url("/hold");
@@ -52,7 +52,7 @@ async fn a_crawl_keeps_its_spacing_after_waiting_for_the_sessions_slot() {
     hold.await.unwrap().unwrap();
     let gap = sent_at(&stamps, "/p2").max(sent_at(&stamps, "/p1"))
         - sent_at(&stamps, "/p2").min(sent_at(&stamps, "/p1"));
-    assert!(gap >= Duration::from_millis(400), "{gap:?}");
+    assert!(gap >= Duration::from_millis(180), "{gap:?}");
 }
 
 #[tokio::test]
@@ -73,12 +73,12 @@ async fn hosts_asking_to_retry_later_leave_room_for_other_hosts() {
         .collect();
     let server = testing::Server::http(move |request| match request.target.as_str() {
         "/" => html(&format!(r#"{links}<a href="/next">N</a>"#)),
-        "/next" => html(r#"<p>next</p><a href="/fast">F</a>"#).delay(Duration::from_secs(2)),
+        "/next" => html(r#"<p>next</p><a href="/fast">F</a>"#).delay(Duration::from_millis(600)),
         _ => html("<p>fast</p>"),
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = brisk().crawl(server.url("/"));
     let reached = tokio::time::timeout(Duration::from_secs(12), async {
         while let Some(page) = crawl.next().await {
             if page.is_ok_and(|page| page.url().path() == "/fast") {
@@ -100,7 +100,7 @@ async fn an_ignore_robots_crawl_does_not_wait_out_a_robots_txt_pause() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/")).respect(None);
+    let mut crawl = brisk().crawl(server.url("/")).respect(None);
     let pages = tokio::time::timeout(Duration::from_secs(8), async {
         let mut pages = 0;
         while let Some(page) = crawl.next().await {
@@ -122,13 +122,13 @@ async fn a_shut_down_session_ends_a_crawl_waiting_on_a_paused_host() {
     })
     .await
     .unwrap();
-    let session = Session::new();
+    let session = brisk();
     let crawl = session.crawl(server.url("/"));
     let run = tokio::spawn(async move {
         let mut crawl = crawl;
         while crawl.next().await.is_some() {}
     });
-    tokio::time::sleep(Duration::from_secs(4)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
     assert!(!run.is_finished());
     let stopped = Instant::now();
     session.shutdown().await;
@@ -163,14 +163,14 @@ async fn a_crawl_keeps_the_sessions_spacing_while_it_waits_for_its_own_slot() {
             .push((request.target.clone(), Instant::now()));
         match request.target.as_str() {
             "/" => html(r#"<a href="/hold">H</a><a href="/p1">1</a><a href="/p2">2</a>"#),
-            "/hold" => html("<p>hold</p>").delay(Duration::from_secs(3)),
+            "/hold" => html("<p>hold</p>").delay(Duration::from_millis(600)),
             _ => html("<p>page</p>"),
         }
     })
     .await
     .unwrap();
     let session = Session::builder()
-        .host_limits(HostLimits::new().per_second(1.0))
+        .host_limits(HostLimits::new().per_second(5.0))
         .build()
         .unwrap();
     let mut crawl = session
@@ -182,7 +182,7 @@ async fn a_crawl_keeps_the_sessions_spacing_while_it_waits_for_its_own_slot() {
     }
     let gap = sent_at(&stamps, "/p2").max(sent_at(&stamps, "/p1"))
         - sent_at(&stamps, "/p2").min(sent_at(&stamps, "/p1"));
-    assert!(gap >= Duration::from_millis(900), "{gap:?}");
+    assert!(gap >= Duration::from_millis(180), "{gap:?}");
 }
 
 #[tokio::test]
@@ -208,19 +208,19 @@ async fn a_crawl_keeps_a_sites_crawl_delay_while_it_visits_other_hosts() {
             .unwrap()
             .push((request.target.clone(), Instant::now()));
         match request.target.as_str() {
-            "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 3\n"),
+            "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 0.6\n"),
             "/" => html(&format!(r#"{links}<a href="/a2">A</a>"#)),
             _ => html("<p>a</p>"),
         }
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = brisk().crawl(server.url("/"));
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
     let gap = sent_at(&stamps, "/a2") - sent_at(&stamps, "/");
-    assert!(gap >= Duration::from_millis(2700), "{gap:?}");
+    assert!(gap >= Duration::from_millis(540), "{gap:?}");
 }
 
 #[tokio::test]
@@ -235,6 +235,7 @@ async fn a_crawl_retries_a_page_within_the_sessions_retry_budget() {
     let session = Session::builder().retry(1).build().unwrap();
     let mut crawl = session
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .host_limits(HostLimits::new());
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -256,7 +257,10 @@ async fn an_ignore_robots_crawl_never_asks_for_robots_txt() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/")).respect(None);
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(unpaced())
+        .respect(None);
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -298,7 +302,7 @@ async fn a_custom_wait_header_pauses_the_host_for_the_crawl() {
             .push((request.target.clone(), Instant::now()));
         match request.target.as_str() {
             "/" => html(r#"<a href="/busy">B</a><a href="/other">O</a>"#),
-            "/busy" => testing::Response::new(503).header("x-wait", "4"),
+            "/busy" => testing::Response::new(503).header("x-wait", "1"),
             _ => html("<p>page</p>"),
         }
     })
@@ -310,7 +314,7 @@ async fn a_custom_wait_header_pauses_the_host_for_the_crawl() {
             HostLimits::new()
                 .max_in_flight(1)
                 .pause_on([503])
-                .pause_for(Duration::from_secs(1)),
+                .pause_for(Duration::from_millis(100)),
         )
         .build()
         .unwrap();
@@ -322,7 +326,7 @@ async fn a_custom_wait_header_pauses_the_host_for_the_crawl() {
         page.unwrap();
     }
     let gap = sent_at(&stamps, "/other") - sent_at(&stamps, "/busy");
-    assert!(gap >= Duration::from_millis(3500), "{gap:?}");
+    assert!(gap >= Duration::from_millis(900), "{gap:?}");
 }
 
 #[tokio::test]
@@ -336,16 +340,16 @@ async fn a_default_crawl_pauses_a_host_that_answers_429() {
         match request.target.as_str() {
             "/robots.txt" => testing::Response::new(404),
             "/" => html(r#"<a href="/busy">B</a><a href="/other">O</a>"#),
-            "/busy" => testing::Response::new(429).header("retry-after", "3"),
+            "/busy" => testing::Response::new(429).header("retry-after", "1"),
             _ => html("<p>page</p>"),
         }
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = brisk().crawl(server.url("/"));
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
     let gap = sent_at(&stamps, "/other") - sent_at(&stamps, "/busy");
-    assert!(gap >= Duration::from_millis(2700), "{gap:?}");
+    assert!(gap >= Duration::from_millis(900), "{gap:?}");
 }

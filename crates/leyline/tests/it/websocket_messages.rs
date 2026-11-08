@@ -80,6 +80,19 @@ async fn connect(seen: Seen) -> WebSocket {
         .unwrap()
 }
 
+async fn frames_through_close(seen: &Seen) -> Vec<Wire> {
+    let wait = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let frames = seen.lock().unwrap().clone();
+            if matches!(frames.last(), Some(Wire::Close(_))) {
+                return frames;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    });
+    wait.await.expect("the server receives a close frame")
+}
+
 #[tokio::test]
 async fn text_and_binary_frames_round_trip_and_close_reaches_the_server() {
     let seen = Seen::default();
@@ -99,9 +112,8 @@ async fn text_and_binary_frames_round_trip_and_close_reaches_the_server() {
         Some(Message::Binary(vec![0, 1, 254, 255]))
     );
     socket.close().await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let seen = seen.lock().unwrap().clone();
+    let seen = frames_through_close(&seen).await;
     assert_eq!(seen[0], Wire::Text("hello".into()));
     assert_eq!(seen[1], Wire::Binary(vec![0, 1, 254, 255].into()));
     assert!(matches!(seen[2], Wire::Close(_)), "{seen:?}");
@@ -120,9 +132,8 @@ async fn a_split_socket_sends_on_the_sink_and_reads_on_the_stream() {
         Some(Message::Text("split".into()))
     );
     sink.send(Message::Close(None)).await.unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let seen = seen.lock().unwrap().clone();
+    let seen = frames_through_close(&seen).await;
     assert_eq!(seen[0], Wire::Text("split".into()));
     assert!(matches!(seen.last(), Some(Wire::Close(_))), "{seen:?}");
 }
@@ -136,9 +147,8 @@ async fn a_close_frame_carries_its_code_and_reason_to_the_server() {
         .send(Message::Close(Some((4001, "done".into()))))
         .await
         .unwrap();
-    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-    let seen = seen.lock().unwrap().clone();
+    let seen = frames_through_close(&seen).await;
     let Some(Wire::Close(Some(frame))) = seen.last() else {
         panic!("no close frame: {seen:?}");
     };

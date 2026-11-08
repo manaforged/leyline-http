@@ -4,19 +4,29 @@ use std::fmt::Write as _;
 use serde::Deserialize;
 
 use crate::browser::Row;
-use crate::header_style::Shape;
-use crate::{BuildResult, is_ident};
+use crate::header_style::{Shape, style_variant};
+use crate::{BuildResult, is_ident, rust_option};
 
 #[derive(Deserialize)]
 pub(crate) struct Brand {
     #[serde(default)]
     default: bool,
+    product: Option<String>,
     header_style: Option<String>,
     ua_token: Option<String>,
     #[serde(default)]
     follow_chromium: bool,
     #[serde(default)]
+    desktop_only: bool,
+    #[serde(default)]
     versions: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    tls: BrandTls,
+}
+
+#[derive(Default, Deserialize)]
+struct BrandTls {
+    request_trust_anchors: Option<bool>,
 }
 
 pub(crate) struct Variant {
@@ -93,7 +103,10 @@ pub(crate) fn check_brands(
     Ok(())
 }
 
-pub(crate) fn render_brands(brands: &BTreeMap<String, Brand>) -> BuildResult<String> {
+pub(crate) fn render_brands(
+    brands: &BTreeMap<String, Brand>,
+    shapes: &BTreeMap<String, Shape>,
+) -> BuildResult<String> {
     let mut out = String::from(
         "#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]\npub(crate) enum ChromiumBrand {\n",
     );
@@ -124,5 +137,34 @@ pub(crate) fn render_brands(brands: &BTreeMap<String, Brand>) -> BuildResult<Str
         labels.join(", ")
     )?;
     writeln!(out, "const BRAND_KEYS: &[&str] = &[{}];", keys.join(", "))?;
+    writeln!(out, "static BRAND_ROWS: &[BrandRow] = &[")?;
+    for brand in brands.values() {
+        writeln!(out, "{}", render_row(brand, shapes)?)?;
+    }
+    writeln!(out, "];")?;
     Ok(out)
+}
+
+fn render_row(brand: &Brand, shapes: &BTreeMap<String, Shape>) -> BuildResult<String> {
+    let quoted = |value: Option<&String>| rust_option(value.map(|v| format!("{v:?}")));
+    let versions: Vec<String> = brand
+        .versions
+        .iter()
+        .map(|(major, builds)| format!("({major:?}, &{builds:?})"))
+        .collect();
+    let header_style = match brand.header_style.as_deref() {
+        Some(key) => Some(format!("HeaderStyle::{}", style_variant(shapes, key)?)),
+        None => None,
+    };
+    Ok(format!(
+        "    BrandRow {{ product: {}, ua_token: {}, follow_chromium: {}, desktop_only: {}, \
+         versions: &[{}], header_style: {}, tls: BrandTls {{ request_trust_anchors: {:?} }} }},",
+        quoted(brand.product.as_ref()),
+        quoted(brand.ua_token.as_ref()),
+        brand.follow_chromium,
+        brand.desktop_only,
+        versions.join(", "),
+        rust_option(header_style),
+        brand.tls.request_trust_anchors,
+    ))
 }

@@ -1,17 +1,52 @@
 use crate::audit::{hash12, non_grease_cipher_ids, non_grease_ext_ids};
-use crate::iana::sigalg_id;
-use crate::profile::{ALPN, SERVER_NAME};
+use crate::iana::{ALPN, SERVER_NAME, sigalg_id};
+use crate::profile::JA4_TCP as TCP;
 
-pub(crate) const JA4_TCP: char = 't';
+const QUIC: char = 'q';
+const TLS13: &str = "13";
+
+/// The ClientHello a JA4 describes: its transport and the first ALPN protocol it offers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClientHello {
+    /// A TCP ClientHello that offers `h2` first.
+    TcpH2,
+    /// A TCP ClientHello that offers only `http/1.1`.
+    TcpHttp11,
+    /// A QUIC ClientHello that offers `h3`.
+    QuicH3,
+}
+
+impl ClientHello {
+    fn transport(self) -> char {
+        match self {
+            Self::TcpH2 | Self::TcpHttp11 => TCP,
+            Self::QuicH3 => QUIC,
+        }
+    }
+
+    fn alpn(self) -> &'static str {
+        match self {
+            Self::TcpH2 => "h2",
+            Self::TcpHttp11 => "h1",
+            Self::QuicH3 => "h3",
+        }
+    }
+
+    pub(crate) fn carrier(self) -> crate::profile::Carrier {
+        match self {
+            Self::TcpH2 | Self::TcpHttp11 => crate::profile::Carrier::Tcp,
+            Self::QuicH3 => crate::profile::Carrier::Quic,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Ja4Input<'a> {
     pub ciphers: &'a [String],
     pub sigalgs: &'a [String],
     pub extension_ids: &'a [u16],
-    pub tls_version: &'a str,
     pub has_sni: bool,
-    pub alpn: &'a str,
+    pub hello: ClientHello,
 }
 
 pub fn compute_ja4(input: &Ja4Input<'_>) -> String {
@@ -23,14 +58,7 @@ pub fn compute_ja4(input: &Ja4Input<'_>) -> String {
 
 impl Ja4Input<'_> {
     fn compute_section_a(&self) -> String {
-        let proto = JA4_TCP;
-        let version = match self.tls_version {
-            "1.3" => "13",
-            "1.2" => "12",
-            "1.1" => "11",
-            "1.0" => "10",
-            _ => "00",
-        };
+        let proto = self.hello.transport();
 
         let sni = if self.has_sni { "d" } else { "i" };
 
@@ -38,16 +66,9 @@ impl Ja4Input<'_> {
 
         let ext_count = non_grease_ext_ids(self.extension_ids).len().min(99);
 
-        let alpn = if self.alpn.is_empty() {
-            "00".to_string()
-        } else {
-            let bytes = self.alpn.as_bytes();
-            let first = bytes[0] as char;
-            let last = bytes[bytes.len() - 1] as char;
-            format!("{first}{last}")
-        };
+        let alpn = self.hello.alpn();
 
-        format!("{proto}{version}{sni}{cipher_count:02}{ext_count:02}{alpn}")
+        format!("{proto}{TLS13}{sni}{cipher_count:02}{ext_count:02}{alpn}")
     }
 
     fn compute_section_b(&self) -> String {

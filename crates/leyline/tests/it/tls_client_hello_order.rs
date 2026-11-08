@@ -119,8 +119,7 @@ impl Route {
 }
 
 fn declared_extension_order(browser: Browser) -> Vec<u16> {
-    browser
-        .profile()
+    leyline::internals::browser_profile(browser)
         .tls
         .extension_permutation
         .clone()

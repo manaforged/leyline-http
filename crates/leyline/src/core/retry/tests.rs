@@ -1,6 +1,8 @@
-use super::wait::unix_from_ymd_hms;
 use super::*;
-use crate::core::error::{Cause, Error, Kind};
+use http::StatusCode;
+
+use crate::error::{Error, Kind};
+use crate::util::wait::{parse_retry_after, unix_from_ymd_hms};
 
 fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
     let mut headers = http::HeaderMap::new();
@@ -9,18 +11,18 @@ fn grid_response(status: u16, retry_after: Option<&str>) -> Response {
     }
     Response::from_parts(crate::core::response::Parts {
         status: StatusCode::from_u16(status).unwrap(),
-        version: crate::core::HttpVersion::Http2,
-        headers,
-        trailers: Vec::new(),
+        version: http::Version::HTTP_2,
+        headers: headers.into(),
+        trailers: None,
         body: crate::core::response::ResponseBody::Buffered(Vec::new()),
-        url: url::Url::parse("https://example.test/").unwrap(),
+        url: std::sync::Arc::new(url::Url::parse("https://example.test/").unwrap()),
         redirect_chain: Vec::new(),
         request_headers: Vec::new(),
         tls: None,
-        request_method: "GET".to_string(),
+        request_method: Some(http::Method::GET),
         audit_tls: None,
         audit_cache: std::sync::OnceLock::new(),
-        timing: crate::core::ResponseTiming::default(),
+        timing: crate::wire::ResponseTiming::default(),
         compression: crate::core::BodyRules::default(),
         attempts: 1,
         proxy: None,
@@ -41,12 +43,14 @@ fn grid() -> Vec<(&'static str, Result<Response>)> {
         ("503 retry-after 120", Ok(grid_response(503, Some("120")))),
         ("504", Ok(grid_response(504, None))),
         ("block 403", Ok(grid_response(403, None))),
-        ("connect refused", Err(Error::new(Cause::Connect))),
+        ("connect refused", Err(Error::new(Kind::Connect))),
         (
             "tls handshake timeout",
-            Err(Error::from(crate::tls::TlsError::HandshakeIo(handshake))),
+            Err(Error::from(crate::tls::error::TlsError::HandshakeIo(
+                handshake,
+            ))),
         ),
-        ("timeout after send", Err(Error::new(Cause::Timeout))),
+        ("timeout after send", Err(Error::new(Kind::Timeout))),
         ("reset after send", Err(Error::from(reset))),
     ]
 }
@@ -65,10 +69,10 @@ fn plan_label(plan: RetryPlan) -> &'static str {
 fn decisions_match_the_table_and_an_unsent_post_retries() {
     let mut table = String::new();
     for (name, retry) in [("transient", Retry::new(3)), ("none", Retry::new(0))] {
-        for method in ["GET", "POST"] {
+        for method in [http::Method::GET, http::Method::POST] {
             for attempt in [0, 3] {
                 for (label, result) in grid() {
-                    let plan = retry.plan(&result, attempt, retry.allows(method), || true);
+                    let plan = retry.plan_resend(&result, attempt, retry.allows(&method), || true);
                     table.push_str(&format!(
                         "{name} {method} attempt {attempt} {label}: {}\n",
                         plan_label(plan)
@@ -100,8 +104,7 @@ fn when_replaces_the_default_rule() {
     let limited = Ok(blocked);
     let on_conflict = Retry::new(3).when(|attempt| attempt.status() == Some(StatusCode::CONFLICT));
     let skip_blocks = Retry::new(3).when(|attempt| attempt.is_transient() && !attempt.is_block());
-    let plan =
-        |retry: &Retry, result: &Result<Response>| plan_label(retry.plan(result, 0, true, || true));
+    let plan = |retry: &Retry, result: &Result<Response>| plan_label(retry.plan(result, 0));
     assert_eq!(plan(&on_conflict, &conflict), "backoff");
     assert_eq!(plan(&on_conflict, &limited), "stop");
     assert_eq!(plan(&skip_blocks, &limited), "stop");
@@ -154,13 +157,26 @@ fn wait_formats_parse_header_values() {
 #[test]
 fn a_tls_handshake_timeout_is_unsent() {
     let timeout = std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake");
-    let error = Error::from(crate::tls::TlsError::HandshakeIo(timeout));
+    let error = Error::from(crate::tls::error::TlsError::HandshakeIo(timeout));
     assert_eq!(error.kind(), Kind::Timeout);
     assert!(error.is_unsent());
 }
 
 #[test]
 fn a_failed_tls_handshake_is_unsent() {
-    let error = Error::from(crate::tls::TlsError::Handshake("alert".into()));
+    let error = Error::from(crate::tls::error::TlsError::Handshake("alert".into()));
     assert!(error.is_unsent());
+}
+
+#[test]
+fn a_spent_budget_stops_retries_and_each_request_refills_it() {
+    let retry = Retry::new(3).budget(0.5);
+    let failed = || Err::<Response, _>(Error::new(Kind::Connect));
+    let plan = |attempt| plan_label(retry.plan_resend(&failed(), attempt, true, || true));
+    let allowed = (0..200).take_while(|_| plan(1) == "backoff").count();
+    assert_eq!(allowed, 100);
+    assert_eq!(plan(1), "stop");
+    assert_eq!(plan(0), "stop");
+    assert_eq!(plan(0), "backoff");
+    assert_eq!(plan(1), "stop");
 }

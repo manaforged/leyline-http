@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use leyline::h2::frame::FrameType;
+use leyline::internals::h2::frame::FrameType;
 use leyline::{Body, Kind, Session, Tls};
 use leyline_bssl_tokio::SslStream;
 use support::{

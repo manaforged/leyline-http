@@ -2,14 +2,12 @@ use std::sync::Arc;
 
 use http::header::USER_AGENT;
 
-use crate::audit::AuditTlsCache;
-use crate::core::error::{Cause, Error, Result};
-use crate::core::{BodyRules, Identity};
+use crate::audit::{AuditTlsCache, ClientHello};
+use crate::core::{Identity, Protocol};
+use crate::error::Result;
 use crate::h2::H2Config;
-use crate::profile::{
-    Browser, BrowserHeaders, BrowserProfile, ChromiumBrand, HeaderStyle, Platform,
-};
-use crate::tcp::TcpProfile;
+use crate::profile::TcpProfile;
+use crate::profile::{Browser, BrowserProfile, ChromiumBrand, HeaderStyle, Platform};
 
 pub(in crate::core::session) enum IdentitySource {
     Bare,
@@ -21,9 +19,7 @@ pub(in crate::core::session) struct IdentityInputs<'a> {
     pub source: IdentitySource,
     pub platform: Platform,
     pub brand: ChromiumBrand,
-    pub compression: BodyRules,
-    #[cfg(feature = "http3")]
-    pub h3_required: bool,
+    pub protocol: Protocol,
     pub tcp: &'a TcpProfile,
     pub audit: bool,
     pub default_headers: &'a [(String, String)],
@@ -83,17 +79,6 @@ impl Selected {
     }
 }
 
-impl BrowserProfile {
-    pub(in crate::core::session) fn resolve_presented(
-        &self,
-        platform: Platform,
-        brand: ChromiumBrand,
-    ) -> Result<BrowserHeaders> {
-        self.resolve_identity(platform, brand)
-            .map_err(|e| Error::new(Cause::Config).with_message(e))
-    }
-}
-
 fn session_user_agent(default_headers: &[(String, String)]) -> Option<&str> {
     default_headers
         .iter()
@@ -115,35 +100,11 @@ fn session_accept_language(
     }
 }
 
-impl BrowserProfile {
-    fn derive_h2(&self, platform: Platform, max_body: usize) -> Result<H2Config> {
-        let resolved = self.h2.resolve_for_platform(platform)?;
-        let mut config = H2Config::from_profile(&resolved)?;
-        config.max_response_body_bytes = max_body;
-        Ok(config)
-    }
-}
-
-#[cfg(feature = "http3")]
-impl BrowserProfile {
-    fn derive_h3(&self, max_body: usize, required: bool) -> Result<Option<crate::quic::H3Config>> {
-        match crate::quic::H3Config::from_profile(self) {
-            Ok(mut config) => {
-                config.max_response_body_bytes = max_body as u64;
-                Ok(Some(config))
-            }
-            Err(error) if required => Err(error),
-            Err(_) => Ok(None),
-        }
-    }
-}
-
 pub(in crate::core::session) fn derive_identity(
     input: IdentityInputs<'_>,
 ) -> Result<DerivedIdentity> {
     let platform = input.platform.resolve();
     let brand = input.brand;
-    let max_body = input.compression.max_body_size;
     let bare = matches!(input.source, IdentitySource::Bare);
     let selected = Selected::new(input.source, platform)?;
     let profile = brand.tls_profile(selected.base);
@@ -152,13 +113,28 @@ pub(in crate::core::session) fn derive_identity(
         .header_style()
         .unwrap_or(http_profile.meta.header_style);
     let header_order = http_profile.meta.header_order.clone();
-    let resolved = http_profile.resolve_presented(platform, brand)?;
-    let h2_config = profile.derive_h2(platform, max_body)?;
+    let resolved = http_profile.resolve_identity(platform, brand)?;
+    let h2_config = H2Config::from_profile(&profile.h2.resolve_for_platform(platform)?)?;
     #[cfg(feature = "http3")]
-    let h3_config = profile.derive_h3(max_body, input.h3_required)?;
-    let audit_tls = input
-        .audit
-        .then(|| Arc::new(profile.audit_cache(&h2_config, input.tcp)));
+    let h3_config = if profile.h3.is_none() && !input.protocol.requires_h3() {
+        None
+    } else {
+        Some(crate::quic::H3Config::from_profile(&profile)?)
+    };
+    #[cfg(feature = "http3")]
+    let quic_tls = h3_config.as_ref().map(|config| &config.tls);
+    #[cfg(not(feature = "http3"))]
+    let quic_tls = None;
+    let hello = if input.protocol.tcp_offers_h2() {
+        ClientHello::TcpH2
+    } else {
+        ClientHello::TcpHttp11
+    };
+    let audit_tls = input.audit.then(|| {
+        Arc::new(AuditTlsCache::new(
+            &profile, &h2_config, input.tcp, hello, quic_tls,
+        ))
+    });
 
     Ok(DerivedIdentity {
         browser: selected.browser,

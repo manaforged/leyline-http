@@ -1,6 +1,6 @@
 use bytes::{BufMut, Bytes};
 
-use super::{FrameHeader, FrameType, be_u32};
+use super::{FrameHeader, FrameType, Scope, be_u32, check_scope};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
@@ -12,12 +12,7 @@ pub struct RstStreamFrame {
 
 impl RstStreamFrame {
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
-        if header.stream_id == 0 {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "RST_STREAM on stream 0".into(),
-            });
-        }
+        check_scope(&header, Scope::Stream, "RST_STREAM")?;
         if payload.len() != 4 {
             return Err(H2Error::Connection {
                 code: ErrorCode::FrameSizeError,

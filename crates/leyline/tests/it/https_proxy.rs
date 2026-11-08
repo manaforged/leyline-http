@@ -5,13 +5,16 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use leyline::tls::FingerprintConnector;
-use leyline::{BrowserProfile, Platform, Tls};
+use leyline::internals::BrowserProfile;
+use leyline::internals::pool::ProxyUrl;
+use leyline::internals::tls::{AlpnPlan, FingerprintConnector};
+use leyline::{Platform, Tls};
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
+use leyline_bssl::ec::{EcGroup, EcKey};
 use leyline_bssl::hash::MessageDigest;
+use leyline_bssl::nid::Nid;
 use leyline_bssl::pkey::PKey;
-use leyline_bssl::rsa::Rsa;
 use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
 use leyline_bssl::x509::{X509, X509NameBuilder};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -26,7 +29,10 @@ struct Generated {
 }
 
 fn generate_chain(dns_names: &[&str]) -> Generated {
-    let ca_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+    let ca_key = PKey::from_ec_key(
+        EcKey::generate(&EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap(),
+    )
+    .unwrap();
     let mut name = X509NameBuilder::new().unwrap();
     name.append_entry_by_text("CN", "leyline-test-ca").unwrap();
     let ca_name = name.build();
@@ -51,7 +57,10 @@ fn generate_chain(dns_names: &[&str]) -> Generated {
     ca.sign(&ca_key, MessageDigest::sha256()).unwrap();
     let ca = ca.build();
 
-    let leaf_key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+    let leaf_key = PKey::from_ec_key(
+        EcKey::generate(&EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap(),
+    )
+    .unwrap();
     let mut leaf_name = X509NameBuilder::new().unwrap();
     leaf_name.append_entry_by_text("CN", dns_names[0]).unwrap();
     let leaf_name = leaf_name.build();
@@ -177,7 +186,12 @@ async fn https_proxy_tunnels_with_encrypted_connect() {
 
     let proxy_url = format!("https://user:secret@localhost:{}", addr.port());
     let res = Arc::new(connector(&r#gen))
-        .connect("right.example", 443, Some(&proxy_url))
+        .connect(
+            "right.example",
+            443,
+            Some(&ProxyUrl::parse(&proxy_url).unwrap()),
+            AlpnPlan::Browser,
+        )
         .await;
     assert!(
         res.is_ok(),
@@ -213,7 +227,12 @@ async fn https_proxy_refused_when_connector_has_origin_identity() {
     .expect("connector build");
 
     let err = match conn
-        .connect("right.example", 443, Some("https://localhost:1"))
+        .connect(
+            "right.example",
+            443,
+            Some(&ProxyUrl::parse("https://localhost:1").unwrap()),
+            AlpnPlan::Browser,
+        )
         .await
     {
         Ok(_) => panic!("https proxy + origin pins must be refused"),

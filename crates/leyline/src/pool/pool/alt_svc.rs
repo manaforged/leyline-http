@@ -1,6 +1,7 @@
+use std::borrow::Cow;
 use std::time::{Duration, SystemTime};
 
-use super::expiring::ExpiringSet;
+use crate::util::expiring::ExpiringSet;
 
 const DEFAULT_MAX_AGE: Duration = Duration::from_secs(86_400);
 
@@ -62,11 +63,7 @@ fn h3_max_age(fields: &[&str], host: &str, port: u16) -> Option<Duration> {
 
 fn same_authority_h3(entry: &str, host: &str, port: u16) -> Option<Duration> {
     let mut parts = split_unquoted(entry.strip_prefix("h3=")?, ';');
-    let authority = parts.next().unwrap_or_default().trim();
-    let authority = authority
-        .strip_prefix('"')
-        .and_then(|a| a.strip_suffix('"'))
-        .unwrap_or(authority);
+    let authority = value(parts.next().unwrap_or_default());
     let (alt_host, alt_port) = authority.rsplit_once(':')?;
     if alt_port.parse::<u16>() != Ok(port)
         || !(alt_host.is_empty() || alt_host.eq_ignore_ascii_case(host))
@@ -78,8 +75,17 @@ fn same_authority_h3(entry: &str, host: &str, port: u16) -> Option<Duration> {
         .find(|(name, _)| name.trim().eq_ignore_ascii_case("ma"));
     match ma {
         None => Some(DEFAULT_MAX_AGE),
-        Some((_, secs)) => crate::util::delta_seconds(secs.trim().trim_matches('"'))
+        Some((_, secs)) => crate::util::delta_seconds(&value(secs))
             .map(|secs| Duration::from_secs(secs.min(u64::from(u32::MAX)))),
+    }
+}
+
+fn value(raw: &str) -> Cow<'_, str> {
+    let raw = raw.trim();
+    if raw.starts_with('"') {
+        Cow::Owned(crate::util::unquote(raw).0)
+    } else {
+        Cow::Borrowed(raw)
     }
 }
 

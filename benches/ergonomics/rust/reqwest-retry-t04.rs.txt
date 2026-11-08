@@ -1,0 +1,17 @@
+use reqwest_middleware::ClientBuilder;
+use reqwest_retry::{RetryTransientMiddleware, policies::ExponentialBackoff};
+use serde_json::Value;
+use std::error::Error;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let policy = ExponentialBackoff::builder().build_with_max_retries(2);
+    let client = ClientBuilder::new(reqwest::Client::new())
+        .with(RetryTransientMiddleware::new_with_policy(policy))
+        .build();
+    let response = client.get("http://127.0.0.1:18743/t04/flaky").send().await?;
+    let status = response.status().as_u16();
+    let body: Value = response.json().await?;
+    println!("{status} {}", body["attempts"]);
+    Ok(())
+}

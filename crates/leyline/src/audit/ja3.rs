@@ -1,7 +1,5 @@
 use crate::audit::{non_grease_cipher_ids, non_grease_curve_ids, non_grease_ext_ids};
-
-pub(crate) const JA3_RECORD_VERSION: u16 = 771;
-pub(crate) const JA3_POINT_FORMATS: u16 = 0;
+use crate::profile::JA3_POINT_FORMATS;
 
 #[derive(Debug)]
 pub struct Ja3Input<'a> {

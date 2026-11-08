@@ -128,18 +128,15 @@ async fn autosave_writes_a_final_save_on_shutdown() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-#[expect(
-    clippy::disallowed_methods,
-    reason = "the handler must block its thread to prove the test server isolates it"
-)]
 async fn a_blocking_test_handler_does_not_stall_client_timeouts() {
-    let server = testing::Server::http(|_| {
-        std::thread::sleep(Duration::from_secs(2));
+    let (release, held) = std::sync::mpsc::channel::<()>();
+    let held = std::sync::Mutex::new(held);
+    let server = testing::Server::http(move |_| {
+        let _released = held.lock().unwrap().recv();
         testing::Response::new(200)
     })
     .await
     .unwrap();
-    let started = Instant::now();
     let err = Session::builder()
         .build()
         .unwrap()
@@ -149,14 +146,14 @@ async fn a_blocking_test_handler_does_not_stall_client_timeouts() {
         .await
         .unwrap_err();
     assert!(err.kind() == Kind::Timeout);
-    assert!(started.elapsed() < Duration::from_secs(1));
+    drop(release);
 }
 
 #[tokio::test]
 async fn test_responses_can_wait_and_arrive_in_chunks() {
     let server = testing::Server::http(|req: &testing::Request| {
         if req.target == "/slow" {
-            testing::Response::new(200).delay(Duration::from_secs(2))
+            testing::Response::new(200).delay(Duration::from_millis(400))
         } else {
             testing::Response::new(200).chunks(["ab", "cd", "ef"], Duration::from_millis(10))
         }

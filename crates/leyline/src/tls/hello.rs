@@ -11,6 +11,7 @@ pub(crate) struct HelloOptions {
     request_trust_anchors: bool,
     key_shares: Option<Vec<u16>>,
     tls12_extensions: bool,
+    records: bool,
 }
 
 impl HelloOptions {
@@ -20,9 +21,14 @@ impl HelloOptions {
             alps_proto: tls.alps.as_ref().map(|s| s.as_bytes().to_vec()),
             alps_new_codepoint: tls.alps_new_codepoint,
             request_trust_anchors: tls.request_trust_anchors,
-            key_shares: tls.key_share_ids()?,
+            key_shares: tls.key_share_ids().map_err(TlsError::Profile)?,
             tls12_extensions: tls.tls12_extensions,
+            records: tls.record_size_limit.is_none(),
         })
+    }
+
+    pub(crate) fn records(&self) -> bool {
+        self.records
     }
 
     pub(crate) fn ech_grease(&self) -> bool {
@@ -61,31 +67,5 @@ impl HelloOptions {
         }
 
         Ok(())
-    }
-}
-
-impl TlsProfile {
-    fn key_share_ids(&self) -> Result<Option<Vec<u16>>, TlsError> {
-        let Some(names) = self.key_shares.as_deref() else {
-            return Ok(None);
-        };
-        let ids = names
-            .iter()
-            .map(|name| {
-                crate::iana::curve_id(name)
-                    .ok_or_else(|| TlsError::Profile(format!("unknown key share group: {name}")))
-            })
-            .collect::<Result<Vec<u16>, _>>()?;
-        let mut curves = self
-            .curves
-            .iter()
-            .filter_map(|name| crate::iana::curve_id(name));
-        if !ids.iter().all(|id| curves.any(|curve| curve == *id)) {
-            return Err(TlsError::Profile(format!(
-                "key_shares {names:?} must be an ordered subsequence of curves {:?}",
-                self.curves
-            )));
-        }
-        Ok(Some(ids))
     }
 }

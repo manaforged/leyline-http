@@ -7,6 +7,9 @@ Each section links to the chapter with the full detail.
 
 ## Build the client once
 
+The sections below also cover [response caching](#cache-responses) and
+[token refresh](#refresh-a-bearer-token).
+
 ```rust,no_run
 use std::time::Duration;
 
@@ -171,3 +174,86 @@ api.post("uploads").multipart(form).error_for_status().send().await?;
 
 Response bodies are decoded for you: the default features cover gzip,
 deflate, Brotli, and zstd. See [Features and targets](features-and-targets.md).
+
+## Cache responses
+
+Enable a private, in-memory HTTP cache with a byte budget:
+
+```rust,no_run
+use leyline::Session;
+
+# async fn run() -> leyline::Result<()> {
+let api = Session::builder()
+    .base_url("https://api.example/v1/")
+    .cache(64 * 1024 * 1024)
+    .build()?;
+let first = api.get("catalog").bytes().await?;
+let again = api.get("catalog").bytes().await?;
+api.clear_cache();
+# drop((first, again));
+# Ok(())
+# }
+```
+
+Caching is off by default. Session clones share the cache; `to_builder().build()`
+creates a new one. The budget charges bodies and a conservative allowance for
+headers and metadata, with least-recently-used eviction. An entry larger than
+the budget is not stored.
+
+The cache respects cache-control directives, validators, and `Vary`. Stale
+responses are revalidated with `If-None-Match` or `If-Modified-Since`; a matching
+304 reuses the stored body. Successful writes invalidate all cached variants
+of the request URL and same-origin `Location` and `Content-Location` URLs.
+
+Request headers and the proxy route partition entries, so changing credentials
+or proxies cannot reuse another context's body. This is deliberately more
+conservative than `Vary` alone. Responses that set cookies are not stored.
+Streaming requests, ranges, and caller-supplied conditional requests bypass the
+cache. A cache miss with `Cache-Control: only-if-cached` returns status 504
+without contacting the origin. The cache is not written by `Session::save`. Audited request headers describe
+the caller's request before the cache adds revalidation headers; they are not
+a packet capture.
+
+## Refresh a bearer token
+
+`refresh_token` takes an asynchronous callback that returns the next access
+token. Set both `base_url` and the initial `bearer_auth`; `build()` rejects a
+refresh callback without them.
+
+```rust,no_run
+use leyline::Session;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct Token { access_token: String }
+
+# fn run() -> leyline::Result<()> {
+let tokens = Session::new();
+let api = Session::builder()
+    .base_url("https://api.example/v1/")
+    .bearer_auth("initial-access-token")
+    .refresh_token(move || {
+        let tokens = tokens.clone();
+        async move {
+            let token = tokens.post("https://auth.example/token")
+                .form([("grant_type", "refresh_token"), ("refresh_token", "replace-with-your-refresh-token")])
+                .error_for_status().send().await?.json::<Token>().await?;
+            Ok(token.access_token)
+        }
+    })
+    .build()?;
+# drop(api);
+# Ok(())
+# }
+```
+
+A 401 from the base URL origin permits one authentication replay per transport
+attempt, only for a replayable body. Concurrent requests that used the old token
+share the refresh result, including a failure. An explicit request authorization
+header and cross-origin redirects do not trigger refresh. The callback's wait
+is covered by the request's total deadline and session shutdown.
+
+Use a separate session for the token endpoint to avoid recursive refresh. The
+callback owns provider-specific behavior, refresh-token rotation, and secret
+storage. It can be cancelled. Bearer tokens and callbacks are not saved by
+`Session::save`.

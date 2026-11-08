@@ -18,14 +18,11 @@ fn content_type_carries_boundary() {
     assert!(ct.contains(&f.boundary));
 }
 
-async fn first_part_header(form: Form) -> std::io::Result<bytes::Bytes> {
-    let body = form.into_stream_body();
-    let mut stream = body;
-    match stream.next().await {
-        Some(Ok(b)) => Ok(b),
-        Some(Err(e)) => Err(e),
-        None => Err(std::io::Error::other("empty form")),
-    }
+async fn first_part_header(form: Form) -> crate::Result<bytes::Bytes> {
+    let mut body = form.into_stream_body();
+    body.next()
+        .await
+        .unwrap_or_else(|| Err(std::io::Error::other("empty form").into()))
 }
 
 #[tokio::test]
@@ -35,7 +32,7 @@ async fn filename_with_crlf_is_rejected() {
         Part::bytes(b"nope".to_vec()).filename("x\"\r\nInjected: yes\r\n\r\n--evil\r\n"),
     );
     let err = first_part_header(form).await.expect_err("must reject");
-    let msg = format!("{err}");
+    let msg = std::error::Error::source(&err).map_or_else(String::new, ToString::to_string);
     assert!(
         msg.contains("filename") && msg.contains("control"),
         "unexpected error: {msg}"
@@ -46,7 +43,7 @@ async fn filename_with_crlf_is_rejected() {
 async fn name_with_crlf_is_rejected() {
     let form = Form::new().part("field\r\nInjected: yes", Part::text("v"));
     let err = first_part_header(form).await.expect_err("must reject");
-    let msg = format!("{err}");
+    let msg = std::error::Error::source(&err).map_or_else(String::new, ToString::to_string);
     assert!(
         msg.contains("name") && msg.contains("control"),
         "unexpected error: {msg}"

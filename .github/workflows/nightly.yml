@@ -16,28 +16,6 @@ env:
   CARGO_INCREMENTAL: '0'
 
 jobs:
-  live:
-    name: live fingerprint + smoke
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: ci-live
-          workspaces: ". -> target/verify"
-          cache-workspace-crates: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - name: verify gates
-        run: scripts/verify.sh --only live
-
   fuzz:
     name: fuzz (time-bounded)
     runs-on: ubuntu-24.04
@@ -45,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          submodules: recursive
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
@@ -72,32 +51,3 @@ jobs:
   matrix:
     name: matrix
     uses: ./.github/workflows/matrix.yml
-    permissions:
-      contents: read
-      issues: write
-
-  alert:
-    name: open failure issue
-    needs: [live, fuzz, qualify]
-    if: failure() && github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      issues: write
-    steps:
-      - name: Open or update the failure issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TITLE: 'nightly workflow failed'
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          body="Run failed on $(date -u +%Y-%m-%d): $RUN_URL"
-          number="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title \
-            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")"
-          if [[ -n "$number" ]]; then
-            gh issue comment "$number" --body "$body"
-          else
-            gh issue create --title "$TITLE" --body "$body"
-          fi

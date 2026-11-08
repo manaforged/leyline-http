@@ -1,11 +1,11 @@
 mod sessions;
 mod state;
 
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use crate::core::Identity;
 use crate::core::config::Proxy;
-use crate::core::session::Identity;
 use crate::profile::{Browser, Platform};
 
 use sessions::IdentitySessions;
@@ -130,7 +130,7 @@ impl ProxyPool {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, PoolState> {
-        self.state.lock().unwrap_or_else(PoisonError::into_inner)
+        crate::util::lock(&self.state)
     }
 }
 

@@ -1,32 +1,16 @@
 #![forbid(unsafe_code)]
+mod cache;
 mod compare;
 mod ja3;
 mod ja4;
 mod ja4h;
 mod ja4t;
 
-pub(crate) use ja3::{JA3_POINT_FORMATS, JA3_RECORD_VERSION};
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
+pub(crate) use cache::AuditTlsCache;
 pub use ja3::{Ja3Input, compute_ja3};
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use ja3::{Ja3Input, compute_ja3};
-pub(crate) use ja4::JA4_TCP;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-pub use ja4::{Ja4Input, compute_ja4};
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use ja4::{Ja4Input, compute_ja4};
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
+pub use ja4::{ClientHello, Ja4Input, compute_ja4};
 pub use ja4h::{Ja4hInput, compute_ja4h};
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use ja4h::{Ja4hInput, compute_ja4h};
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
 pub use ja4t::compute_ja4t;
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use ja4t::compute_ja4t;
 
 use sha2::{Digest, Sha256};
 
@@ -80,7 +64,7 @@ pub struct Fingerprint {
 
 impl std::fmt::Debug for Fingerprint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let headers = crate::trace::masked(
+        let headers = crate::util::masked(
             self.request_headers
                 .iter()
                 .map(|(name, value)| (name.as_str(), value.as_bytes())),
@@ -127,13 +111,4 @@ impl Fingerprint {
     pub fn headers(&self) -> &[(String, String)] {
         &self.request_headers
     }
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AuditTlsCache {
-    pub(crate) ja4: String,
-    pub(crate) ja3: String,
-    pub(crate) h2_fingerprint: String,
-    pub(crate) ja4t: String,
-    pub(crate) permutes_extensions: bool,
 }

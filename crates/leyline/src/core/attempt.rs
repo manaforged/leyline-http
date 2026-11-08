@@ -3,8 +3,8 @@ use std::fmt;
 use http::StatusCode;
 use url::Url;
 
-use crate::core::error::{Error, Result};
 use crate::core::response::Response;
+use crate::error::{Error, Result};
 use crate::util::redact;
 
 /// One sent request or one redirect, as seen by retry and redirect policies.
@@ -104,7 +104,7 @@ impl<'a> Attempt<'a> {
             Kind::Sent(Ok(response)) => {
                 let status = response.status();
                 status == StatusCode::TOO_MANY_REQUESTS
-                    || crate::core::retry::is_gateway_status(status.as_u16())
+                    || crate::error::is_gateway_status(status.as_u16())
             }
             Kind::Sent(Err(error)) => error.is_retryable(),
             Kind::Redirect { .. } => false,

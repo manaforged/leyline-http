@@ -1,18 +1,13 @@
 use std::fmt;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use http::StatusCode;
-
 use crate::core::attempt::Attempt;
-use crate::core::error::Result;
 use crate::core::response::Response;
+use crate::error::Result;
 
-mod wait;
-
-pub(crate) use wait::WaitFormat;
-pub(crate) use wait::parse_retry_after;
-use wait::{RETRY_AFTER, WaitHeader};
+use crate::util::wait::{WaitFormat, WaitHeader, retry_after};
 
 pub(crate) enum RetryPlan {
     Stop,
@@ -24,18 +19,6 @@ pub(crate) enum RetryPlan {
 const DEFAULT_MIN_BACKOFF: Duration = Duration::from_millis(100);
 const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(1);
 const DEFAULT_MAX_WAIT: Duration = Duration::from_secs(60);
-
-const GATEWAY_STATUSES: [StatusCode; 3] = [
-    StatusCode::BAD_GATEWAY,
-    StatusCode::SERVICE_UNAVAILABLE,
-    StatusCode::GATEWAY_TIMEOUT,
-];
-
-pub(crate) fn is_gateway_status(code: u16) -> bool {
-    GATEWAY_STATUSES
-        .iter()
-        .any(|status| status.as_u16() == code)
-}
 
 type RetryPredicate = dyn Fn(&Attempt<'_>) -> bool + Send + Sync;
 
@@ -49,6 +32,39 @@ pub struct Retry {
     max_wait: Duration,
     wait_headers: Vec<WaitHeader>,
     any_method: bool,
+    budget: Option<Arc<Budget>>,
+}
+
+const BUDGET_TOKEN: i64 = 1000;
+const BUDGET_CAPACITY: i64 = 100 * BUDGET_TOKEN;
+
+#[derive(Debug)]
+struct Budget {
+    deposit: i64,
+    tokens: AtomicI64,
+}
+
+impl Budget {
+    fn new(ratio: f64) -> Self {
+        Self {
+            deposit: (ratio.clamp(0.0, 1.0) * BUDGET_TOKEN as f64) as i64,
+            tokens: AtomicI64::new(BUDGET_CAPACITY),
+        }
+    }
+
+    fn deposit(&self) {
+        if self.tokens.load(Ordering::Relaxed) < BUDGET_CAPACITY {
+            self.tokens.fetch_add(self.deposit, Ordering::Relaxed);
+        }
+    }
+
+    fn withdraw(&self) -> bool {
+        self.tokens
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |tokens| {
+                (tokens >= BUDGET_TOKEN).then_some(tokens - BUDGET_TOKEN)
+            })
+            .is_ok()
+    }
 }
 
 impl fmt::Debug for Retry {
@@ -60,6 +76,7 @@ impl fmt::Debug for Retry {
             .field("max_wait", &self.max_wait)
             .field("wait_headers", &self.wait_headers)
             .field("any_method", &self.any_method)
+            .field("budget", &self.budget)
             .finish()
     }
 }
@@ -86,6 +103,7 @@ impl Retry {
             max_wait: DEFAULT_MAX_WAIT,
             wait_headers: Vec::new(),
             any_method: false,
+            budget: None,
         }
     }
 
@@ -116,6 +134,10 @@ impl Retry {
         self
     }
 
+    pub(crate) fn allows_wait(&self, wait: Duration) -> bool {
+        wait <= self.max_wait
+    }
+
     /// Adds a header, checked before `Retry-After`, whose value is delay-seconds, a Unix timestamp in seconds, or an HTTP date.
     pub fn wait_header(self, name: impl Into<String>) -> Self {
         self.push_wait_header(name.into(), WaitFormat::Delay)
@@ -129,6 +151,24 @@ impl Retry {
     fn push_wait_header(mut self, name: String, format: WaitFormat) -> Self {
         self.wait_headers.push(WaitHeader { name, format });
         self
+    }
+
+    /// Limits retries to `ratio` of the requests sent through this policy and its clones, after a burst of 100; off by default.
+    pub fn budget(mut self, ratio: f64) -> Self {
+        self.budget = Some(Arc::new(Budget::new(ratio)));
+        self
+    }
+
+    fn count_request(&self, attempt: u32) {
+        if attempt == 0
+            && let Some(budget) = &self.budget
+        {
+            budget.deposit();
+        }
+    }
+
+    fn spend_budget(&self) -> bool {
+        self.budget.as_ref().is_none_or(|budget| budget.withdraw())
     }
 
     /// Sets whether non-idempotent methods retry too, off by default.
@@ -153,16 +193,8 @@ impl Retry {
         self.count() == 0
     }
 
-    #[cfg(feature = "html")]
-    pub(crate) fn or(self, fallback: Retry) -> Retry {
-        match self.is_none() {
-            true => fallback,
-            false => self,
-        }
-    }
-
-    pub(crate) fn allows(&self, method: &str) -> bool {
-        self.any_method || crate::util::is_idempotent(method)
+    pub(crate) fn allows(&self, method: &http::Method) -> bool {
+        self.any_method || crate::wire::is_idempotent(method)
     }
 
     fn wants(&self, attempt: &Attempt<'_>) -> bool {
@@ -179,10 +211,14 @@ impl Retry {
                     .header(&wait.name)
                     .and_then(|value| wait.format.parse(value))
             })
-            .or_else(|| response.header(RETRY_AFTER).and_then(parse_retry_after))
+            .or_else(|| retry_after(response.headers()))
     }
 
-    pub(crate) fn plan(
+    pub(crate) fn plan(&self, result: &Result<Response>, attempt: u32) -> RetryPlan {
+        self.plan_resend(result, attempt, true, || true)
+    }
+
+    pub(crate) fn plan_resend(
         &self,
         result: &Result<Response>,
         attempt: u32,
@@ -192,6 +228,7 @@ impl Retry {
         if self.is_none() {
             return RetryPlan::Stop;
         }
+        self.count_request(attempt);
         let view = Attempt::sent(result);
         if attempt >= self.count {
             return match result {
@@ -201,6 +238,13 @@ impl Retry {
         }
         if !self.wants(&view) || !(method_allowed || view.is_unsent()) || !body_retryable() {
             return RetryPlan::Stop;
+        }
+        if !self.spend_budget() {
+            return if result.is_ok() {
+                RetryPlan::Exhausted
+            } else {
+                RetryPlan::Stop
+            };
         }
         match result.as_ref().ok().and_then(|r| self.server_wait(r)) {
             Some(wait) if wait > self.max_wait => RetryPlan::Declined,

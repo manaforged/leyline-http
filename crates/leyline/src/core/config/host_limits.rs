@@ -1,18 +1,14 @@
-use std::sync::atomic::Ordering;
-use std::sync::{Arc, PoisonError};
+mod statuses;
+
 use std::time::Duration;
 
-use tokio::time::Instant;
+use crate::error::{Error, Result};
+use crate::net::normalize_host;
 
-use super::host::normalize_host;
-pub(crate) use super::host_gate::HostPass;
-use super::host_gate::{Count, Gates, HostGate, acquire};
-pub(crate) use super::origin::Origin;
-
-#[derive(Debug, Clone, Copy, Default)]
-struct Rule {
-    max_in_flight: Option<usize>,
-    interval: Option<Duration>,
+#[derive(Debug, Clone, Copy, Default, serde::Serialize, serde::Deserialize)]
+pub(super) struct Rule {
+    pub(super) max_in_flight: Option<usize>,
+    pub(super) interval: Option<Duration>,
 }
 
 impl Rule {
@@ -35,7 +31,7 @@ impl Rule {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 enum HostPattern {
     Exact(String),
     Subdomains(String),
@@ -62,20 +58,23 @@ impl HostPattern {
 }
 
 /// Per-host concurrency, rate, and pause limits for a session or crawl.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[non_exhaustive]
 #[must_use]
 pub struct HostLimits {
     rule: Rule,
     overrides: Vec<(HostPattern, Rule)>,
     max_total: Option<usize>,
+    #[serde(default)]
+    max_pending: Option<usize>,
+    #[serde(default)]
+    max_total_pending: Option<usize>,
     pause: Pause,
-    gates: Arc<Gates>,
-    floors: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Pause {
+    #[serde(with = "statuses")]
     statuses: Vec<http::StatusCode>,
     invalid: Option<u16>,
     default: Duration,
@@ -83,10 +82,14 @@ struct Pause {
 }
 
 impl Pause {
-    fn length(&self, status: http::StatusCode, wait: Option<Duration>) -> Option<Duration> {
+    fn length(
+        &self,
+        status: http::StatusCode,
+        wait: impl FnOnce() -> Option<Duration>,
+    ) -> Option<Duration> {
         self.statuses
             .contains(&status)
-            .then(|| wait.unwrap_or(self.default).min(self.max))
+            .then(|| wait().unwrap_or(self.default).min(self.max))
     }
 }
 
@@ -96,14 +99,14 @@ impl Default for HostLimits {
             rule: Rule::default(),
             overrides: Vec::new(),
             max_total: None,
+            max_pending: None,
+            max_total_pending: None,
             pause: Pause {
                 statuses: Vec::new(),
                 invalid: None,
                 default: Duration::from_secs(60),
                 max: Duration::from_secs(24 * 60 * 60),
             },
-            gates: Arc::default(),
-            floors: true,
         }
     }
 }
@@ -151,6 +154,18 @@ impl HostLimits {
         self
     }
 
+    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a `max_in_flight` slot on its host.
+    pub fn max_pending(mut self, n: usize) -> Self {
+        self.max_pending = Some(n);
+        self
+    }
+
+    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a `max_total_in_flight` slot.
+    pub fn max_total_pending(mut self, n: usize) -> Self {
+        self.max_total_pending = Some(n);
+        self
+    }
+
     /// Pauses a host when a response has one of these status codes, replacing any earlier list.
     pub fn pause_on(mut self, statuses: impl IntoIterator<Item = u16>) -> Self {
         self.pause.statuses.clear();
@@ -178,43 +193,50 @@ impl HostLimits {
         self
     }
 
-    pub(crate) fn config_error(&self) -> Option<String> {
-        self.pause
-            .invalid
-            .map(|code| format!("HostLimits::pause_on: {code} is not a valid HTTP status code"))
-    }
-
-    pub(crate) fn armed(mut self) -> Self {
-        self.gates = Arc::new(Gates::new(self.max_total));
-        self
-    }
-
-    pub(crate) fn observe(&self, url: &url::Url, status: http::StatusCode, wait: Option<Duration>) {
-        let Some(length) = self.pause.length(status, wait) else {
-            return;
+    pub(crate) fn validate(&self) -> Result<()> {
+        let invalid_count = |count: Option<usize>| {
+            count.is_some_and(|count| count == 0 || count > tokio::sync::Semaphore::MAX_PERMITS)
         };
-        let Some(origin) = Origin::of(url) else {
-            return;
-        };
-        let rule = self.rule_for(&origin.host);
-        let now = Instant::now();
-        let end = now.checked_add(length).unwrap_or(now);
-        self.gates.gate(origin, rule.max_in_flight).pause_until(end);
+        if invalid_count(self.max_total)
+            || invalid_count(self.rule.max_in_flight)
+            || self
+                .overrides
+                .iter()
+                .any(|(_, rule)| invalid_count(rule.max_in_flight))
+        {
+            return Err(Error::config(
+                "host concurrency limit is outside the supported range",
+            ));
+        }
+        match self.pause.invalid {
+            Some(code) => Err(Error::config(format!(
+                "HostLimits::pause_on: {code} is not a valid HTTP status code"
+            ))),
+            None => Ok(()),
+        }
     }
 
-    pub(crate) fn is_unlimited(&self) -> bool {
+    pub(super) fn pending_limits(&self) -> (Option<usize>, Option<usize>) {
+        (self.max_pending, self.max_total_pending)
+    }
+
+    pub(super) fn max_total(&self) -> Option<usize> {
+        self.max_total
+    }
+
+    pub(super) fn pause_length(
+        &self,
+        status: http::StatusCode,
+        wait: impl FnOnce() -> Option<Duration>,
+    ) -> Option<Duration> {
+        self.pause.length(status, wait)
+    }
+
+    pub(super) fn is_unlimited(&self) -> bool {
         self.rule.is_unlimited()
             && self.overrides.is_empty()
             && self.max_total.is_none()
             && self.pause.statuses.is_empty()
-            && !(self.floors && self.gates.has_floors())
-    }
-
-    #[cfg(feature = "html")]
-    pub(crate) fn set_floor(&self, url: &url::Url, gap: Option<Duration>) {
-        if let Some(origin) = Origin::of(url) {
-            self.gates.set_floor(origin, gap);
-        }
     }
 
     #[cfg(feature = "html")]
@@ -231,156 +253,20 @@ impl HostLimits {
         self
     }
 
-    #[cfg(feature = "html")]
-    pub(crate) fn without_floors(mut self) -> Self {
-        self.floors = false;
-        self
-    }
-
-    #[cfg(feature = "html")]
-    pub(crate) fn ready(&self, origin: &Origin) -> bool {
-        self.ready_at(origin).is_none() && self.has_room(origin)
-    }
-
-    #[cfg(feature = "html")]
-    fn has_room(&self, origin: &Origin) -> bool {
-        let free = |slots: Option<&Arc<tokio::sync::Semaphore>>| {
-            slots.is_none_or(|slots| slots.available_permits() > 0)
-        };
-        let gate = self
-            .gates
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(origin)
-            .cloned();
-        free(self.gates.total.as_ref()) && gate.is_none_or(|gate| free(gate.slots.as_ref()))
-    }
-
-    #[cfg(feature = "html")]
-    pub(crate) fn ready_at(&self, origin: &Origin) -> Option<Instant> {
-        let gate = self
-            .gates
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .get(origin)
-            .cloned()?;
-        let interval = self.interval_for(origin, self.rule_for(&origin.host));
-        gate.ready_at(interval, Instant::now())
-    }
-
-    fn interval_for(&self, origin: &Origin, rule: Rule) -> Option<Duration> {
-        let floor = self.floors.then(|| self.gates.floor(origin)).flatten();
-        rule.interval.max(floor)
-    }
-
-    #[cfg(feature = "html")]
-    pub(crate) fn max_in_flight_for(&self, origin: &Origin) -> Option<usize> {
-        self.rule_for(&origin.host).max_in_flight
-    }
-
-    fn rule_for(&self, host: &str) -> Rule {
+    pub(super) fn rule_for(&self, host: &str) -> Rule {
         self.overrides
             .iter()
             .filter_map(|(pattern, rule)| Some((pattern.rank(host)?, *rule)))
             .max_by_key(|(rank, _)| *rank)
             .map_or(self.rule, |(_, rule)| rule)
     }
-
-    #[cfg(feature = "websocket")]
-    pub(crate) async fn admit(&self, url: &url::Url) -> Option<HostPass> {
-        self.admit_with(None, url).await
-    }
-
-    pub(crate) async fn admit_with(
-        &self,
-        extra: Option<&HostLimits>,
-        url: &url::Url,
-    ) -> Option<HostPass> {
-        let origin = Origin::of(url)?;
-        let sides: Vec<Side<'_>> = std::iter::once(self)
-            .chain(extra)
-            .filter(|limits| !limits.is_unlimited())
-            .map(|limits| limits.side(&origin))
-            .collect();
-        if sides.is_empty() {
-            return None;
-        }
-        let waiting: Vec<Count> = sides
-            .iter()
-            .map(|side| Count::enter(&side.gate.waiting))
-            .collect();
-        let mut permits = Vec::with_capacity(sides.len());
-        for side in &sides {
-            permits.push(acquire(side.gate.slots.as_ref()).await);
-        }
-        let totals = loop {
-            let now = Instant::now();
-            let due = sides
-                .iter()
-                .filter_map(|side| side.gate.ready_at(side.interval(&origin), now))
-                .max();
-            if let Some(at) = due {
-                HostGate::wait_until(at).await;
-                continue;
-            }
-            let mut totals = Vec::with_capacity(sides.len());
-            for side in &sides {
-                totals.push(acquire(side.limits.gates.total.as_ref()).await);
-            }
-            let clocks: Vec<_> = sides
-                .iter()
-                .map(|side| (side.gate.as_ref(), side.interval(&origin)))
-                .collect();
-            if HostGate::commit(&clocks) {
-                break totals;
-            }
-        };
-        drop(waiting);
-        sides.into_iter().zip(permits).zip(totals).rev().fold(
-            None,
-            |also, ((side, permit), total)| {
-                Some(HostPass {
-                    _in_flight: Count::enter(&side.gate.in_flight),
-                    _permit: permit,
-                    _total: total,
-                    _gate: side.gate,
-                    _also: also.map(Box::new),
-                })
-            },
-        )
-    }
-
-    fn side(&self, origin: &Origin) -> Side<'_> {
-        let rule = self.rule_for(&origin.host);
-        Side {
-            limits: self,
-            rule,
-            gate: self.gates.gate(origin.clone(), rule.max_in_flight),
-        }
-    }
-
-    pub(crate) fn stats(&self) -> Vec<HostStats> {
-        self.gates
-            .by_origin
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .iter()
-            .map(|(origin, gate)| HostStats {
-                origin: origin.to_string(),
-                in_flight: gate.in_flight.load(Ordering::Relaxed),
-                waiting: gate.waiting.load(Ordering::Relaxed),
-            })
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HostStats {
-    origin: String,
-    in_flight: usize,
-    waiting: usize,
+    pub(super) origin: String,
+    pub(super) in_flight: usize,
+    pub(super) waiting: usize,
 }
 
 impl HostStats {
@@ -394,17 +280,5 @@ impl HostStats {
 
     pub(crate) fn waiting(&self) -> usize {
         self.waiting
-    }
-}
-
-struct Side<'a> {
-    limits: &'a HostLimits,
-    rule: Rule,
-    gate: Arc<HostGate>,
-}
-
-impl Side<'_> {
-    fn interval(&self, origin: &Origin) -> Option<Duration> {
-        self.limits.interval_for(origin, self.rule)
     }
 }

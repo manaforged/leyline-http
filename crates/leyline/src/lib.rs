@@ -1,6 +1,6 @@
 #![doc = include_str!("../docs/overview.md")]
 #![cfg_attr(docsrs, feature(doc_cfg))]
-#![deny(missing_docs)]
+#![cfg_attr(not(feature = "bench-internals"), deny(missing_docs))]
 #![cfg_attr(not(feature = "bench-internals"), deny(missing_debug_implementations))]
 
 #[cfg(doctest)]
@@ -61,6 +61,8 @@ pub mod guide {
     pub struct Testing;
     #[doc = include_str!("../../../docs/guide/service-integration.md")]
     pub struct ServiceIntegration;
+    #[doc = include_str!("../../../docs/guide/throughput.md")]
+    pub struct Throughput;
     #[doc = include_str!("../../../docs/guide/crawling.md")]
     pub struct Crawling;
     #[doc = include_str!("../../../docs/guide/accounts.md")]
@@ -69,104 +71,152 @@ pub mod guide {
     pub struct ApiClients;
 }
 
-macro_rules! bench_pub {
-    ($(#[$meta:meta])* fn $($rest:tt)*) => {
-        #[cfg(feature = "bench-internals")]
-        #[allow(missing_docs, reason = "bench-internals exposes unsupported internals for benches and fuzzing")]
-        $(#[$meta])*
-        pub fn $($rest)*
-
-        #[cfg(not(feature = "bench-internals"))]
-        $(#[$meta])*
-        pub(crate) fn $($rest)*
-    };
-}
-
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-#[allow(
-    missing_docs,
-    reason = "bench-internals exposes unsupported internals for benches and fuzzing"
-)]
-pub mod audit;
-#[cfg(not(feature = "bench-internals"))]
 pub(crate) mod audit;
+/// Blocking use: a `Session` whose calls run on the calling thread.
+pub mod blocking;
 /// Cookie storage and `Set-Cookie` parsing.
 pub mod cookie;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-#[allow(
-    missing_docs,
-    reason = "bench-internals exposes unsupported internals for benches and fuzzing"
-)]
-pub mod profile;
-#[cfg(not(feature = "bench-internals"))]
 pub(crate) mod profile;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-#[allow(
-    missing_docs,
-    reason = "bench-internals exposes unsupported internals for benches and fuzzing"
-)]
-pub mod tls;
-#[cfg(not(feature = "bench-internals"))]
 pub(crate) mod tls;
 /// Trace hooks that observe connection and request events.
 pub mod trace;
 
 pub(crate) mod core;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-#[allow(
-    missing_docs,
-    reason = "bench-internals exposes unsupported internals for benches and fuzzing"
-)]
-pub mod h2;
-#[cfg(not(feature = "bench-internals"))]
+mod deadline;
+mod error;
 pub(crate) mod h2;
 pub(crate) mod header_str;
 pub(crate) mod iana;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-#[allow(
-    missing_docs,
-    reason = "bench-internals exposes unsupported internals for benches and fuzzing"
-)]
-pub mod pool;
-#[cfg(not(feature = "bench-internals"))]
 pub(crate) mod pool;
+pub(crate) mod wire;
+/// Unsupported internals for the benches, fuzz targets, and integration tests.
 #[cfg(feature = "bench-internals")]
 #[doc(hidden)]
-#[allow(
-    missing_docs,
-    reason = "bench-internals exposes unsupported internals for benches and fuzzing"
-)]
-pub mod fuzz {
-    pub use crate::cookie::parse::parse_cookie_date;
-    pub use crate::pool::h1::parse::{parse_h1_head, read_chunked_body};
-    pub use crate::tls::proxy::http::validate_connect_response;
+pub mod internals {
+    use std::sync::Arc;
 
-    pub fn parse_set_cookie(header: &str, request_url: &str) -> Option<crate::cookie::Cookie> {
-        let parsed = url::Url::parse(request_url).ok()?;
-        crate::cookie::parse::parse_set_cookie(header, &parsed)
+    use crate::{Browser, Platform, Session};
+
+    pub use crate::core::saved::ConnectionState;
+    pub use crate::net::NetError;
+    pub use crate::profile::BrowserProfile;
+    #[cfg(feature = "http3")]
+    pub use crate::quic::H3Config;
+    pub use crate::tls::error::TlsError;
+
+    /// Returns the built-in profile of `browser`.
+    pub fn browser_profile(browser: Browser) -> &'static BrowserProfile {
+        browser.profile()
     }
 
-    pub fn extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
-        tls.extension_ids()
+    /// Returns the profile of `browser` with its brand applied.
+    pub fn branded_profile(browser: Browser) -> Arc<BrowserProfile> {
+        browser.branded_profile()
     }
 
-    pub fn parse_links(header: &str, base: &str) -> Vec<crate::Link> {
-        url::Url::parse(base)
-            .map(|base| crate::core::parse_links(header, &base))
-            .unwrap_or_default()
+    /// Returns the key that names `platform` in profile tables.
+    pub fn identity_key(platform: Platform) -> &'static str {
+        platform.identity_key()
+    }
+
+    /// Returns the TLS sessions, Alt-Svc entries, and HSTS hosts `session` holds.
+    pub fn connection_state(session: &Session) -> ConnectionState {
+        session.connection_state()
+    }
+
+    /// Loads `state` into `session`.
+    pub fn restore(session: &Session, state: &ConnectionState) {
+        session.restore(state);
+    }
+
+    /// TLS and HTTP fingerprint computation.
+    pub mod audit {
+        pub use crate::audit::{
+            ClientHello, Ja3Input, Ja4Input, Ja4hInput, compute_ja3, compute_ja4, compute_ja4h,
+            compute_ja4t,
+        };
+    }
+
+    /// Parsers the fuzz targets drive.
+    pub mod fuzz {
+        pub use crate::cookie::parse::parse_cookie_date;
+        pub use crate::net::proxy::http::validate_connect_response;
+        pub use crate::pool::h1::parse::read_chunked_body;
+
+        /// Parses an HTTP/1.1 response head into its status, fields, and minor version.
+        pub fn parse_h1_head(head: &[u8]) -> crate::Result<(u16, http::HeaderMap, u8)> {
+            crate::wire::h1::parse_h1_head(head)
+        }
+
+        /// Parses a `Set-Cookie` value received from `request_url`.
+        pub fn parse_set_cookie(header: &str, request_url: &str) -> Option<crate::cookie::Cookie> {
+            let parsed = url::Url::parse(request_url).ok()?;
+            crate::cookie::parse::parse_set_cookie(header, &parsed)
+        }
+
+        /// Returns the TLS extension ids `tls` sends over TCP.
+        pub fn extension_ids(tls: &crate::profile::TlsProfile) -> Vec<u16> {
+            tls.extension_ids(crate::profile::Carrier::Tcp)
+        }
+
+        /// Parses a `Link` header value against `base`.
+        pub fn parse_links(header: &str, base: &str) -> Vec<crate::Link> {
+            url::Url::parse(base)
+                .map(|base| crate::core::parse_links(header, &base))
+                .unwrap_or_default()
+        }
+    }
+
+    /// The HTTP/2 client, codec, and HPACK.
+    pub mod h2 {
+        pub use crate::h2::client::{H2Client, Head};
+        pub use crate::h2::config::H2Limits;
+        pub use crate::h2::{
+            ErrorCode, H2Config, H2Error, codec, connection, error, frame, hpack, start,
+            stream_state,
+        };
+        pub use crate::header_str::HeaderStr;
+        pub use crate::wire::{ErrorBudget, ResponseMode};
+    }
+
+    /// The connection pool and the HTTP/1.1 transport.
+    pub mod pool {
+        pub use crate::net::ProxyUrl;
+        pub use crate::pool::h1::{floor, send_request_h1_pooled};
+        pub use crate::pool::{
+            ConnectionStats, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS,
+            DEFAULT_MAX_H1_CONNS_PER_HOST, Pool, checkout_handle,
+        };
+        pub use crate::wire::{TransportBody, TransportResponse};
+    }
+
+    /// Browser profiles and their registry.
+    pub mod profile {
+        pub use crate::profile::{
+            H2Profile, ProfileRegistry, PseudoOrder, SettingId, akamai_fingerprint,
+        };
+    }
+
+    /// The fingerprinting TLS connector.
+    pub mod tls {
+        pub use crate::tls::{AlpnPlan, FingerprintConnector};
+
+        /// Builds the TLS context for a custom `profile`, with `min_version` as the floor when it declares none.
+        pub fn context(
+            profile: &crate::profile::BrowserProfile,
+            min_version: crate::profile::TlsMinVersion,
+        ) -> Result<crate::tls::TlsContext, crate::tls::error::TlsError> {
+            crate::tls::builder::ssl_context(profile, min_version)
+                .map(crate::tls::TlsContext::from_builder)
+        }
     }
 }
 /// HTML parsing for links, forms, and crawl pages.
 #[cfg(feature = "html")]
 pub mod html;
+pub(crate) mod net;
 #[cfg(feature = "http3")]
 pub(crate) mod quic;
-pub(crate) mod tcp;
 /// A local HTTP and HTTPS server for tests: `Server`, `Response`, `Request`, and `queue`.
 #[cfg(feature = "test-util")]
 pub mod testing;
@@ -175,14 +225,15 @@ mod util;
 pub use http;
 pub use url::Url;
 
-pub(crate) use crate::core::Cause;
-pub(crate) use crate::core::HttpVersion;
 pub use crate::core::{
-    Attempt, Block, Body, Encoding, Error, HostLimits, IntoParamPair, IntoUrl, Kind, Link,
-    Protocol, Proxy, Purpose, Redirect, RequestBuilder, Response, Result, Retry, Robots,
-    RobotsSource, Session, SessionBuilder, Stats, Tab, Timeout, relay_headers,
+    Attempt, Block, Event, Events, HostLimits, IntoUrl, Link, Protocol, Proxy, Purpose, Redirect,
+    RequestBuilder, Response, Retry, Robots, RobotsSource, Session, SessionBuilder, Stats, Tab,
+    relay_headers,
 };
-pub(crate) use crate::core::{BodyStream, FetchSite, ResponseTiming};
+pub use crate::deadline::Timeout;
+pub use crate::error::{Error, Kind, Result};
+pub use crate::wire::Body;
+
 #[cfg(feature = "html")]
 pub use crate::core::{Crawl, Page, Respect, Scope, SkipReason};
 pub use crate::util::redact as redact_url;
@@ -193,67 +244,26 @@ pub mod multipart {
     pub use crate::core::multipart::{Form, Part};
 }
 
-use crate::profile::ProfileRegistry;
 pub use crate::profile::anchor::HeaderPosition;
 pub use crate::profile::browser::Browser;
 pub use crate::profile::platform::Platform;
 pub use crate::profile::preset::RequestKind;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-pub use crate::profile::types::BrowserProfile;
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use crate::profile::types::BrowserProfile;
 
-pub use crate::tcp::TcpProfile;
-
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-pub use crate::h2::{ErrorCode, H2Error};
-
-#[cfg(all(feature = "http3", feature = "bench-internals"))]
-#[doc(hidden)]
-pub use crate::quic::H3Config;
+pub use crate::profile::Encoding;
+pub use crate::profile::TcpProfile;
 
 #[cfg(feature = "websocket")]
 pub use crate::core::{Message, WebSocket};
 
 pub use crate::audit::Fingerprint;
-pub use crate::tls::Resolver;
+pub use crate::net::Resolver;
+#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
+pub use crate::profile::TlsMinVersion;
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub use crate::tls::TlsContext;
-#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
-pub use crate::tls::builder::TlsMinVersion;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
-pub use crate::tls::error::{ProxyReply, TlsError};
 pub use crate::tls::trust::Tls;
 
-impl Browser {
-    bench_pub! {
-        fn profile(self) -> &'static BrowserProfile {
-            ProfileRegistry::global().get_browser(self).expect(
-                "built-in profile missing - registry integrity check in tests would have caught this",
-            )
-        }
-    }
-
-    bench_pub! {
-        #[cfg_attr(
-            not(any(test, feature = "bench-internals")),
-            expect(dead_code, reason = "tests and bench-internals read the branded profile")
-        )]
-        fn branded_profile(self) -> std::sync::Arc<BrowserProfile> {
-            let base = self.shared_profile();
-            match self.brand() {
-                Some(brand) => brand.tls_profile(base),
-                None => base,
-            }
-        }
-    }
-
-    pub(crate) fn shared_profile(self) -> std::sync::Arc<BrowserProfile> {
-        ProfileRegistry::global().shared(self).expect(
-            "built-in profile missing - registry integrity check in tests would have caught this",
-        )
-    }
+/// Returns a `GET` request builder on a new default [`Session`], for one-off requests.
+pub fn get(url: impl IntoUrl) -> RequestBuilder {
+    Session::new().get(url)
 }

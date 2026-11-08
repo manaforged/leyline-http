@@ -2,48 +2,28 @@ pub(crate) mod alpn;
 pub(crate) mod builder;
 mod connector;
 pub(crate) mod error;
-mod happy_eyeballs;
 mod hello;
 mod keylog;
 #[cfg(target_os = "macos")]
 mod macos_trust;
-mod nonblocking;
 pub(crate) mod proxy;
-mod resolver;
 mod session_cache;
 mod stream;
 pub(crate) mod trust;
 #[cfg(windows)]
 mod windows_trust;
 
-pub(crate) use error::TlsError;
-pub(crate) use happy_eyeballs::HappyEyeballs;
-pub use resolver::Resolver;
-pub(crate) use resolver::{ResolveFuture, SystemResolver};
-pub(crate) use trust::Tls;
+pub use alpn::AlpnPlan;
 
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
 pub use connector::FingerprintConnector;
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use connector::FingerprintConnector;
 
-#[cfg(any(feature = "http3", feature = "bench-internals", leyline_unstable_bssl))]
-pub(crate) use builder::TlsMinVersion;
-#[cfg(feature = "http3")]
-pub(crate) use builder::apply_tls_with_trust;
-#[cfg(feature = "http3")]
 pub(crate) use hello::HelloOptions;
-pub(crate) use session_cache::SessionCache;
 pub(crate) use stream::TlsIo;
-#[cfg(feature = "bench-internals")]
-#[doc(hidden)]
 pub use stream::TlsStream;
-#[cfg(not(feature = "bench-internals"))]
-pub(crate) use stream::TlsStream;
 #[cfg(feature = "http3")]
 pub(crate) use trust::install_verifier_ctx;
 
+/// The BoringSSL context a browser profile builds, outside the semver promise.
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub struct TlsContext(
     #[cfg_attr(
@@ -57,19 +37,34 @@ pub struct TlsContext(
 );
 
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
+impl std::fmt::Debug for TlsContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TlsContext").finish_non_exhaustive()
+    }
+}
+
+#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 impl TlsContext {
-    pub fn from_profile(
-        profile: &crate::profile::BrowserProfile,
-        min_version: TlsMinVersion,
-    ) -> Result<Self, TlsError> {
-        profile.build_ssl_context(min_version).map(Self)
+    /// Builds the TLS context `browser` uses, with `min_version` as the floor when its profile declares none.
+    pub fn new(
+        browser: crate::Browser,
+        min_version: crate::profile::TlsMinVersion,
+    ) -> crate::Result<Self> {
+        Ok(Self(builder::ssl_context(browser.profile(), min_version)?))
     }
 
+    #[cfg(feature = "bench-internals")]
+    pub(crate) fn from_builder(builder: leyline_bssl::ssl::SslContextBuilder) -> Self {
+        Self(builder)
+    }
+
+    /// Returns the BoringSSL builder to change before it is used.
     #[cfg(leyline_unstable_bssl)]
     pub fn builder_mut(&mut self) -> &mut leyline_bssl::ssl::SslContextBuilder {
         &mut self.0
     }
 
+    /// Returns the BoringSSL builder.
     #[cfg(leyline_unstable_bssl)]
     pub fn into_inner(self) -> leyline_bssl::ssl::SslContextBuilder {
         self.0

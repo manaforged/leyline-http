@@ -9,11 +9,11 @@ fn obs_fold_appends_to_previous_header_never_creates_one() {
                     \tSet-Cookie: evil=x; Domain=.example.com\r\n\
                     X-Real: ok\r\n\
                     \r\n";
-    let (_, headers, _) = parse_h1_head(head).unwrap();
+    let (_, headers, _) = parse_h1_head(head.as_bytes()).unwrap();
     let set_cookies: Vec<&str> = headers
+        .get_all("set-cookie")
         .iter()
-        .filter(|(k, _)| k.eq_ignore_ascii_case("set-cookie"))
-        .map(|(_, v)| v.as_str())
+        .map(|v| v.to_str().unwrap())
         .collect();
     assert_eq!(
         set_cookies.len(),
@@ -24,13 +24,13 @@ fn obs_fold_appends_to_previous_header_never_creates_one() {
         set_cookies[0],
         "a=1 Set-Cookie: evil=x; Domain=.example.com"
     );
-    assert!(headers.iter().any(|(k, v)| k == "X-Real" && v == "ok"));
+    assert_eq!(headers.get("x-real").unwrap(), "ok");
 }
 
 #[test]
 fn fold_without_previous_header_is_dropped() {
     let head = "HTTP/1.1 200 OK\r\n\tContent-Length: 999\r\n\r\n";
-    let (_, headers, _) = parse_h1_head(head).unwrap();
+    let (_, headers, _) = parse_h1_head(head.as_bytes()).unwrap();
     assert!(headers.is_empty(), "{headers:?}");
 }
 
@@ -40,13 +40,13 @@ fn whitespace_before_colon_drops_the_line() {
                     Transfer-Encoding : chunked\r\n\
                     X-Ok: 1\r\n\
                     \r\n";
-    parse_h1_head(head).expect_err("expected Err");
+    parse_h1_head(head.as_bytes()).expect_err("expected Err");
 }
 
 #[test]
 fn empty_header_name_dropped() {
     let head = "HTTP/1.1 200 OK\r\n: value\r\nX-Real: ok\r\n\r\n";
-    parse_h1_head(head).expect_err("expected Err");
+    parse_h1_head(head.as_bytes()).expect_err("expected Err");
 }
 
 async fn tcp_pair() -> (TcpStream, TcpStream) {
@@ -60,7 +60,7 @@ async fn tcp_pair() -> (TcpStream, TcpStream) {
 #[tokio::test]
 async fn live_idle_socket_probes_as_live() {
     let (mut client, _server) = tcp_pair().await;
-    assert!(conn_is_live(&mut client as &mut dyn H1Io));
+    assert!(conn_is_live(&mut client as &mut dyn H1Io, true));
 }
 
 #[tokio::test]
@@ -68,7 +68,7 @@ async fn peer_closed_socket_probes_as_dead() {
     let (mut client, server) = tcp_pair().await;
     drop(server);
     client.readable().await.unwrap();
-    assert!(!conn_is_live(&mut client as &mut dyn H1Io));
+    assert!(!conn_is_live(&mut client as &mut dyn H1Io, true));
 }
 
 #[tokio::test]
@@ -77,26 +77,20 @@ async fn socket_with_pending_bytes_probes_as_dead() {
     server.write_all(b"x").await.unwrap();
     server.flush().await.unwrap();
     client.readable().await.unwrap();
-    assert!(!conn_is_live(&mut client as &mut dyn H1Io));
+    assert!(!conn_is_live(&mut client as &mut dyn H1Io, true));
 }
 
 #[tokio::test]
 async fn checkout_live_h1_drains_dead_and_counts_stale() {
     let pool = Arc::new(Pool::new());
-    let key = pool.key("http", "127.0.0.1", 1, None, Transport::Tcp);
+    let key = pool.key(Scheme::Http, "127.0.0.1", 1, None, Carrier::Tcp);
 
     let (client, server) = tcp_pair().await;
     drop(server);
     client.readable().await.unwrap();
-    pool.return_h1(
-        key.clone(),
-        H1Slot {
-            io: Box::new(client),
-        },
-        TlsInfo::default(),
-    );
+    pool.return_h1(&key, H1Slot::new(Box::new(client)), TlsInfo::default());
 
-    assert!(checkout_live_h1(&pool, &key).is_none());
+    assert!(checkout_live_h1(&pool, &key, true, std::time::Instant::now()).is_none());
     let stats = pool.stats();
     assert_eq!(stats.stale_probed, 1, "probe catch must count as stale");
     assert_eq!(stats.evictions_dead, 0, "no mid-exchange failure occurred");
@@ -105,19 +99,13 @@ async fn checkout_live_h1_drains_dead_and_counts_stale() {
 #[tokio::test]
 async fn checkout_live_h1_returns_a_live_connection_uncounted() {
     let pool = Arc::new(Pool::new());
-    let key = pool.key("http", "127.0.0.1", 2, None, Transport::Tcp);
+    let key = pool.key(Scheme::Http, "127.0.0.1", 2, None, Carrier::Tcp);
 
     let (client, _server) = tcp_pair().await;
-    pool.return_h1(
-        key.clone(),
-        H1Slot {
-            io: Box::new(client),
-        },
-        TlsInfo::default(),
-    );
+    pool.return_h1(&key, H1Slot::new(Box::new(client)), TlsInfo::default());
 
     assert!(
-        checkout_live_h1(&pool, &key).is_some(),
+        checkout_live_h1(&pool, &key, true, std::time::Instant::now()).is_some(),
         "a live pooled connection must be handed out"
     );
     assert_eq!(
@@ -129,8 +117,229 @@ async fn checkout_live_h1_returns_a_live_connection_uncounted() {
 
 #[test]
 fn a_chunk_size_must_be_hex_digits_only() {
-    assert_eq!(parse::chunk_size(b"1a;ext=1"), Ok(26));
+    assert_eq!(crate::wire::h1::chunk_size(b"1a;ext=1"), Ok(26));
     for bad in [&b"+5"[..], b"-0", b"", b"0x5", b" "] {
-        parse::chunk_size(bad).unwrap_err();
+        crate::wire::h1::chunk_size(bad).unwrap_err();
     }
+}
+
+#[tokio::test]
+async fn a_buffered_body_leaves_the_read_buffer_with_the_connection() {
+    let mut initial_body = Vec::with_capacity(4096);
+    initial_body.extend_from_slice(b"ok-10byte!");
+    let mut head = H1Head {
+        status: 200,
+        headers: crate::wire::Fields::default(),
+        minor: 1,
+        framing: BodyFraming::Fixed(10),
+        initial_body,
+    };
+    let (mut client, _server) = tcp_pair().await;
+    let Buffered { body, excess, .. } =
+        read_h1_body(&mut client, &mut head, BodyLimit::session(usize::MAX))
+            .await
+            .expect("buffered body");
+    assert_eq!(body, b"ok-10byte!");
+    assert!(!excess);
+    assert!(head.initial_body.is_empty());
+    assert!(head.initial_body.capacity() >= 4096);
+}
+
+#[test]
+fn a_header_value_allows_tab_visible_ascii_and_utf8_only() {
+    for byte in 0u8..0x80 {
+        let value = char::from(byte).to_string();
+        let allowed = byte == b'\t' || (b' '..=b'~').contains(&byte);
+        assert_eq!(
+            crate::wire::h1::is_valid_header_value(&value),
+            allowed,
+            "byte {byte:#04x}"
+        );
+    }
+    assert!(crate::wire::h1::is_valid_header_value("café au lait"));
+    assert!(!crate::wire::h1::is_valid_header_value(
+        "ok\r\nInjected: yes"
+    ));
+}
+
+#[tokio::test]
+async fn time_queued_for_a_connection_is_not_counted_as_request_time() {
+    use crate::testing::{Response, Server};
+    let delay = Duration::from_millis(250);
+    let server = Server::http(move |_| Response::new(200).delay(delay).body("ok"))
+        .await
+        .expect("server starts");
+    let session = crate::Session::builder()
+        .protocol(crate::Protocol::Http1)
+        .max_connections_per_host(1)
+        .build()
+        .expect("session");
+
+    let url = server.url("/");
+    let started = std::time::Instant::now();
+    let (first, second) = tokio::join!(
+        session.get(url.as_str()).send(),
+        session.get(url.as_str()).send()
+    );
+    let total = started.elapsed();
+    let (first, second) = (first.expect("first"), second.expect("second"));
+
+    let counted = first.elapsed() + second.elapsed();
+    assert!(
+        counted < total + delay / 2,
+        "elapsed {counted:?} of {total:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_full_host_refuses_requests_past_the_pending_limit() {
+    use crate::testing::{Response, Server};
+    let delay = Duration::from_millis(200);
+    let server = Server::http(move |_| Response::new(200).delay(delay).body("ok"))
+        .await
+        .expect("server starts");
+    let session = crate::Session::builder()
+        .protocol(crate::Protocol::Http1)
+        .max_connections_per_host(1)
+        .max_pending_per_host(1)
+        .build()
+        .expect("session");
+
+    let url = server.url("/");
+    let (running, waiting, refused) = tokio::join!(
+        session.get(url.as_str()).send(),
+        async {
+            tokio::time::sleep(delay / 4).await;
+            session.get(url.as_str()).send().await
+        },
+        async {
+            tokio::time::sleep(delay / 2).await;
+            session.get(url.as_str()).retry(3).send().await
+        },
+    );
+    assert_eq!(running.expect("running").status(), 200);
+    assert_eq!(waiting.expect("waiting").status(), 200);
+    let refused = refused.expect_err("over the pending limit");
+    assert_eq!(refused.kind(), Kind::Overloaded, "{refused:?}");
+    assert_eq!(server.requests().await.len(), 2);
+    let after = session
+        .get(url.as_str())
+        .send()
+        .await
+        .expect("after the queue drains");
+    assert_eq!(after.status(), 200);
+}
+
+#[tokio::test]
+async fn a_default_session_refuses_the_request_past_1024_waiting() {
+    use crate::testing::{Response, Server};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let delay = Duration::from_millis(300);
+    let first = std::sync::Arc::new(AtomicBool::new(true));
+    let server = Server::http(move |_| {
+        let held = if first.swap(false, Ordering::SeqCst) {
+            delay
+        } else {
+            Duration::ZERO
+        };
+        Response::new(200).delay(held).body("ok")
+    })
+    .await
+    .expect("server starts");
+    let session = crate::Session::builder()
+        .protocol(crate::Protocol::Http1)
+        .max_connections_per_host(1)
+        .build()
+        .expect("session");
+    let url = server.url("/");
+    let running = tokio::spawn({
+        let (session, url) = (session.clone(), url.clone());
+        async move { session.get(url.as_str()).send().await }
+    });
+    tokio::time::sleep(delay / 3).await;
+    let queued: Vec<_> = (0..1025)
+        .map(|_| {
+            let (session, url) = (session.clone(), url.clone());
+            tokio::spawn(async move { session.get(url.as_str()).send().await })
+        })
+        .collect();
+    assert_eq!(running.await.expect("task").expect("running").status(), 200);
+    let mut refused = 0;
+    for task in queued {
+        match task.await.expect("task") {
+            Ok(response) => assert_eq!(response.status(), 200),
+            Err(error) => {
+                assert_eq!(error.kind(), Kind::Overloaded, "{error:?}");
+                refused += 1;
+            }
+        }
+    }
+    assert_eq!(refused, 1);
+}
+
+#[tokio::test]
+async fn a_full_total_limit_refuses_requests_past_the_pending_limit() {
+    use crate::testing::{Response, Server};
+    let delay = Duration::from_millis(200);
+    let server = Server::http(move |_| Response::new(200).delay(delay).body("ok"))
+        .await
+        .expect("server starts");
+    let session = crate::Session::builder()
+        .host_limits(
+            crate::HostLimits::new()
+                .max_total_in_flight(1)
+                .max_total_pending(1),
+        )
+        .build()
+        .expect("session");
+
+    let url = server.url("/");
+    let (running, waiting, refused) = tokio::join!(
+        session.get(url.as_str()).send(),
+        async {
+            tokio::time::sleep(delay / 4).await;
+            session.get(url.as_str()).send().await
+        },
+        async {
+            tokio::time::sleep(delay / 2).await;
+            session.get(url.as_str()).retry(3).send().await
+        },
+    );
+    assert_eq!(running.expect("running").status(), 200);
+    assert_eq!(waiting.expect("waiting").status(), 200);
+    let refused = refused.expect_err("over the pending limit");
+    assert_eq!(refused.kind(), Kind::Overloaded, "{refused:?}");
+    assert_eq!(server.requests().await.len(), 2);
+}
+
+#[test]
+fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
+    let closed = closed("before headers");
+    assert_eq!(closed.failure(), Failure::Connection);
+    let closed = closed.into_error();
+    assert!(
+        closed.cause() == Kind::Io
+            && closed
+                .io()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::UnexpectedEof),
+        "a closed connection must be Io(UnexpectedEof), got {closed:?}"
+    );
+    assert!(closed.is_connection_closed());
+    let framing = crate::wire::h1::malformed("invalid Transfer-Encoding: connection-close");
+    assert!(
+        framing.cause() == Kind::Io
+            && framing
+                .io()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::InvalidData),
+        "a malformed response must be Io(InvalidData), got {framing:?}"
+    );
+    assert!(!framing.is_connection_closed());
+    assert_eq!(H1Error::from(framing).failure(), Failure::Request);
+
+    let pinning = Error::from(crate::tls::error::TlsError::Pinning("mismatch".into()));
+    assert!(
+        matches!(pinning.tls(), Some(crate::tls::error::TlsError::Pinning(_))),
+        "H1 must preserve typed TLS failures, got {pinning:?}"
+    );
+    assert!(!pinning.is_connection_closed());
 }

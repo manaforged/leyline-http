@@ -1,0 +1,13 @@
+{
+  "name": "node-client",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "axios": "1.21.0",
+    "got": "16.2.0",
+    "undici": "8.12.3"
+  }
+}

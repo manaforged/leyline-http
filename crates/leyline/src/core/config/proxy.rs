@@ -1,85 +1,15 @@
 use std::time::Duration;
 
-use crate::core::Cause;
 use crate::core::proxy_pool::ProxyPool;
+use crate::error::Error;
+use crate::error::Kind;
+use crate::net::ProxyUrl;
 use crate::profile::{Browser, Platform};
 use crate::util::redact;
+use crate::wire::Scheme;
 
-use super::host::{normalize_host, pattern_matches};
-
-#[derive(Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(try_from = "String", into = "String")]
-pub(crate) struct ProxyUrl(String);
-
-impl TryFrom<String> for ProxyUrl {
-    type Error = crate::core::Error;
-
-    fn try_from(raw: String) -> crate::core::Result<Self> {
-        Self::parse(raw)
-    }
-}
-
-impl std::fmt::Debug for ProxyUrl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ProxyUrl").field(&redact(&self.0)).finish()
-    }
-}
-
-impl ProxyUrl {
-    pub(crate) fn parse(raw: impl AsRef<str>) -> crate::core::Result<Self> {
-        let raw = raw.as_ref().trim();
-        let parsed = Self::parse_inner(raw)?;
-        match parsed.scheme() {
-            "http" | "https" | "socks5" | "socks5h" => {}
-            other => {
-                return Err(crate::core::Error::new(Cause::Config).with_message(format!(
-                    "unsupported proxy scheme {other:?}; expected http, https, socks5, or socks5h"
-                )));
-            }
-        }
-        if parsed.host_str().is_none() {
-            return Err(crate::core::Error::new(Cause::Config)
-                .with_message("proxy URL must include a host"));
-        }
-        Ok(Self(raw.to_string()))
-    }
-
-    #[cfg(not(feature = "socks"))]
-    pub(crate) fn socks_feature_error(raw: &str) -> crate::core::Error {
-        crate::core::Error::new(Cause::Config).with_message(format!(
-            "proxy {} needs the `socks` feature: enable `features = [\"socks\"]` or use an \
-             http or https proxy",
-            redact(raw)
-        ))
-    }
-
-    pub(crate) fn configured(raw: &str) -> Self {
-        Self(raw.to_owned())
-    }
-
-    fn parse_inner(raw: &str) -> crate::core::Result<url::Url> {
-        url::Url::parse(raw).map_err(|e| {
-            crate::core::Error::new(Cause::Config).with_message(format!("invalid proxy URL: {e}"))
-        })
-    }
-
-    #[cfg(test)]
-    pub(crate) fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for ProxyUrl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&redact(&self.0))
-    }
-}
-
-impl From<ProxyUrl> for String {
-    fn from(value: ProxyUrl) -> Self {
-        value.0
-    }
-}
+use super::host::pattern_matches;
+use crate::net::normalize_host;
 
 #[doc = include_str!("../../../docs/proxy.md")]
 #[derive(Clone)]
@@ -101,8 +31,8 @@ pub(super) struct RejectedProxy {
 }
 
 impl RejectedProxy {
-    fn error(self, kind: Cause) -> crate::core::Error {
-        crate::core::Error::new(kind).with_message(format!(
+    fn error(self, kind: Kind) -> crate::error::Error {
+        crate::error::Error::new(kind).with_message(format!(
             "the {} environment variable is not a valid proxy URL (expected an http, https, \
              socks5, or socks5h URL with a host); fix or unset it, or set a proxy with \
              `SessionBuilder::proxy`",
@@ -129,7 +59,7 @@ impl Default for Proxy {
     fn default() -> Self {
         Self {
             rules: Vec::new(),
-            no_proxy: NoProxy::from_env().unwrap_or_default(),
+            no_proxy: NoProxy::default(),
             no_proxy_explicit: false,
             use_env: true,
             from_env: false,
@@ -146,19 +76,25 @@ impl Proxy {
     }
 
     /// Sets one proxy for every scheme, replacing any earlier all-scheme proxy.
-    pub fn all(self, proxy_url: impl Into<String>) -> Self {
-        self.set_default_proxy(proxy_url)
+    pub fn all(mut self, proxy_url: impl Into<String>) -> Self {
+        self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
+        self.rules
+            .push(ProxyRule::new(ProxyRuleScheme::All, proxy_url));
+        self.from_env = false;
+        self
     }
 
     /// Adds a proxy for `http` URLs.
     pub fn http(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules.push(ProxyRule::http(proxy_url));
+        self.rules
+            .push(ProxyRule::new(ProxyRuleScheme::Http, proxy_url));
         self
     }
 
     /// Adds a proxy for `https` URLs.
     pub fn https(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules.push(ProxyRule::https(proxy_url));
+        self.rules
+            .push(ProxyRule::new(ProxyRuleScheme::Https, proxy_url));
         self
     }
 
@@ -218,15 +154,15 @@ impl Proxy {
         self
     }
 
-    pub(crate) fn set_default_proxy(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
-        self.rules.push(ProxyRule::all(proxy_url));
-        self.from_env = false;
+    pub(crate) fn set_from_env(mut self) -> Self {
+        self.from_env = true;
         self
     }
 
-    pub(crate) fn set_from_env(mut self) -> Self {
-        self.from_env = true;
+    pub(crate) fn env_no_proxy(mut self, raw: Option<&str>) -> Self {
+        if !self.no_proxy_explicit {
+            self.no_proxy = raw.and_then(NoProxy::from_string).unwrap_or_default();
+        }
         self
     }
 
@@ -239,7 +175,7 @@ impl Proxy {
         self.rejected.is_some()
     }
 
-    pub(crate) fn rejection(&self, kind: Cause) -> Option<crate::core::Error> {
+    pub(crate) fn rejection(&self, kind: Kind) -> Option<crate::error::Error> {
         self.rejected.map(|rejected| rejected.error(kind))
     }
 
@@ -248,11 +184,19 @@ impl Proxy {
     }
 
     pub(crate) fn primary(&self) -> Option<&str> {
+        self.primary_rule().map(ProxyRule::url)
+    }
+
+    pub(crate) fn primary_url(&self) -> Option<&ProxyUrl> {
+        self.primary_rule()
+            .and_then(|rule| rule.parsed.as_ref().ok())
+    }
+
+    fn primary_rule(&self) -> Option<&ProxyRule> {
         self.rules
             .iter()
             .find(|r| r.scheme == ProxyRuleScheme::All)
             .or_else(|| self.rules.first())
-            .map(|r| r.url.as_str())
     }
 
     #[cfg(feature = "http3")]
@@ -266,110 +210,101 @@ impl Proxy {
         self.use_env
     }
 
-    pub(crate) fn proxy_for(&self, url: &url::Url) -> crate::core::Result<Option<&str>> {
+    pub(crate) fn proxy_for(&self, url: &url::Url) -> crate::error::Result<Option<&ProxyUrl>> {
         if let Some(rejected) = self.rejected {
-            return Err(rejected.error(Cause::Proxy));
+            return Err(rejected.error(Kind::Proxy));
         }
         let host = url.host_str().unwrap_or("");
-        let Some(winner) = self
-            .rules
-            .iter()
-            .find(|rule| rule.matches(url.scheme()))
-            .map(|rule| rule.url.as_str())
-        else {
+        let scheme = Scheme::of(url);
+        let Some(winner) = self.rules.iter().find(|rule| rule.matches(scheme)) else {
             return Ok(None);
         };
         if (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches(host) {
             return Ok(None);
         }
-        Ok(Some(winner))
+        winner.proxy().map(Some)
     }
 }
 
 impl From<&str> for Proxy {
     fn from(proxy_url: &str) -> Self {
-        Self::new().set_default_proxy(proxy_url)
+        Self::new().all(proxy_url)
     }
 }
 
 impl From<&String> for Proxy {
     fn from(proxy_url: &String) -> Self {
-        Self::new().set_default_proxy(proxy_url.as_str())
+        Self::new().all(proxy_url.as_str())
     }
 }
 
 impl From<String> for Proxy {
     fn from(proxy_url: String) -> Self {
-        Self::new().set_default_proxy(proxy_url)
+        Self::new().all(proxy_url)
     }
 }
 
 impl From<ProxyUrl> for Proxy {
     fn from(proxy_url: ProxyUrl) -> Self {
-        Self::new().set_default_proxy(proxy_url)
+        Self::new().all(proxy_url)
     }
 }
 
 #[derive(Clone, PartialEq, Eq)]
 pub(crate) struct ProxyRule {
     scheme: ProxyRuleScheme,
-    url: String,
+    parsed: std::result::Result<ProxyUrl, String>,
 }
 
 impl std::fmt::Debug for ProxyRule {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ProxyRule")
             .field("scheme", &self.scheme)
-            .field("url", &redact(&self.url))
+            .field("url", &redact(self.url()))
             .finish()
     }
 }
 
 impl ProxyRule {
-    pub(crate) fn all(proxy_url: impl Into<String>) -> Self {
-        Self::for_scheme(ProxyRuleScheme::All, proxy_url)
-    }
-
-    pub(crate) fn http(proxy_url: impl Into<String>) -> Self {
-        Self::for_scheme(ProxyRuleScheme::Http, proxy_url)
-    }
-
-    pub(crate) fn https(proxy_url: impl Into<String>) -> Self {
-        Self::for_scheme(ProxyRuleScheme::Https, proxy_url)
-    }
-
-    fn for_scheme(scheme: ProxyRuleScheme, proxy_url: impl Into<String>) -> Self {
+    pub(super) fn new(scheme: ProxyRuleScheme, proxy_url: impl Into<String>) -> Self {
+        let raw = proxy_url.into();
         Self {
             scheme,
-            url: proxy_url.into(),
+            parsed: ProxyUrl::parse(&raw).ok().ok_or(raw),
         }
     }
 
-    fn matches(&self, scheme: &str) -> bool {
-        self.scheme == ProxyRuleScheme::All
-            || ProxyRuleScheme::for_url_scheme(scheme) == Some(self.scheme)
+    fn matches(&self, scheme: Option<Scheme>) -> bool {
+        matches!(
+            (self.scheme, scheme),
+            (ProxyRuleScheme::All, _)
+                | (ProxyRuleScheme::Http, Some(Scheme::Http))
+                | (ProxyRuleScheme::Https, Some(Scheme::Https))
+        )
     }
 
     pub(crate) fn url(&self) -> &str {
-        &self.url
+        match &self.parsed {
+            Ok(proxy) => proxy.as_str(),
+            Err(raw) => raw,
+        }
+    }
+
+    pub(crate) fn proxy(&self) -> crate::error::Result<&ProxyUrl> {
+        self.parsed
+            .as_ref()
+            .map_err(|raw| match ProxyUrl::parse(raw) {
+                Err(err) => err,
+                Ok(_) => Error::config("invalid proxy URL"),
+            })
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ProxyRuleScheme {
+pub(super) enum ProxyRuleScheme {
     All,
     Http,
     Https,
-}
-
-impl ProxyRuleScheme {
-    fn for_url_scheme(scheme: &str) -> Option<Self> {
-        match scheme {
-            "http" | "ws" => Some(Self::Http),
-            "https" | "wss" => Some(Self::Https),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -386,13 +321,6 @@ impl NoProxy {
             .map(ToOwned::to_owned)
             .collect();
         (!patterns.is_empty()).then_some(Self { patterns })
-    }
-
-    pub(crate) fn from_env() -> Option<Self> {
-        std::env::var("NO_PROXY")
-            .ok()
-            .or_else(|| std::env::var("no_proxy").ok())
-            .and_then(|raw| Self::from_string(&raw))
     }
 
     pub(crate) fn new<I, S>(patterns: I) -> Self

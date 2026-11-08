@@ -1,13 +1,18 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
-use super::StreamActor;
+use tokio::sync::mpsc::error::TrySendError;
+
+use super::{PendingSend, ResponseSink, StreamActor};
+use crate::h2::client::handle::Streams;
 
 pub(super) struct StreamMap {
     inner: HashMap<u32, StreamActor, BuildHasherDefault<StreamIdHasher>>,
-    open: Arc<crate::h2::client::handle::Streams>,
+    open: Arc<Streams>,
+    stalled: usize,
+    parked: VecDeque<u32>,
 }
 
 #[derive(Default)]
@@ -34,15 +39,75 @@ impl Hasher for StreamIdHasher {
 }
 
 impl StreamMap {
-    pub(super) fn new(open: Arc<crate::h2::client::handle::Streams>) -> Self {
+    pub(super) fn new(open: Arc<Streams>) -> Self {
         Self {
             inner: HashMap::default(),
             open,
+            stalled: 0,
+            parked: VecDeque::new(),
         }
     }
 
     fn publish(&self) {
         self.open.open.store(self.inner.len(), Ordering::Relaxed);
+    }
+
+    pub(super) fn set_capacity(&self, capacity: usize) {
+        self.open.capacity.store(capacity, Ordering::Relaxed);
+    }
+
+    pub(super) fn has_stalled(&self) -> bool {
+        self.stalled > 0
+    }
+
+    pub(super) fn add_stalled(&mut self, chunks: usize) {
+        self.stalled += chunks;
+    }
+
+    pub(super) fn park(&mut self, stream_id: u32, pending: PendingSend) {
+        if let Some(actor) = self.inner.get_mut(&stream_id) {
+            actor.pending_send = Some(pending);
+            if !self.parked.contains(&stream_id) {
+                self.parked.push_back(stream_id);
+            }
+        }
+    }
+
+    pub(super) fn unpark(&mut self, stream_id: u32) {
+        self.parked.retain(|&id| id != stream_id);
+    }
+
+    pub(super) fn parked(&self) -> usize {
+        self.parked.len()
+    }
+
+    pub(super) fn next_parked(&mut self) -> Option<u32> {
+        self.parked.pop_front()
+    }
+
+    pub(super) fn flush_stalled(&mut self) -> Vec<(u32, bool)> {
+        let mut drained = Vec::new();
+        for (&sid, actor) in self.inner.iter_mut() {
+            let Some(ResponseSink::StreamingEx { body_tx, .. }) = actor.response_tx.as_ref() else {
+                continue;
+            };
+            while let Some(chunk) = actor.stalled.pop_front() {
+                self.stalled -= 1;
+                match body_tx.try_send(Ok(chunk)) {
+                    Ok(()) => {}
+                    Err(TrySendError::Full(Ok(chunk))) => {
+                        actor.stalled.push_front(chunk);
+                        self.stalled += 1;
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+            if actor.stalled.is_empty() {
+                drained.push((sid, actor.remote_done));
+            }
+        }
+        drained
     }
 
     pub(super) fn get(&self, stream_id: u32) -> Option<&StreamActor> {
@@ -60,6 +125,10 @@ impl StreamMap {
 
     pub(super) fn remove(&mut self, stream_id: u32) -> Option<StreamActor> {
         let actor = self.inner.remove(&stream_id);
+        if let Some(actor) = &actor {
+            self.stalled = self.stalled.saturating_sub(actor.stalled.len());
+        }
+        self.unpark(stream_id);
         self.publish();
         actor
     }
@@ -78,6 +147,8 @@ impl StreamMap {
 
     pub(super) fn drain(&mut self) -> impl Iterator<Item = (u32, StreamActor)> {
         self.open.open.store(0, Ordering::Relaxed);
+        self.stalled = 0;
+        self.parked.clear();
         self.inner.drain()
     }
 

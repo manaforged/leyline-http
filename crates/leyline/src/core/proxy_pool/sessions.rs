@@ -1,8 +1,9 @@
-use std::sync::{Mutex, PoisonError, Weak};
+use std::sync::{Mutex, Weak};
 
 use crate::cookie::Jar;
-use crate::core::Result;
-use crate::core::session::{Identity, Session, SessionInner};
+use crate::core::Identity;
+use crate::core::session::{Session, SessionInner};
+use crate::error::Result;
 
 struct Derived {
     base: Weak<SessionInner>,
@@ -68,6 +69,10 @@ impl IdentitySessions {
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Derived>> {
-        self.derived.lock().unwrap_or_else(PoisonError::into_inner)
+        crate::util::lock(&self.derived)
     }
 }
+
+#[cfg(test)]
+#[path = "sessions_tests.rs"]
+mod tests;

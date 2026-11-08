@@ -1,12 +1,13 @@
-Leyline is an async HTTP client for Rust that sends the TLS, HTTP/2, HTTP/3, and header fingerprints of real browsers, from captures of shipped Chrome, Firefox, and Safari builds.
+Leyline is an async HTTP client for Rust with HTTP/1.1, HTTP/2, and HTTP/3. Optional browser profiles send the TLS, HTTP/2, HTTP/3, and header fingerprints of real browsers, from captures of shipped Chrome, Firefox, and Safari builds.
 
-Four types do the everyday work. Everything else is a setter on the session or the request, or a value one of them takes.
+Five types cover everyday requests and browsing. Configure them with setters and typed values.
 
 | Type | Get one with | Use it to |
 | --- | --- | --- |
 | `Session` | `Session::new()`, `Session::from(browser)`, `Session::builder()...build()?` | Send requests, and save the session to a file. Clones share the connections and the cookies. The builder's `browser`, `platform`, `languages`, `hello`, and `profile` choose what the server sees |
-| `RequestBuilder` | `session.get(url)`, `post`, `put`, `patch`, `delete`, `head` | Add headers, a body, or a timeout, then `send().await?` |
-| `Response` | `send().await?` | Read the status and headers, then `text`, `json`, `bytes`, or `download_to(path)` |
+| `Tab` | `session.tab()` | Open and follow pages, and submit forms with the page context |
+| `RequestBuilder` | `session.get(url)`, `post`, `put`, `patch`, `delete`, `head` | Add headers, a body, or a timeout, then `.await?`, `text().await?`, `bytes().await?`, or `download_to(path).await?` |
+| `Response` | `.await?` or `send().await?` | Read the status and headers, then `text`, `json`, or `bytes` |
 | `Error` | any `?` | `err.kind()` says what failed |
 
 A setter that takes a config type accepts `impl Into<Config>` where a shorthand exists, so the common case is one call:
@@ -18,7 +19,7 @@ use leyline::{Browser, Platform, Protocol, Session, Timeout};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::from(Browser::default());
-let body = session.get("https://example.com/").send().await?.text().await?;
+let body = session.get("https://example.com/").text().await?;
 
 let session = Session::builder()
     .browser(Browser::firefox()).platform(Platform::MacOS)
@@ -79,7 +80,7 @@ Default: `charset`, `compression-gzip`, `compression-brotli`,
 `SessionBuilder::profile` takes the TOML text of a profile laid out like the
 bundled `profiles/<family>/<version>.toml` files, and
 `Session::profile` returns it. `profiles/bare.toml` holds the bare profile and `profiles/platforms.toml`
-the per-platform TCP values. The `[meta]` keys `capture`, `variant`,
+the per-platform TCP values and the `accept_language` a profile uses when its identity table sets none. The `[meta]` keys `capture`, `variant`,
 `hello`, `platform_browser`, `deprecated`, and `verified_at` are valid and
 ignored at runtime, and the build reads the first five to generate
 `Browser`. The TOML schema is part of the API: a patch release can add keys,

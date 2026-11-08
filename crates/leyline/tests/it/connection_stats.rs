@@ -1,4 +1,6 @@
-use leyline::pool::{ConnectionStats, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, Pool};
+use leyline::internals::pool::{
+    ConnectionStats, DEFAULT_IDLE_TIMEOUT, DEFAULT_MAX_CONNECTIONS, Pool,
+};
 use std::time::Duration;
 
 #[test]

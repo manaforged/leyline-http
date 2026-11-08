@@ -1,16 +1,16 @@
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use futures_util::future::Either;
 
-use crate::{Error, HttpVersion};
+use crate::error::Error;
+use crate::wire::ResponseTiming;
 
 mod body;
 mod event;
 mod fanout;
-mod headers;
 mod metrics;
 mod notes;
 mod summary;
@@ -18,10 +18,9 @@ mod summary;
 pub(crate) use body::BodyWatch;
 pub use event::Event;
 pub(crate) use fanout::Fanout;
-pub(crate) use headers::masked;
 pub use metrics::Metrics;
 pub(crate) use notes::{note_browser, note_label, note_proxy};
-pub(crate) use summary::{Finish, summary};
+pub(crate) use summary::{Answer, Finish, summary};
 
 #[doc = include_str!("../docs/trace.md")]
 pub trait Trace: Send + Sync + 'static {
@@ -63,7 +62,7 @@ where
                 root,
                 notes: notes::SharedNotes::default(),
             };
-            Either::Left(CURRENT.scope(ctx, fut))
+            Either::Left(Box::pin(CURRENT.scope(ctx, fut)))
         }
         None => Either::Right(fut),
     }
@@ -90,37 +89,31 @@ fn with(emit: impl FnOnce(&Ctx)) {
     CURRENT.try_with(emit).unwrap_or(())
 }
 
-pub(crate) fn dns(host: &str, port: u16, addrs: usize, elapsed: Duration) {
+pub(crate) fn dns(host: &str, port: u16, addrs: usize) {
     with(|ctx| {
         ctx.hook.event(&Event::Dns {
             id: ctx.id,
             host,
             port,
             addrs,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn connect(host: &str, port: u16, reused: bool, elapsed: Duration) {
+pub(crate) fn connect(host: &str, port: u16, reused: bool) {
     with(|ctx| {
         ctx.hook.event(&Event::Connect {
             id: ctx.id,
             host,
             port,
             reused,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn tls(
-    host: &str,
-    version: Option<&str>,
-    cipher: Option<&str>,
-    alpn: Option<&str>,
-    elapsed: Duration,
-) {
+pub(crate) fn tls(host: &str, version: Option<&str>, cipher: Option<&str>, alpn: Option<&str>) {
     with(|ctx| {
         ctx.hook.event(&Event::Tls {
             id: ctx.id,
@@ -128,44 +121,38 @@ pub(crate) fn tls(
             version,
             cipher,
             alpn,
-            elapsed,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn sent(host: &str, method: &str, path: &str, protocol: HttpVersion, elapsed: Duration) {
+pub(crate) fn sent(host: &str, method: &str, path: &str, protocol: http::Version) {
     with(|ctx| {
         ctx.hook.event(&Event::Sent {
             id: ctx.id,
             host,
             method,
             path,
-            protocol: protocol.into(),
-            elapsed,
+            protocol,
+            elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn head<I, N, V>(
+pub(crate) fn head(
     host: &str,
     status: u16,
-    protocol: HttpVersion,
-    elapsed: Duration,
-    headers: I,
-) where
-    I: IntoIterator<Item = (N, V)>,
-    N: AsRef<[u8]>,
-    V: Into<bytes::Bytes>,
-{
+    protocol: http::Version,
+    headers: &crate::wire::Fields,
+) {
     with(|ctx| {
-        let headers = crate::core::header_map(headers);
         ctx.hook.event(&Event::Head {
             id: ctx.id,
             host,
             status,
-            protocol: protocol.into(),
-            elapsed,
-            headers: &headers,
+            protocol,
+            elapsed: ctx.start.elapsed(),
+            headers: headers.map(),
         });
     });
 }
@@ -194,7 +181,7 @@ impl Trace for Log {
                 addrs,
                 elapsed,
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, port, addrs, elapsed_ms = ms(elapsed), "dns");
+                tracing::debug!(target: "leyline::trace", id, host, port, addrs, elapsed_ms = ResponseTiming::span(elapsed), "dns");
             }
             Event::Connect {
                 id,
@@ -203,7 +190,7 @@ impl Trace for Log {
                 reused,
                 elapsed,
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, port, reused, elapsed_ms = ms(elapsed), "connect");
+                tracing::debug!(target: "leyline::trace", id, host, port, reused, elapsed_ms = ResponseTiming::span(elapsed), "connect");
             }
             Event::Tls {
                 id,
@@ -213,7 +200,7 @@ impl Trace for Log {
                 alpn,
                 elapsed,
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, version, cipher, alpn, elapsed_ms = ms(elapsed), "tls");
+                tracing::debug!(target: "leyline::trace", id, host, version, cipher, alpn, elapsed_ms = ResponseTiming::span(elapsed), "tls");
             }
             Event::Sent {
                 id,
@@ -223,7 +210,7 @@ impl Trace for Log {
                 protocol,
                 elapsed,
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, method, path = %crate::util::mask_query(path), protocol = ?protocol, elapsed_ms = ms(elapsed), "sent");
+                tracing::debug!(target: "leyline::trace", id, host, method, path = %crate::util::mask_query(path), protocol = ?protocol, elapsed_ms = ResponseTiming::span(elapsed), "sent");
             }
             Event::Head {
                 id,
@@ -233,21 +220,21 @@ impl Trace for Log {
                 elapsed,
                 ..
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, status, protocol = ?protocol, elapsed_ms = ms(elapsed), "head");
+                tracing::debug!(target: "leyline::trace", id, host, status, protocol = ?protocol, elapsed_ms = ResponseTiming::span(elapsed), "head");
             }
             Event::Done {
                 id,
                 elapsed,
                 outcome: Ok(()),
             } => {
-                tracing::debug!(target: "leyline::trace", id, elapsed_ms = ms(elapsed), "done");
+                tracing::debug!(target: "leyline::trace", id, elapsed_ms = ResponseTiming::span(elapsed), "done");
             }
             Event::Done {
                 id,
                 elapsed,
                 outcome: Err(e),
             } => {
-                tracing::debug!(target: "leyline::trace", id, elapsed_ms = ms(elapsed), kind = ?e.kind(), error = %e, "done");
+                tracing::debug!(target: "leyline::trace", id, elapsed_ms = ResponseTiming::span(elapsed), kind = ?e.kind(), error = %e, "done");
             }
             Event::Summary { .. } => summary::render(event),
             Event::Body {
@@ -258,10 +245,6 @@ impl Trace for Log {
             } => body::render(id, bytes, elapsed, outcome),
         }
     }
-}
-
-fn ms(d: Duration) -> u32 {
-    u32::try_from(d.as_millis()).unwrap_or(u32::MAX)
 }
 
 impl<T: Trace> Trace for Arc<T> {

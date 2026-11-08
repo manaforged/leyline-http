@@ -1,12 +1,8 @@
 use bytes::{BufMut, Bytes};
 
-use super::{FrameHeader, FrameType, be_u16, be_u32};
+use super::{FrameHeader, FrameType, Scope, be_u16, be_u32, check_scope, flags};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
-
-pub mod flags {
-    pub const ACK: u8 = 0x1;
-}
 
 #[derive(Debug)]
 pub struct SettingsFrame {
@@ -16,12 +12,7 @@ pub struct SettingsFrame {
 
 impl SettingsFrame {
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
-        if header.stream_id != 0 {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "SETTINGS frame on non-zero stream".into(),
-            });
-        }
+        check_scope(&header, Scope::Connection, "SETTINGS")?;
 
         let ack = header.flags & flags::ACK != 0;
 

@@ -5,14 +5,18 @@ use std::time::Duration;
 use crate::cookie::Jar;
 use crate::core::block::Rules;
 use crate::core::config::HostLimits;
+use crate::core::config::Proxy;
+use crate::core::config::WebSocketOptions;
+use crate::core::into_url::IntoUrl;
 use crate::core::proxy_pool::ProxyPool;
-use crate::core::{
-    BodyRules, DnsConfig, Encoding, IntoUrl, PoolConfig, Proxy, Redirect, SocketOptions, Timeout,
-    WebSocketOptions,
-};
+use crate::core::{BodyRules, Redirect};
+use crate::deadline::Timeout;
+use crate::net::{DnsConfig, Resolver, SocketOptions};
+use crate::pool::PoolConfig;
+use crate::profile::Encoding;
+use crate::profile::TcpProfile;
 use crate::profile::{Browser, BrowserProfile, ChromiumBrand, FingerprintSpec, Platform};
-use crate::tcp::TcpProfile;
-use crate::tls::{Resolver, Tls};
+use crate::tls::trust::Tls;
 use crate::trace::Trace;
 
 pub(crate) use self::bearer::BearerToken;
@@ -21,13 +25,14 @@ use self::inherit::Parent;
 use super::identity::Source;
 use super::proxy::InvalidEnvProxy;
 use super::{Identity, Protocol, Session};
-use crate::core::error::Result;
+use crate::error::{Error, Kind, Result};
 
 const AUTHORIZATION: &str = "authorization";
 
 mod assemble;
 mod bearer;
 pub(super) mod connect;
+mod cores;
 mod debug;
 pub(super) mod derive;
 mod inherit;
@@ -46,34 +51,36 @@ pub struct SessionBuilder {
     platform: Platform,
     platform_explicit: bool,
     platform_pinned: bool,
-    brand: ChromiumBrand,
-    proxy_config: Proxy,
+    pub(in crate::core::session) brand: ChromiumBrand,
+    pub(in crate::core::session) proxy_config: Proxy,
     dns_config: DnsConfig,
-    timeouts: Timeout,
+    pub(in crate::core::session) timeouts: Timeout,
     pool_config: PoolConfig,
     socket_config: SocketOptions,
-    redirect_policy: Redirect,
-    compression: BodyRules,
-    websocket_config: WebSocketOptions,
-    https_only: bool,
+    pub(in crate::core::session) redirect_policy: Redirect,
+    pub(in crate::core::session) compression: BodyRules,
+    pub(in crate::core::session) websocket_config: WebSocketOptions,
+    pub(in crate::core::session) https_only: bool,
     audit: bool,
     cookie_jar: Option<Jar>,
     tcp_profile: Option<TcpProfile>,
-    protocol_policy: Protocol,
+    pub(in crate::core::session) protocol_policy: Protocol,
     #[cfg(feature = "http3")]
     protocol_explicit: bool,
-    config_error: Option<String>,
+    config_error: Option<Arc<Error>>,
     default_headers: Vec<(String, String)>,
-    bearer: Option<BearerToken>,
+    pub(in crate::core::session) bearer: Option<BearerToken>,
+    refresh_token: Option<bearer::Callback>,
+    cache: usize,
     http_identity: Option<Browser>,
-    tls_trust: Tls,
-    default_retry: crate::core::retry::Retry,
-    trace: Option<Arc<dyn Trace>>,
-    base_url: Option<url::Url>,
-    languages: Option<Vec<String>>,
+    pub(in crate::core::session) tls_trust: Tls,
+    pub(in crate::core::session) default_retry: crate::core::retry::Retry,
+    pub(in crate::core::session) trace: Option<Arc<dyn Trace>>,
+    pub(in crate::core::session) base_url: Option<url::Url>,
+    pub(in crate::core::session) languages: Option<Vec<String>>,
     host_limits: HostLimits,
-    proxy_pool: Option<ProxyPool>,
-    block_rules: Rules,
+    pub(in crate::core::session) proxy_pool: Option<ProxyPool>,
+    pub(in crate::core::session) block_rules: Rules,
     parent: Option<Parent>,
     saved: Option<crate::core::saved::Saved>,
 }
@@ -106,6 +113,8 @@ impl SessionBuilder {
             config_error: None,
             default_headers: Vec::new(),
             bearer: None,
+            refresh_token: None,
+            cache: 0,
             http_identity: None,
             tls_trust: Tls::default(),
             default_retry: crate::core::retry::Retry::new(0),
@@ -138,59 +147,79 @@ impl SessionBuilder {
         self
     }
 
+    /// Enables a private in-memory HTTP cache with a byte budget; zero disables caching.
+    pub fn cache(mut self, bytes: usize) -> Self {
+        self.cache = bytes;
+        self
+    }
+
     /// Sets the default retry policy, which makes no retries by default.
     pub fn retry(mut self, retry: impl Into<crate::core::retry::Retry>) -> Self {
         self.default_retry = retry.into();
         self
     }
 
-    /// Sets the maximum number of open connections in the pool.
+    /// Sets the maximum number of open connections in the pool, and fails the build on zero.
     pub fn max_connections(mut self, n: usize) -> Self {
-        self.own_pool();
+        if n == 0 {
+            self.reject(Error::config("max_connections must be at least 1"));
+        }
         self.pool_config.max_connections = n;
         self
     }
 
-    /// Sets the most connections per host; HTTP/2 adds one when all are full, and browser profiles stay on one unless set.
+    /// Sets the most connections per host, and fails the build on zero; HTTP/2 adds one when all are full, and browser profiles stay on one unless set.
     pub fn max_connections_per_host(mut self, n: usize) -> Self {
-        self.own_pool();
+        if n == 0 {
+            self.reject(Error::config("max_connections_per_host must be at least 1"));
+        }
         self.pool_config.max_h1_conns_per_host = n;
         self.pool_config.max_h2_conns_per_host = Some(n);
         self
     }
 
+    /// Fails a request with `Kind::Overloaded` when this many HTTP/1.1 requests already wait for a connection to its host; 1024 by default, and `None` removes the limit.
+    pub fn max_pending_per_host(mut self, limit: impl Into<Option<usize>>) -> Self {
+        self.pool_config.max_h1_pending_per_host = limit.into();
+        self
+    }
+
     /// Sets how long an idle pooled connection stays open.
     pub fn pool_idle_timeout(mut self, timeout: Duration) -> Self {
-        self.own_pool();
         self.pool_config.idle_timeout = timeout;
+        self
+    }
+
+    /// Stops reusing a connection this long after it opened, so traffic follows a DNS or load balancer change; no limit by default, and `None` removes the limit.
+    pub fn pool_max_lifetime(mut self, lifetime: impl Into<Option<Duration>>) -> Self {
+        self.pool_config.max_lifetime = lifetime.into();
         self
     }
 
     /// Sets whether connections are kept open for reuse.
     pub fn keep_alive(mut self, on: bool) -> Self {
-        self.own_pool();
         self.pool_config.keepalive = on;
         self
     }
 
     /// Sets the idle time after which an HTTP/2 connection sends a ping, or `None` for no pings.
     pub fn http2_ping_after_idle(mut self, idle: impl Into<Option<Duration>>) -> Self {
-        self.own_pool();
         self.pool_config.h2_ping_after_idle = idle.into();
         self
     }
 
     /// Sets how long an HTTP/2 ping waits for its acknowledgement.
     pub fn http2_ping_timeout(mut self, timeout: Duration) -> Self {
-        self.own_pool();
         self.pool_config.h2_ping_timeout = timeout;
         self
     }
 
     /// Sets whether a session built from `Session::to_builder` shares its parent's connection pool.
     pub fn share_connections(mut self, share: bool) -> Self {
-        if !share {
-            self.own_pool();
+        if let Some(parent) = &mut self.parent
+            && !share
+        {
+            parent.separate_pool = true;
         }
         self
     }
@@ -205,10 +234,9 @@ impl SessionBuilder {
     /// Sets the browser the session sends as, with that browser's default platform unless one is set.
     pub fn browser(mut self, browser: Browser) -> Self {
         if self.layered {
-            self.config_error.get_or_insert(
-                "browser(..) replaces the fingerprint layers set before it; call browser(..) first"
-                    .to_owned(),
-            );
+            self.reject(Error::config(
+                "browser(..) replaces the fingerprint layers set before it; call browser(..) first",
+            ));
             return self;
         }
         let platform = if self.platform_pinned {
@@ -247,20 +275,18 @@ impl SessionBuilder {
     /// Sets the TLS ClientHello to another version of the same browser family as the session browser.
     pub fn hello(mut self, hello: Browser) -> Self {
         let Some(tls) = self.browser else {
-            self.config_error
-                .get_or_insert("hello needs a browser session; call browser(..) first".to_owned());
-            return self;
-        };
-        let http = self.http_identity.unwrap_or(tls);
-        let hello = hello.base();
-        if http.family() != hello.family() {
-            self.config_error.get_or_insert(format!(
-                "hello {hello} is not the same browser family as {http}"
+            self.reject(Error::config(
+                "hello needs a browser session; call browser(..) first",
             ));
             return self;
+        };
+        match Browser::pair(self.http_identity.unwrap_or(tls), hello) {
+            Ok((http, hello)) => {
+                self.browser = Some(hello);
+                self.http_identity = Some(http);
+            }
+            Err(error) => self.reject(error),
         }
-        self.browser = Some(hello.hello_rep());
-        self.http_identity = Some(http);
         self
     }
 
@@ -325,9 +351,21 @@ impl SessionBuilder {
         self
     }
 
-    fn fail(mut self, error: crate::core::error::Error) -> Self {
-        self.config_error.get_or_insert(error.to_string());
+    fn fail(mut self, error: Error) -> Self {
+        self.reject(error);
         self
+    }
+
+    fn reject(&mut self, error: Error) {
+        if self.config_error.is_some() {
+            return;
+        }
+        let error = if error.cause() == Kind::Config {
+            error
+        } else {
+            Error::config(error.to_string()).with_source(error)
+        };
+        self.config_error = Some(Arc::new(error));
     }
 
     pub(super) fn loaded_profile(&self) -> Option<&Arc<BrowserProfile>> {
@@ -354,9 +392,7 @@ impl SessionBuilder {
             source: self.identity_source(),
             platform: self.platform,
             brand: self.brand,
-            compression: self.compression,
-            #[cfg(feature = "http3")]
-            h3_required: self.protocol_policy.requires_h3(),
+            protocol: self.protocol_policy,
             tcp,
             audit: self.audit,
             default_headers: &self.default_headers,
@@ -378,14 +414,12 @@ impl SessionBuilder {
 
     /// Sets the TCP fingerprint used for new connections.
     pub fn tcp_profile(mut self, profile: TcpProfile) -> Self {
-        self.own_pool();
         self.tcp_profile = Some(profile);
         self
     }
 
     /// Sets the DNS resolver used for new connections.
     pub fn dns_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
-        self.own_pool();
         self.dns_config = std::mem::take(&mut self.dns_config).resolver(resolver);
         self
     }
@@ -396,28 +430,24 @@ impl SessionBuilder {
         host: impl AsRef<str>,
         addrs: impl IntoIterator<Item = SocketAddr>,
     ) -> Self {
-        self.own_pool();
         self.dns_config = std::mem::take(&mut self.dns_config).resolve_host(host, addrs);
         self
     }
 
     /// Sets the TLS trust settings for server certificates.
     pub fn tls(mut self, trust: Tls) -> Self {
-        self.own_pool();
         self.tls_trust = trust;
         self
     }
 
     /// Sets the content encodings the session offers in `Accept-Encoding`.
     pub fn accept_encoding(mut self, codings: impl IntoIterator<Item = Encoding>) -> Self {
-        self.own_pool();
         self.compression.offer(codings);
         self
     }
 
     /// Sets the maximum decoded response body size in bytes.
     pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.own_pool();
         self.compression.max_body_size = bytes;
         self
     }
@@ -452,7 +482,6 @@ impl SessionBuilder {
 
     /// Sets the HTTP version policy, which is `Protocol::Auto` by default.
     pub fn protocol(mut self, policy: Protocol) -> Self {
-        self.own_pool();
         self.protocol_policy = policy;
         #[cfg(feature = "http3")]
         {
@@ -500,15 +529,15 @@ impl SessionBuilder {
                 .try_for_each(|tag| crate::profile::languages::validate_language(tag))
         };
         if let Err(error) = checked {
-            self.config_error.get_or_insert(error);
+            self.reject(Error::config(error));
         }
         self.languages = Some(tags);
     }
 
     /// Sets the per-host concurrency and pacing limits.
     pub fn host_limits(mut self, limits: HostLimits) -> Self {
-        if let Some(error) = limits.config_error() {
-            self.config_error.get_or_insert(error);
+        if let Err(error) = limits.validate() {
+            self.reject(error);
         }
         if let Some(parent) = &mut self.parent {
             parent.own_limits = true;
@@ -521,16 +550,17 @@ impl SessionBuilder {
     pub fn block_rules(mut self, toml: &str) -> Self {
         match Rules::from_toml(toml) {
             Ok(rules) => self.block_rules.extend(rules),
-            Err(error) => {
-                self.config_error.get_or_insert(error.to_string());
-            }
+            Err(error) => self.reject(error),
         }
         self
     }
 
-    /// Adds response status codes that count as a block.
+    /// Adds response status codes that count as a block, and fails the build on a code outside 100 to 999.
     pub fn block_statuses(mut self, statuses: impl IntoIterator<Item = u16>) -> Self {
-        self.block_rules.extend(Rules::statuses(statuses));
+        match Rules::statuses(statuses) {
+            Ok(rules) => self.block_rules.extend(rules),
+            Err(error) => self.reject(error),
+        }
         self
     }
 
@@ -540,7 +570,7 @@ impl SessionBuilder {
             Ok(url) => self.base_url = Some(url),
             Err(error) => {
                 self.base_url = None;
-                self.config_error.get_or_insert(error.to_string());
+                self.reject(error);
             }
         }
         self
@@ -562,17 +592,22 @@ impl SessionBuilder {
                     Err(_) => self.invalid_header(name.as_str()),
                 },
                 (Ok(name), Err(_)) => self.invalid_header(name.as_str()),
-                (Err(error), _) => {
-                    self.config_error.get_or_insert(error.to_string());
-                }
+                (Err(error), _) => self.reject(error),
             }
         }
         self
     }
 
+    pub(crate) fn blocking_io(mut self) -> Self {
+        self.pool_config.blocking = true;
+        self
+    }
+
     fn invalid_header(&mut self, name: &str) {
-        self.config_error
-            .get_or_insert(format!("invalid header `{}`", name.escape_debug()));
+        self.reject(Error::config(format!(
+            "invalid header `{}`",
+            name.escape_debug()
+        )));
     }
 
     pub(super) fn into_builtin(self) -> Session {
@@ -597,7 +632,9 @@ impl SessionBuilder {
         let shares = shared.is_some();
         let connector = match shared {
             Some(connector) => connector,
-            None => self.build_connector(&derived.profile, &tcp_profile)?,
+            None => self
+                .pool_inputs()
+                .connector(&derived.profile, &tcp_profile)?,
         };
         let mut session = self.into_session(derived, connector);
         if let Some(parent) = parent {
@@ -612,11 +649,5 @@ impl SessionBuilder {
     pub(crate) fn saved(mut self, saved: crate::core::saved::Saved) -> Self {
         self.saved = Some(saved);
         self
-    }
-
-    fn own_pool(&mut self) {
-        if let Some(parent) = &mut self.parent {
-            parent.own_pool = true;
-        }
     }
 }

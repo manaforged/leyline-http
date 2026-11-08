@@ -25,7 +25,10 @@ async fn a_crawl_opens_child_sitemaps_only_while_it_needs_pages() {
         }
     })
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/")).limit(2);
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(unpaced())
+        .limit(2);
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -72,6 +75,7 @@ async fn a_crawl_reads_every_sitemap_form_and_only_the_ones_it_may() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .respect(Respect::Robots);
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
@@ -169,9 +173,7 @@ async fn a_crawl_skips_image_locations_in_a_sitemap() {
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -189,9 +191,7 @@ async fn a_crawl_does_not_follow_a_sitemap_redirect_past_robots() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -214,9 +214,7 @@ async fn a_crawl_counts_a_failed_sitemap_and_skips_a_cut_gzip() {
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -238,9 +236,7 @@ async fn a_crawl_tries_a_busy_sitemap_again() {
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -290,7 +286,7 @@ fn a_sitemap_retry_waiting_for_a_free_sitemap_slot_does_not_spin() {
                 "/busy.xml" => testing::Response::new(200).body(map.clone()),
                 "/slow1.xml" | "/slow2.xml" => testing::Response::new(200)
                     .body("<urlset></urlset>")
-                    .delay(Duration::from_secs(2)),
+                    .delay(Duration::from_millis(500)),
                 path => html(&format!("<p>{path}</p>")),
             })
             .unwrap();
@@ -320,9 +316,7 @@ async fn a_crawl_follows_a_sitemap_to_its_new_address() {
         path => html(&format!("<p>{path}</p>")),
     })
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());

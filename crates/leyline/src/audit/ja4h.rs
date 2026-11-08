@@ -1,11 +1,11 @@
 use std::fmt;
 
 use crate::audit::hash12;
-use crate::trace::masked;
+use crate::util::masked;
 
 pub struct Ja4hInput<'a> {
     pub method: &'a str,
-    pub http_version: &'a str,
+    pub version: http::Version,
     pub headers: &'a [(String, String)],
 }
 
@@ -13,7 +13,7 @@ impl fmt::Debug for Ja4hInput<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Ja4hInput")
             .field("method", &self.method)
-            .field("http_version", &self.http_version)
+            .field("version", &self.version)
             .field(
                 "headers",
                 &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
@@ -39,11 +39,11 @@ impl Ja4hInput<'_> {
             method.as_str()
         };
 
-        let version = match self.http_version {
-            "1.0" => "10",
-            "1.1" => "11",
-            "2" | "2.0" => "20",
-            "3" | "3.0" => "30",
+        let version = match self.version {
+            http::Version::HTTP_10 => "10",
+            http::Version::HTTP_11 => "11",
+            http::Version::HTTP_2 => "20",
+            http::Version::HTTP_3 => "30",
             _ => "00",
         };
 

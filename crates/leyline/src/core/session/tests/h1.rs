@@ -1,6 +1,6 @@
 use super::super::{Session, SessionBuilder};
-use crate::core::error::Cause;
 use crate::core::response::Response;
+use crate::error::Kind;
 use crate::{Body, Encoding};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -241,7 +241,7 @@ async fn compress_rejects_streaming_body() {
         .send()
         .await
         .unwrap_err();
-    assert_eq!(err.cause(), Cause::Body, "got: {err:?}");
+    assert_eq!(err.cause(), Kind::Body, "got: {err:?}");
 }
 
 #[tokio::test]
@@ -359,5 +359,5 @@ async fn json_builder_returns_error_instead_of_panicking() {
         .send()
         .await
         .unwrap_err();
-    assert_eq!(err.cause(), Cause::Json);
+    assert_eq!(err.cause(), Kind::Json);
 }

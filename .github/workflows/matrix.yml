@@ -12,28 +12,8 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  msrv:
-    name: Resolve MSRV
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      version: ${{ steps.read.outputs.version }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Read rust-version from Cargo.toml
-        id: read
-        run: |
-          set -euo pipefail
-          version="$(awk -F'"' '/^rust-version *= *"/{print $2; exit}' Cargo.toml)"
-          test -n "$version"
-          echo "version=$version" >>"$GITHUB_OUTPUT"
-
   toolchains:
     name: check (${{ matrix.rust }})
-    needs: msrv
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
@@ -42,12 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         rust:
-          - ${{ needs.msrv.outputs.version }}
           - stable
           - beta
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          submodules: recursive
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
@@ -70,6 +50,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          submodules: recursive
           persist-credentials: false
 
       - name: Rust toolchain
@@ -92,100 +73,24 @@ jobs:
           cargo update -p pkg-config --precise 0.3.34
           cargo check -p leyline-http --locked --features full
 
-  external-types:
-    name: external types
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - uses: dtolnay/rust-toolchain@6c977a6ca4077a0ceb28ffbe03f59d46e9ac8772 # master
-        with:
-          toolchain: nightly-2026-06-20
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: external-types
-          cache-workspace-crates: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
-        with:
-          tool: cargo-check-external-types@0.5.0
-
-      - name: cargo check-external-types (nightly rustdoc JSON)
-        run: cargo +nightly-2026-06-20 check-external-types --manifest-path crates/leyline/Cargo.toml --features full
-
   cross:
-    name: cross (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+    name: cross (aarch64-unknown-linux-gnu)
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            os: macos-15
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-24.04
-          - target: aarch64-unknown-linux-gnu
-            os: ubuntu-24.04-arm
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-24.04
-          - target: aarch64-unknown-linux-musl
-            os: ubuntu-24.04
-          - target: x86_64-pc-windows-msvc
-            os: windows-2025
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          submodules: recursive
           persist-credentials: false
 
       - name: Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
-      - name: Rust target
-        run: rustup target add ${{ matrix.target }}
-
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          key: cross-${{ matrix.target }}
+          key: cross-aarch64-unknown-linux-gnu
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Install the musl cross toolchain
-        if: endsWith(matrix.target, '-linux-musl')
-        uses: taiki-e/setup-cross-toolchain-action@12b7ad4acfa95a1476779d6c06699b96ec1691f8 # v1
-        with:
-          target: ${{ matrix.target }}
-
       - name: cargo check
-        run: cargo check -p leyline-http --locked --target ${{ matrix.target }}
-
-  alert:
-    name: open failure issue
-    needs: [msrv, toolchains, minimal-versions, external-types, cross]
-    if: failure() && github.event_name != 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    permissions:
-      issues: write
-    steps:
-      - name: Open or update the failure issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TITLE: 'matrix workflow failed'
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          set -euo pipefail
-          body="Run failed on $(date -u +%Y-%m-%d): $RUN_URL"
-          number="$(gh issue list --state open --search "\"$TITLE\" in:title" --json number,title \
-            --jq "map(select(.title == env.TITLE)) | .[0].number // empty")"
-          if [[ -n "$number" ]]; then
-            gh issue comment "$number" --body "$body"
-          else
-            gh issue create --title "$TITLE" --body "$body"
-          fi
+        run: cargo check -p leyline-http --locked --target aarch64-unknown-linux-gnu

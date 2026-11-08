@@ -39,7 +39,10 @@ CHROMIUM_BUILDS = {
         "windows": {
             "url": "https://dl.google.com/dl/chrome/install/googlechromestandaloneenterprise64.msi",
             "install": ["msiexec", "/i", "{installer}", "/qn", "/norestart"],
-            "paths": [r"C:\Program Files\Google\Chrome\Application\chrome.exe"],
+            "paths": [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files\Google\Chrome\Application\new_chrome.exe",
+            ],
         },
     },
     "brave": {

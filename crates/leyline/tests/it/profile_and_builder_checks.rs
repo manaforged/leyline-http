@@ -2,7 +2,7 @@ use leyline::{Browser, Platform};
 
 #[test]
 fn every_browser_variant_has_profile() {
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     for browser in Browser::all().iter().copied() {
         assert!(
             reg.get_browser(browser).is_some(),
@@ -13,7 +13,7 @@ fn every_browser_variant_has_profile() {
 
 #[test]
 fn every_profile_has_fingerprint_expectation() {
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).unwrap();
         let has_ja4 = profile
@@ -37,7 +37,7 @@ fn every_profile_has_fingerprint_expectation() {
 
 #[test]
 fn h2_fingerprints_match_toml_expectations() {
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let mut checked = 0;
     for browser in Browser::all().iter().copied() {
         let profile = reg.get_browser(browser).unwrap();
@@ -47,8 +47,12 @@ fn h2_fingerprints_match_toml_expectations() {
             .as_ref()
             .and_then(|f| f.akamai.as_deref())
         {
-            let h2 = leyline::h2::H2Config::from_profile(&profile.h2).unwrap();
-            let actual = h2.akamai_fingerprint();
+            let h2 = leyline::internals::h2::H2Config::from_profile(&profile.h2).unwrap();
+            let actual = leyline::internals::profile::akamai_fingerprint(
+                &h2.settings,
+                h2.initial_connection_window_size,
+                &h2.pseudo_order,
+            );
             assert_eq!(actual, expected, "H2 mismatch for {browser}");
             checked += 1;
         }
@@ -61,12 +65,16 @@ fn h2_fingerprints_match_toml_expectations() {
 
 #[test]
 fn h2_per_platform_overrides_resolve() {
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     for browser in [Browser::Chrome145, Browser::Chrome146, Browser::Chrome147] {
         let profile = reg.get_browser(browser).unwrap();
         let resolved = profile.h2.resolve_for_platform(Platform::MacOS).unwrap();
-        let h2 = leyline::h2::H2Config::from_profile(&resolved).unwrap();
-        let actual = h2.akamai_fingerprint();
+        let h2 = leyline::internals::h2::H2Config::from_profile(&resolved).unwrap();
+        let actual = leyline::internals::profile::akamai_fingerprint(
+            &h2.settings,
+            h2.initial_connection_window_size,
+            &h2.pseudo_order,
+        );
         let expected = profile
             .h2
             .platforms
@@ -143,25 +151,18 @@ fn session_builder_resolves_all_valid_combos() {
 
 #[test]
 fn crate_root_context_helpers_work() {
-    let tls = leyline::TlsContext::from_profile(
-        Browser::Chrome147.profile(),
-        leyline::TlsMinVersion::Tls12,
-    );
+    let tls = leyline::TlsContext::new(Browser::Chrome147, leyline::TlsMinVersion::Tls12);
     assert!(tls.is_ok(), "tls context failed: {:?}", tls.err());
 
     #[cfg(feature = "http3")]
     {
-        let quic = leyline::TlsContext::from_profile(
-            Browser::Chrome147.profile(),
-            leyline::TlsMinVersion::Tls13,
-        );
+        let quic = leyline::TlsContext::new(Browser::Chrome147, leyline::TlsMinVersion::Tls13);
         assert!(quic.is_ok(), "quic context failed: {:?}", quic.err());
     }
 
     for browser in Browser::all().iter().copied() {
         assert!(
-            leyline::TlsContext::from_profile(browser.profile(), leyline::TlsMinVersion::Tls12)
-                .is_ok(),
+            leyline::TlsContext::new(browser, leyline::TlsMinVersion::Tls12).is_ok(),
             "tls context failed for {browser}"
         );
     }
@@ -169,7 +170,7 @@ fn crate_root_context_helpers_work() {
 
 #[test]
 fn profile_helper_returns_builtin() {
-    let p = Browser::Chrome147.profile();
+    let p = leyline::internals::browser_profile(Browser::Chrome147);
     assert_eq!(p.meta.browser, "chrome");
     assert_eq!(p.meta.version, 147);
     assert!(!p.tls.ciphers.is_empty());

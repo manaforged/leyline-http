@@ -32,6 +32,21 @@ pub use generated::*;
 
 pub const TLSEXT_cert_compression_zstd: i32 = 3;
 
+unsafe extern "C" {
+    /// Copies a finished TLS 1.3 connection's read and write traffic secrets.
+    #[link_name = "LEYLINE_SSL_copy_traffic_secrets"]
+    pub fn SSL_copy_traffic_secrets(
+        ssl: *const SSL,
+        out_read: *mut u8,
+        out_write: *mut u8,
+        max_len: usize,
+        out_len: *mut usize,
+    ) -> c_int;
+    /// Passes one post-handshake NewSessionTicket message to the SSL.
+    #[link_name = "LEYLINE_SSL_process_post_handshake"]
+    pub fn SSL_process_post_handshake(ssl: *mut SSL, msg: *const u8, msg_len: usize) -> c_int;
+}
+
 #[cfg(target_pointer_width = "64")]
 pub type BN_ULONG = u64;
 #[cfg(target_pointer_width = "32")]

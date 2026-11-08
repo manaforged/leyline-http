@@ -23,6 +23,10 @@ fn is_ident(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+fn rust_option(value: Option<String>) -> String {
+    value.map_or_else(|| "None".to_owned(), |value| format!("Some({value})"))
+}
+
 type Shapes = BTreeMap<String, header_style::Shape>;
 
 fn main() -> BuildResult<()> {
@@ -39,7 +43,25 @@ fn main() -> BuildResult<()> {
     let rows = write_browsers(&root, &out, &brands)?;
     let shapes = write_header_styles(&root, &out, &rows)?;
     write_brands(&brands, &out, &shapes)?;
+    codec_cfgs();
     write_entities(&entity_data, &out)
+}
+
+const CODEC_FEATURES: [&str; 4] = ["GZIP", "BROTLI", "DEFLATE", "ZSTD"];
+
+fn codec_cfgs() {
+    println!("cargo::rustc-check-cfg=cfg(leyline_any_codec)");
+    println!("cargo::rustc-check-cfg=cfg(leyline_all_codecs)");
+    let on = CODEC_FEATURES
+        .iter()
+        .filter(|codec| std::env::var_os(format!("CARGO_FEATURE_COMPRESSION_{codec}")).is_some())
+        .count();
+    if on > 0 {
+        println!("cargo::rustc-cfg=leyline_any_codec");
+    }
+    if on == CODEC_FEATURES.len() {
+        println!("cargo::rustc-cfg=leyline_all_codecs");
+    }
 }
 
 fn write_browsers(
@@ -97,7 +119,10 @@ fn write_brands(
     shapes: &Shapes,
 ) -> BuildResult<()> {
     brand::check_brands(brands, shapes)?;
-    fs::write(out.join("chromium_brand.rs"), brand::render_brands(brands)?)?;
+    fs::write(
+        out.join("chromium_brand.rs"),
+        brand::render_brands(brands, shapes)?,
+    )?;
     Ok(())
 }
 

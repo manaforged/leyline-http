@@ -1,0 +1,8 @@
+c64 leyline 64
+c64 hyper 64
+c64 reqwest 64
+c64 wreq 64
+c64 ureq 64
+c64 curl 64
+c64 nethttp 64
+c64 fasthttp 64

@@ -15,16 +15,12 @@ fn preset_xhr() -> Vec<HeaderPair> {
     ]
 }
 
-fn never_sensitive(_: &str) -> bool {
-    false
-}
-
 #[test]
 fn plain_unknown_header_appends_at_end() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
     drop(extra.set("x-custom", "val"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     assert_eq!(headers.last().unwrap().0, "x-custom");
 }
 
@@ -33,7 +29,7 @@ fn plain_known_header_rides_inferred_anchor() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
     drop(extra.set("authorization", "Bearer t"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     let ua = headers.iter().position(|(k, _)| k == "user-agent").unwrap();
     assert_eq!(headers[ua + 1].0, "authorization");
 }
@@ -43,7 +39,7 @@ fn anchored_header_splices_after_anchor() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
     drop(extra.append_anchored(HeaderPosition::AfterUserAgent, "x-extra-6", "6"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     let ua = headers.iter().position(|(k, _)| k == "user-agent").unwrap();
     assert_eq!(headers[ua + 1].0, "x-extra-6");
 }
@@ -55,7 +51,7 @@ fn multiple_anchored_same_anchor_preserve_caller_order() {
     drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-a0", "0"));
     drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-b", "b"));
     drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-a", "a"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_ref()).collect();
     let mobile = names.iter().position(|&n| n == "sec-ch-ua-mobile").unwrap();
     assert_eq!(&names[mobile + 1..mobile + 4], &["x-a0", "x-b", "x-a"]);
@@ -67,7 +63,7 @@ fn preset_owned_name_replaced_in_place() {
     let original_ua_idx = headers.iter().position(|(k, _)| k == "user-agent").unwrap();
     let mut extra = HeaderList::new();
     drop(extra.set("user-agent", "custom-agent"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     assert_eq!(headers[original_ua_idx].0, "user-agent");
     assert_eq!(headers[original_ua_idx].1, "custom-agent");
 }
@@ -92,7 +88,7 @@ fn anchored_headers_interleave_at_each_anchor() {
     drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-extra-4", "4"));
     drop(extra.append_anchored(HeaderPosition::AfterUserAgent, "x-extra-6", "6"));
     drop(extra.append_anchored(HeaderPosition::AfterContentType, "x-extra-7", "7"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_ref()).collect();
     assert_eq!(
         names,
@@ -121,7 +117,7 @@ fn before_anchor_inserts_before_target() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
     drop(extra.append_anchored(HeaderPosition::BeforeAcceptEncoding, "x-last-chance", "v"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     let ae_idx = headers
         .iter()
         .position(|(k, _)| k == "accept-encoding")
@@ -135,7 +131,7 @@ fn client_hints_lead_the_client_hint_block_in_push_order() {
     let mut extra = HeaderList::new();
     drop(extra.append_anchored(HeaderPosition::BeforeCchUa, "device-memory", "8"));
     drop(extra.append_anchored(HeaderPosition::BeforeCchUa, "dpr", "1"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     let names: Vec<&str> = headers.iter().take(3).map(|(k, _)| k.as_ref()).collect();
     assert_eq!(names, ["device-memory", "dpr", "sec-ch-ua"]);
 }
@@ -146,8 +142,7 @@ fn sensitive_stripped_on_cross_origin_redirect() {
     let mut extra = HeaderList::new();
     drop(extra.set("authorization", "Bearer t"));
     drop(extra.set("x-benign", "ok"));
-    let sensitive = |name: &str| name.eq_ignore_ascii_case("authorization");
-    apply_extra_headers(&mut headers, &extra, true, &sensitive);
+    apply_extra_headers(&mut headers, &extra, true);
     assert!(!headers.iter().any(|(k, _)| k == "authorization"));
     assert!(headers.iter().any(|(k, _)| k == "x-benign"));
 }
@@ -162,6 +157,6 @@ fn anchor_absent_falls_back_to_end() {
     ];
     let mut extra = HeaderList::new();
     drop(extra.append_anchored(HeaderPosition::AfterContentType, "x-d", "d"));
-    apply_extra_headers(&mut headers, &extra, false, &never_sensitive);
+    apply_extra_headers(&mut headers, &extra, false);
     assert_eq!(headers.last().unwrap().0, "x-d");
 }

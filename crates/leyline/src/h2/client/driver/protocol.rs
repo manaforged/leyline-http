@@ -1,19 +1,19 @@
 #[cfg(feature = "websocket")]
 use std::io;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::task::{Context, Poll};
 
 #[cfg(feature = "websocket")]
 use bytes::Bytes;
-#[cfg(feature = "websocket")]
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, mpsc};
 
-use crate::h2::client::RequestBody;
-use crate::h2::connection::{HeaderPair, PseudoHeaders};
+use crate::h2::connection::PseudoHeaders;
+use crate::wire::Body;
 
 use super::ResponseSink;
 
-pub(crate) const MAX_FLOW_WINDOW: i64 = 0x7FFF_FFFF;
+pub(crate) const MAX_FLOW_WINDOW: i64 = crate::h2::frame::U31_MAX as i64;
 
 pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
     let new_win = current.saturating_add(delta);
@@ -26,26 +26,147 @@ pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
 
 pub struct Head {
     pub pseudo: PseudoHeaders,
-    pub headers: Vec<HeaderPair>,
+    pub(crate) headers: crate::wire::RequestHeaders,
+    pub(crate) body_limit: crate::error::BodyLimit,
+}
+
+impl Head {
+    #[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
+    /// Builds a request head from its pseudo-headers and header fields.
+    pub fn new(pseudo: PseudoHeaders, headers: Vec<crate::wire::HeaderPair>) -> Self {
+        Self {
+            pseudo,
+            headers: headers.into(),
+            body_limit: crate::error::BodyLimit::session(crate::wire::DEFAULT_MAX_BODY_SIZE),
+        }
+    }
 }
 
 pub(crate) enum DriverCommand {
     SendRequest {
         head: Arc<Head>,
-        body: RequestBody,
+        body: Body,
         sink: ResponseSink,
         slot: Option<super::super::handle::Slot>,
     },
     #[cfg(feature = "websocket")]
     OpenConnect {
-        pseudo: PseudoHeaders,
-        headers: Vec<crate::h2::connection::HeaderPair>,
+        head: Box<Head>,
         write_rx: mpsc::Receiver<io::Result<Bytes>>,
         sink: ResponseSink,
+        slot: Option<super::super::handle::Slot>,
     },
-    Ping {
-        ack_tx: oneshot::Sender<()>,
-    },
+    Ping(super::Ping),
+}
+
+const _: () = assert!(
+    size_of::<DriverCommand>() <= 112,
+    "DriverCommand is copied into the driver queue after the channel unboxes it"
+);
+
+pub(super) type CommandSlot = Box<DriverCommand>;
+
+const _: () = assert!(
+    size_of::<CommandSlot>() == size_of::<usize>(),
+    "the command channel stores a box, not the enum"
+);
+
+#[derive(Default)]
+struct Queue {
+    queued: AtomicUsize,
+    space: Notify,
+}
+
+#[derive(Clone)]
+pub(crate) struct CommandTx {
+    tx: mpsc::UnboundedSender<CommandSlot>,
+    queue: Arc<Queue>,
+    capacity: usize,
+}
+
+pub(super) struct CommandRx {
+    rx: mpsc::UnboundedReceiver<CommandSlot>,
+    queue: Arc<Queue>,
+    capacity: usize,
+}
+
+pub(super) fn command_channel(capacity: usize) -> (CommandTx, CommandRx) {
+    let (tx, rx) = mpsc::unbounded_channel();
+    let queue = Arc::new(Queue::default());
+    (
+        CommandTx {
+            tx,
+            queue: Arc::clone(&queue),
+            capacity,
+        },
+        CommandRx {
+            rx,
+            queue,
+            capacity,
+        },
+    )
+}
+
+impl CommandTx {
+    pub(crate) async fn send(
+        &self,
+        cmd: DriverCommand,
+    ) -> Result<(), mpsc::error::SendError<DriverCommand>> {
+        let mut waited = false;
+        loop {
+            if self.queue.queued.fetch_add(1, Ordering::AcqRel) < self.capacity {
+                let sent = self.tx.send(Box::new(cmd)).map_err(|err| {
+                    self.queue.queued.fetch_sub(1, Ordering::AcqRel);
+                    mpsc::error::SendError(*err.0)
+                });
+                if waited && self.queue.queued.load(Ordering::Acquire) < self.capacity {
+                    self.queue.space.notify_one();
+                }
+                return sent;
+            }
+            self.queue.queued.fetch_sub(1, Ordering::AcqRel);
+            let space = self.queue.space.notified();
+            tokio::pin!(space);
+            space.as_mut().enable();
+            if self.tx.is_closed() {
+                return Err(mpsc::error::SendError(cmd));
+            }
+            if self.queue.queued.load(Ordering::Acquire) >= self.capacity {
+                space.await;
+                waited = true;
+            }
+        }
+    }
+}
+
+impl Drop for CommandRx {
+    fn drop(&mut self) {
+        self.rx.close();
+        self.queue.space.notify_waiters();
+    }
+}
+
+impl CommandRx {
+    pub(super) fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<DriverCommand>> {
+        self.rx
+            .poll_recv(cx)
+            .map(|cmd| cmd.map(|boxed| self.taken(*boxed)))
+    }
+
+    pub(super) fn try_recv(&mut self) -> Result<DriverCommand, mpsc::error::TryRecvError> {
+        self.rx.try_recv().map(|boxed| self.taken(*boxed))
+    }
+
+    fn taken(&self, cmd: DriverCommand) -> DriverCommand {
+        if self.queue.queued.fetch_sub(1, Ordering::AcqRel) >= self.capacity {
+            self.queue.space.notify_one();
+        }
+        cmd
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.rx.len()
+    }
 }
 
 impl DriverCommand {
@@ -54,7 +175,7 @@ impl DriverCommand {
             DriverCommand::SendRequest { sink, .. } => sink.is_cancelled(),
             #[cfg(feature = "websocket")]
             DriverCommand::OpenConnect { sink, .. } => sink.is_cancelled(),
-            DriverCommand::Ping { ack_tx } => ack_tx.is_closed(),
+            DriverCommand::Ping(_) => false,
         }
     }
 
@@ -63,10 +184,14 @@ impl DriverCommand {
             DriverCommand::SendRequest { sink, .. } => Some(sink),
             #[cfg(feature = "websocket")]
             DriverCommand::OpenConnect { sink, .. } => Some(sink),
-            DriverCommand::Ping { .. } => None,
+            DriverCommand::Ping(_) => None,
         }
     }
 }
 
+#[cfg(test)]
+mod command_channel_tests;
+#[cfg(kani)]
+mod flow_control_proofs;
 #[cfg(test)]
 mod flow_control_tests;

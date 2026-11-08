@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 mod builder;
-pub(crate) mod decompress;
-pub(crate) mod execute;
+mod cache;
+mod execute;
+mod guard;
 mod header_merge;
 mod helpers;
 mod identity;
@@ -18,19 +19,12 @@ pub(crate) use identity::Identity;
 
 use std::sync::Arc;
 
-use url::Url;
-
-use crate::cookie::Jar;
-#[cfg(feature = "websocket")]
-use crate::core::WebSocketOptions;
-use crate::core::retry::Retry;
-use crate::core::{BodyRules, Proxy, Redirect, Timeout};
 use crate::h2::H2Config;
 use crate::header_str::HeaderStr;
-use crate::pool::Pool;
-use crate::profile::{Browser, ChromiumBrand, HeaderStyle, Platform};
+use crate::pool::{Pool, Route};
+use crate::profile::preset::HeaderPlan;
+use crate::profile::{Browser, Platform};
 use crate::tls::FingerprintConnector;
-use crate::tls::Tls;
 
 /// The HTTP version policy a session uses to send requests.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -53,8 +47,48 @@ pub enum Protocol {
 impl Protocol {
     #[cfg(feature = "http3")]
     pub(crate) fn requires_h3(self) -> bool {
-        matches!(self, Self::Http3 | Self::Race)
+        !matches!(self.plan(), Plan::Tcp(_))
     }
+
+    fn plan(self) -> Plan {
+        match self {
+            Self::Auto => Plan::Tcp(Route::Auto),
+            Self::Http1 => Plan::Tcp(Route::Http1),
+            Self::Http2 => Plan::Tcp(Route::Http2),
+            #[cfg(feature = "http3")]
+            Self::Http3 => Plan::H3Only,
+            #[cfg(feature = "http3")]
+            Self::Race => Plan::H3First,
+        }
+    }
+
+    fn tcp_route(self) -> Option<Route> {
+        match self.plan() {
+            Plan::Tcp(route) => Some(route),
+            #[cfg(feature = "http3")]
+            Plan::H3First => Some(Route::Auto),
+            #[cfg(feature = "http3")]
+            Plan::H3Only => None,
+        }
+    }
+
+    fn dials_h2(self) -> bool {
+        self.tcp_route().is_some_and(|route| route != Route::Http1)
+    }
+
+    fn tcp_offers_h2(self) -> bool {
+        self.tcp_route().unwrap_or(Route::Auto) != Route::Http1
+    }
+}
+
+/// Where a protocol policy sends a request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Plan {
+    Tcp(Route),
+    #[cfg(feature = "http3")]
+    H3Only,
+    #[cfg(feature = "http3")]
+    H3First,
 }
 
 #[doc = include_str!("../../../docs/session.md")]
@@ -67,46 +101,28 @@ pub struct Session {
 pub(crate) struct SessionInner {
     browser: Option<Browser>,
     impersonates: bool,
-    header_style: HeaderStyle,
+    header_plan: Arc<HeaderPlan>,
     identity: Option<Identity>,
     platform: Platform,
-    brand: ChromiumBrand,
     user_agent: HeaderStr,
     sec_ch_ua: HeaderStr,
     accept_language: HeaderStr,
     header_order: Option<Vec<String>>,
-    default_headers: Vec<(String, String)>,
-    bearer: Option<builder::BearerToken>,
-    proxy_config: Proxy,
+    default_headers: Vec<(String, HeaderStr)>,
+    cache: Option<Arc<cache::Cache>>,
     proxy_shown: Option<String>,
-    timeouts: Timeout,
-    redirect_policy: Redirect,
-    compression: BodyRules,
-    #[cfg(feature = "websocket")]
-    websocket_config: WebSocketOptions,
-    https_only: bool,
-    cookie_jar: Jar,
     connector: FingerprintConnector,
     h2_config: H2Config,
     pool: Arc<Pool>,
-    shutdown: tokio_util::sync::CancellationToken,
+    hsts: Arc<std::sync::Mutex<crate::core::hsts::HstsStore>>,
+    shutdown: Arc<crate::core::shutdown::Shutdown>,
     writers: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
-    protocol_policy: Protocol,
-    default_retry: Retry,
     #[cfg(feature = "http3")]
     h3_config: Option<crate::quic::H3Config>,
-    tls_trust: Tls,
     profile: Arc<crate::profile::BrowserProfile>,
-    base_url: Option<Url>,
-    languages: Option<Vec<String>>,
-    host_limits: crate::core::config::HostLimits,
-    #[cfg(feature = "html")]
-    crawl_limits: Arc<std::sync::OnceLock<crate::core::config::HostLimits>>,
-    #[cfg(feature = "html")]
-    crawl_pace: Option<crate::core::config::HostLimits>,
-    proxy_pool: Option<crate::core::proxy_pool::ProxyPool>,
-    block_rules: crate::core::block::Rules,
-    inputs: Arc<SessionBuilder>,
-    trace: Option<Arc<dyn crate::trace::Trace>>,
+    host_limits: crate::core::config::HostGates,
+    extra_gates: Option<crate::core::config::HostGates>,
+    inputs: SessionBuilder,
+    header_id: crate::core::request_headers::HeaderId,
 }

@@ -16,7 +16,7 @@ async fn a_crawl_follows_a_redirected_seed_to_its_new_host() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
+    let mut crawl = brisk()
         .crawl(seed.url("/"))
         .respect(Respect::Robots)
         .scope(Scope::Host);
@@ -43,7 +43,7 @@ async fn a_crawl_keeps_a_page_that_redirects_back_to_itself_through_a_check() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -61,8 +61,8 @@ async fn a_domain_crawl_from_an_address_stays_on_that_address() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
-        .scope(Scope::Domain)
-        .host_limits(leyline::HostLimits::new());
+        .host_limits(unpaced())
+        .scope(Scope::Domain);
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -165,8 +165,8 @@ async fn a_prefix_crawl_keeps_a_dotted_directory_as_its_prefix() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/v2.0"))
-        .scope(Scope::Prefix)
-        .host_limits(leyline::HostLimits::new());
+        .host_limits(unpaced())
+        .scope(Scope::Prefix);
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -185,8 +185,8 @@ async fn a_prefix_crawl_from_a_dotted_directory_ending_in_a_slash_stays_inside_i
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/docs.old/"))
-        .scope(Scope::Prefix)
-        .host_limits(leyline::HostLimits::new());
+        .host_limits(unpaced())
+        .scope(Scope::Prefix);
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -208,9 +208,7 @@ async fn a_crawl_counts_a_redirect_that_leaves_its_scope() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }

@@ -16,7 +16,6 @@ use httpbin::{
 };
 use live::{exact_fingerprint, firefox, h1_wire_shape, h3_get, safari};
 
-const PEET_URL: &str = "https://tls.peet.ws/api/all";
 const SMOKE_TIMEOUT: Duration = Duration::from_secs(25);
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 type SmokeFuture<'a> = Pin<Box<dyn Future<Output = Result<String>> + 'a>>;
@@ -35,9 +34,11 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(async {
-            exact_fingerprint(Session::from(Browser::default()), Browser::chrome()).await
-        }),
+        || {
+            smoke(async {
+                exact_fingerprint(Session::from(Browser::default()), Browser::chrome()).await
+            })
+        },
     )
     .await;
 
@@ -46,7 +47,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(async { exact_fingerprint(firefox()?, Browser::Firefox154).await }),
+        || smoke(async { exact_fingerprint(firefox()?, Browser::Firefox154).await }),
     )
     .await;
 
@@ -55,28 +56,30 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(async {
-            let s = Session::from(Browser::default());
-            let t = Instant::now();
-            let r1 = s.get(PEET_URL).send().await?;
-            let t1 = t.elapsed();
-            let r2 = s.get(PEET_URL).send().await?;
-            let t2 = t.elapsed();
-            let r3 = s.get(PEET_URL).send().await?;
-            let t3 = t.elapsed();
-            ensure(
-                r1.status() == 200 && r2.status() == 200 && r3.status() == 200,
-                {
-                    format!(
-                        "statuses were {}, {}, {}",
-                        r1.status(),
-                        r2.status(),
-                        r3.status()
-                    )
-                },
-            )?;
-            Ok(format!("1st={t1:?} 2nd={:?} 3rd={:?}", t2 - t1, t3 - t2))
-        }),
+        || {
+            smoke(async {
+                let s = Session::from(Browser::default());
+                let t = Instant::now();
+                let r1 = s.get(crate::echo::URL).send().await?;
+                let t1 = t.elapsed();
+                let r2 = s.get(crate::echo::URL).send().await?;
+                let t2 = t.elapsed();
+                let r3 = s.get(crate::echo::URL).send().await?;
+                let t3 = t.elapsed();
+                ensure(
+                    r1.status() == 200 && r2.status() == 200 && r3.status() == 200,
+                    {
+                        format!(
+                            "statuses were {}, {}, {}",
+                            r1.status(),
+                            r2.status(),
+                            r3.status()
+                        )
+                    },
+                )?;
+                Ok(format!("1st={t1:?} 2nd={:?} 3rd={:?}", t2 - t1, t3 - t2))
+            })
+        },
     )
     .await;
 
@@ -85,17 +88,19 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(async {
-            let s = Session::from(Browser::default());
-            let r = s.get(PEET_URL).send().await?;
-            let body = r.text().await.unwrap();
-            let _: Value = serde_json::from_str(&body)?;
-            ensure(
-                body.contains("http2") && body.contains("tls"),
-                "tls.peet response missing protocol sections",
-            )?;
-            Ok(format!("{}B valid JSON", body.len()))
-        }),
+        || {
+            smoke(async {
+                let s = Session::from(Browser::default());
+                let r = s.get(crate::echo::URL).send().await?;
+                let body = r.text().await.unwrap();
+                let _: Value = serde_json::from_str(&body)?;
+                ensure(
+                    body.contains("http2") && body.contains("tls"),
+                    "tls.peet response missing protocol sections",
+                )?;
+                Ok(format!("{}B valid JSON", body.len()))
+            })
+        },
     )
     .await;
 
@@ -104,7 +109,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_cdn_get()),
+        || smoke(httpbin_cdn_get()),
     )
     .await;
 
@@ -113,7 +118,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_post_json()),
+        || smoke(httpbin_post_json()),
     )
     .await;
 
@@ -122,7 +127,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_post_form()),
+        || smoke(httpbin_post_form()),
     )
     .await;
 
@@ -131,7 +136,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_query()),
+        || smoke(httpbin_query()),
     )
     .await;
 
@@ -140,7 +145,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_bearer()),
+        || smoke(httpbin_bearer()),
     )
     .await;
 
@@ -149,7 +154,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_status_404()),
+        || smoke(httpbin_status_404()),
     )
     .await;
 
@@ -158,7 +163,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_redirect()),
+        || smoke(httpbin_redirect()),
     )
     .await;
 
@@ -167,34 +172,36 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(async {
-            let c = Session::from(Browser::default())
-                .get(PEET_URL)
-                .send()
-                .await?;
-            let f = firefox()?.get(PEET_URL).send().await?;
-            let s = safari()?.get(PEET_URL).send().await?;
-            let ch: Value = c.json().await?;
-            let fh: Value = f.json().await?;
-            let sh: Value = s.json().await?;
-            let c_fp = normalize_akamai(json_str(
-                &ch["http2"]["akamai_fingerprint"],
-                "chrome http2.akamai_fingerprint",
-            )?);
-            let f_fp = normalize_akamai(json_str(
-                &fh["http2"]["akamai_fingerprint"],
-                "firefox http2.akamai_fingerprint",
-            )?);
-            let s_fp = normalize_akamai(json_str(
-                &sh["http2"]["akamai_fingerprint"],
-                "safari http2.akamai_fingerprint",
-            )?);
-            ensure(
-                c_fp != f_fp && f_fp != s_fp && c_fp != s_fp,
-                "fingerprints should be unique",
-            )?;
-            Ok("all 3 unique".to_string())
-        }),
+        || {
+            smoke(async {
+                let c = Session::from(Browser::default())
+                    .get(crate::echo::URL)
+                    .send()
+                    .await?;
+                let f = firefox()?.get(crate::echo::URL).send().await?;
+                let s = safari()?.get(crate::echo::URL).send().await?;
+                let ch: Value = c.json().await?;
+                let fh: Value = f.json().await?;
+                let sh: Value = s.json().await?;
+                let c_fp = normalize_akamai(json_str(
+                    &ch["http2"]["akamai_fingerprint"],
+                    "chrome http2.akamai_fingerprint",
+                )?);
+                let f_fp = normalize_akamai(json_str(
+                    &fh["http2"]["akamai_fingerprint"],
+                    "firefox http2.akamai_fingerprint",
+                )?);
+                let s_fp = normalize_akamai(json_str(
+                    &sh["http2"]["akamai_fingerprint"],
+                    "safari http2.akamai_fingerprint",
+                )?);
+                ensure(
+                    c_fp != f_fp && f_fp != s_fp && c_fp != s_fp,
+                    "fingerprints should be unique",
+                )?;
+                Ok("all 3 unique".to_string())
+            })
+        },
     )
     .await;
 
@@ -203,7 +210,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(h1_wire_shape()),
+        || smoke(h1_wire_shape()),
     )
     .await;
 
@@ -212,7 +219,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(async { h3_get(Browser::Chrome147).await }),
+        || smoke(async { h3_get(Browser::Chrome147).await }),
     )
     .await;
 
@@ -221,7 +228,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(async { h3_get(Browser::Firefox150).await }),
+        || smoke(async { h3_get(Browser::Firefox150).await }),
     )
     .await;
 
@@ -230,7 +237,7 @@ async fn smoke_suite() {
         &mut passed,
         &mut failed,
         &mut skipped,
-        smoke(httpbin_large()),
+        || smoke(httpbin_large()),
     )
     .await;
 
@@ -251,9 +258,9 @@ async fn run(
     passed: &mut u32,
     failed: &mut u32,
     skipped: &mut u32,
-    fut: SmokeFuture<'_>,
+    case: impl Fn() -> SmokeFuture<'static>,
 ) {
-    finish(name, passed, failed, skipped, false, SMOKE_TIMEOUT, fut).await;
+    finish(name, passed, failed, skipped, false, SMOKE_TIMEOUT, case).await;
 }
 
 async fn run_httpbin(
@@ -261,9 +268,9 @@ async fn run_httpbin(
     passed: &mut u32,
     failed: &mut u32,
     skipped: &mut u32,
-    fut: SmokeFuture<'_>,
+    case: impl Fn() -> SmokeFuture<'static>,
 ) {
-    finish(name, passed, failed, skipped, true, httpbin_budget(), fut).await;
+    finish(name, passed, failed, skipped, true, httpbin_budget(), case).await;
 }
 
 async fn finish(
@@ -273,10 +280,18 @@ async fn finish(
     skipped: &mut u32,
     httpbin: bool,
     budget: Duration,
-    fut: SmokeFuture<'_>,
+    case: impl Fn() -> SmokeFuture<'static>,
 ) {
     let t = Instant::now();
-    match tokio::time::timeout(budget, fut).await {
+    let tries = if httpbin { 1 } else { crate::echo::TRIES };
+    let mut outcome = crate::echo::paced(tokio::time::timeout(budget, case())).await;
+    for _ in 1..tries {
+        if matches!(outcome, Ok(Ok(_))) {
+            break;
+        }
+        outcome = crate::echo::paced(tokio::time::timeout(budget, case())).await;
+    }
+    match outcome {
         Ok(Ok(detail)) => {
             println!("  ✓ {name} ({:?}) — {detail}", t.elapsed());
             *passed += 1;

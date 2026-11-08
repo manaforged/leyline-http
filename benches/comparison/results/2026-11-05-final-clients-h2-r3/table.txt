@@ -1,0 +1,47 @@
+1 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline-cores        52114    4.5%      34796       -294      10.21      4     -
+       leyline              51993   12.8%      34780       -310      10.23      4     -
+       h2                   51567    5.6%      35090         +0      10.19      4     -
+       hyper                42182   10.8%      53989     +18899      18.55      4     -
+       curl                 42164    8.3%     116278     +81188      19.14      4     -
+       nethttp              38961    5.4%      99944     +64854      21.92      4     -
+       reqwest              34929    6.5%      94650     +59560      24.75      4     -
+
+1c64   lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline             206307    1.0%      30631       -271       8.13      4     1
+       hyper               183381    2.1%      45919     +15017      17.20      4     1
+       reqwest             181283    1.7%      78091     +47190      21.99      4     1
+       h2                  168892   13.6%      30902         +0      13.56      4     1
+       leyline-cores       166924    2.6%      28794      -2108       4.56      4     1
+       nethttp             101245    4.2%     101522     +70620      23.78      4     1
+       curl                 97339    4.9%      98816     +67914      10.27      4     1
+
+8c8    lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline-cores       316345    6.7%      33207      -2080      11.51      4     8
+       hyper               276465   15.0%      52134     +16847      16.57      4     8
+       h2                  271757    6.2%      35287         +0      10.87      4     8
+       leyline             270719    3.5%      35296         +9      11.68      4     8
+       nethttp             244804    8.1%      73182     +37895      18.64      4     8
+       reqwest             227841    5.5%      84659     +49373      21.82      4     8
+       curl                211625   10.2%     116187     +80900      28.45      4     8
+
+8c256  lib                  req/s  spread  instr/req    over h2 cpu_us/req rounds conns
+       leyline-cores      1409526    2.4%      26408       -937       4.20      4     8
+       leyline            1303094    9.6%      27156       -190       6.53      4     8
+       h2                 1205713    4.5%      27345         +0       9.87      4     8
+       hyper              1128585    9.4%      40928     +13582      11.88      4     8
+       reqwest             843585    7.1%      73408     +46063      15.76      4     8
+       curl                594787   40.0%      98042     +70696      12.17      4     8
+       nethttp             562784   39.6%      81767     +54421      22.63      4     8
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline           vs h2         req/s 1.013 [0.897, 1.144] tie; CPU/req 1.016 [0.916, 1.128] same CPU; single-run, 4 rounds
+seq    leyline-cores     vs h2         req/s 0.999 [0.967, 1.032] tie; CPU/req 1.012 [0.955, 1.072] same CPU; single-run, 4 rounds
+1c64   leyline           vs hyper      req/s 1.121 [1.097, 1.145] ahead; CPU/req 0.477 [0.450, 0.505] less CPU; single-run, 4 rounds
+1c64   leyline-cores     vs hyper      req/s 0.905 [0.887, 0.923] behind; CPU/req 0.269 [0.259, 0.281] less CPU; single-run, 4 rounds
+8c8    leyline           vs hyper      req/s 0.960 [0.881, 1.046] tie; CPU/req 0.700 [0.647, 0.757] less CPU; single-run, 4 rounds
+8c8    leyline-cores     vs hyper      req/s 1.112 [0.993, 1.245] tie; CPU/req 0.712 [0.642, 0.788] less CPU; single-run, 4 rounds
+8c256  leyline           vs h2         req/s 1.084 [1.037, 1.134] ahead; CPU/req 0.676 [0.643, 0.710] less CPU; single-run, 4 rounds
+8c256  leyline-cores     vs h2         req/s 1.171 [1.142, 1.201] ahead; CPU/req 0.428 [0.386, 0.475] less CPU; single-run, 4 rounds

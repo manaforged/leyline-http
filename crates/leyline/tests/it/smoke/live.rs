@@ -2,12 +2,12 @@ use leyline::{Browser, Platform, Protocol, Session};
 use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use super::{PEET_URL, Result, ensure, json_str, normalize_akamai};
+use super::{Result, ensure, json_str, normalize_akamai};
 
 const H3_GET_HOST: &str = "cloudflare-quic.com";
 
 pub(super) async fn exact_fingerprint(session: Session, browser: Browser) -> Result<String> {
-    let r = session.get(PEET_URL).send().await?;
+    let r = session.get(crate::echo::URL).send().await?;
     ensure(r.status() == 200, format!("status={}", r.status()))?;
     let v: Value = r.json().await?;
 
@@ -17,7 +17,7 @@ pub(super) async fn exact_fingerprint(session: Session, browser: Browser) -> Res
         "http2.akamai_fingerprint",
     )?);
 
-    let profile = browser.profile();
+    let profile = leyline::internals::browser_profile(browser);
     let expected_ja4 = profile
         .tls
         .fingerprint

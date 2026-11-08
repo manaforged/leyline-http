@@ -1,6 +1,7 @@
-use leyline::h2::H2Config;
-use leyline::profile::{H2Profile, ProfileRegistry};
-use leyline::{Browser, BrowserProfile, TlsContext, TlsMinVersion};
+use leyline::internals::BrowserProfile;
+use leyline::internals::h2::H2Config;
+use leyline::internals::profile::{H2Profile, ProfileRegistry};
+use leyline::{Browser, TlsMinVersion};
 
 fn chrome_h2() -> H2Profile {
     chrome_profile().h2
@@ -77,9 +78,12 @@ fn missing_connection_window_is_rejected() {
 #[cfg(feature = "http3")]
 #[test]
 fn profile_without_h3_table_has_no_h3_config() {
-    use leyline::H3Config;
+    use leyline::internals::H3Config;
     assert!(
-        H3Config::from_profile(Browser::OkHttpAndroid10.profile()).is_err(),
+        H3Config::from_profile(leyline::internals::browser_profile(
+            Browser::OkHttpAndroid10
+        ))
+        .is_err(),
         "okhttp silently received an H3 config it has no fingerprint for"
     );
     assert!(
@@ -91,11 +95,14 @@ fn profile_without_h3_table_has_no_h3_config() {
 #[cfg(feature = "http3")]
 #[test]
 fn firefox_profile_carries_firefox_h3_not_chrome() {
-    use leyline::H3Config;
-    let firefox = H3Config::from_profile(Browser::Firefox154.profile()).expect("firefox h3");
-    let chrome = H3Config::from_profile(Browser::Chrome152.profile()).expect("chrome h3");
+    use leyline::internals::H3Config;
+    let firefox = H3Config::from_profile(leyline::internals::browser_profile(Browser::Firefox154))
+        .expect("firefox h3");
+    let chrome = H3Config::from_profile(leyline::internals::browser_profile(Browser::Chrome152))
+        .expect("chrome h3");
     assert_ne!(
-        firefox.initial_max_data, chrome.initial_max_data,
+        firefox.h3().initial_max_data,
+        chrome.h3().initial_max_data,
         "firefox is still resolving to Chrome's H3 params"
     );
 }
@@ -113,7 +120,7 @@ fn qpack() {
         );
     }
     for browser in Browser::all().iter().copied() {
-        let Some(h3) = browser.profile().h3.as_ref() else {
+        let Some(h3) = leyline::internals::browser_profile(browser).h3.as_ref() else {
             continue;
         };
         let setting = |id: u64| {
@@ -133,7 +140,7 @@ fn qpack() {
         } else {
             legacy
         };
-        let meta = &browser.profile().meta;
+        let meta = &leyline::internals::browser_profile(browser).meta;
         let base = format!("{}-{}", meta.browser, meta.version);
         let expected = captured.get(base.as_str()).copied().unwrap_or((0, 0));
         assert_eq!(advertised, expected, "{browser}");
@@ -145,7 +152,7 @@ fn unknown_cert_compression_algorithm_is_rejected() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["frobnicate".into()];
     assert!(
-        TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_err(),
+        leyline::internals::tls::context(&profile, TlsMinVersion::Tls13).is_err(),
         "a garbage cert-compression algorithm name was silently dropped from the ClientHello"
     );
 }
@@ -160,7 +167,7 @@ fn real_cert_compression_codepoints_still_build() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["zlib".into(), "brotli".into(), "zstd".into()];
     assert!(
-        TlsContext::from_profile(&profile, TlsMinVersion::Tls13).is_ok(),
+        leyline::internals::tls::context(&profile, TlsMinVersion::Tls13).is_ok(),
         "a real RFC 8879 cert-compression list (as Firefox ships) failed to build"
     );
 }
@@ -170,7 +177,7 @@ fn real_cert_compression_codepoints_still_build() {
 fn cert_compression_without_its_feature_names_the_feature() {
     let mut profile = chrome_profile();
     profile.tls.cert_compression = vec!["zstd".into()];
-    let err = match TlsContext::from_profile(&profile, TlsMinVersion::Tls13) {
+    let err = match leyline::internals::tls::context(&profile, TlsMinVersion::Tls13) {
         Err(err) => err,
         Ok(_) => panic!("zstd cert decompression built with `compression-zstd` off"),
     };

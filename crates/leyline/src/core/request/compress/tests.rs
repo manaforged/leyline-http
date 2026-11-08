@@ -1,82 +1,89 @@
-use super::*;
+#[cfg(not(leyline_all_codecs))]
+use super::encode;
+use crate::profile::Encoding;
 
-#[test]
-fn header_tokens() {
-    assert_eq!(Encoding::Gzip.header_value(), "gzip");
-    assert_eq!(Encoding::Brotli.header_value(), "br");
-    assert_eq!(Encoding::Zstd.header_value(), "zstd");
-    assert_eq!(Encoding::Deflate.header_value(), "deflate");
-}
-
-#[cfg(any(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-zstd",
-    feature = "compression-deflate"
-))]
+#[cfg(leyline_any_codec)]
 fn sample() -> Vec<u8> {
     b"the quick brown fox jumps over the lazy dog. ".repeat(16)
 }
 
+#[cfg(leyline_any_codec)]
+async fn sent(encoding: Encoding) -> (String, Vec<u8>) {
+    use crate::testing::{Response, Server};
+    let server = Server::http(|_: &crate::testing::Request| Response::new(200))
+        .await
+        .expect("server starts");
+    let session = crate::Session::builder()
+        .protocol(crate::Protocol::Http1)
+        .proxy(crate::Proxy::new().env(false))
+        .build()
+        .expect("session");
+    let response = session
+        .post(server.url("/upload"))
+        .body(sample())
+        .compress_body(encoding)
+        .send()
+        .await
+        .expect("response");
+    assert_eq!(response.status(), 200);
+    let requests = server.requests().await;
+    let request = requests.first().expect("one request");
+    let token = request
+        .header("content-encoding")
+        .expect("content-encoding");
+    assert!(request.body.len() < sample().len());
+    (token.to_owned(), request.body.clone())
+}
+
 #[cfg(feature = "compression-gzip")]
-#[test]
-fn gzip_roundtrips_and_shrinks() {
+#[tokio::test]
+async fn gzip_reaches_the_server_as_gzip() {
     use std::io::Read;
-    let data = sample();
-    let enc = Encoding::Gzip.encode(&data).unwrap();
-    assert!(enc.len() < data.len());
+    let (token, wire) = sent(Encoding::Gzip).await;
+    assert_eq!(token, "gzip");
     let mut out = Vec::new();
-    flate2::read::GzDecoder::new(&enc[..])
+    flate2::read::GzDecoder::new(&wire[..])
         .read_to_end(&mut out)
         .unwrap();
-    assert_eq!(out, data);
+    assert_eq!(out, sample());
 }
 
 #[cfg(feature = "compression-brotli")]
-#[test]
-fn brotli_roundtrips_and_shrinks() {
+#[tokio::test]
+async fn brotli_reaches_the_server_as_br() {
     use std::io::Read;
-    let data = sample();
-    let enc = Encoding::Brotli.encode(&data).unwrap();
-    assert!(enc.len() < data.len());
+    let (token, wire) = sent(Encoding::Brotli).await;
+    assert_eq!(token, "br");
     let mut out = Vec::new();
-    brotli::Decompressor::new(&enc[..], 4096)
+    brotli::Decompressor::new(&wire[..], 4096)
         .read_to_end(&mut out)
         .unwrap();
-    assert_eq!(out, data);
+    assert_eq!(out, sample());
 }
 
 #[cfg(feature = "compression-zstd")]
-#[test]
-fn zstd_roundtrips_and_shrinks() {
-    let data = sample();
-    let enc = Encoding::Zstd.encode(&data).unwrap();
-    assert!(enc.len() < data.len());
-    let out = zstd::decode_all(&enc[..]).unwrap();
-    assert_eq!(out, data);
+#[tokio::test]
+async fn zstd_reaches_the_server_as_zstd() {
+    let (token, wire) = sent(Encoding::Zstd).await;
+    assert_eq!(token, "zstd");
+    assert_eq!(zstd::decode_all(&wire[..]).unwrap(), sample());
 }
 
 #[cfg(feature = "compression-deflate")]
-#[test]
-fn deflate_roundtrips_zlib_wrapped() {
+#[tokio::test]
+async fn deflate_reaches_the_server_zlib_wrapped() {
     use std::io::Read;
-    let data = sample();
-    let enc = Encoding::Deflate.encode(&data).unwrap();
-    assert!(enc.len() < data.len());
-    assert_eq!(enc.first(), Some(&0x78));
+    let (token, wire) = sent(Encoding::Deflate).await;
+    assert_eq!(token, "deflate");
+    assert_eq!(wire.first(), Some(&0x78));
     let mut out = Vec::new();
-    flate2::read::ZlibDecoder::new(&enc[..])
+    flate2::read::ZlibDecoder::new(&wire[..])
         .read_to_end(&mut out)
         .unwrap();
-    assert_eq!(out, data);
+    assert_eq!(out, sample());
 }
 
-#[cfg(not(all(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-zstd",
-    feature = "compression-deflate"
-)))]
+#[cfg(not(leyline_all_codecs))]
 #[test]
 fn disabled_codecs_return_body_errors() {
     for (encoding, enabled, feature) in [
@@ -102,10 +109,8 @@ fn disabled_codecs_return_body_errors() {
         ),
     ] {
         if !enabled {
-            let error = encoding
-                .encode(b"request body")
-                .expect_err("disabled codec must fail");
-            assert_eq!(error.kind(), crate::core::Cause::Body);
+            let error = encode(encoding, b"request body").expect_err("disabled codec must fail");
+            assert_eq!(error.kind(), crate::error::Kind::Body);
             assert!(error.message().expect("feature guidance").contains(feature));
         }
     }

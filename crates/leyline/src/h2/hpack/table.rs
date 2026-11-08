@@ -1,8 +1,10 @@
 use std::collections::VecDeque;
+use std::sync::LazyLock;
 
 use bytes::Bytes;
+use http::{HeaderName, HeaderValue};
 
-use crate::h2::config::DEFAULT_HEADER_TABLE_SIZE;
+use crate::h2::frame::DEFAULT_HEADER_TABLE_SIZE;
 
 pub(crate) const ENTRY_OVERHEAD: usize = 32;
 
@@ -71,10 +73,33 @@ pub static STATIC_TABLE: &[(&str, &str)] = &[
     ("www-authenticate", ""),
 ];
 
+pub type Typed = Option<(HeaderName, HeaderValue)>;
+
+static STATIC_TYPED: LazyLock<Vec<Typed>> = LazyLock::new(|| {
+    STATIC_TABLE
+        .iter()
+        .map(|&(name, value)| {
+            (!name.is_empty() && !name.starts_with(':')).then(|| {
+                (
+                    HeaderName::from_static(name),
+                    HeaderValue::from_static(value),
+                )
+            })
+        })
+        .collect()
+});
+
+struct Entry {
+    name: Bytes,
+    value: Bytes,
+    typed: Typed,
+}
+
 pub struct DynamicTable {
-    entries: VecDeque<(Bytes, Bytes)>,
+    entries: VecDeque<Entry>,
     size: usize,
     max_size: usize,
+    inserted: u64,
 }
 
 impl DynamicTable {
@@ -83,6 +108,7 @@ impl DynamicTable {
             entries: VecDeque::new(),
             size: 0,
             max_size: DEFAULT_HEADER_TABLE_SIZE as usize,
+            inserted: 0,
         }
     }
 
@@ -92,7 +118,12 @@ impl DynamicTable {
     }
 
     pub fn insert(&mut self, name: Bytes, value: Bytes) {
+        self.insert_typed(name, value, None);
+    }
+
+    pub fn insert_typed(&mut self, name: Bytes, value: Bytes, typed: Typed) {
         let entry_size = name.len() + value.len() + ENTRY_OVERHEAD;
+        self.inserted += 1;
 
         if entry_size > self.max_size {
             self.entries.clear();
@@ -100,23 +131,32 @@ impl DynamicTable {
             return;
         }
 
-        self.entries.push_front((name, value));
+        self.entries.push_front(Entry { name, value, typed });
         self.size += entry_size;
         self.evict();
     }
 
     pub fn get(&self, index: usize) -> Option<(&Bytes, &Bytes)> {
-        self.entries.get(index).map(|(n, v)| (n, v))
+        self.entries.get(index).map(|e| (&e.name, &e.value))
     }
 
     pub fn len(&self) -> usize {
         self.entries.len()
     }
 
+    pub fn inserted(&self) -> u64 {
+        self.inserted
+    }
+
+    pub fn position(&self, insertion: u64) -> Option<usize> {
+        let age = usize::try_from(self.inserted.checked_sub(insertion)?.checked_sub(1)?).ok()?;
+        (age < self.entries.len()).then_some(age)
+    }
+
     fn evict(&mut self) {
         while self.size > self.max_size {
             if let Some(old) = self.entries.pop_back() {
-                self.size -= old.0.len() + old.1.len() + ENTRY_OVERHEAD;
+                self.size -= old.name.len() + old.value.len() + ENTRY_OVERHEAD;
             } else {
                 break;
             }
@@ -140,6 +180,16 @@ pub fn lookup(index: usize, dynamic: &DynamicTable) -> Option<(Bytes, Bytes)> {
     } else {
         let dyn_index = index - STATIC_TABLE.len();
         dynamic.get(dyn_index).map(|(n, v)| (n.clone(), v.clone()))
+    }
+}
+
+pub fn entry(index: usize, dynamic: &DynamicTable) -> Option<(&[u8], &[u8], &Typed)> {
+    match STATIC_TABLE.get(index) {
+        Some((name, value)) => Some((name.as_bytes(), value.as_bytes(), &STATIC_TYPED[index])),
+        None => dynamic
+            .entries
+            .get(index - STATIC_TABLE.len())
+            .map(|e| (&e.name[..], &e.value[..], &e.typed)),
     }
 }
 

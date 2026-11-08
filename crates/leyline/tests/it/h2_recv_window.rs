@@ -4,11 +4,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::error::ErrorCode;
-use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody};
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::error::ErrorCode;
+use leyline::internals::h2::frame::FrameType;
+use leyline::internals::profile::SettingId;
 use support::*;
 use tokio::io::AsyncReadExt;
 
@@ -20,27 +22,11 @@ fn test_config() -> H2Config {
             (SettingId::InitialWindowSize, 65535),
             (SettingId::MaxFrameSize, 1_048_576),
         ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
@@ -55,7 +41,10 @@ fn small_stream_window_config() -> H2Config {
     cfg
 }
 
-type CowHeaders = Vec<(std::borrow::Cow<'static, str>, leyline::h2::HeaderStr)>;
+type CowHeaders = Vec<(
+    std::borrow::Cow<'static, str>,
+    leyline::internals::h2::HeaderStr,
+)>;
 
 fn get_req(path: &str) -> (PseudoHeaders, CowHeaders) {
     (
@@ -99,7 +88,7 @@ async fn connection_recv_window_overrun_kills_connection() {
         }
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -108,14 +97,7 @@ async fn connection_recv_window_overrun_kills_connection() {
         let handle = handle.clone();
         async move {
             handle
-                .send_shared(
-                    Arc::new(Head {
-                        pseudo: p,
-                        headers: h,
-                    }),
-                    RequestBody::None,
-                    false,
-                )
+                .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
                 .await
         }
     });
@@ -127,7 +109,7 @@ async fn connection_recv_window_overrun_kills_connection() {
         .expect("driver must terminate on a connection-window overrun")
         .expect_err("driver must report an error");
     match err {
-        leyline::h2::H2Error::Connection { code, reason } => {
+        leyline::internals::h2::H2Error::Connection { code, reason } => {
             assert_eq!(code, ErrorCode::FlowControlError, "wrong code: {reason}");
             assert!(
                 reason.contains("connection receive window"),
@@ -182,24 +164,17 @@ async fn stream_recv_window_overrun_rsts_stream_and_survives() {
         }
     });
 
-    let handle = leyline::h2::start(client_io, small_stream_window_config())
+    let handle = leyline::internals::h2::start(client_io, small_stream_window_config())
         .await
         .expect("handshake");
 
     let (p, h) = get_req("/");
     let req_result = handle
-        .send_shared(
-            Arc::new(Head {
-                pseudo: p,
-                headers: h,
-            }),
-            RequestBody::None,
-            false,
-        )
+        .send_shared(Arc::new(Head::new(p, h)), leyline::Body::default(), false)
         .await;
 
     match req_result {
-        Err(leyline::h2::H2Error::Stream { stream_id, code }) => {
+        Err(leyline::internals::h2::H2Error::Stream { stream_id, code }) => {
             assert_eq!(stream_id, 1);
             assert_eq!(code, ErrorCode::FlowControlError);
         }

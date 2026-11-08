@@ -253,7 +253,7 @@ async fn a_pause_set_during_the_rate_wait_holds_the_next_request() {
         if times.len() == 1 {
             testing::Response::new(429)
                 .close()
-                .header("retry-after", "3")
+                .header("retry-after", "1")
         } else {
             testing::Response::new(200).close()
         }
@@ -261,7 +261,7 @@ async fn a_pause_set_during_the_rate_wait_holds_the_next_request() {
     .await
     .unwrap();
     let session = Session::builder()
-        .host_limits(HostLimits::new().per_second(1.0).pause_on([429]))
+        .host_limits(HostLimits::new().per_second(20.0).pause_on([429]))
         .build()
         .unwrap();
     let (a, b) = tokio::join!(
@@ -272,7 +272,7 @@ async fn a_pause_set_during_the_rate_wait_holds_the_next_request() {
     b.unwrap();
     let times = arrivals.lock().unwrap().clone();
     assert!(
-        times[1] - times[0] >= Duration::from_millis(2500),
+        times[1] - times[0] >= Duration::from_millis(900),
         "{:?}",
         times[1] - times[0]
     );

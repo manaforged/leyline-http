@@ -4,7 +4,7 @@ use leyline_bssl::pkey::PKey;
 use leyline_bssl::ssl::SslContextBuilder;
 
 use super::config::ClientIdentity;
-use super::identity::LoadedTrust;
+use super::identity::TrustKey;
 use crate::tls::error::TlsError;
 
 fn read(path: &Path) -> Result<Vec<u8>, TlsError> {
@@ -14,7 +14,7 @@ fn read(path: &Path) -> Result<Vec<u8>, TlsError> {
 pub(super) fn add_root_file(
     builder: &mut SslContextBuilder,
     path: &Path,
-    loaded: &mut LoadedTrust,
+    loaded: &mut TrustKey,
 ) -> Result<usize, TlsError> {
     let pem = read(path)?;
     let added = builder
@@ -28,7 +28,7 @@ pub(super) fn add_root_file(
 pub(super) fn set_client_identity(
     builder: &mut SslContextBuilder,
     identity: &ClientIdentity,
-    loaded: &mut LoadedTrust,
+    loaded: &mut TrustKey,
 ) -> Result<(), TlsError> {
     let chain = read(&identity.certificate_chain_file)?;
     builder

@@ -28,7 +28,7 @@ enable_push = false
 max_concurrent_streams = 100
 initial_stream_window_size = 2097152
 initial_connection_window_size = 5242880
-max_frame_size = 16384
+max_frame_size = 65536
 pseudo_order = ["method", "scheme", "authority", "path"]
 settings_order = [
     "header_table_size", "enable_push", "max_concurrent_streams",

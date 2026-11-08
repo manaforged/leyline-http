@@ -1,0 +1,15 @@
+[package]
+name = "pingora-cmp-client"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+bytes = "=1.12.1"
+http = "=1.5.0"
+pingora-core = { version = "=0.9.0", default-features = false, features = ["rustls"] }
+pingora-http = "=0.9.0"
+rustls = { version = "=0.23.46", default-features = false, features = ["aws-lc-rs"] }
+tokio = { version = "=1.53.1", features = ["rt-multi-thread", "macros", "time"] }

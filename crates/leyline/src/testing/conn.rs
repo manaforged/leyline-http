@@ -4,13 +4,12 @@ use std::sync::Arc;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::types::{CLOSE, CONNECTION, ChunkedBody, Handler, Recorder, Request, Response};
-use crate::pool::H1PooledError;
-use crate::pool::h1::MAX_H1_HEADER_BYTES;
-use crate::pool::h1::parse::{parse_h1_head, read_chunked_body};
+use crate::wire::h1::MAX_H1_HEADER_BYTES;
 
 const MAX_BODY_BYTES: usize = 64 * 1024 * 1024;
 const HEAD_END: &[u8] = b"\r\n\r\n";
 const READ_CHUNK: usize = 8192;
+const CRLF: &[u8] = b"\r\n";
 
 pub(super) async fn serve<S>(mut stream: S, handler: Handler, recorder: Recorder)
 where
@@ -64,8 +63,11 @@ where
     let (Some(method), Some(target)) = (parts.next(), parts.next()) else {
         return Err(invalid(format!("bad request line: {request_line}")));
     };
-    let (_, headers, _) =
-        parse_h1_head(&format!("HTTP/1.1 200 OK\r\n{header_block}")).map_err(to_io)?;
+    let headers = header_block
+        .split("\r\n")
+        .filter_map(|line| line.split_once(':'))
+        .map(|(name, value)| (name.to_owned(), value.trim().to_owned()))
+        .collect();
     let mut request = Request {
         method: method.to_owned(),
         target: target.to_owned(),
@@ -108,10 +110,7 @@ where
         .header("transfer-encoding")
         .is_some_and(|value| value.to_ascii_lowercase().contains("chunked"));
     if chunked {
-        let initial = std::mem::take(buf);
-        return read_chunked_body(stream, initial, MAX_BODY_BYTES)
-            .await
-            .map_err(to_io);
+        return read_chunked(stream, buf).await;
     }
     let length = match request.header("content-length") {
         Some(value) => value
@@ -125,6 +124,66 @@ where
             "request body exceeds {MAX_BODY_BYTES} bytes"
         )));
     }
+    fill(stream, buf, length).await?;
+    Ok(buf.drain(..length).collect())
+}
+
+async fn read_chunked<S>(stream: &mut S, buf: &mut Vec<u8>) -> io::Result<Vec<u8>>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut body = Vec::new();
+    loop {
+        let line = read_line(stream, buf).await?;
+        let digits = line.split(';').next().unwrap_or_default().trim();
+        let size = usize::from_str_radix(digits, 16)
+            .map_err(|err| invalid(format!("bad chunk size {line:?}: {err}")))?;
+        if size == 0 {
+            while !read_line(stream, buf).await?.is_empty() {}
+            return Ok(body);
+        }
+        if size > MAX_BODY_BYTES - body.len() {
+            return Err(invalid(format!(
+                "request body exceeds {MAX_BODY_BYTES} bytes"
+            )));
+        }
+        fill(stream, buf, size + CRLF.len()).await?;
+        if &buf[size..size + CRLF.len()] != CRLF {
+            return Err(invalid("chunk data does not end in CRLF".to_owned()));
+        }
+        body.extend_from_slice(&buf[..size]);
+        buf.drain(..size + CRLF.len());
+    }
+}
+
+async fn read_line<S>(stream: &mut S, buf: &mut Vec<u8>) -> io::Result<String>
+where
+    S: AsyncRead + Unpin,
+{
+    let mut chunk = [0u8; READ_CHUNK];
+    loop {
+        if let Some(end) = buf.windows(CRLF.len()).position(|w| w == CRLF) {
+            let line = String::from_utf8_lossy(&buf[..end]).into_owned();
+            buf.drain(..end + CRLF.len());
+            return Ok(line);
+        }
+        if buf.len() > MAX_H1_HEADER_BYTES {
+            return Err(invalid(format!(
+                "chunk line exceeds {MAX_H1_HEADER_BYTES} bytes"
+            )));
+        }
+        let read = stream.read(&mut chunk).await?;
+        if read == 0 {
+            return Err(io::Error::from(io::ErrorKind::UnexpectedEof));
+        }
+        buf.extend_from_slice(&chunk[..read]);
+    }
+}
+
+async fn fill<S>(stream: &mut S, buf: &mut Vec<u8>, length: usize) -> io::Result<()>
+where
+    S: AsyncRead + Unpin,
+{
     let mut chunk = [0u8; READ_CHUNK];
     while buf.len() < length {
         let read = stream.read(&mut chunk).await?;
@@ -133,7 +192,7 @@ where
         }
         buf.extend_from_slice(&chunk[..read]);
     }
-    Ok(buf.drain(..length).collect())
+    Ok(())
 }
 
 async fn write_response<S>(stream: &mut S, response: &Response, head_only: bool) -> io::Result<()>
@@ -198,8 +257,4 @@ where
 
 fn invalid(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, message)
-}
-
-fn to_io(err: H1PooledError) -> io::Error {
-    invalid(err.to_string())
 }

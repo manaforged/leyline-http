@@ -1,6 +1,6 @@
 use bytes::{BufMut, Bytes};
 
-use super::{FrameHeader, FrameType, be_u32};
+use super::{FrameHeader, FrameType, Scope, U31_MAX, be_u32, check_scope};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
@@ -13,12 +13,7 @@ pub struct GoAwayFrame {
 
 impl GoAwayFrame {
     pub fn parse(header: FrameHeader, payload: Bytes) -> Result<Self, H2Error> {
-        if header.stream_id != 0 {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "GOAWAY on non-zero stream".into(),
-            });
-        }
+        check_scope(&header, Scope::Connection, "GOAWAY")?;
         if payload.len() < 8 {
             return Err(H2Error::Connection {
                 code: ErrorCode::FrameSizeError,
@@ -26,8 +21,7 @@ impl GoAwayFrame {
             });
         }
 
-        let last_stream_id = be_u32(&payload[..4]);
-        let last_stream_id = last_stream_id & 0x7FFF_FFFF;
+        let last_stream_id = be_u32(&payload[..4]) & U31_MAX;
 
         let error_code = be_u32(&payload[4..8]);
 
@@ -53,7 +47,7 @@ impl GoAwayFrame {
             stream_id: 0,
         };
         header.encode(buf);
-        buf.put_u32(self.last_stream_id & 0x7FFF_FFFF);
+        buf.put_u32(self.last_stream_id & U31_MAX);
         buf.put_u32(self.error_code as u32);
         if !self.debug_data.is_empty() {
             buf.put_slice(&self.debug_data);

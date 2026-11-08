@@ -16,7 +16,7 @@ enum Context {
     Attribute,
 }
 
-pub(super) fn decode(text: &str) -> String {
+pub(crate) fn decode(text: &str) -> String {
     decode_in(text, Context::Text)
 }
 

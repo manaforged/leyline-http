@@ -4,7 +4,7 @@ use std::fmt::Write as _;
 use serde::Deserialize;
 
 use crate::preset_kind::RequestKind;
-use crate::{BuildResult, is_ident};
+use crate::{BuildResult, is_ident, rust_option};
 
 type Template = Vec<(String, String)>;
 
@@ -137,6 +137,59 @@ pub(crate) fn render_shapes(shapes: &BTreeMap<String, Shape>) -> BuildResult<Str
             shape.variant, shape.id
         )?;
     }
-    writeln!(out, "}}")?;
+    writeln!(out, "}}\n")?;
+    render_rows(&mut out, shapes)?;
     Ok(out)
+}
+
+pub(crate) fn style_variant<'a>(
+    shapes: &'a BTreeMap<String, Shape>,
+    key: &str,
+) -> BuildResult<&'a str> {
+    shapes
+        .get(key)
+        .map(|shape| shape.variant.as_str())
+        .ok_or_else(|| format!("header_style {key:?} is not in headers.toml").into())
+}
+
+fn render_template(template: &[(String, String)]) -> String {
+    let pairs: Vec<String> = template
+        .iter()
+        .map(|(name, value)| format!("({name:?}, {value:?})"))
+        .collect();
+    format!("&[{}]", pairs.join(", "))
+}
+
+fn render_row(shapes: &BTreeMap<String, Shape>, shape: &Shape) -> BuildResult<String> {
+    let mut presets: Vec<_> = shape.presets.iter().collect();
+    presets.sort_by_key(|(kind, _)| **kind as usize);
+    let presets: Vec<String> = presets
+        .into_iter()
+        .map(|(kind, template)| format!("(RequestKind::{kind:?}, {})", render_template(template)))
+        .collect();
+    let extends = match shape.extends.as_deref() {
+        Some(parent) => Some(format!("HeaderStyle::{}", style_variant(shapes, parent)?)),
+        None => None,
+    };
+    let order = shape.order.as_ref().map(|names| format!("&{names:?}"));
+    Ok(format!(
+        "    (HeaderStyle::{}, ShapeRow {{ fallback: {}, presets: &[{}], extends: {}, append: {}, order: {} }}),",
+        shape.variant,
+        rust_option(shape.fallback.as_deref().map(render_template)),
+        presets.join(", "),
+        rust_option(extends),
+        render_template(&shape.append),
+        rust_option(order),
+    ))
+}
+
+fn render_rows(out: &mut String, shapes: &BTreeMap<String, Shape>) -> BuildResult<()> {
+    let mut ordered: Vec<&Shape> = shapes.values().collect();
+    ordered.sort_by_key(|shape| shape.id);
+    writeln!(out, "static SHAPE_ROWS: &[(HeaderStyle, ShapeRow)] = &[")?;
+    for shape in ordered {
+        writeln!(out, "{}", render_row(shapes, shape)?)?;
+    }
+    writeln!(out, "];")?;
+    Ok(())
 }

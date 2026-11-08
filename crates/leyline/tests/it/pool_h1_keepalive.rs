@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-use leyline::pool::{H1Body, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
-use leyline::profile::ProfileRegistry;
-use leyline::tls::FingerprintConnector;
+use leyline::internals::pool::{Pool, TransportBody, send_request_h1_pooled};
+use leyline::internals::profile::ProfileRegistry;
+use leyline::internals::tls::FingerprintConnector;
 use leyline::{Browser, Platform};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -91,29 +91,23 @@ async fn h1_pool_reuses_connection_for_sequential_requests() {
     let (addr, accepts, _server) = spawn_mock_server(|_| ok_response()).await;
     let (pool, connector) = setup();
 
-    let host = "127.0.0.1".to_string();
-    let port = addr.port();
     let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
 
     for _ in 0..3 {
         let resp = send_request_h1_pooled(
             &pool,
             &connector,
-            "http",
-            &host,
-            port,
             "GET",
             &url,
             vec![],
-            H1Body::Empty,
+            leyline::Body::default(),
             None,
-            H1Target::OriginForm,
             false,
         )
         .await
         .expect("request succeeds");
         assert_eq!(resp.status, 200);
-        let H1ResponseBody::Buffered(body) = resp.body else {
+        let TransportBody::Buffered(body) = resp.body else {
             unreachable!("buffered request returns a buffered body");
         };
         assert_eq!(body, b"ok");
@@ -127,8 +121,16 @@ async fn h1_pool_reuses_connection_for_sequential_requests() {
     );
 
     let stats = pool.stats();
-    assert_eq!(stats.h1_hits, 2, "2 of 3 checkouts should hit the pool");
-    assert_eq!(stats.h1_misses, 1, "first request is a miss (fresh open)");
+    assert_eq!(
+        stats.hits(leyline::http::Version::HTTP_11),
+        2,
+        "2 of 3 checkouts should hit the pool"
+    );
+    assert_eq!(
+        stats.misses(leyline::http::Version::HTTP_11),
+        1,
+        "first request is a miss (fresh open)"
+    );
 }
 
 #[tokio::test]
@@ -143,23 +145,17 @@ async fn h1_pool_honours_connection_close() {
     .await;
     let (pool, connector) = setup();
 
-    let host = "127.0.0.1".to_string();
-    let port = addr.port();
     let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
 
     for _ in 0..2 {
         let resp = send_request_h1_pooled(
             &pool,
             &connector,
-            "http",
-            &host,
-            port,
             "GET",
             &url,
             vec![],
-            H1Body::Empty,
+            leyline::Body::default(),
             None,
-            H1Target::OriginForm,
             false,
         )
         .await
@@ -177,17 +173,20 @@ async fn h1_pool_honours_connection_close() {
 
 #[tokio::test]
 async fn h1_pool_recovers_when_server_drops_connection() {
+    let closed = Arc::new(tokio::sync::Notify::new());
     let (listener_addr, accepts, _server) = {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let accepts = Arc::new(AtomicUsize::new(0));
         let accepts_c = accepts.clone();
+        let closed = Arc::clone(&closed);
         let handle = tokio::spawn(async move {
             loop {
                 let Ok((mut socket, _)) = listener.accept().await else {
                     break;
                 };
                 accepts_c.fetch_add(1, Ordering::SeqCst);
+                let closed = Arc::clone(&closed);
                 tokio::spawn(async move {
                     let mut tmp = [0u8; 1024];
                     let mut req = Vec::new();
@@ -205,6 +204,7 @@ async fn h1_pool_recovers_when_server_drops_connection() {
                     }
                     drop(socket.write_all(&ok_response()).await);
                     drop(socket.shutdown().await);
+                    closed.notify_one();
                 });
             }
         });
@@ -212,42 +212,34 @@ async fn h1_pool_recovers_when_server_drops_connection() {
     };
 
     let (pool, connector) = setup();
-    let host = "127.0.0.1".to_string();
-    let port = listener_addr.port();
     let url = url::Url::parse(&format!("http://{listener_addr}/")).unwrap();
 
     let resp1 = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        &host,
-        port,
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         false,
     )
     .await
     .expect("first request succeeds");
     assert_eq!(resp1.status, 200);
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(5), closed.notified())
+        .await
+        .expect("the server closes the first connection");
 
     let resp2 = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        &host,
-        port,
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         false,
     )
     .await
@@ -338,29 +330,22 @@ async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
         spawn_peak_tracking_server(Duration::from_millis(40)).await;
     let pool = Arc::new(Pool::with_limits(Duration::from_secs(30), 2048, CAP));
     let connector = bare_connector();
-    let host = "127.0.0.1".to_string();
-    let port = addr.port();
     let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
 
     let mut handles = Vec::new();
     for _ in 0..REQUESTS {
         let pool = Arc::clone(&pool);
         let connector = connector.clone();
-        let host = host.clone();
         let url = url.clone();
         handles.push(tokio::spawn(async move {
             send_request_h1_pooled(
                 &pool,
                 &connector,
-                "http",
-                &host,
-                port,
                 "GET",
                 &url,
                 vec![],
-                H1Body::Empty,
+                leyline::Body::default(),
                 None,
-                H1Target::OriginForm,
                 false,
             )
             .await
@@ -384,10 +369,10 @@ async fn h1_cap_bounds_concurrency_and_reuses_warm_connections() {
     );
     let stats = pool.stats();
     assert!(
-        stats.h1_hits >= (REQUESTS - CAP) as u64,
+        stats.hits(leyline::http::Version::HTTP_11) >= (REQUESTS - CAP) as u64,
         "the {} queued requests should reuse warm connections (h1_hits={}, stats={stats:?})",
         REQUESTS - CAP,
-        stats.h1_hits
+        stats.hits(leyline::http::Version::HTTP_11)
     );
 }
 
@@ -397,28 +382,21 @@ async fn h1_cancelled_request_releases_permit() {
         spawn_peak_tracking_server(Duration::from_millis(500)).await;
     let pool = Arc::new(Pool::with_limits(Duration::from_secs(30), 2048, 1));
     let connector = bare_connector();
-    let host = "127.0.0.1".to_string();
-    let port = addr.port();
     let url = url::Url::parse(&format!("http://{addr}/")).unwrap();
 
     let a = {
         let pool = Arc::clone(&pool);
         let connector = connector.clone();
-        let host = host.clone();
         let url = url.clone();
         async move {
             send_request_h1_pooled(
                 &pool,
                 &connector,
-                "http",
-                &host,
-                port,
                 "GET",
                 &url,
                 vec![],
-                H1Body::Empty,
+                leyline::Body::default(),
                 None,
-                H1Target::OriginForm,
                 false,
             )
             .await
@@ -434,15 +412,11 @@ async fn h1_cancelled_request_releases_permit() {
     let b = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        &host,
-        port,
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         false,
     );
     let resp = tokio::time::timeout(Duration::from_secs(3), b)
@@ -487,15 +461,11 @@ async fn post_is_not_replayed_after_mid_response_close() {
     let warm = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        &addr.ip().to_string(),
-        addr.port(),
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         false,
     )
     .await
@@ -506,15 +476,11 @@ async fn post_is_not_replayed_after_mid_response_close() {
     let post = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        &addr.ip().to_string(),
-        addr.port(),
         "POST",
         &url,
         vec![],
-        H1Body::Buffered(bytes::Bytes::from_static(b"payload")),
+        leyline::Body::from(bytes::Bytes::from_static(b"payload")),
         None,
-        H1Target::OriginForm,
         false,
     )
     .await;

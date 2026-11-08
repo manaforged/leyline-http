@@ -12,13 +12,13 @@ const COMMENT_CLOSE: &str = "-->";
 const CDATA_OPEN: &str = "![CDATA[";
 const CDATA_CLOSE: &str = "]]>";
 
-pub(super) struct Tag<'a> {
-    pub(super) name: String,
-    pub(super) closing: bool,
+pub(crate) struct Tag<'a> {
+    pub(crate) name: String,
+    pub(crate) closing: bool,
     pub(super) self_closing: bool,
     pub(super) attrs: Vec<(String, String)>,
     pub(super) raw: Option<&'a str>,
-    pub(super) text: Cow<'a, str>,
+    pub(crate) text: Cow<'a, str>,
 }
 
 impl Tag<'_> {
@@ -34,7 +34,7 @@ impl Tag<'_> {
     }
 }
 
-pub(super) struct Scanner<'a> {
+pub(crate) struct Scanner<'a> {
     doc: &'a str,
     pos: usize,
     started: bool,
@@ -51,7 +51,7 @@ impl<'a> Scanner<'a> {
         }
     }
 
-    pub(super) fn xml(doc: &'a str) -> Self {
+    pub(crate) fn xml(doc: &'a str) -> Self {
         Self {
             xml: true,
             ..Self::new(doc)

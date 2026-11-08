@@ -1,117 +1,79 @@
 use std::time::Duration;
 
-use crate::h2::frame::StreamDependency;
-use crate::{Cause, Error};
-
-pub(crate) const DEFAULT_WINDOW_SIZE: u32 = 65_535;
-pub(crate) const DEFAULT_MAX_FRAME_SIZE: u32 = 16_384;
-pub(crate) const DEFAULT_HEADER_TABLE_SIZE: u32 = 4096;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[repr(u16)]
-#[non_exhaustive]
-pub enum SettingId {
-    HeaderTableSize = 1,
-    EnablePush = 2,
-    MaxConcurrentStreams = 3,
-    InitialWindowSize = 4,
-    MaxFrameSize = 5,
-    MaxHeaderListSize = 6,
-    Unknown8 = 8,
-    Unknown9 = 9,
-}
-
-const SETTING_KEYS: [(SettingId, &str); 8] = [
-    (SettingId::HeaderTableSize, "header_table_size"),
-    (SettingId::EnablePush, "enable_push"),
-    (SettingId::MaxConcurrentStreams, "max_concurrent_streams"),
-    (SettingId::InitialWindowSize, "initial_window_size"),
-    (SettingId::MaxFrameSize, "max_frame_size"),
-    (SettingId::MaxHeaderListSize, "max_header_list_size"),
-    (SettingId::Unknown8, "unknown8"),
-    (SettingId::Unknown9, "unknown9"),
-];
-
-impl SettingId {
-    pub(crate) fn all() -> impl Iterator<Item = Self> {
-        SETTING_KEYS.iter().map(|&(id, _)| id)
-    }
-
-    pub fn parse_key(s: &str) -> Option<Self> {
-        SETTING_KEYS
-            .iter()
-            .find(|(_, key)| *key == s)
-            .map(|&(id, _)| id)
-    }
-
-    pub(crate) fn from_code(code: u16) -> Option<Self> {
-        SETTING_KEYS
-            .iter()
-            .find(|&&(id, _)| id as u16 == code)
-            .map(|&(id, _)| id)
-    }
-
-    pub(crate) fn key(self) -> &'static str {
-        SETTING_KEYS
-            .iter()
-            .find(|&&(id, _)| id == self)
-            .map_or("", |&(_, key)| key)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum PseudoOrder {
-    Method,
-    Authority,
-    Scheme,
-    Path,
-}
-
-const PSEUDO_KEYS: [(PseudoOrder, &str, &str); 4] = [
-    (PseudoOrder::Method, "method", "m"),
-    (PseudoOrder::Authority, "authority", "a"),
-    (PseudoOrder::Scheme, "scheme", "s"),
-    (PseudoOrder::Path, "path", "p"),
-];
-
-impl PseudoOrder {
-    pub fn parse_key(s: &str) -> Option<Self> {
-        PSEUDO_KEYS
-            .iter()
-            .find(|(_, key, _)| *key == s)
-            .map(|&(order, _, _)| order)
-    }
-
-    pub(crate) fn key_for_label(label: &str) -> Option<&'static str> {
-        PSEUDO_KEYS
-            .iter()
-            .find(|(_, _, known)| *known == label)
-            .map(|&(_, key, _)| key)
-    }
-
-    pub fn label(&self) -> &'static str {
-        PSEUDO_KEYS
-            .iter()
-            .find(|(order, _, _)| order == self)
-            .map_or("", |&(_, _, label)| label)
-    }
-}
+use crate::error::Error;
+use crate::h2::frame::{DEFAULT_HEADER_TABLE_SIZE, DEFAULT_MAX_FRAME_SIZE, StreamDependency};
+use crate::profile::{DEFAULT_WINDOW_SIZE, PseudoOrder, SettingId, parse_pseudo_order};
 
 #[derive(Debug, Clone)]
 pub struct H2Config {
     pub settings: Vec<(SettingId, u32)>,
-    pub settings_order: Vec<SettingId>,
     pub pseudo_order: [PseudoOrder; 4],
     pub initial_connection_window_size: u32,
     pub default_priority: Option<StreamDependency>,
+    /// Abuse limits that only benches and tests change.
+    pub limits: H2Limits,
+}
+
+/// Abuse limits for one HTTP/2 connection.
+#[derive(Debug, Clone, Copy)]
+pub struct H2Limits {
+    /// RST_STREAM frames tolerated per window.
     pub rst_stream_flood_threshold: u32,
+    /// The window that counts RST_STREAM frames.
     pub rst_stream_flood_window: Duration,
-    pub max_response_body_bytes: usize,
-    pub max_header_block_bytes: usize,
+    /// SETTINGS frames tolerated per window.
     pub settings_flood_threshold: u32,
+    /// The window that counts SETTINGS frames.
     pub settings_flood_window: Duration,
+    /// PING, WINDOW_UPDATE on unknown streams, and empty CONTINUATION frames tolerated per window.
+    pub control_flood_threshold: u32,
+    /// The window that counts control frames.
+    pub control_flood_window: Duration,
+    /// The longest wait for the CONTINUATION frames of one header block.
     pub header_block_reassembly_timeout: Duration,
+    /// The first client stream id, so a test can reach the end of the id space.
+    pub first_stream_id: u32,
+}
+
+const LIMITS: H2Limits = H2Limits {
+    rst_stream_flood_threshold: 100,
+    rst_stream_flood_window: Duration::from_secs(10),
+    settings_flood_threshold: 20,
+    settings_flood_window: Duration::from_secs(10),
+    control_flood_threshold: 1000,
+    control_flood_window: Duration::from_secs(10),
+    header_block_reassembly_timeout: Duration::from_secs(10),
+    first_stream_id: 1,
+};
+
+impl Default for H2Limits {
+    fn default() -> Self {
+        LIMITS
+    }
+}
+
+const DEFAULT_SETTINGS: [(SettingId, u32); 4] = [
+    (SettingId::HeaderTableSize, DEFAULT_HEADER_TABLE_SIZE),
+    (SettingId::EnablePush, 0),
+    (SettingId::InitialWindowSize, DEFAULT_WINDOW_SIZE),
+    (SettingId::MaxFrameSize, DEFAULT_MAX_FRAME_SIZE),
+];
+
+impl Default for H2Config {
+    fn default() -> Self {
+        Self {
+            settings: DEFAULT_SETTINGS.to_vec(),
+            pseudo_order: [
+                PseudoOrder::Method,
+                PseudoOrder::Authority,
+                PseudoOrder::Scheme,
+                PseudoOrder::Path,
+            ],
+            initial_connection_window_size: DEFAULT_WINDOW_SIZE,
+            default_priority: None,
+            limits: LIMITS,
+        }
+    }
 }
 
 impl H2Config {
@@ -120,6 +82,15 @@ impl H2Config {
             .iter()
             .find(|(sid, _)| *sid == id)
             .map(|(_, v)| *v)
+    }
+
+    pub(crate) fn limits(&self) -> &H2Limits {
+        &self.limits
+    }
+
+    pub(crate) fn header_list_limit(&self) -> usize {
+        self.setting(SettingId::MaxHeaderListSize)
+            .map_or(crate::wire::DEFAULT_MAX_HEADER_LIST_BYTES, |v| v as usize)
     }
 
     pub(crate) fn advertised_initial_window_size(&self) -> u32 {
@@ -132,29 +103,25 @@ impl H2Config {
             .settings_order
             .iter()
             .map(|s| {
-                SettingId::parse_key(s).ok_or_else(|| {
-                    Error::new(Cause::Config)
-                        .with_message(format!("unknown H2 settings_order key: {s:?}"))
-                })
+                SettingId::parse_key(s)
+                    .ok_or_else(|| Error::config(format!("unknown H2 settings_order key: {s:?}")))
             })
             .collect::<Result<_, _>>()?;
 
         let settings: Vec<(SettingId, u32)> = settings_order
-            .iter()
-            .filter_map(|&id| h2.setting(id).map(|v| (id, v)))
+            .into_iter()
+            .filter_map(|id| h2.settings.get(id).map(|v| (id, v)))
             .collect();
 
         let pseudo_order = parse_pseudo_order(&h2.pseudo_order, "H2")?;
 
         let initial_connection_window_size =
             h2.initial_connection_window_size.ok_or_else(|| {
-                Error::new(Cause::Config)
-                    .with_message("H2 profile missing initial_connection_window_size".to_string())
+                Error::config("H2 profile missing initial_connection_window_size".to_string())
             })?;
 
         Ok(Self {
             settings,
-            settings_order,
             pseudo_order,
             initial_connection_window_size,
             default_priority: h2.default_priority.map(|p| StreamDependency {
@@ -162,48 +129,9 @@ impl H2Config {
                 dependency_id: p.stream_dependency,
                 weight: p.weight,
             }),
-            rst_stream_flood_threshold: 100,
-            rst_stream_flood_window: Duration::from_secs(10),
-            max_response_body_bytes: crate::core::DEFAULT_MAX_BODY_SIZE,
-            max_header_block_bytes: crate::core::DEFAULT_MAX_HEADER_LIST_BYTES,
-            settings_flood_threshold: 20,
-            settings_flood_window: Duration::from_secs(10),
-            header_block_reassembly_timeout: Duration::from_secs(10),
+            limits: LIMITS,
         })
     }
-}
-
-pub(crate) fn parse_pseudo_order(
-    tokens: &[String],
-    label: &str,
-) -> Result<[PseudoOrder; 4], Error> {
-    if tokens.len() != 4 {
-        return Err(Error::new(Cause::Config).with_message(format!(
-            "{label} pseudo_order must have exactly 4 entries, got {}",
-            tokens.len()
-        )));
-    }
-    let mut pseudo_order = [
-        PseudoOrder::Method,
-        PseudoOrder::Authority,
-        PseudoOrder::Scheme,
-        PseudoOrder::Path,
-    ];
-    for (slot, s) in pseudo_order.iter_mut().zip(tokens.iter()) {
-        *slot = PseudoOrder::parse_key(s).ok_or_else(|| {
-            Error::new(Cause::Config)
-                .with_message(format!("unknown {label} pseudo_order token: {s:?}"))
-        })?;
-    }
-    for i in 1..pseudo_order.len() {
-        if pseudo_order[..i].contains(&pseudo_order[i]) {
-            return Err(Error::new(Cause::Config).with_message(format!(
-                "duplicate {label} pseudo_order token: {:?}",
-                tokens[i]
-            )));
-        }
-    }
-    Ok(pseudo_order)
 }
 
 #[cfg(test)]

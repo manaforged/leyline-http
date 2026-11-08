@@ -8,146 +8,29 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
-## Unreleased
+## 0.2.0 - 2026-11-08
 
-### Changed
+0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The [upgrade guide](UPGRADE.md) maps the changed 0.1.6 names. The sections below list new features, behavior changes, removals without a replacement, and fixes.
 
-- A request uses less CPU: its futures are a quarter of their former size, its URL is parsed once, and TLS reads the socket in 16 KiB batches. At 8 connections and 256 requests in flight, a session serves 20 to 23% more requests per second than before on the same machine.
-- HTTP/2 writes the requests that callers queue together in one write, and while requests wait for a stream slot it reads up to four frames before it writes. On loopback, 8 connections with 256 requests in flight serve 14.5% more requests per second, and one connection with 256 in flight against a 200-stream server serves 49.9% more.
-- A session without a browser profile opens another HTTP/2 connection to a host when every open one is at the server's stream limit, up to `max_connections_per_host`. Before the server announces its limit, a connection takes 100 requests, as Chrome and Go assume. With 1,024 requests in flight, one session serves 54% more requests per second on loopback and 4.8 times as many over a 10 ms round trip. A browser profile keeps one connection per host unless `max_connections_per_host` is set, and `max_connections_per_host(1)` keeps any session on one.
-- Sessions without a browser profile, client certificate, or custom CA files share one TLS context per trust setting. Each session keeps its own TLS session cache.
-- Tracing has one `session.execute` span per request, and `pool.hit` is recorded on it. The `transport.*` and `pool.send_request*` spans are gone.
+### Breaking changes
 
-### Fixed
+#### Upgrading from 0.1.6
 
-- `Session::stats()` counts one HTTP/2 or HTTP/3 checkout per request. It counted again when a request opened a connection.
-
-## 0.2.0 - 2026-10-30
-
-0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The table maps every 0.1.6 name that changed. The sections after it list new features, behavior changes, removals without a replacement, and fixes.
-
-### Upgrading from 0.1.6
-
-| 0.1.6 | 0.2.0 |
-| --- | --- |
-| `Browser::latest(Family::Chrome)` | `Browser::chrome()`, and one function per product: `edge()`, `opera()`, `brave()`, `firefox()`, `safari()`, `safari_ios()`, `cfnetwork()`, `okhttp()` |
-| `Browser::get(Family::Chrome, 154)` | `Browser::Chrome154`, or `"chrome-154".parse::<Browser>()` |
-| `Session::browser(b)` | `Session::from(b)` |
-| `browser.family()`, `Family`, `ChromiumBrand` | removed; the `Browser` variant names the product, and `chromium_major()` gives its Chromium base |
-| `SessionBuilder::brand(ChromiumBrand::Edge)`, `Identity::with_brand(ChromiumBrand::Edge)` | a branded variant: `.browser(Browser::Edge154)` |
-| a brand on a given Chromium major | the `Browser` in `Browser::all()` whose `id()` names the product and whose `chromium_major()` matches |
-| `browser.identity(platform, brand)` returning `PlatformIdentity` | `browser.headers(platform)` returning `(name, value)` pairs, `user-agent`, `sec-ch-ua`, and `accept-language` among them |
-| `.identity(Identity::from(b))`, `.identity(Identity::locked(b, p))` | `.browser(b)`, `.browser(b).platform(p)` |
-| `Identity::rotate_tls(b)` | `.hello(b)` |
-| `Identity::rotate_hello()` | `.hello(b.next_hello()?)` |
-| `Identity::switch_family(dest)` | `.browser(dest).platform(p)`; a browser with no identity for the platform fails at `build()` |
-| `session.identity()` with `Identity::http()`, `tls()`, `platform()`, `brand()` | `session.browser()`, `hello()`, `platform()`; the brand is part of the `Browser` variant |
-| `SessionIdentity` getters, `export_profile()`, `to_identity()` | `Session::user_agent()`, `profile_id()`, `profile()`, `platform()`, `languages()`, and `to_builder()` |
-| `Browser::profile()`, `BrowserProfile`, and the profile schema types (`TlsProfile`, `H2Profile`, `H3Profile`, `ProfileMeta`, `HeaderStyle`, and the rest) | the profile TOML from `Session::profile()`; load one with `.profile(toml)` |
-| `.profile(BrowserProfile::from_toml(&toml)?)` | `.profile(&toml)`; bad TOML fails at `build()` |
-| `BrowserProfile::from_fingerprint(FingerprintSpec::new().base(b).ja3(s))` | `.browser(b).ja3(s)`, with `ja4_r`, `akamai`, and `header_order`; call `browser` first, or `build()` fails with `Kind::Config` |
-| `ProfileRegistry`, `ProfileError` | removed; load each profile file with `.profile(toml)` |
-| `Preset`, `HeaderAnchor` | `RequestKind`, `HeaderPosition` |
-| `RequestBuilder::preset`, `anchored`, `initiator`, `tag`, `compress` | `kind`, `header_at`, `from_page`, `label`, `compress_body` |
-| `FetchSite` | removed; `from_page(url)` sets the site and referrer context, `Sec-Fetch-Site` included |
-| `SessionBuilder::user_agent(ua)` | `.headers([("user-agent", ua)])` |
-| `SessionBuilder::expect_profile_id(id)` | `Session::load(path)`, whose `build()` fails with `is_profile_changed()`, or a check of `session.profile_id()` |
-| `.headers(&[("a", "b")])` | `.headers([("a", "b")])`, `.headers(vec)`, or `.headers(&header_map)`; each pair converts like `header(name, value)` |
-| `BlockSignal { vendor, kind }`, `BlockKind` | `Block::Challenge(vendor)`, `Block::Captcha(vendor)`, `Block::Denied(vendor)`; `block.vendor()` |
-| `BlockRules::statuses([403])` | `.block_statuses([403])` |
-| `BlockRules::from_toml(s)?`, `BlockRules::extend` | `.block_rules(s)`; each call adds rules, and bad TOML fails at `build()` |
-| `BlockRules::check(&resp)`, `BlockRules::builtin()` | `resp.block()`, which applies the built-in rules and the session's own |
-| `ProxyPool::rotate_on_block(rules)`, `RetryPolicy::skip_blocks(rules)` | removed; every session applies its block rules, and `Retry::when` sees `attempt.is_block()` |
-| `ProxyConfig::new(url)`, `ProxyConfig::rule(ProxyRule)`, `NoProxy` | `Proxy::new(url)`, `Proxy::all(url)`, `http(url)`, `https(url)`, `no_proxy(patterns)`, `env(on)` |
-| `ProxyUrl::parse(url)` | a URL string; `build()` checks it |
-| `ProxyPool::new(urls)`, `.proxy_pool(pool)` | `Proxy::list(urls)`, `.proxy(list)` |
-| `ProxyPool::identified([(proxy, identity)])` | `Proxy::identified([(proxy, browser, platform)])` |
-| `ProxyPool::stats()`, `ProxyHealth` | `session.stats()`: `proxies()`, `proxy_in_use(p)`, `proxy_failures(p)`, `proxy_banned_until(p)` |
-| `RetryPolicy::rotate_proxies(urls)` | `.proxy(Proxy::list(urls))` |
-| `session.proxy_url()` | `session.proxy()`, a `&str` with the password replaced by `***` |
-| `TlsTrustConfig`, `.tls_trust(config)` | `Tls`, `.tls(tls)` |
-| `add_ca_file`, `add_ca_der`, `add_pinned_leaf_sha256`, `client_identity` | `ca_file`, `ca_der`, `pin_sha256`, `client_cert` |
-| `min_tls_version(TlsMinVersion::Tls12)`, `(TlsMinVersion::Tls13)` | `tls12_min()`, `tls13_only()` |
-| `resp.tls()` returning `TlsInfo { version, cipher, peer_cert_der }` | `resp.tls_version()`, `tls_cipher()`, `peer_certificate()` |
-| `.socket(SocketConfig::new().tcp_nodelay(true))` | `.tcp_nodelay(true)` on `SessionBuilder`, one setter per option; `strict` is `strict_socket_options` |
-| `SocketConfig::happy_eyeballs(HappyEyeballsConfig::new().resolve_delay(d).attempt_limit(n))` | `.happy_eyeballs_delay(d).happy_eyeballs_attempts(n)` |
-| `.pool(PoolConfig::new())` with `max_connections`, `max_h1_conns_per_host`, `idle_timeout`, `keepalive`, `h2_ping_after_idle`, `h2_ping_timeout` | `SessionBuilder` setters: `max_connections`, `max_connections_per_host`, `pool_idle_timeout`, `keep_alive`, `http2_ping_after_idle`, `http2_ping_timeout` |
-| `.dns(DnsConfig::new().resolve_host(host, addrs).resolver(r))` | `.resolve(host, addrs)` and `.dns_resolver(r)`; several `resolve` calls add up |
-| `leyline::tls::Resolver` | `leyline::Resolver` |
-| `ResolveFuture`, `SystemResolver` | `Resolver::resolve` returns `Pin<Box<dyn Future<Output = io::Result<Vec<SocketAddr>>> + Send + 'a>>`; the system resolver is the default |
-| `.compression(CompressionConfig)` | `.accept_encoding([..])`, `.max_body_size(n)`, `.max_error_body_size(n)`; `accept_encoding([])` offers no coding |
-| `ContentEncoding` | `Encoding` |
-| `HostLimits::host(host, HostLimits::new().max_in_flight(n).per_second(r))` | `HostLimits::new().host_max_in_flight(host, n).host_per_second(host, r)` |
-| `TimeoutConfig`, `RedirectPolicy`, `ProtocolPolicy` | `Timeout`, `Redirect`, `Protocol`; `RedirectPolicy::limited(n)` is `Redirect::limit(n)` |
-| `session.pool_stats()`, `PoolStats` fields | `session.stats()`, with the same counters as methods |
-| `session.host_stats()`, `HostStats` | `session.stats()`: `hosts()`, `in_flight(host)`, `waiting(host)` |
-| `session.with_proxy(p)`, `with_cookie_jar(jar)`, `with_redirect(r)`, `with_base_url(url)`, `with_identity(id)` | `session.to_builder()`, the setter, then `build()` |
-| `session.fresh_pool()` | `session.to_builder().share_connections(false).build()` |
-| `SessionBuilder::cookie_jar(jar)`, `RequestBuilder::cookie_jar(jar)` | `.cookies(jar)` on `SessionBuilder` or on `session.to_builder()` |
-| `Device::open`, `capture`, `save_to`, `load_from`, `session_builder` | `session.save(path)` and `Session::load(path)`, which returns a `SessionBuilder` |
-| `Device::autosave`, `DeviceAutosave`, `DeviceAutosaveOptions`, `Jar::autosave`, `JarAutosave` | `session.autosave(path, every)` |
-| `Session::state()`, `SessionState::restore_into(&session)` | `session.save(path)` and `Session::load(path)`, which carry the TLS tickets, Alt-Svc entries, and HSTS store |
-| `Device::tab()` | `session.tab()` |
-| `Jar::save_to`, `Jar::load_from` | `session.save(path)`, or serde: `Jar` is `Serialize` and `Deserialize` |
-| `Jar::get_cookie`, `set_cookie`, `store_set_cookie`, `remove_named`, `all_cookies`, `cookie_header`, `extend_from` | `get`, `set`, `store`, `remove_everywhere`, `all`, `header_for`, `merge` |
-| `Jar::load_cookies(pairs)` | `Jar::set` for each pair |
-| `RetryPolicy`, `.retry(policy)` | `Retry`, `.retry(retry)`; `.retry(n)` retries `n` times on connect errors, timeouts, 429, 502, 503, and 504 |
-| `retry_on`, `on_status`, `retry_if`, `RetryTrigger` | `Retry::new(n).when(\|attempt\| ..)`, with `attempt.is_transient()` and `attempt.is_block()` |
-| `initial_backoff`, `max_backoff`, `backoff_factor`, `jitter` | `.backoff(min, max)` |
-| `RetryPolicy::backoff(attempt)` | `Retry::delay(attempt)` |
-| `max_retry_after`, `allow_non_idempotent` | `max_wait`, `any_method` |
-| `retry_unsent` | removed; a request that never reached the server is retried for any method |
-| `.wait_header(name, WaitFormat::Seconds)` | `.wait_header(name)`, which reads delay-seconds, an HTTP date, or a Unix timestamp; `.wait_header_ms(name)` for milliseconds |
-| `RedirectAttempt` | `Attempt`, with `status()`, `url()`, `location()`, and `previous()` |
-| `RedirectPolicy::custom(\|a\| RedirectAction::Follow)` | `Redirect::custom(\|a\| true)` |
-| `HttpVersion`, `HttpVersion::as_str()` | `http::Version` from `Response::version()`; its `Debug` prints `HTTP/2.0` where `as_str()` printed `HTTP/2` |
-| `resp.timing()`, `ResponseTiming` | `resp.reused()`, `connect_time()`, `send_time()`, `elapsed()`, as `Duration` values |
-| `into_stream()`, `into_decoded_stream(limit)`, `BodyStream` | `bytes_stream()`, which yields the decoded body as `leyline::Result<Bytes>`; `.decode(false)` on the request gives the raw bytes |
-| `copy_to(writer)`, `copy_decoded_to(writer, limit)` | `write_to(writer)`; `.max_body_size(n)` on the request sets a limit |
-| `download_to(path, limit)`, `RequestBuilder::download(path)` | `.error_for_status().stream()` on the request, then `Response::download_to(path)` |
-| `RequestBuilder::read_until(n, f)`, `PrefixRead { bytes, stopped_by }`, `StopReason` | `.stream()`, then `Response::read_until(n, f)` returning `(bytes, matched)` |
-| `error_for_status_ref()` | `error_for_status()`, which borrows the response |
-| `resp.link(rel)` | `resp.links()` and `Link::has_rel(rel)` |
-| `relay_headers(RelayBody)`, `RelayBody` | `relay_headers()`, which drops `content-encoding` and `content-length` when Leyline decoded the body |
-| `resp.audit()`, `AuditData` fields | `resp.fingerprint()`, a `Fingerprint` with `ja3()`, `ja4()`, `ja4h()`, `ja4t()`, `akamai()`, `headers()` |
-| `Observed`, `audit.compare(&observed)`, `FingerprintReport`, `FieldOutcome`, `HeaderOutcome` | `Fingerprint::from_json(text)`, `sent.diff(&observed)` returning `(field, expected, observed)` tuples |
-| `audit::compute_ja3`, `compute_ja4`, `compute_ja4h`, `compute_ja4t`, `Ja3Input`, `Ja4Input`, `Ja4hInput` | removed; `Fingerprint` carries the values |
-| `ErrorCategory`, `Error::category()` | `Kind`, `Error::kind()` |
-| `is_timeout()`, `is_status()`, `is_body_limit()`, `is_dns()` | `err.kind()` compared with `Kind::Timeout`, `Kind::Status`, `Kind::BodyLimit`, or `Kind::Dns` |
-| `Error::io()`, `tls()`, `h2()`, and downcasts to `TlsError`, `H2Error`, `ErrorCode`, or `ProxyReply` | `Error::kind()`, `proxy_status()`, and `h2_code()` |
-| `Error::header(name)`, `body_text()` | `headers()?.get(name)`, `body().map(String::from_utf8_lossy)` |
-| `session.websocket(url).header(k, v).connect()`, `WebSocketBuilder` | `session.get(url).header(k, v).websocket()` |
-| `WsConnection`, `WsMessage`, `CloseFrame` | `WebSocket`, `Message`, `Message::Close(Some((code, reason)))` |
-| `WsSink`, `WsStream` from `split()` | a `Sink<Message>` and a `Stream<Item = Result<Message>>`; send `Message::Close` to close |
-| `.websocket_config(WebSocketConfig::new().prefer_http2(true))` | `.websocket_http2(true)`, one `websocket_*` setter per option |
-| `impl Trace { fn head(&self, ev: &Head) .. fn summary(&self, ev: &Summary) }` | `impl Trace { fn event(&self, event: &Event) }`, matching `Event::Head { .. }`, `Event::Summary { .. }` |
-| `trace::Dns`, `Connect`, `Tls`, `Sent`, `Head`, `Done`, `Summary`, `BodyEnd` | variants of `trace::Event` with the same fields |
-| `BodyOutcome::Complete`, `Failed(e)`, `Dropped` | `Ok(())`, `Err(Some(e))`, `Err(None)` |
-| `trace::TracingTrace` | `trace::Log`; the `tag` key is `label` |
-| `trace::Fanout` | one `.trace(t)` call per hook |
-| `metrics.snapshot()`, `MetricsSnapshot` | the same getters on `Metrics`; `{metrics}` prints the summary |
-| `CrawlPage` | `Page` |
-| `crawl.stats()`, `CrawlStats` | `crawl.requests()`, `pages()`, `errors()`, `skipped(reason)` |
-| `Crawl::ignore_robots()` | `Crawl::respect(None)` |
-| `req.pages()` returning `Pages` | `req.pages()` returning a `Stream`; `StreamExt::take(n)` limits it |
-| `form.method()` returning `FormMethod`, `form.enctype()` returning `FormEnctype` | `http::Method`, and the MIME type as `&str` |
-| `multipart::Form::text(name, value)`, `Form::file(name, path)` | `Form::part(name, Part::text(value))`, `Form::part(name, Part::file(path)?)` |
-| `From<multipart::Form> for Body`, `Form::boundary` | `RequestBuilder::multipart(form)`, which sets the boundary header |
-| `Tab::xhr(url)`, `post_json(url, body)`, `subresource(url, kind)` | `Tab::fetch(Method::GET, url)`, `.json(body)`, `.kind(kind)` |
-| `Purpose::as_str()` | `Purpose::id()` |
-| `DigestAuth` | `.digest_auth(user, pass)` |
-| `LeylineService::new(session)` | `session`, which implements `tower::Service`; the response carries no timing extension, so use `Trace` |
-| `leyline::get(url)` | `Session::new().get(url).send()` |
-| `.await` on a `RequestBuilder` or `WebSocketBuilder` | `.send().await` |
-| `Body::len_hint()` | removed |
-| `testing::TestServer`, `TestResponse`, `RecordedRequest` | `testing::Server`, `testing::Response`, `testing::Request` |
-| `TestServer::trust()` | `testing::Server::tls()` |
-| `TestResponse { status, headers, body }` fields | `testing::Response::new(status).header(..).body(..)` |
-| `RecordedRequest::header_count(name)` | `header_values(name).len()` |
+See [UPGRADE.md](UPGRADE.md) for the migration steps and complete old-to-new API map.
 
 ### Added
 
-- Edge and Opera are `Browser` variants: `Browser::Edge145` to `Browser::Edge156`, and `Browser::Opera129` to `Browser::Opera139`, on the Chrome captures. `Browser::all()` lists them.
+- `SessionBuilder::run_per_core`, which runs one single-threaded runtime per CPU core for maximum request rate; the cores share cookies, cache, tokens and HSTS and keep their own connections.
+- `RequestBuilder::text` and `RequestBuilder::bytes` send the request and read the decoded body in one `.await`.
+- Resumable `RequestBuilder::download_to`, strong ETag checks, SHA-256 verification, and download progress callbacks. A dropped transfer is retried under the retry policy and resumes when the server sends a strong ETag.
+- An opt-in, bounded HTTP cache with conditional revalidation, `Vary` matching, and mutation invalidation.
+- `RequestBuilder::events`, `Events`, and `Event` for parsed SSE with `Last-Event-ID` recovery. The retry policy bounds reconnects in a row; each delivered event resets the count.
+- `SessionBuilder::refresh_token` shares an asynchronous bearer-token refresh after concurrent 401 responses, scoped to the base URL origin.
+- `Crawl::save` and `Crawl::load` preserve pending and buffered pages, duplicate history, crawl policies, and retry waits.
+- `HostLimits`, `Page`, `Respect`, `Scope`, and `SkipReason` implement serde `Serialize` and `Deserialize`.
+- A Chrome 157 profile, `Browser::Chrome157`, from Chrome 157.0.8103.38 on Linux and 157.0.8103.39 on macOS and Windows, with TCP and HTTP/3 captures for each desktop.
+- A Brave (Chromium 157) profile, `Browser::Brave157`, from captures of Brave 1.99.55 (Chromium 157) on macOS, Linux, and Windows.
+- Edge and Opera are `Browser` variants: `Browser::Edge145` to `Browser::Edge157`, and `Browser::Opera129` to `Browser::Opera139`, on the Chrome captures. `Browser::all()` lists them.
 - A Firefox 159 profile, `Browser::Firefox159`, from captures of Firefox 159.0 on macOS, Linux, and Windows.
 - `Browser` parses from its id with `FromStr`, as in `"chrome-154".parse()`. `Browser::chromium_major()` gives the Chromium base of a Chromium browser, and `Browser::next_hello()` gives the next distinct ClientHello in the same product.
 - `session.save(path)` writes the browser, the profile id, the proxy URL without its password, the cookies, and the TLS tickets, Alt-Svc entries, and HSTS store as one JSON file. `Session::load(path)` returns a `SessionBuilder`; `build()` fails with `is_profile_changed()` when the saved profile id differs, then restores the connection state. `session.autosave(path, every)` saves on a cookie or state change and on `shutdown()`. `Session` implements `Serialize` and `SessionBuilder` implements `Deserialize`, so your own data goes beside the session in your own struct. Version 1 device files load.
@@ -162,9 +45,30 @@ version and publish as separate crates.
 - `AGENTS.md`, for coding agents that write code with Leyline.
 - `docs/guide/bundled-profiles.md` lists every bundled profile and brand overlay, generated from the profile files.
 - `Crawl::agent(name)` obeys the robots.txt group and meta robots name of a named crawler, and `Crawl::max_body_size(n)` reads pages larger than the session's cap without a new session.
+- `blocking::Session` runs requests on the calling thread for code without an async runtime: `blocking::Session::new(builder)`, then `session.block_on(future)`, with every `Session` method through `Deref`. Its direct HTTP/1.1 connections read and write blocking sockets, and every timeout still applies. A blocking session is `Send` but not `Sync`; build one per thread.
+- `leyline-bssl-tokio`: `RecordStream::try_map_io` moves a TLS 1.3 record stream onto another transport for the same connection.
+- `Retry::budget` limits retries to a share of requests, so retries cannot multiply the load on an overloaded upstream or on the client itself.
+- `HostLimits::max_pending` and `HostLimits::max_total_pending` limit the requests that wait for a slot. Without one, a request queue on `max_total_in_flight` past origin capacity lets every request reach the origin as its deadline ends, and goodput falls to zero.
+- `pool_max_lifetime` stops reusing a connection a set time after it opened, so traffic moves after a DNS or load balancer change. Without it, a busy pool stays on the old address.
+- `max_pending_per_host` limits the HTTP/1.1 requests that wait for a connection to one host. A request over the limit fails at once with the new `Kind::Overloaded`, which `gateway_status` maps to 503 and `retry` does not resend. The default is 1024, as in Envoy, so one slow host cannot hold an unbounded queue; `max_pending_per_host(None)` removes the limit.
+- New connections to a host start on the next address of each family in turn, so a pool spreads its connections across every address DNS returns instead of opening them all on the first.
+- An address that keeps failing to connect moves to the back of the dial order for 30 seconds, longer each time it fails again, so new connections stop waiting on a dead address.
+- `TcpProfile` has one getter per value: `ttl()`, `mss()`, `window_size()`, `df()`, `window_scale()`, `no_delay()`, and `options()`.
 
 ### Changed
 
+- A GET or other idempotent request with a replayable body, on an HTTP/2 connection idle past `http2_ping_after_idle`, is sent right after its liveness PING and does not wait a round trip for the ACK. A missing ACK fails the connection at `http2_ping_timeout`, and the request is resent on a new connection. Other requests still wait for the ACK.
+- BoringSSL is pinned to `5b83e5d`, the revision in Chromium's DEPS at tag `157.0.8103.38`, with six carried patches. The CRL security backport is removed because the fix and its cleanup are included upstream.
+- A browser profile id no longer includes `profiles/bare.toml`, so an edit to the bare profile does not change browser profile ids. A saved session from before this change reports a changed profile id.
+- The bare profile advertises a 64 KiB HTTP/2 maximum frame size.
+- `Body` is `Send + Sync` and is the one body type for requests and responses: `bytes_stream()` and the `tower` service both return it.
+- A request uses less CPU: it parses its URL once, keeps its method, URL, and headers in typed values that the response shares, and TLS reads the socket in 16 KiB batches. [BENCHMARKS.md](BENCHMARKS.md#general-clients-over-http2) compares leyline with other HTTP clients over HTTP/2 and HTTP/1.1.
+- HTTP/2 writes the requests that callers queue together in one write, and while requests wait for a stream slot it reads up to four frames before it writes.
+- A session without a browser profile opens another HTTP/2 connection to a host when every open one is at the server's stream limit, up to `max_connections_per_host`. Before the server announces its limit, a connection takes 100 requests, as Chrome and Go assume. A browser profile keeps one connection per host unless `max_connections_per_host` is set, and `max_connections_per_host(1)` keeps any session on one.
+- After a TLS 1.3 handshake, leyline seals and opens the connection's records itself and BoringSSL handles only the handshake and session tickets. A profile that sets a record size limit keeps BoringSSL's record layer, as does TLS 1.2.
+- Sessions without a browser profile, client certificate, or custom CA files share one TLS context per trust setting. Each session keeps its own TLS session cache.
+- Tracing has one `session.execute` span per request, and `pool.hit` is recorded on it. The `transport.*` and `pool.send_request*` spans are gone.
+- An HTTP/1.1 or HTTP/2 response header value that is not valid UTF-8 reaches `Response::headers()` with its bytes unchanged. It was replaced with U+FFFD before.
 - `Session::shutdown()` returns a future. It still cancels at once; `.await` it to wait until every autosave writer has made its last save. A call without `.await` warns.
 - Brave, Firefox, Safari, and Safari on iOS 18 and later race HTTP/3 by default, as Chrome does, from their captured HTTP/3 hellos. Their profile ids change.
 - Every session applies the built-in block rules. A Cloudflare or AWS WAF challenge counts against its proxy in a proxy list, and `Attempt::is_block()` sees it, without a `block_rules` call.
@@ -176,9 +80,13 @@ version and publish as separate crates.
 - `build()` checks the settings, so a bad proxy URL fails there and not at the first send.
 - Each `SessionBuilder::trace` call adds a hook beside the earlier ones, including a hook that the parent session carries into `to_builder()`.
 - `error_for_status()` borrows the response, so the body stays readable after a status error.
-- `IntoParamPair` is sealed: pass `(key, value)` pairs or references to them.
+- `query`, `form`, and `Tab::submit` use the standard `Borrow<(K, V)>` bound instead of a custom pair-conversion trait. Pass owned `(key, value)` tuples or references to them. Explicit generic arguments change from `<I, P>` to `<I, K, V>`; inferred calls need no changes.
 - `RequestBuilder::header_order` takes any iterator of strings, as `SessionBuilder::header_order` does.
 - `Response::text_with_charset` needs the `charset` feature. Without it, the method ignored its argument. `text()` stays in every build.
+- `leyline::get(url)` returns a `RequestBuilder`, so request settings, `.text()`, and `.bytes()` chain before `.await`.
+- `multipart::Part::file` and `Form::file` return `leyline::Result`. A file that cannot be opened is `Kind::Io`.
+- `TcpProfile` fields are private; read them through its getters.
+- `TlsContext::new(browser, min_version)` replaces `TlsContext::from_profile`, whose profile argument no caller outside the crate could build. A build with only `--cfg leyline_unstable_bssl` compiles again.
 
 ### Removed
 
@@ -186,11 +94,33 @@ version and publish as separate crates.
 
 ### Fixed
 
+- `pool_idle_timeout` now closes idle connections on a session with no traffic. Before, they stayed open until the next request.
+- A response with several `Transfer-Encoding` lines is now read as one list, and `chunked` must end it exactly once. Before, only the first line counted, so `chunked` then `gzip` was framed as chunked, a response desync risk.
+- A session that talks to more hosts than `max_connections` no longer collapses. Eviction scanned every entry under one write lock and closed sockets inside it; at 20,000 hosts and 300,000 req/s on the default limit this held the client to about 190,000 req/s with latency of many seconds. The pool now has up to 64 shards, and sockets close outside the lock.
+- An HTTP/2 connection that uses its last stream id now retires, and later requests move to a new connection. Before, the connection stayed in the pool and every later request to that host failed.
+- `retry(n)` now reaches the origin at most `n + 2` times for an idempotent request: one resend on a stale pooled connection for the first attempt only. Before, every attempt could resend, up to `2 * (n + 1)` times.
+- HTTP/2 requests no longer wait until their deadline when more than 1,024 requests queue on a connection and the queue drains in a batch. A sender that waited now wakes the next one, and every waiting sender fails at once when the connection ends.
+- Dropping a session that uses `Proxy::identified` frees the per-proxy identity sessions and their TLS contexts; before, each derived session kept the pool alive through a reference cycle.
+- A connection failure no longer evicts the healthy HTTP/2 or HTTP/3 connection that replaced the failed one in the pool.
+- A retry that reuses a pooled connection is treated as a pooled attempt: it is replayed after a failure and reported as reused.
+- HTTP/1 rejects malformed status-code widths and version tokens, discards the failed connection, and does not replay a malformed response.
+- The HTTP/2 reader builds with the minimum supported `tokio-util` version.
+- Reject malformed HTTP/2 response fields and invalid or repeated Content-Length fields instead of accepting incomplete metadata. Apply the shared field validation to HTTP/3 responses and trailers.
+- Reject HTTP/2 connections whose server preface does not start with SETTINGS, and server push after acknowledgement of disabled push.
+- An HTTP/2 server that sends `SETTINGS_ENABLE_PUSH` with a value other than 0 fails the connection with PROTOCOL_ERROR, as RFC 9113 section 6.5.2 requires.
+- A malformed PRIORITY frame or a zero WINDOW_UPDATE increment on a stream resets only that stream. These errors closed the whole HTTP/2 connection.
+- Concurrent connections to one host and port share a single DNS lookup, including the HTTP/2 and HTTP/3 legs of `Protocol::Race`.
+- `download_to` syncs its resume checkpoint at most once a second, writes every chunk that is already received in one blocking call, and hashes a saved prefix while the resume request is in flight. A 256 MiB download over loopback on an M-series Mac went from about 54 MiB/s to about 1,250 MiB/s.
+- `download_to` finishes a saved prefix of unknown length when the server answers the resume with 416 and `Content-Range: bytes */N` that equals the prefix. It failed with 416 on every retry.
+- An HTTP/2 RST_STREAM or WINDOW_UPDATE overflow that arrives after END_STREAM no longer discards a streamed body that is still queued for the reader.
+- Benchmark clients use rustls 0.23.46, which fixes certificate decompression, session debug, key-exchange hint, and ECH rejection advisories. Leyline's TLS backend remains BoringSSL.
+- `Session::stats()` counts one HTTP/2 or HTTP/3 checkout per request. It counted again when a request opened a connection.
 - The `Debug` output of a response fingerprint printed the `authorization` and `cookie` values it sent. `Fingerprint` prints them as `***`.
 - A zstd body whose frame declares a window over 8 MiB fails to decode, the limit RFC 9659 sets for the `zstd` coding.
 - Cookie `Expires` dates with an hour over 23, a minute or second over 59, or a year before 1601 are ignored, as RFC 6265 requires.
 - HTTP/2 and HTTP/3 fail a response after 16 informational (1xx) responses, as HTTP/1.1 already did.
-- A padded HTTP/2 DATA frame with no pad length, and an HTTP/1.1 chunk size with a sign or other non-hex characters, are protocol errors.
+- An HTTP/1.1 chunk-size line follows RFC 9112 section 7.1: a sign, non-hex characters, whitespace before the size, or anything other than spaces, tabs or `;` after it is a protocol error.
+- A padded HTTP/2 DATA, HEADERS or PUSH_PROMISE frame too short for its fixed fields is a FRAME_SIZE_ERROR, as RFC 9113 section 4.2 requires; padding longer than the rest of the frame is a PROTOCOL_ERROR.
 - `Response::bytes()` on a streamed response decodes each chunk as it arrives, so a corrupt compressed body fails at its first bad chunk.
 
 ## 0.1.6 - 2026-10-23

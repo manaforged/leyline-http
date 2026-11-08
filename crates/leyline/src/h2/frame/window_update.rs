@@ -1,6 +1,6 @@
 use bytes::{BufMut, Bytes};
 
-use super::{FrameHeader, FrameType, be_u32};
+use super::{FrameHeader, FrameType, U31_MAX, be_u32};
 use crate::h2::H2Error;
 use crate::h2::error::ErrorCode;
 
@@ -22,8 +22,7 @@ impl WindowUpdateFrame {
             });
         }
 
-        let increment = be_u32(&payload[..4]);
-        let increment = increment & 0x7FFF_FFFF;
+        let increment = be_u32(&payload[..4]) & U31_MAX;
         if increment == 0 {
             if header.stream_id == 0 {
                 return Err(H2Error::Connection {
@@ -52,6 +51,6 @@ impl WindowUpdateFrame {
             stream_id: self.stream_id,
         };
         header.encode(buf);
-        buf.put_u32(self.increment & 0x7FFF_FFFF);
+        buf.put_u32(self.increment & U31_MAX);
     }
 }

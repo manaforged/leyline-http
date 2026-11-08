@@ -1,12 +1,13 @@
+use crate::profile::Carrier;
 use crate::profile::TlsProfile;
 use crate::profile::extension::{PADDING, PRE_SHARED_KEY};
 
 impl TlsProfile {
-    pub(crate) fn extension_ids(&self) -> Vec<u16> {
+    pub(crate) fn extension_ids(&self, carrier: Carrier) -> Vec<u16> {
         let mut ids = match self.extension_permutation.as_deref() {
             Some(order) => order.to_vec(),
             None => self
-                .advertised_extensions(false)
+                .advertised_extensions(carrier)
                 .into_iter()
                 .map(|(id, _)| id)
                 .collect(),
@@ -17,8 +18,9 @@ impl TlsProfile {
         ids
     }
 
-    pub(super) fn validate(&self, quic: bool) -> Result<(), String> {
-        self.validate_tail(quic)?;
+    pub(super) fn validate(&self, carrier: Carrier) -> Result<(), String> {
+        self.validate_ids()?;
+        self.validate_tail(carrier)?;
         let Some(order) = self.extension_permutation.as_deref() else {
             return Ok(());
         };
@@ -30,7 +32,7 @@ impl TlsProfile {
             );
         }
 
-        let advertised = self.advertised_extensions(quic);
+        let advertised = self.advertised_extensions(carrier);
         for (index, id) in order.iter().enumerate() {
             if *id == PRE_SHARED_KEY {
                 return Err(format!(
@@ -69,11 +71,14 @@ impl TlsProfile {
         Ok(())
     }
 
-    fn validate_tail(&self, quic: bool) -> Result<(), String> {
+    fn validate_tail(&self, carrier: Carrier) -> Result<(), String> {
         if self.extension_tail.is_empty() {
             return Ok(());
         }
-        if !quic || self.grease || !self.permute_extensions || self.extension_permutation.is_some()
+        if carrier != Carrier::Quic
+            || self.grease
+            || !self.permute_extensions
+            || self.extension_permutation.is_some()
         {
             return Err(
                 "extension_tail belongs in [h3.tls] with permute_extensions = true, grease = false \
@@ -81,7 +86,7 @@ impl TlsProfile {
                     .to_string(),
             );
         }
-        let advertised = self.advertised_extensions(quic);
+        let advertised = self.advertised_extensions(carrier);
         for (index, id) in self.extension_tail.iter().enumerate() {
             if *id == PRE_SHARED_KEY || self.extension_tail[..index].contains(id) {
                 return Err(format!(

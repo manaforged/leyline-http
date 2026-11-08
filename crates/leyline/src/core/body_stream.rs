@@ -7,11 +7,11 @@ use bytes::Bytes;
 use futures_util::Stream;
 use tokio::sync::mpsc;
 use tokio::time::Sleep;
-use tokio_util::sync::{CancellationToken, WaitForCancellationFutureOwned};
 
 use crate::core::config::HostPass;
 
-use crate::core::session::decompress::Decoder;
+use crate::core::decompress::Decoder;
+use crate::core::shutdown::{Shutdown, Stopped};
 use crate::trace::BodyWatch;
 
 pub struct BodyStream {
@@ -22,9 +22,10 @@ pub struct BodyStream {
     body_deadline: Option<Pin<Box<Sleep>>>,
     decoded: Option<Box<Decoded>>,
     watch: Option<BodyWatch>,
-    shutdown: Option<Pin<Box<WaitForCancellationFutureOwned>>>,
+    shutdown: Option<Stopped>,
     ended: bool,
     pass: Option<HostPass>,
+    pump: Option<std::sync::Mutex<Pin<Box<dyn Future<Output = ()> + Send>>>>,
 }
 
 struct Decoded {
@@ -63,6 +64,15 @@ impl Decoded {
     }
 }
 
+impl From<crate::wire::BodyChannel> for BodyStream {
+    fn from(channel: crate::wire::BodyChannel) -> Self {
+        Self {
+            pump: channel.pump.map(|pump| std::sync::Mutex::new(*pump)),
+            ..Self::new(channel.rx)
+        }
+    }
+}
+
 impl BodyStream {
     pub(crate) fn new(rx: mpsc::Receiver<std::io::Result<Bytes>>) -> Self {
         Self {
@@ -76,6 +86,7 @@ impl BodyStream {
             shutdown: None,
             ended: false,
             pass: None,
+            pump: None,
         }
     }
 
@@ -125,8 +136,8 @@ impl BodyStream {
         ))
     }
 
-    pub(crate) fn stop_on(&mut self, token: &CancellationToken) {
-        self.shutdown = Some(Box::pin(token.clone().cancelled_owned()));
+    pub(crate) fn stop_on(&mut self, shutdown: &std::sync::Arc<Shutdown>) {
+        self.shutdown = Some(shutdown.wait_owned());
     }
 
     pub(crate) fn hold(&mut self, pass: Option<HostPass>) {
@@ -153,6 +164,7 @@ impl BodyStream {
         self.body_deadline = None;
         self.shutdown = None;
         self.pass = None;
+        self.pump = None;
         if let Some(mut watch) = self.watch.take() {
             watch.observe(item);
         }
@@ -168,8 +180,35 @@ impl BodyStream {
         self.watch = BodyWatch::begin();
     }
 
+    fn poll_pump(&mut self, cx: &mut Context<'_>) {
+        let idle = self.read_timeout.map(|timeout| {
+            self.idle
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep(timeout)))
+                .deadline()
+        });
+        let body = self.body_deadline.as_ref().map(|sleep| sleep.deadline());
+        let until = match (idle, body) {
+            (Some(idle), Some(body)) => Some(idle.min(body)),
+            (idle, body) => idle.or(body),
+        };
+        let Some(pump) = self.pump.as_mut() else {
+            return;
+        };
+        let pump = pump
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if crate::deadline::expiring(until, || pump.as_mut().poll(cx)).is_ready() {
+            self.pump = None;
+        }
+    }
+
     fn poll_raw(&mut self, cx: &mut Context<'_>) -> Poll<Option<std::io::Result<Bytes>>> {
-        match self.rx.poll_recv(cx) {
+        let mut polled = self.rx.poll_recv(cx);
+        if polled.is_pending() && self.pump.is_some() {
+            self.poll_pump(cx);
+            polled = self.rx.poll_recv(cx);
+        }
+        match polled {
             Poll::Ready(item) => {
                 self.idle = None;
                 Poll::Ready(item)
@@ -208,7 +247,7 @@ impl Stream for BodyStream {
             return Poll::Ready(None);
         }
         if this.poll_shutdown(cx) {
-            return this.end_with(std::io::Error::other(crate::core::error::Error::shut_down()));
+            return this.end_with(std::io::Error::other(crate::error::Error::shut_down()));
         }
         if let Poll::Ready(err) = this.poll_body_deadline(cx) {
             return this.end_with(err);

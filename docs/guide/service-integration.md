@@ -12,8 +12,8 @@ profile, the TLS context, and the trust store; a clone is an `Arc` clone that
 shares the pool, the cookie jar, and the identity, so it keeps the warm
 connections.
 
-`Session`, `Response`, and `Error` are `Send + Sync`. `Body`,
-`RequestBuilder`, and the `bytes_stream()` stream are `Send`. `leyline::http` is the `http` 1.x crate, so
+`Session`, `RequestBuilder`, `Response`, `Body`, and `Error` are
+`Send + Sync`. `leyline::http` is the `http` 1.x crate, so
 its `StatusCode`, `HeaderMap`, and `Request` pass to and from axum 0.8 and
 hyper 1 with no conversion.
 
@@ -67,7 +67,7 @@ and `.proxy(..)`. See
 ## Relay an upstream body
 
 Send with `.stream()` so that `send()` returns at the response head, then
-pass the body on from `bytes_stream()`, a
+pass the body on from `bytes_stream()`: a `Body`, which is a
 `Stream<Item = leyline::Result<Bytes>>` that most frameworks accept as a
 response body. Forward the headers from `relay_headers`, which drops
 the hop-by-hop headers of RFC 9110, section 7.6.1.

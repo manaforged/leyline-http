@@ -1,4 +1,5 @@
 use super::*;
+use bytes::BytesMut;
 
 #[test]
 fn frame_header_roundtrip() {

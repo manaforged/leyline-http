@@ -2,54 +2,50 @@ use leyline_bssl::ssl::{SslContextBuilder, SslVerifyMode};
 
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 use crate::profile::BrowserProfile;
-use crate::profile::TlsProfile;
+use crate::profile::{TlsMinVersion, TlsProfile};
 
 use crate::tls::error::TlsError;
 use crate::tls::keylog::install_from_env;
 use crate::tls::trust::{Tls, TrustIdentity, wire_configured_trust};
 
-#[cfg(any(
-    feature = "compression-gzip",
-    feature = "compression-brotli",
-    feature = "compression-deflate",
-    feature = "compression-zstd"
-))]
+#[cfg(leyline_any_codec)]
 mod cert;
 mod phase;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-#[non_exhaustive]
-pub enum TlsMinVersion {
-    Tls10,
-    Tls12,
-    Tls13,
+/// The transport a TLS context serves: TCP with the minimum used when the profile declares none, or QUIC, which needs TLS 1.3.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Transport {
+    Tcp(TlsMinVersion),
+    Quic,
 }
 
+/// Builds a TCP TLS context for `profile` with default trust and `min_version` as the fallback floor.
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
-impl BrowserProfile {
-    pub(crate) fn build_ssl_context(
-        &self,
-        min_version: TlsMinVersion,
-    ) -> Result<SslContextBuilder, TlsError> {
-        let mut builder = SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
-            .map_err(TlsError::from_stack)?;
-        let identity = apply_tls_with_trust(&mut builder, &self.tls, min_version, &Tls::default())?;
-        drop(identity);
-        Ok(builder)
-    }
+pub(crate) fn ssl_context(
+    profile: &BrowserProfile,
+    min_version: TlsMinVersion,
+) -> Result<SslContextBuilder, TlsError> {
+    let mut builder = SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
+        .map_err(TlsError::from_stack)?;
+    let trust = Tls::default();
+    let transport = Transport::Tcp(min_version);
+    let identity = apply_tls_with_trust(&mut builder, &profile.tls, transport, &trust)?;
+    drop(identity);
+    crate::tls::trust::install_verifier_ctx(&mut builder, &trust, None, transport);
+    Ok(builder)
 }
 
 pub(crate) fn apply_tls_with_trust(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,
-    min_version: TlsMinVersion,
+    transport: Transport,
     trust: &Tls,
 ) -> Result<TrustIdentity, TlsError> {
     phase::ciphers(builder, tls)?;
     phase::curves(builder, tls)?;
     phase::sigalgs(builder, tls)?;
     phase::extensions(builder, tls)?;
-    phase::versions(builder, tls, min_version, trust.min_tls_version)?;
+    phase::versions(builder, tls, transport, trust.min_tls_version)?;
 
     let identity = wire_configured_trust(builder, trust)?;
     builder.set_verify(SslVerifyMode::PEER);
@@ -65,27 +61,11 @@ fn partition_ciphers(ciphers: &[String]) -> Result<(Vec<u16>, Vec<&str>), TlsErr
     for cipher in ciphers {
         match crate::iana::cipher_id(cipher) {
             Some(id) if crate::iana::is_tls13_cipher(id) => tls13.push(id),
-            _ if cipher.starts_with("TLS_AES_") || cipher.starts_with("TLS_CHACHA20_") => {
-                return Err(TlsError::Profile(format!(
-                    "unknown TLS 1.3 cipher: {cipher}"
-                )));
-            }
-            _ => tls12.push(cipher.as_str()),
+            Some(_) => tls12.push(cipher.as_str()),
+            None => return Err(TlsError::Profile(format!("unknown cipher: {cipher}"))),
         }
     }
     Ok((tls13, tls12))
-}
-
-fn profile_min_version(declared: &Option<String>) -> Result<Option<TlsMinVersion>, TlsError> {
-    match declared.as_deref() {
-        None => Ok(None),
-        Some("1.0") => Ok(Some(TlsMinVersion::Tls10)),
-        Some("1.2") => Ok(Some(TlsMinVersion::Tls12)),
-        Some("1.3") => Ok(Some(TlsMinVersion::Tls13)),
-        Some(other) => Err(TlsError::Profile(format!(
-            "unsupported min_tls_version {other:?}; expected \"1.0\", \"1.2\", or \"1.3\""
-        ))),
-    }
 }
 
 #[cfg(not(all(
@@ -93,9 +73,10 @@ fn profile_min_version(declared: &Option<String>) -> Result<Option<TlsMinVersion
     feature = "compression-zstd",
     any(feature = "compression-gzip", feature = "compression-deflate")
 )))]
-fn missing(algo: &str, feature: &str) -> TlsError {
+fn missing(algo: &str, codec: crate::profile::Encoding) -> TlsError {
     TlsError::Profile(format!(
-        "profile requests {algo} certificate decompression but the `{feature}` feature is not compiled in"
+        "profile requests {algo} certificate decompression but the `{}` feature is not compiled in",
+        codec.feature()
     ))
 }
 

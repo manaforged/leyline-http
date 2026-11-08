@@ -1,0 +1,14 @@
+[package]
+name = "ergo-reqwest"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+reqwest = { version = "=0.13.5", features = ["json", "cookies", "multipart", "stream"] }
+reqwest-eventsource = "=0.6.0"
+tokio = { version = "=1.54.1", features = ["macros", "rt-multi-thread", "fs", "io-util", "time"] }
+serde_json = "1"
+futures = "=0.3.31"

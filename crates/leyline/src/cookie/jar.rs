@@ -5,8 +5,8 @@ use std::time::SystemTime;
 use tokio::sync::watch;
 use url::Url;
 
+use crate::cookie::Cookie;
 use crate::cookie::parse;
-use crate::cookie::record::Cookie;
 use crate::util::lock;
 
 use self::evict::settle;
@@ -102,7 +102,7 @@ impl Jar {
             return false;
         };
         if !cookie.secure
-            && url.scheme() != "https"
+            && !parse::secure_origin(url)
             && lock(&self.inner)
                 .cookies
                 .values()
@@ -118,7 +118,7 @@ impl Jar {
             if let Some(entries) = jar.cookies.get_mut(&domain)
                 && let Some(pos) = entries.iter().position(|c| c.same_slot(&cookie))
             {
-                if entries[pos].secure && url.scheme() != "https" {
+                if entries[pos].secure && !parse::secure_origin(url) {
                     return false;
                 }
                 return jar.remove_in(&domain, |c| c.same_slot(&cookie)) > 0;
@@ -170,7 +170,7 @@ impl Jar {
         use crate::cookie::record::SameSite;
         let domain = url.host_str().unwrap_or("");
         let path = url.path();
-        let is_secure = url.scheme() == "https";
+        let is_secure = parse::secure_origin(url);
 
         let mut jar = lock(&self.inner);
         if jar.total == 0 {
@@ -252,7 +252,7 @@ impl Jar {
     pub fn get(&self, url: &Url, name: &str) -> Option<String> {
         let domain = url.host_str().unwrap_or("");
         let path = url.path();
-        let is_secure = url.scheme() == "https";
+        let is_secure = parse::secure_origin(url);
 
         let jar = lock(&self.inner);
         jar.cookies

@@ -1,7 +1,9 @@
 use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::error::ErrorCode;
+
+use crate::h2::H2Error;
 use crate::h2::stream_state::StreamEvent;
 
 use super::*;
@@ -9,13 +11,13 @@ use super::*;
 mod headers;
 
 #[derive(Clone, Copy)]
-enum DataEnd {
+pub(super) enum DataEnd {
     Buffered,
     Streaming { producer_closed: bool },
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    pub(super) async fn on_body_chunk(&mut self, chunk: BodyChunkIn) -> Result<(), H2Error> {
+    pub(super) fn on_body_chunk(&mut self, chunk: BodyChunkIn) -> Result<(), H2Error> {
         match chunk {
             BodyChunkIn::Chunk { stream_id, data } => {
                 let should_try_write = if let Some(actor) = self.streams.get_mut(stream_id) {
@@ -30,7 +32,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     false
                 };
                 if should_try_write {
-                    self.try_pump_streaming_body(stream_id).await?;
+                    self.try_pump_streaming_body(stream_id)?;
                 }
             }
             BodyChunkIn::Eof { stream_id, error } => {
@@ -51,14 +53,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     false
                 };
                 if should_try_write {
-                    self.try_pump_streaming_body(stream_id).await?;
+                    self.try_pump_streaming_body(stream_id)?;
                 }
             }
         }
         Ok(())
     }
 
-    pub(super) async fn try_pump_streaming_body(&mut self, stream_id: u32) -> Result<(), H2Error> {
+    pub(super) fn try_pump_streaming_body(&mut self, stream_id: u32) -> Result<(), H2Error> {
         loop {
             let parked = self
                 .streams
@@ -86,7 +88,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             let already_closed = self
                 .streams
                 .get(stream_id)
-                .map(|a| a.send_closed)
+                .map(|a| !matches!(a.state, StreamState::Open | StreamState::HalfClosedRemote))
                 .unwrap_or(true);
             if already_closed {
                 return Ok(());
@@ -95,16 +97,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if next_chunk.is_none()
                 && let Some(cause) = self.take_body_error(stream_id)
             {
-                if let Err(e) = self
-                    .writer
-                    .write_frame(&RstStreamFrame {
-                        stream_id,
-                        error_code: ErrorCode::InternalError,
-                    })
-                    .await
-                {
-                    tracing::warn!(error = %e, stream_id, "h2 RST_STREAM write failed");
+                RstStreamFrame {
+                    stream_id,
+                    error_code: ErrorCode::InternalError,
                 }
+                .encode(self.writer.out());
                 self.fail_stream(stream_id, H2Error::RequestBody(cause));
                 return Ok(());
             }
@@ -117,12 +114,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         DataEnd::Streaming {
                             producer_closed: closed,
                         },
-                    )
-                    .await?;
+                    )?;
                 }
                 _ => {
                     if closed {
-                        self.end_send_side(stream_id).await?;
+                        self.end_send_side(stream_id)?;
                     }
                     return Ok(());
                 }
@@ -130,22 +126,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    async fn end_send_side(&mut self, stream_id: u32) -> Result<(), H2Error> {
+    fn end_send_side(&mut self, stream_id: u32) -> Result<(), H2Error> {
         if let Some(actor) = self.streams.get_mut(stream_id) {
             actor
                 .state
                 .transition(StreamEvent::SendData { end_stream: true })
                 .map_err(|e| map_state_err(stream_id, e))?;
-            actor.send_closed = true;
         }
-        self.writer
-            .write_frame(&DataFrame {
-                stream_id,
-                end_stream: true,
-                data: Bytes::new(),
-                wire_len: 0,
-            })
-            .await?;
+        DataFrame {
+            stream_id,
+            end_stream: true,
+            data: Bytes::new(),
+            wire_len: 0,
+        }
+        .encode(self.writer.out());
         Ok(())
     }
 
@@ -156,7 +150,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    async fn write_data_frames(
+    pub(super) fn write_data_frames(
         &mut self,
         stream_id: u32,
         mut remaining: Bytes,
@@ -165,7 +159,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         while !remaining.is_empty() {
             let window = self.effective_send_window(stream_id);
             if window == 0 || self.writer.congested() {
-                self.park_stream(stream_id, PendingSend { remaining });
+                self.streams.park(stream_id, PendingSend { remaining });
                 return Ok(());
             }
             let max_frame = self.peer_settings.max_frame_size as usize;
@@ -184,24 +178,20 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 }
             };
 
-            if let Some(actor) = self.streams.get_mut(stream_id) {
-                if let Err(e) = actor.state.transition(StreamEvent::SendData { end_stream }) {
-                    return Err(map_state_err(stream_id, e));
-                }
-                if end_stream && matches!(end, DataEnd::Streaming { .. }) {
-                    actor.send_closed = true;
-                }
+            if let Some(actor) = self.streams.get_mut(stream_id)
+                && let Err(e) = actor.state.transition(StreamEvent::SendData { end_stream })
+            {
+                return Err(map_state_err(stream_id, e));
             }
 
             let wire_len = piece.len() as u64;
-            self.writer
-                .write_frame(&DataFrame {
-                    stream_id,
-                    end_stream,
-                    data: piece,
-                    wire_len,
-                })
-                .await?;
+            DataFrame {
+                stream_id,
+                end_stream,
+                data: piece,
+                wire_len,
+            }
+            .encode(self.writer.out());
 
             self.note_upload_sent(stream_id, chunk_size);
         }
@@ -221,31 +211,18 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         self.conn_send_window -= sent as i64;
         if let Some(actor) = self.streams.get_mut(stream_id) {
             actor.send_window -= sent as i64;
-            if let Some(credit) = &actor.upload_credit {
-                credit.add_permits(sent);
+            if let Some(upload) = &actor.upload {
+                upload.sent(sent);
             }
         }
     }
 
-    pub(super) async fn write_body_or_park(
-        &mut self,
-        stream_id: u32,
-        body: Bytes,
-    ) -> Result<(), H2Error> {
-        self.write_data_frames(stream_id, body, DataEnd::Buffered)
-            .await
-    }
-
-    pub(super) async fn try_drain_pending(&mut self) -> Result<(), H2Error> {
-        if self.buffered_pending.is_empty() {
-            return Ok(());
-        }
-        let mut progress_count = self.buffered_pending.len();
-        while progress_count > 0 && !self.buffered_pending.is_empty() && !self.writer.congested() {
+    pub(super) fn try_drain_pending(&mut self) {
+        let mut progress_count = self.streams.parked();
+        while progress_count > 0 && self.streams.parked() > 0 && !self.writer.congested() {
             progress_count -= 1;
-            let sid = match self.buffered_pending.pop_front() {
-                Some(s) => s,
-                None => break,
+            let Some(sid) = self.streams.next_parked() else {
+                break;
             };
             let pending = match self
                 .streams
@@ -268,16 +245,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                 {
                     pending_buf.push_front(pending.remaining);
                 }
-                if let Err(e) = self.try_pump_streaming_body(sid).await {
+                if let Err(e) = self.try_pump_streaming_body(sid) {
                     self.fail_stream(sid, e);
                 }
                 continue;
             }
 
-            if let Err(e) = self.write_body_or_park(sid, pending.remaining).await {
+            if let Err(e) = self.write_data_frames(sid, pending.remaining, DataEnd::Buffered) {
                 self.fail_stream(sid, e);
             }
         }
-        Ok(())
     }
 }

@@ -9,8 +9,9 @@ use tokio::io::ReadBuf;
 use body::Encoder;
 
 const POLL_BUDGET: usize = 64;
+const READ_BUFFER_BYTES: usize = 4096;
 
-type Step = Poll<Result<Option<Sent>, H1PooledError>>;
+type Step = Poll<Result<Option<Sent>, H1Error>>;
 
 pub(super) enum Sent {
     Complete,
@@ -24,18 +25,24 @@ pub(super) struct Upload {
 }
 
 impl Upload {
-    pub(super) fn idle() -> Self {
+    pub(super) fn idle(buf: Vec<u8>) -> Self {
         Self {
-            received: Vec::with_capacity(4096),
+            received: read_buffer(buf),
             sent: Sent::Complete,
         }
     }
 }
 
+fn read_buffer(mut buf: Vec<u8>) -> Vec<u8> {
+    buf.clear();
+    buf.reserve(READ_BUFFER_BYTES);
+    buf
+}
+
 struct Pump<'a> {
     stream: &'a mut dyn H1Io,
     queue: VecDeque<Bytes>,
-    source: Option<(BodyStream, Encoder)>,
+    source: Option<(BoxedStream, Encoder)>,
     received: Vec<u8>,
     reading: bool,
 }
@@ -43,13 +50,14 @@ struct Pump<'a> {
 pub(super) async fn upload(
     stream: &mut dyn H1Io,
     queue: VecDeque<Bytes>,
-    source: Option<(BodyStream, Encoder)>,
-) -> Result<Upload, H1PooledError> {
+    source: Option<(BoxedStream, Encoder)>,
+    buf: Vec<u8>,
+) -> Result<Upload, H1Error> {
     let mut pump = Pump {
         stream,
         queue,
         source,
-        received: Vec::with_capacity(4096),
+        received: read_buffer(buf),
         reading: true,
     };
     let sent = poll_fn(|cx| pump.poll(cx)).await?;
@@ -60,18 +68,20 @@ pub(super) async fn upload(
 }
 
 impl Pump<'_> {
-    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Result<Sent, H1PooledError>> {
+    fn poll(&mut self, cx: &mut Context<'_>) -> Poll<Result<Sent, H1Error>> {
         if self.answered(cx)? {
             return Poll::Ready(Ok(Sent::Answered));
         }
         self.send(cx)
     }
 
-    fn answered(&mut self, cx: &mut Context<'_>) -> Result<bool, H1PooledError> {
+    fn answered(&mut self, cx: &mut Context<'_>) -> Result<bool, H1Error> {
         let mut tmp = [0u8; 2048];
         while self.reading {
             let mut read = ReadBuf::new(&mut tmp);
-            match Pin::new(&mut *self.stream).poll_read(cx, &mut read) {
+            match crate::net::probing(true, || {
+                Pin::new(&mut *self.stream).poll_read(cx, &mut read)
+            }) {
                 Poll::Pending => break,
                 Poll::Ready(Err(e)) => return Err(e.into()),
                 Poll::Ready(Ok(())) if read.filled().is_empty() => {
@@ -80,7 +90,7 @@ impl Pump<'_> {
                 }
                 Poll::Ready(Ok(())) => {
                     self.received.extend_from_slice(read.filled());
-                    if final_head(&self.received)? {
+                    if answered(&self.received) {
                         return Ok(true);
                     }
                 }
@@ -89,7 +99,7 @@ impl Pump<'_> {
         Ok(false)
     }
 
-    fn send(&mut self, cx: &mut Context<'_>) -> Poll<Result<Sent, H1PooledError>> {
+    fn send(&mut self, cx: &mut Context<'_>) -> Poll<Result<Sent, H1Error>> {
         for _ in 0..POLL_BUDGET {
             let step = if self.queue.is_empty() {
                 self.pull(cx)
@@ -138,19 +148,20 @@ impl Pump<'_> {
         match source.poll_next_unpin(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(Ok(chunk))) => {
-                Poll::Ready(encoder.encode(chunk, &mut self.queue).map(|()| None))
+                encoder.encode(chunk, &mut self.queue);
+                Poll::Ready(Ok(None))
             }
-            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(H1PooledError::RequestBody(e))),
+            Poll::Ready(Some(Err(e))) => Poll::Ready(Err(Error::from_request_body(e).into())),
             Poll::Ready(None) => {
-                let finished = encoder.finish(&mut self.queue);
+                encoder.finish(&mut self.queue);
                 self.source = None;
-                Poll::Ready(finished.map(|()| None))
+                Poll::Ready(Ok(None))
             }
         }
     }
 }
 
-fn broken(e: io::Error) -> Result<Sent, H1PooledError> {
+fn broken(e: io::Error) -> Result<Sent, H1Error> {
     match e.kind() {
         io::ErrorKind::BrokenPipe
         | io::ErrorKind::ConnectionReset
@@ -159,17 +170,19 @@ fn broken(e: io::Error) -> Result<Sent, H1PooledError> {
     }
 }
 
-fn final_head(buf: &[u8]) -> Result<bool, H1PooledError> {
+fn answered(buf: &[u8]) -> bool {
     if buf.len() > MAX_H1_HEADER_BYTES {
-        return Ok(true);
+        return true;
     }
+    let mut state = crate::wire::ResponseState::default();
     let mut rest = buf;
     while let Some(end) = find_header_end(rest) {
-        let (status, _, _) = parse_h1_head(&String::from_utf8_lossy(&rest[..end]))?;
-        if status == 101 || !(100..200).contains(&status) {
-            return Ok(true);
+        let interim = crate::pool::h1::parse::classify(&rest[..end], &mut state).is_ok()
+            && state != crate::wire::ResponseState::Final;
+        if !interim {
+            return true;
         }
         rest = &rest[end + 4..];
     }
-    Ok(false)
+    false
 }

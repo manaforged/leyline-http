@@ -187,7 +187,7 @@ fn public_claim_surfaces() -> Vec<PathBuf> {
         "crates/leyline/src/pool/mod.rs",
         "crates/leyline/src/profile/mod.rs",
         "crates/leyline/src/quic/mod.rs",
-        "crates/leyline/src/tcp/mod.rs",
+        "crates/leyline/src/net/mod.rs",
         "crates/leyline/src/tls/mod.rs",
     ]
     .into_iter()

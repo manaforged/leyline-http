@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::{BigNum, MsbOption};
+use leyline_bssl::ec::{EcGroup, EcKey};
 use leyline_bssl::hash::MessageDigest;
+use leyline_bssl::nid::Nid;
 use leyline_bssl::pkey::{PKey, Private};
-use leyline_bssl::rsa::Rsa;
 use leyline_bssl::ssl::{AlpnError, Ssl, SslContextBuilder, SslMethod, select_next_proto};
 use leyline_bssl::x509::extension::{BasicConstraints, SubjectAlternativeName};
 use leyline_bssl::x509::{X509, X509NameBuilder};
@@ -19,7 +20,10 @@ use leyline_bssl_tokio::SslStream;
 use tokio::net::{TcpListener, TcpStream};
 
 pub fn self_signed() -> (X509, PKey<Private>) {
-    let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
+    let key = PKey::from_ec_key(
+        EcKey::generate(&EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap(),
+    )
+    .unwrap();
     let mut name = X509NameBuilder::new().unwrap();
     name.append_entry_by_text("CN", "127.0.0.1").unwrap();
     let name = name.build();

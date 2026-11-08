@@ -42,10 +42,12 @@ async fn httpbin_timeout_skips_and_other_timeout_fails() {
         &mut skipped,
         true,
         std::time::Duration::from_millis(40),
-        smoke(async {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            Ok("late".to_string())
-        }),
+        || {
+            smoke(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                Ok("late".to_string())
+            })
+        },
     )
     .await;
     assert_eq!((passed, failed, skipped), (0, 0, 1));
@@ -53,6 +55,8 @@ async fn httpbin_timeout_skips_and_other_timeout_fails() {
     let mut passed = 0;
     let mut failed = 0;
     let mut skipped = 0;
+    let tries = AtomicUsize::new(0);
+    let started = std::time::Instant::now();
     finish(
         "hung fingerprint",
         &mut passed,
@@ -60,13 +64,22 @@ async fn httpbin_timeout_skips_and_other_timeout_fails() {
         &mut skipped,
         false,
         std::time::Duration::from_millis(40),
-        smoke(async {
-            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-            Ok("late".to_string())
-        }),
+        || {
+            tries.fetch_add(1, Ordering::SeqCst);
+            smoke(async {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                Ok("late".to_string())
+            })
+        },
     )
     .await;
     assert_eq!((passed, failed, skipped), (0, 1, 0));
+    assert_eq!(tries.load(Ordering::SeqCst), crate::echo::TRIES as usize);
+    assert!(
+        started.elapsed() >= crate::echo::GAP,
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[tokio::test]

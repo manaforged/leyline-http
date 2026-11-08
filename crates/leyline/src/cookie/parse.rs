@@ -2,6 +2,7 @@ use std::time::{Duration, SystemTime};
 
 use crate::cookie::record::{Cookie, MAX_NAME_VALUE_OCTETS, SameSite, capped_expiry};
 use crate::util::epoch_plus;
+use crate::wire::Scheme;
 
 mod attr;
 mod date;
@@ -35,14 +36,15 @@ fn parse_attributes(attrs_str: &str) -> CookieAttributes {
     a
 }
 
-fn secure_origin(request_url: &url::Url) -> bool {
-    let scheme = request_url.scheme();
-    let host = request_url.host_str().unwrap_or("");
-    scheme == "https"
-        || host == "localhost"
-        || host == "127.0.0.1"
-        || host == "[::1]"
-        || host.ends_with(".localhost")
+/// Reports whether `request_url` counts as a secure origin for `Secure` cookies.
+pub(crate) fn secure_origin(request_url: &url::Url) -> bool {
+    Scheme::of(request_url).is_some_and(Scheme::is_secure)
+        || match request_url.host() {
+            Some(url::Host::Domain(name)) => name == "localhost" || name.ends_with(".localhost"),
+            Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+            Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+            None => false,
+        }
 }
 
 fn prefix_rejected(name: &str, attrs: &CookieAttributes) -> bool {
@@ -76,11 +78,8 @@ fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Opti
     if !host_only && is_public_suffix(&cookie_domain) {
         return None;
     }
-    if !host_only {
-        let rh = request_host.to_lowercase();
-        if rh != cookie_domain && !rh.ends_with(&format!(".{cookie_domain}")) {
-            return None;
-        }
+    if !host_only && !crate::util::domain_match(&request_host, &cookie_domain) {
+        return None;
     }
     Some((host_only, cookie_domain))
 }
@@ -159,10 +158,6 @@ fn is_public_suffix(domain: &str) -> bool {
     }
     psl::suffix(domain.as_bytes())
         .is_some_and(|s| s.as_bytes().eq_ignore_ascii_case(domain.as_bytes()))
-}
-
-pub(crate) fn registrable_domain(host: &str) -> Option<String> {
-    psl::domain(host.as_bytes()).map(|d| String::from_utf8_lossy(d.as_bytes()).into_owned())
 }
 
 fn default_path(request_path: &str) -> String {

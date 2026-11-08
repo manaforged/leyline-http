@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use http_body_util::Full;
-use hyper::server::conn::http2;
+use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
 use hyper::{Request, Response};
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -46,7 +46,12 @@ async fn main() {
         .with_no_client_auth()
         .with_single_cert(vec![certificate], key)
         .expect("TLS config");
-    config.alpn_protocols = vec![b"h2".to_vec()];
+    let h1 = env::var("CMP_PROTO").as_deref() == Ok("h1");
+    config.alpn_protocols = vec![if h1 {
+        b"http/1.1".to_vec()
+    } else {
+        b"h2".to_vec()
+    }];
     let acceptor = TlsAcceptor::from(Arc::new(config));
     let address = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:0".into());
     let listener = TcpListener::bind(address).await.expect("bind");
@@ -63,6 +68,7 @@ async fn main() {
         None => Bytes::from_static(b"ok-10byte!"),
     };
     let log = env::var("CMP_LOG_PROTO").as_deref() == Ok("1");
+    let log_headers = env::var("CMP_LOG_HEADERS").as_deref() == Ok("1");
     println!(
         "LISTENING https://{}/",
         listener.local_addr().expect("address")
@@ -83,11 +89,12 @@ async fn main() {
             if log {
                 let tls = stream.get_ref().1;
                 eprintln!(
-                    "TLS version={:?} cipher={:?} group={:?} handshake={:?}",
+                    "TLS version={:?} cipher={:?} group={:?} alpn={} handshake={:?}",
                     tls.protocol_version(),
                     tls.negotiated_cipher_suite().map(|suite| suite.suite()),
                     tls.negotiated_key_exchange_group()
                         .map(|group| group.name()),
+                    String::from_utf8_lossy(tls.alpn_protocol().unwrap_or_default()),
                     tls.handshake_kind()
                 );
             }
@@ -97,6 +104,9 @@ async fn main() {
                     if log {
                         eprintln!("PROTO {:?}", request.version());
                     }
+                    if log_headers {
+                        println!("HEADERS {}", map_order(request.headers()));
+                    }
                     Ok::<_, Infallible>(
                         Response::builder()
                             .header("content-type", "text/plain")
@@ -105,12 +115,26 @@ async fn main() {
                     )
                 }
             });
-            if let Err(error) = http2::Builder::new(TokioExecutor::new())
-                .serve_connection(TokioIo::new(stream), service)
-                .await
-            {
+            let served = if h1 {
+                http1::Builder::new()
+                    .serve_connection(TokioIo::new(stream), service)
+                    .await
+            } else {
+                http2::Builder::new(TokioExecutor::new())
+                    .serve_connection(TokioIo::new(stream), service)
+                    .await
+            };
+            if let Err(error) = served {
                 eprintln!("connection: {error}");
             }
         }));
     }
+}
+
+fn map_order(headers: &hyper::HeaderMap) -> String {
+    headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {}", String::from_utf8_lossy(value.as_bytes())))
+        .collect::<Vec<_>>()
+        .join("\u{1f}")
 }

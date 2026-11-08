@@ -3,8 +3,9 @@ use std::sync::{Arc, LazyLock};
 use http::{HeaderName, StatusCode};
 use serde::Deserialize;
 
-use crate::core::error::{Cause, Error, Result};
 use crate::core::response::Response;
+use crate::error::{Error, Result};
+use crate::wire::text;
 
 const STATUS_VENDOR: &str = "status";
 const BUILTIN: &str = include_str!("../../profiles/blocks.toml");
@@ -79,8 +80,8 @@ impl Rules {
     }
 
     pub(crate) fn from_toml(source: &str) -> Result<Self> {
-        let file: RulesFile =
-            toml::from_str(source).map_err(|e| Error::new(Cause::Config).with_source(e))?;
+        let file: RulesFile = toml::from_str(source)
+            .map_err(|e| Error::new(crate::error::Kind::Config).with_source(e))?;
         let rules = file
             .rule
             .into_iter()
@@ -91,21 +92,25 @@ impl Rules {
         })
     }
 
-    pub(crate) fn statuses(statuses: impl IntoIterator<Item = u16>) -> Self {
+    pub(crate) fn statuses(statuses: impl IntoIterator<Item = u16>) -> Result<Self> {
         let rules = statuses
             .into_iter()
-            .filter_map(|code| StatusCode::from_u16(code).ok())
-            .map(|status| BlockRule {
-                vendor: STATUS_VENDOR.to_string(),
-                kind: Kind::Denied,
-                status: Some(status),
-                header: None,
-                value: None,
+            .map(|code| {
+                let status = StatusCode::from_u16(code).map_err(|e| {
+                    Error::config(format!("block status {code} is not a status code: {e}"))
+                })?;
+                Ok(BlockRule {
+                    vendor: STATUS_VENDOR.to_string(),
+                    kind: Kind::Denied,
+                    status: Some(status),
+                    header: None,
+                    value: None,
+                })
             })
-            .collect();
-        Self {
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self {
             rules: Arc::new(rules),
-        }
+        })
     }
 
     pub(crate) fn extend(&mut self, other: Rules) {
@@ -124,7 +129,7 @@ impl TryFrom<RuleEntry> for BlockRule {
     type Error = Error;
 
     fn try_from(entry: RuleEntry) -> Result<Self> {
-        let invalid = |message: String| Error::new(Cause::Config).with_message(message);
+        let invalid = |message: String| Error::config(message);
         if entry.status.is_none() && entry.header.is_none() {
             return Err(invalid(format!(
                 "block rule for {} needs a status or a header",
@@ -141,12 +146,12 @@ impl TryFrom<RuleEntry> for BlockRule {
             .status
             .map(StatusCode::from_u16)
             .transpose()
-            .map_err(|e| Error::new(Cause::Config).with_source(e))?;
+            .map_err(|e| Error::new(crate::error::Kind::Config).with_source(e))?;
         let header = entry
             .header
             .map(|name| HeaderName::from_bytes(name.as_bytes()))
             .transpose()
-            .map_err(|e| Error::new(Cause::Config).with_source(e))?;
+            .map_err(|e| Error::new(crate::error::Kind::Config).with_source(e))?;
         Ok(Self {
             vendor: entry.vendor,
             kind: entry.kind,
@@ -177,12 +182,12 @@ impl BlockRule {
         let Some(header) = &self.header else {
             return true;
         };
-        let mut values = response.headers().get_all(header).iter().peekable();
+        let headers = &response.parts.headers;
         let Some(expected) = &self.value else {
-            return values.peek().is_some();
+            return headers.any_value(header, |_| true);
         };
-        values
-            .filter_map(|value| value.to_str().ok())
-            .any(|value| value.trim().eq_ignore_ascii_case(expected))
+        headers.any_value(header, |value| {
+            text(value).is_some_and(|value| value.trim().eq_ignore_ascii_case(expected))
+        })
     }
 }

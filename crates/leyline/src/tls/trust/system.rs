@@ -4,19 +4,8 @@ use leyline_bssl::x509::X509;
 
 use crate::tls::error::TlsError;
 
-fn wire_system_trust(builder: &mut SslContextBuilder) -> Result<(), TlsError> {
-    #[cfg(windows)]
-    {
-        wire_windows_system_trust(builder)
-    }
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    {
-        wire_linux_system_trust(builder)
-    }
-}
-
 #[cfg(windows)]
-pub(super) fn wire_system_trust_cached(
+pub(super) fn wire_system_trust(
     builder: &mut SslContextBuilder,
     config: &super::Tls,
     env_roots_loaded: bool,
@@ -25,16 +14,16 @@ pub(super) fn wire_system_trust_cached(
         builder.set_cert_store_ref(cached_windows_system_store()?);
         return Ok(());
     }
-    wire_system_trust(builder)
+    wire_windows_system_trust(builder)
 }
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
-pub(super) fn wire_system_trust_cached(
+pub(super) fn wire_system_trust(
     builder: &mut SslContextBuilder,
     _config: &super::Tls,
     _env_roots_loaded: bool,
 ) -> Result<(), TlsError> {
-    wire_system_trust(builder)
+    wire_linux_system_trust(builder)
 }
 
 #[cfg(windows)]

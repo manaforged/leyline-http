@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 use leyline::testing;
 use leyline::{HostLimits, Proxy, Retry, Session};
 
+#[cfg(unix)]
 fn scratch(name: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!("leyline-{name}-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
@@ -238,12 +239,16 @@ async fn the_first_https_request_reports_a_fresh_connection() {
     let first = session.get(server.url("/a")).send().await.unwrap();
     assert!(!first.reused());
     assert!(first.connect_time().is_some());
-    let misses = session.stats().h2_misses();
+    let misses = session.stats().misses(leyline::http::Version::HTTP_2);
     let second = session.get(server.url("/b")).send().await.unwrap();
     assert!(second.reused());
     session.get(server.url("/c")).send().await.unwrap();
     let stats = session.stats();
-    assert_eq!(stats.h2_misses(), misses, "{stats:?}");
+    assert_eq!(
+        stats.misses(leyline::http::Version::HTTP_2),
+        misses,
+        "{stats:?}"
+    );
     assert_eq!(stats.evictions_dead(), 0, "{stats:?}");
 }
 

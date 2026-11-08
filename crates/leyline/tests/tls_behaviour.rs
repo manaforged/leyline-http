@@ -210,21 +210,21 @@ async fn a_saved_tls_session_resumes_only_under_the_trust_that_made_it() {
     let unpinned = http1_session(bare_trust().ca_der(server.der.clone()));
     let first = unpinned.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = unpinned.connection_state();
+    let state = leyline::internals::connection_state(&unpinned);
 
     let pinned = http1_session(bare_trust().ca_der(server.der.clone()).pin_sha256([7; 32]));
-    pinned.restore(&state);
+    leyline::internals::restore(&pinned, &state);
     let refused = pinned.get(server.url.clone()).send().await.unwrap_err();
     assert!(
         std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
             .is_some(),
         "{refused:?}"
     );
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
 
     let same = http1_session(bare_trust().ca_der(server.der));
-    same.restore(&state);
+    leyline::internals::restore(&same, &state);
     let again = same.get(server.url).send().await.unwrap();
     assert_eq!(again.text().await.unwrap(), "ok");
     assert_eq!(server.resumed.load(Ordering::SeqCst), 1);
@@ -258,14 +258,14 @@ async fn a_fresh_pool_labels_its_tickets_with_the_roots_it_loaded() {
     std::fs::write(&ca_file, unrelated_pem()).unwrap();
     let first = copy.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = copy.connection_state();
+    let state = leyline::internals::connection_state(&copy);
 
     let rotated = http1_session(bare_trust().ca_file(&ca_file));
-    rotated.restore(&state);
+    leyline::internals::restore(&rotated, &state);
     let refused = rotated.get(server.url).send().await.unwrap_err();
     assert!(
         std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
             .is_some(),
         "{refused:?}"
     );
@@ -283,18 +283,18 @@ async fn a_saved_tls_session_does_not_resume_after_environment_roots_change() {
     let before = http1_session(env_trust());
     let first = before.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = before.connection_state();
+    let state = leyline::internals::connection_state(&before);
 
     // SAFETY: see above.
     unsafe { std::env::set_var("SSL_CERT_FILE", &other) };
     let after = http1_session(env_trust());
     // SAFETY: see above.
     unsafe { std::env::remove_var("SSL_CERT_FILE") };
-    after.restore(&state);
+    leyline::internals::restore(&after, &state);
     let refused = after.get(server.url).send().await.unwrap_err();
     assert!(
         std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::TlsError>())
+            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
             .is_some(),
         "{refused:?}"
     );
@@ -317,13 +317,13 @@ async fn a_saved_tls_session_does_not_resume_after_the_client_certificate_rotate
     let before = with_identity();
     let first = before.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = before.connection_state();
+    let state = leyline::internals::connection_state(&before);
 
     let (next_cert, next_key) = tls_support::self_signed();
     std::fs::write(&chain, next_cert.to_pem().unwrap()).unwrap();
     std::fs::write(&private, next_key.private_key_to_pem_pkcs8().unwrap()).unwrap();
     let after = with_identity();
-    after.restore(&state);
+    leyline::internals::restore(&after, &state);
     let again = after.get(server.url.clone()).send().await.unwrap();
     assert_eq!(again.text().await.unwrap(), "ok");
     assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
@@ -422,13 +422,13 @@ async fn restored_tickets_for_other_trust_are_not_kept() {
     let unpinned = http1_session(bare_trust().ca_der(server.der.clone()));
     let first = unpinned.get(server.url.clone()).send().await.unwrap();
     assert_eq!(first.text().await.unwrap(), "ok");
-    let state = unpinned.connection_state();
+    let state = leyline::internals::connection_state(&unpinned);
     let saved = serde_json::to_value(&state).unwrap();
     assert!(!saved["tls_sessions"].as_array().unwrap().is_empty());
 
     let pinned = http1_session(bare_trust().ca_der(server.der).pin_sha256([7; 32]));
-    pinned.restore(&state);
-    let kept = serde_json::to_value(pinned.connection_state()).unwrap();
+    leyline::internals::restore(&pinned, &state);
+    let kept = serde_json::to_value(leyline::internals::connection_state(&pinned)).unwrap();
     assert_eq!(kept["tls_sessions"].as_array().map(Vec::len), Some(0));
 }
 
@@ -487,7 +487,7 @@ async fn saved_tickets_through_a_proxy_hold_no_proxy_credentials() {
         .unwrap();
     let response = session.get(server.url).send().await.unwrap();
     assert_eq!(response.text().await.unwrap(), "ok");
-    let saved = serde_json::to_string(&session.connection_state()).unwrap();
+    let saved = serde_json::to_string(&leyline::internals::connection_state(&session)).unwrap();
     assert!(saved.contains("tls_sessions"), "{saved}");
     assert!(
         !saved.contains("tunneluser"),
@@ -497,4 +497,99 @@ async fn saved_tickets_through_a_proxy_hold_no_proxy_credentials() {
         !saved.contains("tunnelsecret"),
         "the proxy password was saved"
     );
+}
+
+async fn read_request(stream: &mut SslStream<TcpStream>) -> Option<usize> {
+    let mut head = Vec::new();
+    let mut buf = [0u8; 4096];
+    let end = loop {
+        if let Some(end) = head.windows(4).position(|window| window == b"\r\n\r\n") {
+            break end + 4;
+        }
+        match stream.read(&mut buf).await {
+            Ok(0) | Err(_) => return None,
+            Ok(read) => head.extend_from_slice(&buf[..read]),
+        }
+    };
+    let text = String::from_utf8_lossy(&head[..end]).to_ascii_lowercase();
+    let length = text
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:"))
+        .map_or(0, |value| value.trim().parse().unwrap());
+    let mut body = head.len() - end;
+    while body < length {
+        match stream.read(&mut buf).await {
+            Ok(0) | Err(_) => return None,
+            Ok(read) => body += read,
+        }
+    }
+    Some(length)
+}
+
+#[tokio::test]
+async fn a_key_update_from_the_server_rekeys_both_directions() {
+    use foreign_types::ForeignTypeRef;
+
+    let (cert, key) = tls_support::self_signed();
+    let der = cert.to_der().unwrap();
+    let read_sequence = Arc::new(Mutex::new(None));
+    let seen = Arc::clone(&read_sequence);
+    let port = tls_support::tls_server_per_connection(
+        cert,
+        key,
+        Arc::new(AtomicUsize::new(0)),
+        |_| tls_support::HTTP11,
+        move |_, mut stream: SslStream<TcpStream>| {
+            let seen = Arc::clone(&seen);
+            async move {
+                let mut served = 0;
+                while let Some(length) = read_request(&mut stream).await {
+                    served += 1;
+                    if served == 3 {
+                        // SAFETY: the SSL is live for the whole borrow.
+                        let sequence = unsafe {
+                            leyline_bssl_sys::SSL_get_read_sequence(stream.ssl().as_ptr())
+                        };
+                        *seen.lock().unwrap() = Some(sequence);
+                    }
+                    let body = if served == 4 {
+                        vec![b'x'; length]
+                    } else {
+                        b"ok".to_vec()
+                    };
+                    if served == 2 {
+                        // SAFETY: the SSL is live for the whole borrow.
+                        let queued = unsafe {
+                            leyline_bssl_sys::SSL_key_update(
+                                stream.ssl().as_ptr(),
+                                leyline_bssl_sys::SSL_KEY_UPDATE_REQUESTED,
+                            )
+                        };
+                        assert_eq!(queued, 1);
+                    }
+                    let head = format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\n\r\n", body.len());
+                    if stream.write_all(head.as_bytes()).await.is_err()
+                        || stream.write_all(&body).await.is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        },
+    )
+    .await;
+    let session = http1_session(bare_trust().ca_der(der));
+    let url = format!("https://127.0.0.1:{port}/");
+    for _ in 0..3 {
+        let reply = session.get(&url).send().await.unwrap();
+        assert_eq!(reply.text().await.unwrap(), "ok");
+    }
+    let reply = session
+        .post(&url)
+        .body(vec![b'y'; 100 * 1024])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reply.bytes().await.unwrap().len(), 100 * 1024);
+    assert_eq!(*read_sequence.lock().unwrap(), Some(1));
 }

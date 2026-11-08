@@ -1,5 +1,7 @@
-use crate::profile::{BrowserHeaders, BrowserProfile, ChromiumBrand, Platform};
-use crate::{Cause, Error};
+use std::sync::Arc;
+
+use crate::error::Error;
+use crate::profile::{BrowserHeaders, BrowserProfile, ChromiumBrand, Platform, ProfileRegistry};
 
 mod digest;
 
@@ -47,7 +49,7 @@ impl std::str::FromStr for Browser {
 string_id_serde!(Browser);
 
 pub(crate) fn unknown<'a>(kind: &str, id: &str, known: impl Iterator<Item = &'a str>) -> Error {
-    Error::new(Cause::Config).with_message(format!(
+    Error::config(format!(
         "unknown {kind} {id:?}; expected one of {}",
         known.collect::<Vec<_>>().join(", ")
     ))
@@ -113,6 +115,17 @@ impl Browser {
         self.entry().hello
     }
 
+    /// Pairs `http` with the representative hello of `tls`, which must be the same family.
+    pub(crate) fn pair(http: Self, tls: Self) -> Result<(Self, Self), Error> {
+        let tls = tls.base();
+        if http.family() != tls.family() {
+            return Err(Error::config(format!(
+                "tls {tls} is not the same family as {http}"
+            )));
+        }
+        Ok((http, tls.hello_rep()))
+    }
+
     /// Returns the next distinct TLS ClientHello in the same family, or `None` when the family has only one.
     #[must_use]
     pub fn next_hello(self) -> Option<Self> {
@@ -159,17 +172,42 @@ impl Browser {
     }
 
     pub(crate) fn identity_headers(self, platform: Platform) -> Option<BrowserHeaders> {
-        self.platform_profile(platform)
+        self.base()
+            .for_platform(platform)
+            .profile()
             .resolve_identity(platform, self.brand().unwrap_or_default())
             .ok()
     }
 
-    pub(crate) fn platform_profile(self, platform: Platform) -> &'static BrowserProfile {
-        self.base().for_platform(platform).profile()
-    }
-
     pub(crate) fn profile_source(self) -> &'static str {
         self.entry().source
+    }
+
+    pub(crate) fn profile(self) -> &'static BrowserProfile {
+        ProfileRegistry::global().get_browser(self).expect(
+            "built-in profile missing - registry integrity check in tests would have caught this",
+        )
+    }
+
+    #[cfg_attr(
+        not(any(test, feature = "bench-internals")),
+        expect(
+            dead_code,
+            reason = "tests and bench-internals read the branded profile"
+        )
+    )]
+    pub(crate) fn branded_profile(self) -> Arc<BrowserProfile> {
+        let base = self.shared_profile();
+        match self.brand() {
+            Some(brand) => brand.tls_profile(base),
+            None => base,
+        }
+    }
+
+    pub(crate) fn shared_profile(self) -> Arc<BrowserProfile> {
+        ProfileRegistry::global().shared(self).expect(
+            "built-in profile missing - registry integrity check in tests would have caught this",
+        )
     }
 
     pub(crate) fn matching_source(text: &str) -> Option<Self> {
@@ -177,10 +215,6 @@ impl Browser {
         ALL.iter()
             .copied()
             .find(|browser| digest(&[browser.profile_source().as_bytes()]) == wanted)
-    }
-
-    pub(crate) fn default_browser() -> Self {
-        Self::latest(DEFAULT_FAMILY)
     }
 
     /// Returns the Chromium major version this browser is built on, or `None` for a non-Chromium browser.
@@ -191,7 +225,7 @@ impl Browser {
 
 impl Default for Browser {
     fn default() -> Self {
-        Self::default_browser()
+        Self::latest(DEFAULT_FAMILY)
     }
 }
 

@@ -1,10 +1,12 @@
 mod akamai;
-mod ja3;
-mod ja4;
+pub use akamai::akamai_fingerprint;
+mod raw;
 
-use crate::iana::is_grease;
-use crate::profile::{BrowserProfile, TlsProfile};
-use crate::{Cause, Error};
+use crate::error::Error;
+use crate::iana::{cipher_name, curve_name, is_grease, sigalg_name};
+use crate::profile::{BrowserProfile, Carrier, TlsProfile};
+pub(crate) use raw::{JA3_POINT_FORMATS, JA3_RECORD_VERSION, JA4_TCP};
+use raw::{Ja3, Ja4};
 
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -70,15 +72,15 @@ impl FingerprintSpec {
 }
 
 fn config_error(format: &str, why: impl std::fmt::Display) -> Error {
-    Error::new(Cause::Config).with_message(format!("{format} fingerprint: {why}"))
+    Error::config(format!("{format} fingerprint: {why}"))
 }
 
 impl BrowserProfile {
-    pub fn from_fingerprint(spec: FingerprintSpec) -> crate::Result<Self> {
+    pub fn from_fingerprint(spec: FingerprintSpec) -> crate::error::Result<Self> {
         let base = spec.base.unwrap_or_else(|| (*Self::bare_shared()).clone());
-        let source = base.source().ok_or_else(|| {
-            Error::new(Cause::Config).with_message("fingerprint base profile has no TOML source")
-        })?;
+        let source = base
+            .source()
+            .ok_or_else(|| Error::config("fingerprint base profile has no TOML source"))?;
         Self::from_toml(&format!("{source}{}", spec.layer.to_toml()))
     }
 }
@@ -103,7 +105,7 @@ impl FingerprintLayer {
         out
     }
 
-    pub(crate) fn apply(&self, profile: &mut BrowserProfile) -> crate::Result<()> {
+    pub(crate) fn apply(&self, profile: &mut BrowserProfile) -> crate::error::Result<()> {
         if let Some(name) = &self.name {
             profile.meta.name.clone_from(name);
         }
@@ -124,7 +126,7 @@ impl FingerprintLayer {
         }
         profile
             .tls
-            .validate(false)
+            .validate(Carrier::Tcp)
             .map_err(|why| config_error("TLS", why))?;
         if let Some(raw) = self.akamai.as_deref() {
             profile
@@ -153,18 +155,29 @@ fn quote(text: &str) -> String {
     out
 }
 
-fn parse_list(field: &str, radix: u32, what: &str) -> Result<Vec<u16>, String> {
-    field
-        .split([',', '-'])
-        .filter(|item| !item.is_empty())
-        .map(|item| {
-            u16::from_str_radix(item.trim(), radix)
-                .map_err(|e| format!("{what} value {item:?} is not a 16-bit number: {e}"))
-        })
-        .collect()
-}
-
 impl TlsProfile {
+    fn apply_ja3(&mut self, raw: &str) -> Result<(), String> {
+        let ja3 = Ja3::parse(raw)?;
+        self.ciphers = self.iana_names(&ja3.ciphers, cipher_name, "cipher")?;
+        self.curves = self.iana_names(&ja3.curves, curve_name, "curve")?;
+        if let Some(shares) = self.key_shares.as_mut() {
+            shares.retain(|share| self.curves.contains(share));
+        }
+        let order = self.apply_extensions(&ja3.extensions)?;
+        self.extension_permutation = Some(order);
+        self.permute_extensions = false;
+        Ok(())
+    }
+
+    fn apply_ja4(&mut self, raw: &str) -> Result<(), String> {
+        let ja4 = Ja4::parse(raw)?;
+        self.ciphers = self.iana_names(&ja4.ciphers, cipher_name, "cipher")?;
+        self.sigalgs = self.iana_names(&ja4.sigalgs, sigalg_name, "signature algorithm")?;
+        self.apply_extensions(&ja4.extensions)?;
+        self.extension_permutation = None;
+        Ok(())
+    }
+
     fn iana_names(
         &mut self,
         ids: &[u16],

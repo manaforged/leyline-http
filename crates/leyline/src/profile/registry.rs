@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use crate::profile::Browser;
-use crate::profile::types::BrowserProfile;
+use crate::profile::BrowserProfile;
 
 pub struct ProfileRegistry {
     profiles: Vec<Arc<BrowserProfile>>,
@@ -35,14 +35,12 @@ impl ProfileRegistry {
         }
     }
 
-    bench_pub! {
-        fn builtin() -> Self {
-            let mut reg = Self::new();
-            for browser in Browser::all() {
-                reg.load_toml(browser.profile_source());
-            }
-            reg
+    pub fn builtin() -> Self {
+        let mut reg = Self::new();
+        for browser in Browser::all() {
+            reg.load_toml(browser.profile_source());
         }
+        reg
     }
 
     fn load_toml(&mut self, toml_str: &str) {
@@ -76,11 +74,9 @@ impl ProfileRegistry {
         self.find(name, version).cloned()
     }
 
-    bench_pub! {
-        fn get_browser(&self, browser: Browser) -> Option<&BrowserProfile> {
-            let (name, version) = browser.profile_key();
-            self.get(name, version)
-        }
+    pub fn get_browser(&self, browser: Browser) -> Option<&BrowserProfile> {
+        let (name, version) = browser.profile_key();
+        self.get(name, version)
     }
 }
 

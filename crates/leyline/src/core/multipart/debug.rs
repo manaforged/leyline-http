@@ -1,7 +1,7 @@
 use std::fmt;
 
 use super::{Form, Part};
-use crate::trace::masked;
+use crate::util::masked;
 
 impl fmt::Debug for Part {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

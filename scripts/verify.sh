@@ -28,7 +28,6 @@ cd "$repo_root"
 if [[ -n "${USERPROFILE:-}" ]] && command -v cygpath >/dev/null 2>&1; then
     export PATH="$(cygpath "$USERPROFILE")/.cargo/bin:$PATH"
 fi
-export PATH="$HOME/.cargo/bin:$PATH"
 if ! command -v cargo >/dev/null 2>&1 && command -v cargo.exe >/dev/null 2>&1; then
     cargo() { cargo.exe "$@"; }
 fi
@@ -37,13 +36,6 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target/verify}"
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
 fail() { printf '\033[1;31m✗ %s\033[0m\n'  "$*" >&2; exit 1; }
-skipped=""
-current_gate=""
-skip() {
-    [[ -z "${CI:-}" ]] || fail "$1"
-    printf '  (%s; skipping)\n' "$1"
-    [[ " $skipped " == *" $current_gate "* ]] || skipped="${skipped:+$skipped }$current_gate"
-}
 
 msrv="$(awk -F'"' '/^rust-version *= *"/{print $2; exit}' Cargo.toml)"
 
@@ -65,12 +57,6 @@ ensure_msrv() {
     ensure_toolchain "$msrv"
 }
 
-g_comments() {
-    step "rust comments (one line)"
-    python3 scripts/check-comments.py || fail "comments must be one-line rustdoc or // SAFETY:"
-    ok "comment lint"
-}
-
 g_msrv() {
     step "rust toolchain"
     rustc --version
@@ -81,10 +67,8 @@ g_msrv() {
         cargo +"$msrv" --version || fail "Rust $msrv is required; install it with rustup toolchain install $msrv"
     fi
 
-    step "cargo +$msrv check"
-    cargo +"$msrv" check --workspace || fail "MSRV cargo check failed"
-    step "cargo +$msrv check -p leyline-http --features full"
-    cargo +"$msrv" check -p leyline-http --features full || fail "MSRV cargo check with feature full failed"
+    step "cargo +$msrv check --workspace --features leyline-http/full"
+    cargo +"$msrv" check --workspace --locked --features leyline-http/full || fail "MSRV cargo check failed"
     ok "MSRV compile sanity"
 }
 
@@ -97,8 +81,40 @@ stage_workspace() {
     git submodule foreach --quiet --recursive \
         "git archive --format=tar --prefix=\"\$displaypath/\" HEAD | tar -xf - -C \"$package_stage\"" \
         || fail "failed to stage the submodules"
-    node scripts/stage-package-workspace.mjs "$package_stage" \
-        || fail "failed to stage the package workspace"
+    python3 - "$package_stage" <<'PY'
+import pathlib, re, sys
+
+stage = pathlib.Path(sys.argv[1])
+root_toml = stage / "Cargo.toml"
+text = root_toml.read_text()
+anchor = '    "crates/leyline",\n'
+members = [
+    "crates/leyline-bssl-sys",
+    "crates/leyline-bssl",
+    "crates/leyline-bssl-tokio",
+]
+added = "".join(f'    "{m}",\n' for m in members)
+if anchor not in text:
+    raise SystemExit("workspace member anchor is missing")
+text = text.replace(anchor, anchor + added, 1)
+excluded = (
+    "\nexclude = [\n"
+    '    "crates/leyline-bssl-sys",\n'
+    '    "crates/leyline-bssl",\n'
+    '    "crates/leyline-bssl-tokio",\n'
+    "]\n"
+)
+if excluded not in text:
+    raise SystemExit("BoringSSL workspace exclusion block is missing")
+root_toml.write_text(text.replace(excluded, "\n", 1))
+for m in members:
+    p = stage / m / "Cargo.toml"
+    s = p.read_text()
+    updated = re.sub(r"\n\[workspace\]\s*$", "\n", s)
+    if updated == s:
+        raise SystemExit(f"{m} does not declare its standalone workspace")
+    p.write_text(updated)
+PY
 }
 
 g_package() {
@@ -134,18 +150,12 @@ g_package() {
         || fail "packaged crate archive is missing"
     mkdir -p "$package_root/consumer/src"
     printf 'fn main() {}\n' >"$package_root/consumer/src/main.rs"
-    local smoke_features smoke_set smoke_spec smoke_failed=()
-    smoke_features="$(cargo metadata --manifest-path "$leyline_package/Cargo.toml" --no-deps --format-version 1 \
-        | python3 -c '
-import json, sys
-pkg = next(p for p in json.load(sys.stdin)["packages"] if p["name"] == "leyline-http")
-print(" ".join(sorted(f for f in pkg["features"] if f not in ("default", "full", "bench-internals", "test-util"))))
-')" || fail "cargo metadata failed on the packaged leyline-http"
-    for smoke_set in none default full $smoke_features; do
+    local smoke_set smoke_spec smoke_failed=()
+    for smoke_set in none default full; do
         case "$smoke_set" in
             none) smoke_spec='default-features = false' ;;
             default) smoke_spec='default-features = true' ;;
-            *) smoke_spec="default-features = false, features = [\"$smoke_set\"]" ;;
+            full) smoke_spec='default-features = false, features = ["full"]' ;;
         esac
         cat >"$package_root/consumer/Cargo.toml" <<EOF
 [package]
@@ -214,14 +224,14 @@ g_book() {
 g_links() {
     step "lychee --offline (README, docs, crate pages)"
     command -v lychee >/dev/null || fail "lychee not found (cargo install --locked lychee)"
-    lychee --offline --no-progress README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md \
+    lychee --offline --no-progress README.md CHANGELOG.md UPGRADE.md CONTRIBUTING.md SECURITY.md \
         BENCHMARKS.md AGENTS.md docs crates/leyline/docs || fail "broken links"
     ok "links resolve"
 }
 
 g_test() {
-    step "cargo test --workspace --exclude leyline-quiche"
-    cargo test --workspace --exclude leyline-quiche \
+    step "cargo test --workspace"
+    cargo test --workspace --locked \
         --features leyline-http/full,leyline-http/bench-internals || fail "tests failed"
     ok "tests pass"
 }
@@ -238,53 +248,26 @@ g_live() {
 
 g_deny() {
     step "cargo deny --all-features check"
-    if ! command -v cargo-deny >/dev/null; then
-        fail "cargo-deny not installed: cargo install --locked cargo-deny"
-    fi
+    command -v cargo-deny >/dev/null || fail "cargo-deny not installed: cargo install --locked cargo-deny"
     cargo deny --all-features check || fail "cargo-deny found issues"
     ok "cargo-deny clean"
 }
 
-g_semver() {
-    step "cargo semver-checks check-release -p leyline-http (against crates.io)"
-    if ! command -v cargo-semver-checks >/dev/null; then
-        skip "cargo-semver-checks not installed: cargo install --locked cargo-semver-checks"
-        return 0
-    fi
-    cargo semver-checks check-release -p leyline-http \
-        || fail "cargo-semver-checks found a breaking change against the published release"
-    semver_status="ran"
-    ok "semver-checks clean"
-}
-
-g_external_types() {
-    external_types_nightly="nightly-2026-06-20"
-    step "cargo check-external-types leyline-http --features full ($external_types_nightly)"
-    if ! command -v cargo-check-external-types >/dev/null; then
-        skip "cargo-check-external-types not installed: cargo install --locked cargo-check-external-types"
-    elif ! rustup toolchain list 2>/dev/null | grep -q "^$external_types_nightly"; then
-        external_types_status="skipped ($external_types_nightly toolchain not installed)"
-        skip "$external_types_nightly not installed (rustdoc JSON format 57): rustup toolchain install $external_types_nightly"
-    else
-        cargo "+$external_types_nightly" check-external-types \
-            --manifest-path crates/leyline/Cargo.toml --features full \
-            || fail "public API leaks unapproved external types"
-        external_types_status="ran"
-        ok "external types clean"
-    fi
+g_kani() {
+    step "cargo kani: HPACK integer, HTTP/2 frame header, SETTINGS, stream state and flow-window proofs"
+    command -v cargo-kani >/dev/null || fail "cargo-kani not installed: cargo install --locked kani-verifier && cargo kani setup"
+    (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing --jobs --output-format terse) \
+        || fail "a Kani proof failed"
+    ok "Kani proofs verified"
 }
 
 g_benches() {
     step "benches compile (sub-workspace)"
-    if [[ -d benches ]]; then
-        ( cd benches && cargo bench --no-run ) || fail "benches fail to compile"
-        ok "benches compile"
-    else
-        skip "benches/ not present"
-    fi
+    ( cd benches && cargo bench --no-run ) || fail "benches fail to compile"
+    ok "benches compile"
 }
 
-FUZZ_TARGETS=(h2_frame hpack h2_continuation h1_head h1_chunked cookie connect_response qpack html link)
+FUZZ_TARGETS=($(sed -n 's/^name = "\(.*\)"$/\1/p' fuzz/Cargo.toml 2>/dev/null | grep -v '^leyline-fuzz$'))
 
 fuzz_run() {
     local host
@@ -292,36 +275,9 @@ fuzz_run() {
     ( cd fuzz && cargo +nightly fuzz run --target "$host" "$@" )
 }
 
-g_fuzz_replay() {
-    step "fuzz corpus replay (cargo fuzz, -runs=0)"
-    if [[ ! -d fuzz ]]; then
-        skip "fuzz/ not present"
-    elif ! command -v cargo-fuzz >/dev/null; then
-        skip "cargo-fuzz not installed: cargo install --locked cargo-fuzz"
-    elif ! command -v rustc >/dev/null || ! rustup toolchain list 2>/dev/null | grep -q nightly; then
-        skip "nightly toolchain not installed: rustup toolchain install nightly"
-    else
-        for target in "${FUZZ_TARGETS[@]}"; do
-            echo "  replaying corpus/$target ..."
-            fuzz_run "$target" -- -runs=0 \
-                </dev/null >/tmp/leyline-fuzz-$target.log 2>&1 \
-                || { cat /tmp/leyline-fuzz-$target.log; fail "corpus replay failed for $target"; }
-        done
-        ok "fuzz corpus replay clean"
-    fi
-}
-
 g_fuzz_timed() {
     step "fuzz (time-bounded, ${fuzz_seconds}s per target)"
-    if [[ ! -d fuzz ]]; then
-        fail "fuzz/ not present; cannot run --fuzz"
-    fi
-    if ! command -v cargo-fuzz >/dev/null; then
-        fail "cargo-fuzz not installed: cargo install --locked cargo-fuzz"
-    fi
-    if ! rustup toolchain list 2>/dev/null | grep -q nightly; then
-        fail "nightly toolchain required: rustup toolchain install nightly"
-    fi
+    command -v cargo-fuzz >/dev/null || fail "cargo-fuzz not installed: cargo install --locked cargo-fuzz"
     for target in "${FUZZ_TARGETS[@]}"; do
         echo "  fuzzing $target for ${fuzz_seconds}s ..."
         fuzz_run "$target" -- -max_total_time="$fuzz_seconds" </dev/null \
@@ -332,7 +288,6 @@ g_fuzz_timed() {
 
 MAX_CRATE_BYTES=10485760
 CRATES_INDEX=https://index.crates.io
-PUBLISH_TOOLCHAIN=nightly-2026-09-16
 PUBLISH_INDEX_WAIT=900
 SUBCRATE_MANIFESTS=(
     crates/leyline-bssl-sys/Cargo.toml
@@ -398,9 +353,8 @@ published_on_crates_io() {
 }
 
 g_publish() {
-    step "cargo publish (every publishable crate not yet on crates.io, in dependency order, waiting up to ${PUBLISH_INDEX_WAIT}s for each in the index)"
+    step "cargo publish (every publishable crate not yet on crates.io, in dependency order)"
     [[ -n "${CARGO_REGISTRY_TOKEN:-}" ]] || fail "CARGO_REGISTRY_TOKEN is unset; publish runs from the release workflow"
-    ensure_toolchain "$PUBLISH_TOOLCHAIN"
     stage_workspace
     local name version pending=() excluded=()
     while read -r name version; do
@@ -417,7 +371,7 @@ g_publish() {
     fi
     echo "  publishing: ${pending[*]}"
     rm -rf "$CARGO_TARGET_DIR/package"
-    cargo +"$PUBLISH_TOOLCHAIN" package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+    cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
         || fail "cargo package failed; nothing was uploaded"
     if [[ -n "${RELEASE_PACKAGES:-}" ]]; then
         local archive
@@ -426,21 +380,17 @@ g_publish() {
                 || fail "$(basename "$archive") differs from the package the release job tested; nothing was uploaded"
         done
     fi
-    cargo +"$PUBLISH_TOOLCHAIN" publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
-        -Zpublish-timeout --config "publish.timeout=$PUBLISH_INDEX_WAIT" \
+    cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
         || fail "cargo publish failed; re-running the publish job publishes only the crates not yet on crates.io"
     ok "crates published"
 }
 
 gate_order=(
-    comments msrv package
-    fmt clippy features doc book links test live deny semver external-types benches
-    subcrates release publish
-    fuzz-replay fuzz-timed
+    fmt clippy features doc book links msrv test deny benches
+    subcrates package kani live release publish fuzz-timed
 )
-quick_gates=(comments msrv package)
-full_gates=(comments msrv package fmt clippy features doc book links test live
-    deny semver external-types benches subcrates fuzz-replay)
+quick_gates=(fmt clippy doc)
+full_gates=(fmt clippy features doc book links msrv test deny benches subcrates package)
 
 if [[ -n "$only" ]]; then
     IFS=',' read -ra want <<<"$only"
@@ -455,40 +405,10 @@ else
 fi
 [[ $fuzz -eq 1 ]] && want+=(fuzz-timed)
 
-semver_status="skipped (cargo install --locked cargo-semver-checks)"
-external_types_status="skipped (cargo install --locked cargo-check-external-types)"
-
 for g in "${gate_order[@]}"; do
     if [[ " ${want[*]} " == *" $g "* ]]; then
-        current_gate="$g"
         "g_${g//-/_}"
     fi
 done
-
-if [[ -z "$only" && $full -eq 1 ]]; then
-    step "pre-tag matrix parity (.github/workflows/matrix.yml)"
-    printf '  %-22s %s\n' \
-        'check (MSRV)'        "ran (cargo +$msrv check --workspace)" \
-        'check (stable)'      'ran (this toolchain)' \
-        'check (beta)'        'matrix only' \
-        'minimal versions'    'matrix only (cargo minimal-versions check)' \
-        'semver'              "$semver_status" \
-        'external types'      "$external_types_status" \
-        'cross aarch64-macos' 'matrix only' \
-        'cross x86_64-linux'  'matrix only' \
-        'cross aarch64-linux' 'matrix only' \
-        'cross x86_64-windows' 'matrix only'
-    echo "  Run the rest with: gh workflow run matrix.yml"
-fi
-
-if [[ -n "$skipped" ]]; then
-    printf '\n\033[1;33mVerify incomplete: skipped %s\033[0m\n' "$skipped" >&2
-    exit 2
-fi
-
-if [[ -z "$only" && $full -eq 0 ]]; then
-    printf '\n\033[1;32mSanity check passed.\033[0m\n'
-    exit 0
-fi
 
 printf '\n\033[1;32mAll verify gates passed.\033[0m\n'

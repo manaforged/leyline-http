@@ -1,9 +1,10 @@
 use std::path::PathBuf;
 
-use crate::tls::builder::TlsMinVersion;
+use super::identity::TrustKey;
+use crate::profile::TlsMinVersion;
 
 /// TLS trust settings: root stores, extra CAs, a client certificate, pins, and the minimum version.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[must_use]
 pub struct Tls {
@@ -116,28 +117,16 @@ impl Tls {
         self
     }
 
-    pub(crate) fn shareable(&self) -> bool {
-        self.client_identity.is_none()
+    pub(crate) fn shared_key(&self) -> Option<TrustKey> {
+        let shareable = self.client_identity.is_none()
             && self.ca_files.is_empty()
             && !(self.use_env_roots && super::env_roots_set())
-            && !crate::tls::keylog::requested()
-    }
-
-    pub(crate) fn same_roots(&self, other: &Tls) -> bool {
-        self.use_env_roots == other.use_env_roots
-            && self.use_system_roots == other.use_system_roots
-            && self.ca_der == other.ca_der
-            && self.pinned_leaf_sha256 == other.pinned_leaf_sha256
-            && self.accept_invalid_certs == other.accept_invalid_certs
-            && self.min_tls_version == other.min_tls_version
+            && !crate::tls::keylog::requested();
+        shareable.then(|| TrustKey::of(self))
     }
 
     pub(crate) fn accepts_invalid_certs(&self) -> bool {
         self.accept_invalid_certs
-    }
-
-    pub(crate) fn uses_system_roots(&self) -> bool {
-        self.use_system_roots
     }
 
     pub(crate) fn has_client_identity(&self) -> bool {
@@ -149,7 +138,7 @@ impl Tls {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ClientIdentity {
     pub(crate) certificate_chain_file: PathBuf,
     pub(crate) private_key_file: PathBuf,

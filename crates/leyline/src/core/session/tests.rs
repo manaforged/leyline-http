@@ -18,8 +18,4 @@ impl Session {
     pub(crate) fn brand(&self) -> Option<ChromiumBrand> {
         self.identity().brand()
     }
-
-    pub(crate) fn protocol_policy(&self) -> crate::core::Protocol {
-        self.inner.protocol_policy
-    }
 }

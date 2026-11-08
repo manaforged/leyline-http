@@ -1,146 +1,82 @@
-use tokio::net::TcpStream;
-
-use super::{H1Io, H1PooledError};
-use crate::Error;
+use super::H1Io;
+use crate::error::Error;
+use crate::h2::H2Config;
 use crate::h2::client::H2Client;
-use crate::h2::config::H2Config;
-use crate::pool::connect::tls_info;
+use crate::net::{BlockingTcp, ProxyUrl};
+use crate::pool::Io;
+use crate::pool::Pool;
+use crate::pool::connect::{h1_io, start_h2, tls_info};
 use crate::pool::types::PoolKey;
-use crate::pool::{Pool, TlsInfo};
-use crate::tls::proxy;
-use crate::tls::{FingerprintConnector, TlsError, TlsStream};
+use crate::tls::error::TlsError;
+use crate::tls::proxy::{self, Route, Tunnel};
+use crate::tls::{AlpnPlan, FingerprintConnector};
+use crate::wire::{Scheme, TlsInfo};
 
-#[derive(Clone, Copy)]
-pub(crate) enum H1Dial<'a> {
-    Browser(&'a H2Config),
-    Http1Only,
-}
-
-pub(super) fn tls_for_scheme(scheme: &str, tls: &TlsInfo) -> Option<TlsInfo> {
-    if scheme == "https" {
-        Some(tls.clone())
-    } else {
-        None
-    }
-}
-
-pub(super) enum Dialed {
+pub(super) enum Dialed<W> {
     H1(Box<dyn H1Io>, TlsInfo),
-    H2(H2Client, TlsInfo),
+    H2(H2Client, TlsInfo, W),
 }
 
-pub(super) async fn open_new(
+pub(super) async fn open_new<W: Copy + Send>(
     pool: &Pool,
     key: &PoolKey,
     connector: &FingerprintConnector,
-    dial: H1Dial<'_>,
-) -> Result<Dialed, H1PooledError> {
-    let (host, port, proxy) = (key.host.as_str(), key.port, key.proxy.as_deref());
-    match key.scheme.as_str() {
-        "https" => open_tls(pool, key, connector, dial).await,
-        "http" => Ok(Dialed::H1(
-            dial_plain(connector, host, port, proxy).await?,
+    offer: Option<(&H2Config, W)>,
+) -> Result<Dialed<W>, Error> {
+    let (host, port, proxy) = (key.host.as_str(), key.port, key.proxy.as_ref());
+    match key.scheme {
+        Scheme::Https => open_tls(pool, key, connector, offer).await,
+        Scheme::Http => Ok(Dialed::H1(
+            dial_plain(connector, host, port, proxy, pool.io()).await?,
             TlsInfo::default(),
         )),
-        other => Err(H1PooledError::Config(format!(
-            "unsupported URL scheme for HTTP/1.1: {other}"
-        ))),
     }
 }
 
-async fn open_tls(
+async fn open_tls<W: Copy + Send>(
     pool: &Pool,
     key: &PoolKey,
     connector: &FingerprintConnector,
-    dial: H1Dial<'_>,
-) -> Result<Dialed, H1PooledError> {
-    let (host, port, proxy) = (key.host.as_str(), key.port, key.proxy.as_deref());
-    let tls_stream = match dial {
-        H1Dial::Browser(_) => connector.connect(host, port, proxy).await?,
-        H1Dial::Http1Only => connector.connect_h1(host, port, proxy).await?,
+    offer: Option<(&H2Config, W)>,
+) -> Result<Dialed<W>, Error> {
+    let (host, port, proxy) = (key.host.as_str(), key.port, key.proxy.as_ref());
+    let plan = match offer {
+        Some(_) => AlpnPlan::Browser,
+        None => AlpnPlan::Http11,
     };
+    let tls_stream = connector.connect(host, port, proxy, plan).await?;
     let tls = tls_info(&tls_stream);
-    if let H1Dial::Browser(h2_config) = dial
-        && tls_stream.alpn.as_deref() == Some(crate::tls::alpn::H2)
+    if let Some((h2_config, offered)) = offer
+        && tls_stream.is_h2()
     {
-        return hand_to_h2(pool, key, tls_stream, tls, h2_config).await;
+        let (handle, tls) = start_h2(pool, key.clone(), tls_stream, tls, h2_config.clone()).await?;
+        return Ok(Dialed::H2(handle, tls, offered));
     }
-    Ok(Dialed::H1(Box::new(tls_stream.stream), tls))
-}
-
-async fn hand_to_h2(
-    pool: &Pool,
-    key: &PoolKey,
-    tls_stream: TlsStream,
-    tls: TlsInfo,
-    h2_config: &H2Config,
-) -> Result<Dialed, H1PooledError> {
-    match crate::h2::start(tls_stream.stream, h2_config.clone()).await {
-        Ok(handle) => {
-            let (handle, tls) = pool.install_mux(key.clone(), handle, tls);
-            Ok(Dialed::H2(handle, tls))
-        }
-        Err(e) => Err(H1PooledError::NotResendable(Error::from(e))),
-    }
+    Ok(Dialed::H1(h1_io(pool, proxy, tls_stream)?, tls))
 }
 
 pub(super) async fn dial_plain(
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
-    proxy_url: Option<&str>,
-) -> Result<Box<dyn H1Io>, H1PooledError> {
-    let Some(proxy_url) = proxy_url else {
+    proxy: Option<&ProxyUrl>,
+    io: Io,
+) -> Result<Box<dyn H1Io>, Error> {
+    let Some(proxy) = proxy else {
         let stream = connector
-            .with_timeout(connector.dial_tcp(host, port))
+            .with_timeout(connector.dialer().dial(host, port))
             .await?;
-        return Ok(Box::new(stream));
+        return Ok(match io {
+            Io::Blocking(wait) => Box::new(BlockingTcp::new(stream, wait)?),
+            Io::Async => Box::new(stream),
+        });
     };
-    let parsed = url::Url::parse(proxy_url)
-        .map_err(|e| H1PooledError::Config(format!("invalid proxy URL: {e}")))?;
-    let io: Box<dyn H1Io> = match parsed.scheme() {
-        "http" => Box::new(
-            connector
-                .with_timeout(proxy::connect_to_proxy(connector, &parsed))
-                .await
-                .map_err(TlsError::into_proxy)?,
-        ),
-        "https" => Box::new(
-            connector
-                .with_timeout(proxy::http::open_tls_to_proxy(connector, &parsed))
-                .await
-                .map_err(TlsError::into_proxy)?
-                .stream,
-        ),
-        "socks5" | "socks5h" => Box::new(socks_tunnel(connector, host, port, &parsed).await?),
-        other => {
-            return Err(H1PooledError::Config(format!(
-                "unsupported proxy scheme `{other}` for http:// URLs"
-            )));
-        }
-    };
-    Ok(io)
-}
-
-#[cfg(feature = "socks")]
-async fn socks_tunnel(
-    connector: &FingerprintConnector,
-    host: &str,
-    port: u16,
-    proxy: &url::Url,
-) -> Result<TcpStream, H1PooledError> {
-    Ok(connector
-        .with_timeout(proxy::socks5::tunnel(connector, host, port, proxy))
+    let tunnel = connector
+        .with_timeout(proxy::open(connector, host, port, proxy, Route::Forward))
         .await
-        .map_err(TlsError::into_proxy)?)
-}
-
-#[cfg(not(feature = "socks"))]
-async fn socks_tunnel(
-    _connector: &FingerprintConnector,
-    _host: &str,
-    _port: u16,
-    _proxy: &url::Url,
-) -> Result<TcpStream, H1PooledError> {
-    Err(TlsError::proxy("SOCKS proxy support requires the `socks` feature").into())
+        .map_err(TlsError::into_proxy)?;
+    Ok(match tunnel {
+        Tunnel::Plain(tcp) => Box::new(tcp),
+        Tunnel::Tls(io) => Box::new(io),
+    })
 }

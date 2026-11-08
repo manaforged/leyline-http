@@ -2,7 +2,9 @@ use std::sync::atomic::Ordering;
 
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::h2::error::{ErrorCode, H2Error};
+use crate::h2::error::ErrorCode;
+
+use crate::h2::H2Error;
 
 use super::*;
 
@@ -48,18 +50,17 @@ impl OutputState {
 }
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
-    pub(super) async fn goaway_drained(&mut self) -> Result<bool, H2Error> {
+    pub(super) fn goaway_drained(&mut self) -> bool {
         if !self.output.goaway_sent {
             self.output.goaway_sent = true;
-            self.writer
-                .write_frame(&GoAwayFrame {
-                    last_stream_id: 0,
-                    error_code: ErrorCode::NoError,
-                    debug_data: Bytes::new(),
-                })
-                .await?;
+            GoAwayFrame {
+                last_stream_id: 0,
+                error_code: ErrorCode::NoError,
+                debug_data: Bytes::new(),
+            }
+            .encode(self.writer.out());
         }
-        Ok(!self.writer.has_output())
+        !self.writer.has_output()
     }
 
     pub(super) fn check_write_stall(&mut self) -> Result<(), H2Error> {

@@ -1,6 +1,6 @@
 use crate::core::headers::reorder as reorder_headers;
 use crate::header_str::HeaderStr;
-use crate::profile::preset::HeaderPair;
+use crate::wire::HeaderPair;
 use std::borrow::Cow;
 
 fn h(name: &str, value: &str) -> HeaderPair {
@@ -26,12 +26,14 @@ fn firefox_navigate_order_matches_the_live_capture() {
         navigation_site: "none",
         navigation_referer: "",
     };
-    let mut headers =
-        crate::profile::HeaderStyle::Gecko.build_headers(Some(RequestKind::Navigate), &ctx);
-    let order = Browser::Firefox153
-        .profile()
-        .meta
-        .header_style
+    let style = Browser::Firefox153.profile().meta.header_style;
+    let plan = crate::profile::preset::HeaderPlan::new(
+        style,
+        &ctx,
+        crate::profile::preset::AcceptEncoding::of(style, None),
+    );
+    let mut headers = plan.plan(Some(RequestKind::Navigate)).headers(&ctx, true);
+    let order = plan
         .order()
         .expect("firefox header shape declares a request header order");
     reorder_headers(&mut headers, order);

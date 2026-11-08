@@ -1,11 +1,11 @@
-use bytes::Bytes;
 use tokio::io::{AsyncRead, AsyncWrite};
 
-use crate::h2::connection::{HeaderPair, encode_request_pseudos};
-use crate::h2::error::H2Error;
+use crate::h2::H2Error;
+use crate::h2::connection::encode_request_pseudos;
+use crate::h2::frame::PRIORITY_LEN;
 use crate::h2::hpack::ENTRY_OVERHEAD as HPACK_ENTRY_OVERHEAD;
-
-const OUTBOUND_HEADER_LIST: usize = crate::core::DEFAULT_MAX_HEADER_LIST_BYTES;
+use crate::wire::DEFAULT_MAX_HEADER_LIST_BYTES;
+use crate::wire::HeaderPair;
 
 use super::*;
 
@@ -24,13 +24,14 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             .map(|(name, value)| name.len() + value.len() + HPACK_ENTRY_OVERHEAD)
             .sum();
         let size = pseudo_size + header_size;
-        let limit = self
-            .peer_settings
-            .max_header_list_size
-            .map_or(OUTBOUND_HEADER_LIST, |peer| {
-                usize::try_from(peer)
-                    .map_or(OUTBOUND_HEADER_LIST, |peer| peer.min(OUTBOUND_HEADER_LIST))
-            });
+        let limit =
+            self.peer_settings
+                .max_header_list_size
+                .map_or(DEFAULT_MAX_HEADER_LIST_BYTES, |peer| {
+                    usize::try_from(peer).map_or(DEFAULT_MAX_HEADER_LIST_BYTES, |peer| {
+                        peer.min(DEFAULT_MAX_HEADER_LIST_BYTES)
+                    })
+                });
         if size > limit {
             return Err(H2Error::Hpack(format!(
                 "request header list of {size} bytes exceeds the peer's header list limit ({limit})"
@@ -39,69 +40,58 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(in crate::h2::client::driver) async fn write_headers_block(
+    pub(in crate::h2::client::driver) fn write_headers_block(
         &mut self,
         stream_id: u32,
         end_stream: bool,
         (pseudo, headers): (&[(&str, &str)], &[HeaderPair]),
-        with_priority: bool,
-    ) -> Result<(), H2Error> {
-        let fragment = encode_request_pseudos(&mut self.encoder, pseudo, headers);
+    ) {
         let max_frame = self.peer_settings.max_frame_size as usize;
-        let priority = if with_priority {
-            self.config.default_priority
-        } else {
-            None
-        };
-        let prio_overhead = if priority.is_some() { 5 } else { 0 };
+        let priority = self.config.default_priority;
+        let prio_overhead = if priority.is_some() { PRIORITY_LEN } else { 0 };
+        let fragment = encode_request_pseudos(&mut self.encoder, pseudo, headers);
 
         if fragment.len() + prio_overhead <= max_frame {
-            self.writer
-                .write_frame(&HeadersFrame {
-                    stream_id,
-                    end_stream,
-                    end_headers: true,
-                    priority,
-                    fragment: Bytes::from(fragment),
-                })
-                .await?;
+            HeadersFrame {
+                stream_id,
+                end_stream,
+                end_headers: true,
+                priority,
+                fragment,
+            }
+            .encode(self.writer.out());
         } else {
+            let fragment = fragment.to_vec();
             let first_cap = max_frame.saturating_sub(prio_overhead).max(1);
             let first_len = first_cap.min(fragment.len());
-            let first = &fragment[..first_len];
-            self.writer
-                .write_frame(&HeadersFrame {
-                    stream_id,
-                    end_stream,
-                    end_headers: false,
-                    priority,
-                    fragment: Bytes::copy_from_slice(first),
-                })
-                .await?;
-            self.write_continuations(stream_id, &fragment, first_len, max_frame)
-                .await?;
+            HeadersFrame {
+                stream_id,
+                end_stream,
+                end_headers: false,
+                priority,
+                fragment: &fragment[..first_len],
+            }
+            .encode(self.writer.out());
+            self.write_continuations(stream_id, &fragment, first_len, max_frame);
         }
-        Ok(())
     }
 
-    pub(in crate::h2::client::driver) async fn write_continuations(
+    fn write_continuations(
         &mut self,
         stream_id: u32,
         fragment: &[u8],
         mut offset: usize,
         max_frame: usize,
-    ) -> Result<(), H2Error> {
+    ) {
         while offset < fragment.len() {
             let end = (offset + max_frame).min(fragment.len());
-            self.writer
-                .write_frame(&ContinuationFrame {
-                    stream_id,
-                    end_headers: end == fragment.len(),
-                    fragment: &fragment[offset..end],
-                })
-                .await?;
+            ContinuationFrame {
+                stream_id,
+                end_headers: end == fragment.len(),
+                fragment: &fragment[offset..end],
+            }
+            .encode(self.writer.out());
             offset = end;
         }
-        Ok(())
     }
 }

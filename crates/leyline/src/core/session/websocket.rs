@@ -1,148 +1,91 @@
+use std::borrow::Cow;
+
 use super::Session;
 use super::header_merge::apply_extra_headers;
-use crate::core::config::{Proxy, Timeout};
-use crate::core::error::{Cause, Error, Result};
+use crate::core::config::Origin;
 use crate::core::headers::HeaderList;
-use crate::core::websocket::WebSocket;
-use crate::pool::OriginFlag;
-use crate::util::sensitive_header;
+use crate::core::request::Carry;
+use crate::core::websocket::{Handshake, WebSocket, http_equivalent};
+use crate::error::{Error, Result};
 
 impl Session {
     pub(crate) async fn open_websocket(
         &self,
         url: &url::Url,
-        proxy: Option<&Proxy>,
         headers: &HeaderList,
-        timeout: Option<&Timeout>,
+        carry: &Carry,
     ) -> Result<WebSocket> {
         let handshake = async {
-            let _pass = self.inner.host_limits.admit(&http_equivalent(url)).await;
-            self.websocket_with_options(url.as_str(), proxy, headers)
-                .await
+            let http_url = http_equivalent(url)?;
+            let _pass = self.admit_host(&http_url).await?;
+            let conn = self
+                .websocket_with_options(&http_url, headers, carry)
+                .await?;
+            self.store_cookies(&conn.header_map(), &http_url);
+            Ok::<_, Error>(conn)
         };
-        self.unless_shut_down(self.deadline(timeout).total(handshake))
+        self.unless_shut_down(self.deadline(carry.timeouts.as_ref()).total(handshake))
             .await
     }
 
-    pub(crate) async fn websocket_with_options(
+    async fn websocket_with_options(
         &self,
-        url: &str,
-        request_proxy: Option<&Proxy>,
+        http_url: &url::Url,
         extra_headers: &HeaderList,
+        carry: &Carry,
     ) -> Result<WebSocket> {
-        let config = self.inner.websocket_config;
-        let origin = ws_origin(url)?;
-        let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
-        let proxy = self.proxy_for(&parsed, request_proxy)?;
-        let extra_headers = &self.websocket_headers(&parsed, extra_headers);
+        let config = self.inner.inputs.websocket_config;
+        let proxy = self.proxy_for(http_url, carry.proxy.as_ref())?;
+        let extra_headers = self.websocket_headers(http_url, extra_headers);
+        let origin = Origin::ascii(http_url);
+        let header_order = carry
+            .header_order
+            .as_deref()
+            .map(Cow::Borrowed)
+            .or_else(|| self.session_header_order());
+        let handshake = Handshake {
+            url: http_url,
+            proxy,
+            user_agent: &self.inner.user_agent,
+            origin: &origin,
+            extra_headers: &extra_headers,
+            header_order: header_order.as_deref(),
+            options: &config,
+        };
 
-        let h1_only = parsed.host_str().is_some_and(|host| {
-            self.inner.pool.recalls(
-                OriginFlag::H1Only,
-                host,
-                parsed.port_or_known_default().unwrap_or(443),
-                proxy,
-            )
-        });
-
-        if config.prefer_http2 && !h1_only {
-            match WebSocket::connect_h2(
+        if config.prefer_http2 && self.inner.inputs.protocol_policy.tcp_offers_h2() {
+            if let Some(conn) = WebSocket::connect_h2(
                 &self.inner.pool,
                 &self.inner.connector,
                 &self.inner.h2_config,
-                url,
-                proxy,
-                &self.inner.user_agent,
-                &origin,
-                extra_headers,
-                &config,
+                &handshake,
             )
-            .await
+            .await?
             {
-                Ok(conn) => return Ok(conn),
-                Err(e) if WebSocket::is_h2_fallback_trigger(&e) => {
-                    if crate::core::transport::is_h2_alpn_mismatch(&e)
-                        && let Some(host) = parsed.host_str()
-                    {
-                        let port = parsed.port_or_known_default().unwrap_or(443);
-                        self.inner
-                            .pool
-                            .remember(OriginFlag::H1Only, host, port, proxy);
-                    }
-                    tracing::debug!(
-                        error = %e,
-                        "H2 extended CONNECT not available, falling back to H1 Upgrade"
-                    );
-                }
-                Err(e) => return Err(e),
+                return Ok(conn);
             }
+            tracing::debug!("H2 extended CONNECT not available, falling back to H1 Upgrade");
         }
 
-        WebSocket::connect_h1(
-            &self.inner.connector,
-            url,
-            proxy,
-            &self.inner.user_agent,
-            &origin,
-            extra_headers,
-            self.session_header_order().as_deref(),
-            &config,
-        )
-        .await
+        WebSocket::connect_h1(&self.inner.connector, &handshake).await
     }
-}
 
-impl Session {
-    fn websocket_headers(&self, url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {
+    fn websocket_headers(&self, http_url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {
         let caller_has = |name: &str| caller.get(name).is_some();
-        let cookie_url = http_equivalent(url);
-        let lookup = &cookie_url;
         let mut headers = Vec::new();
-        self.merge_session_headers(&mut headers, &caller_has, false, lookup);
-        apply_extra_headers(&mut headers, caller, false, &sensitive_header);
+        self.merge_session_headers(&mut headers, &caller_has, false, http_url);
+        apply_extra_headers(&mut headers, caller, false);
         let site = super::execute::SiteContext {
-            fetch_site: crate::FetchSite::SameOrigin,
-            initiator: Some(lookup),
+            fetch_site: crate::core::FetchSite::SameOrigin,
+            initiator: Some(http_url),
             chain: &[],
         };
-        self.add_jar_cookie(&mut headers, lookup, &site, "GET");
+        self.add_jar_cookie(&mut headers, http_url, &site, &http::Method::GET);
         headers
             .into_iter()
             .map(|(k, v)| (k.into_owned(), v.to_string()))
             .collect()
     }
-}
-
-fn http_equivalent(url: &url::Url) -> url::Url {
-    let mut http = url.clone();
-    let scheme = match url.scheme() {
-        "ws" => "http",
-        _ => "https",
-    };
-    if http.set_scheme(scheme).is_err() {
-        return url.clone();
-    }
-    http
-}
-
-fn ws_origin(url: &str) -> Result<String> {
-    let parsed = url::Url::parse(url).map_err(crate::core::Error::from_url_parse)?;
-    let scheme = match parsed.scheme() {
-        "wss" => "https",
-        "ws" => {
-            return Err(Error::new(Cause::Request)
-                .with_message("plaintext ws:// is not supported; use wss://"));
-        }
-        other => {
-            return Err(Error::new(Cause::Request)
-                .with_message(format!("websocket URL must use wss://, not {other}")));
-        }
-    };
-    let host = parsed.host_str().unwrap_or("");
-    Ok(match parsed.port() {
-        Some(port) => format!("{scheme}://{host}:{port}"),
-        None => format!("{scheme}://{host}"),
-    })
 }
 
 #[cfg(test)]

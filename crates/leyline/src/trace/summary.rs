@@ -1,7 +1,8 @@
 use url::Url;
 
-use super::{Event, ms};
-use crate::Error;
+use super::Event;
+use crate::error::Error;
+use crate::wire::ResponseTiming;
 
 pub(crate) struct Finish<'a> {
     pub(crate) method: &'a str,
@@ -10,16 +11,23 @@ pub(crate) struct Finish<'a> {
     pub(crate) streamed: bool,
 }
 
-pub(crate) fn summary(finish: &Finish<'_>, out: Result<&crate::Response, &Error>) {
+pub(crate) struct Answer<'a> {
+    pub(crate) url: &'a Url,
+    pub(crate) redirects: usize,
+    pub(crate) status: http::StatusCode,
+    pub(crate) version: http::Version,
+}
+
+pub(crate) fn summary(finish: &Finish<'_>, out: Result<Answer<'_>, &Error>) {
     super::with(|ctx| {
         let notes = super::notes::take(&ctx.notes);
         let parsed;
         let (url, redirects, status, version, outcome) = match out {
-            Ok(r) => (
-                Some(r.url()),
-                r.redirect_chain().len(),
-                Some(r.status()),
-                Some(r.version()),
+            Ok(answer) => (
+                Some(answer.url),
+                answer.redirects,
+                Some(answer.status),
+                Some(answer.version),
                 Ok(()),
             ),
             Err(e) => {
@@ -69,7 +77,7 @@ pub(super) fn render(event: &Event<'_>) {
     let url = crate::util::redact(url.map_or(*original_url, Url::as_str));
     let status = status.map(|s| s.as_u16());
     let version = version.map(tracing::field::debug);
-    let elapsed_ms = ms(*elapsed);
+    let elapsed_ms = ResponseTiming::span(*elapsed);
     let label = *label;
     let proxy = proxy.as_deref();
     let browser = browser.map(tracing::field::debug);

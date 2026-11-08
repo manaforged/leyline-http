@@ -1,11 +1,12 @@
-use std::time::Instant;
+use std::future::Future;
 
 use leyline_bssl::ssl::SslVerifyMode;
 use leyline_bssl::x509::X509VerifyError;
 use tokio::net::TcpStream;
 
-use super::FingerprintConnector;
-use crate::tls::alpn::{AlpnPlan, HTTP11_WIRE};
+use super::{FingerprintConnector, TCP};
+use crate::tls::AlpnPlan;
+use crate::tls::alpn::HTTP11_WIRE;
 use crate::tls::error::TlsError;
 use crate::tls::trust::{
     TrustFailure, VerificationFailure, install_verifier, take_verification_failure,
@@ -14,28 +15,35 @@ use crate::tls::{TlsIo, TlsStream};
 use crate::trace;
 
 impl FingerprintConnector {
-    pub(crate) async fn tls_handshake(
+    pub(crate) fn tls_handshake(
         &self,
         tcp_stream: TcpStream,
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-    ) -> Result<TlsStream, TlsError> {
-        self.handshake_over(tcp_stream, host, session_key, plan, TlsIo::Boring)
-            .await
+    ) -> impl Future<Output = Result<TlsStream, TlsError>> {
+        let records = self.hello.records();
+        self.handshake_over(tcp_stream, host, session_key, plan, move |stream| {
+            if !records {
+                return TlsIo::Boring(stream);
+            }
+            match stream.into_records() {
+                Ok(stream) => TlsIo::Records(Box::new(stream)),
+                Err(stream) => TlsIo::Boring(stream),
+            }
+        })
     }
 
-    pub(crate) async fn tls_handshake_nested(
+    pub(crate) fn tls_handshake_nested(
         &self,
         inner: TlsIo,
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-    ) -> Result<TlsStream, TlsError> {
+    ) -> impl Future<Output = Result<TlsStream, TlsError>> {
         self.handshake_over(inner, host, session_key, plan, |stream| {
             TlsIo::Nested(Box::new(stream))
         })
-        .await
     }
 
     async fn handshake_over<S>(
@@ -49,7 +57,6 @@ impl FingerprintConnector {
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
-        let started = Instant::now();
         let host = crate::util::bare_host(host);
         let (ssl, verification_failure) = self.prepare_ssl(host, session_key, plan)?;
 
@@ -82,7 +89,6 @@ impl FingerprintConnector {
                 tls_version.as_deref(),
                 tls_cipher.as_deref(),
                 proto.as_deref(),
-                started.elapsed(),
             );
         }
         Ok(TlsStream {
@@ -114,15 +120,12 @@ impl FingerprintConnector {
         if insecure {
             ssl.set_verify(SslVerifyMode::NONE);
         }
-        let pins = self.trust.pinned_leaf_sha256();
-        let system_roots = self.trust.uses_system_roots();
-        let verification_failure = (!insecure
-            && (!pins.is_empty() || cfg!(target_os = "macos") && system_roots))
-            .then(|| install_verifier(&mut ssl, pins, host, system_roots));
+        let verification_failure = install_verifier(&mut ssl, &self.trust, host, TCP);
         if !insecure {
             self.session_cache.attach(&mut ssl, session_key)?;
         }
         self.hello.apply(&mut ssl, plan.alps())?;
+        ssl.shed_handshake_config();
         Ok((ssl, verification_failure))
     }
 }

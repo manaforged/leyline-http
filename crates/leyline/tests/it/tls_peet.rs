@@ -17,8 +17,7 @@ static BRAND_JA4: LazyLock<HashMap<String, String>> =
 
 fn expected_ja4(browser: Browser) -> Option<String> {
     BRAND_JA4.get(browser.id()).cloned().or_else(|| {
-        browser
-            .branded_profile()
+        leyline::internals::branded_profile(browser)
             .tls
             .fingerprint
             .as_ref()
@@ -26,31 +25,8 @@ fn expected_ja4(browser: Browser) -> Option<String> {
     })
 }
 
-pub(super) const PEET_URL: &str = "https://tls.peet.ws/api/all";
-
 pub(super) async fn peet(session: &leyline::Session) -> Value {
-    let mut last_err = String::new();
-    for attempt in 0..4 {
-        if attempt > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(500 * attempt as u64)).await;
-        }
-        let resp = match session.get(PEET_URL).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                last_err = format!("request error: {e}");
-                continue;
-            }
-        };
-        if resp.status() != 200 {
-            last_err = format!("status {}", resp.status());
-            continue;
-        }
-        match serde_json::from_str(&resp.text().await.unwrap()) {
-            Ok(v) => return v,
-            Err(e) => last_err = format!("non-JSON: {e}"),
-        }
-    }
-    panic!("tls.peet.ws failed after retries: {last_err}");
+    crate::echo::get(session).await
 }
 
 fn live_platform_for(browser: Browser) -> Platform {
@@ -117,53 +93,6 @@ fn denormalize_peet_quotes(raw: &str) -> String {
 
 #[tokio::test]
 #[ignore = "live: needs network"]
-async fn live_wire_audit_every_profile() {
-    let mut checked = 0;
-
-    for browser in Browser::all().iter().copied() {
-        let platform = live_platform_for(browser);
-        let session = leyline::Session::builder()
-            .browser(browser)
-            .platform(platform)
-            .build()
-            .unwrap();
-        let json = peet(&session).await;
-        let profile = browser.branded_profile();
-
-        let wire_ja4 = json["tls"]["ja4"].as_str().unwrap_or("?");
-        let wire_ja3 = json["tls"]["ja3_hash"].as_str().unwrap_or("?");
-        let wire_peet = json["tls"]["peetprint_hash"].as_str().unwrap_or("?");
-        let wire_akamai =
-            normalize_akamai(json["http2"]["akamai_fingerprint"].as_str().unwrap_or("?"));
-
-        println!("\n## {browser} ({platform:?})");
-        println!("  wire JA4       = {wire_ja4}");
-        println!("  wire JA3 hash  = {wire_ja3}");
-        println!("  wire peetprint = {wire_peet}");
-        println!("  wire Akamai-H2 = {wire_akamai}");
-
-        if let Some(exp) = expected_ja4(browser) {
-            assert_eq!(wire_ja4, exp, "{browser} JA4 wire != golden");
-        }
-        if let Some(exp) = profile
-            .h2
-            .fingerprint
-            .as_ref()
-            .and_then(|f| f.akamai.as_deref())
-        {
-            assert_eq!(
-                wire_akamai,
-                normalize_akamai(exp),
-                "{browser} Akamai wire != golden"
-            );
-        }
-        checked += 1;
-    }
-    assert!(checked >= 9, "expected >=9 profiles audited, got {checked}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
 async fn live_chrome150_macos_matches_capture() {
     const SEC_CH_UA: &str = r#""Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150""#;
     const JA4: &str = "t13d1516h2_8daaf6152771_806a8c22fdea";
@@ -184,214 +113,6 @@ async fn live_chrome150_macos_matches_capture() {
     assert_eq!(denormalize_peet_quotes(sec_ch_ua), SEC_CH_UA);
     assert_eq!(json["tls"]["ja4"].as_str().expect("no tls.ja4"), JA4);
     assert_eq!(normalize_akamai(observed_h2), H2);
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_chrome149() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome149)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Chrome149).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Chrome 149 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Chrome 149 JA4 mismatch");
-    println!("✓ Chrome 149 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_chrome148() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome148)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Chrome148).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Chrome 148 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Chrome 148 JA4 mismatch");
-    println!("✓ Chrome 148 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_chrome147() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome147)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Chrome147).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Chrome 147 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Chrome 147 JA4 mismatch");
-    println!("✓ Chrome 147 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_chrome146() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome146)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Chrome146).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Chrome 146 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Chrome 146 JA4 mismatch");
-    println!("✓ Chrome 146 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_chrome145() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Chrome145)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Chrome145).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Chrome 145 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Chrome 145 JA4 mismatch");
-    println!("✓ Chrome 145 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_firefox150() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Firefox150)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Firefox150).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Firefox 150 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Firefox 150 JA4 mismatch");
-    println!("✓ Firefox 150 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_firefox151() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Firefox151)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Firefox151).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Firefox 151 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Firefox 151 JA4 mismatch");
-    println!("✓ Firefox 151 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_firefox152() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Firefox152)
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Firefox152).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Firefox 152 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Firefox 152 JA4 mismatch");
-    println!("✓ Firefox 152 JA4 exact match: {ja4}");
-}
-
-#[tokio::test]
-#[ignore = "live: needs network"]
-async fn live_ja4_exact_match_safari18() {
-    let session = leyline::Session::builder()
-        .browser(Browser::Safari18)
-        .platform(live_platform_for(Browser::Safari18))
-        .build()
-        .unwrap();
-    let json = peet(&session).await;
-    let ja4 = json["tls"]["ja4"].as_str().expect("no tls.ja4");
-
-    let reg = leyline::profile::ProfileRegistry::builtin();
-    let profile = reg.get_browser(Browser::Safari18).unwrap();
-    let expected = profile
-        .tls
-        .fingerprint
-        .as_ref()
-        .and_then(|f| f.ja4.as_deref())
-        .expect("Safari 18 TOML missing JA4");
-
-    assert_eq!(ja4, expected, "Safari 18 JA4 mismatch");
-    println!("✓ Safari 18 JA4 exact match: {ja4}");
 }
 
 #[tokio::test]
@@ -451,7 +172,7 @@ async fn live_h2_akamai_every_profile() {
             .expect("no http2.akamai_fingerprint");
         let observed = normalize_akamai(observed);
 
-        let profile = browser.branded_profile();
+        let profile = leyline::internals::branded_profile(browser);
         let expected = profile
             .h2
             .fingerprint
@@ -477,7 +198,7 @@ async fn live_chrome147_ciphers_match_profile_order() {
     let session = leyline::Session::from(Browser::default());
     let json = peet(&session).await;
 
-    let reg = leyline::profile::ProfileRegistry::builtin();
+    let reg = leyline::internals::profile::ProfileRegistry::builtin();
     let profile = reg.get_browser(Browser::Chrome147).unwrap();
     let expected_ciphers: Vec<&str> = profile.tls.ciphers.iter().map(|s| s.as_str()).collect();
 

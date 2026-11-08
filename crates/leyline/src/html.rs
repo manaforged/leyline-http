@@ -5,13 +5,13 @@ mod entity;
 mod fieldset;
 mod page;
 mod scan;
-mod sitemap;
 
-pub(crate) use sitemap::Sitemap;
-
-use crate::core::lookup;
-
-pub(crate) const WEB_SCHEMES: [&str; 2] = ["http", "https"];
+pub use build::forms;
+pub(crate) use directives::X_ROBOTS_TAG;
+pub(crate) use entity::decode;
+pub(crate) use page::base;
+pub use page::{canonical, links, meta, text};
+pub(crate) use scan::Scanner;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[non_exhaustive]
@@ -81,38 +81,6 @@ pub struct Anchor {
     rel: Option<String>,
 }
 
-/// Returns the content of the `<meta>` tag named `name`, or `None` when the page has none.
-#[must_use]
-pub fn meta(document: &str, name: &str) -> Option<String> {
-    page::meta(document, name)
-}
-
-/// Returns every link in the document.
-#[must_use]
-pub fn links(document: &str) -> Vec<Anchor> {
-    page::links(document)
-}
-
-/// Returns the readable text of the document.
-#[must_use]
-pub fn text(document: &str) -> String {
-    page::text(document)
-}
-
-pub(crate) fn base(document: &str) -> Option<String> {
-    page::base(document)
-}
-
-/// Returns the page's canonical URL, or `None` when the page declares none.
-#[must_use]
-pub fn canonical(document: &str) -> Option<String> {
-    page::canonical(document)
-}
-
-pub(crate) fn sitemap(document: &str) -> Sitemap {
-    sitemap::read(document)
-}
-
 /// The robots directives for a page, read from its meta tags and `X-Robots-Tag` headers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
@@ -123,12 +91,6 @@ pub struct Directives {
 }
 
 impl Directives {
-    /// Reads the directives that apply to `agent` from the document and response headers.
-    #[must_use]
-    pub fn read(document: &str, headers: &http::HeaderMap, agent: &str) -> Directives {
-        directives::read(document, headers, agent)
-    }
-
     /// Returns whether the page may be indexed.
     #[must_use]
     pub fn index(&self) -> bool {
@@ -166,12 +128,6 @@ impl Anchor {
     pub fn rel(&self) -> Option<&str> {
         self.rel.as_deref()
     }
-}
-
-/// Returns every form in the document.
-#[must_use]
-pub fn forms(document: &str) -> Vec<Form> {
-    build::forms(document)
 }
 
 impl Form {

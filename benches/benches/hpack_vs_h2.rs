@@ -1,6 +1,5 @@
-
 use criterion::{Criterion, Throughput, black_box, criterion_group, criterion_main};
-use leyline::h2::hpack::{Decoder, Encoder};
+use leyline::internals::h2::hpack::{Decoder, Encoder};
 
 fn chrome_147_request_headers() -> Vec<(&'static str, &'static str)> {
     vec![

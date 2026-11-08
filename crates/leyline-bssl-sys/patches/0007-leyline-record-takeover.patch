@@ -1,0 +1,90 @@
+diff --git a/include/openssl/prefix_symbols.h b/include/openssl/prefix_symbols.h
+index 3453d74..f0bb1fb 100644
+--- a/include/openssl/prefix_symbols.h
++++ b/include/openssl/prefix_symbols.h
+@@ -3190,6 +3190,8 @@
+ #pragma redefine_extname SSL_CTX_set_delegated_credentials BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_delegated_credentials)
+ #pragma redefine_extname SSL_CTX_set_extension_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_extension_order)
+ #pragma redefine_extname SSL_CTX_set_extension_tail BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_extension_tail)
++#pragma redefine_extname SSL_copy_traffic_secrets BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_copy_traffic_secrets)
++#pragma redefine_extname SSL_process_post_handshake BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_process_post_handshake)
+ #pragma redefine_extname SSL_CTX_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_record_size_limit)
+ #pragma redefine_extname SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_CTX_set_tls13_cipher_order)
+ #pragma redefine_extname SSL_set_record_size_limit BORINGSSL_ADD_USER_LABEL_AND_PREFIX(SSL_set_record_size_limit)
+@@ -6350,6 +6352,8 @@
+ #define SSL_CTX_set_delegated_credentials BORINGSSL_ADD_PREFIX(SSL_CTX_set_delegated_credentials)
+ #define SSL_CTX_set_extension_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_extension_order)
+ #define SSL_CTX_set_extension_tail BORINGSSL_ADD_PREFIX(SSL_CTX_set_extension_tail)
++#define SSL_copy_traffic_secrets BORINGSSL_ADD_PREFIX(SSL_copy_traffic_secrets)
++#define SSL_process_post_handshake BORINGSSL_ADD_PREFIX(SSL_process_post_handshake)
+ #define SSL_CTX_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_CTX_set_record_size_limit)
+ #define SSL_CTX_set_tls13_cipher_order BORINGSSL_ADD_PREFIX(SSL_CTX_set_tls13_cipher_order)
+ #define SSL_set_record_size_limit BORINGSSL_ADD_PREFIX(SSL_set_record_size_limit)
+diff --git a/include/openssl/ssl.h b/include/openssl/ssl.h
+index f97b650..ac00653 100644
+--- a/include/openssl/ssl.h
++++ b/include/openssl/ssl.h
+@@ -5707,6 +5707,20 @@ OPENSSL_EXPORT int SSL_CTX_set_extension_tail(SSL_CTX *ctx,
+                                               const uint16_t *tail,
+                                               size_t tail_len);
+ 
++// SSL_copy_traffic_secrets copies the current TLS 1.3 read and write traffic
++// secrets of `ssl` into `out_read` and `out_write` and sets `*out_len` to the
++// length of each. It returns one on success and zero if `ssl` is not a TLS 1.3
++// connection whose handshake is complete or a secret is longer than `max_len`.
++OPENSSL_EXPORT int SSL_copy_traffic_secrets(const SSL *ssl, uint8_t *out_read,
++                                            uint8_t *out_write, size_t max_len,
++                                            size_t *out_len);
++
++// SSL_process_post_handshake processes `msg`, one whole NewSessionTicket
++// message including its header, that the caller decrypted from a TLS 1.3
++// connection. It returns one on success and zero on error.
++OPENSSL_EXPORT int SSL_process_post_handshake(SSL *ssl, const uint8_t *msg,
++                                              size_t msg_len);
++
+ // SSL_set_permute_extensions configures whether sockets on `ssl` should
+ // permute extensions. For now, this is only implemented for the ClientHello.
+ OPENSSL_EXPORT void SSL_set_permute_extensions(SSL *ssl, int enabled);
+diff --git a/ssl/ssl_lib.cc b/ssl/ssl_lib.cc
+index 972fc4b..5373c4b 100644
+--- a/ssl/ssl_lib.cc
++++ b/ssl/ssl_lib.cc
+@@ -3365,6 +3365,38 @@ int SSL_CTX_set_extension_tail(SSL_CTX *ctx, const uint16_t *tail,
+   return 1;
+ }
+ 
++int SSL_copy_traffic_secrets(const SSL *ssl, uint8_t *out_read,
++                             uint8_t *out_write, size_t max_len,
++                             size_t *out_len) {
++  Span<const uint8_t> read, write;
++  if (SSL_version(ssl) != TLS1_3_VERSION ||
++      !SSL_get_traffic_secrets(ssl, &read, &write) ||
++      read.size() != write.size() || read.size() > max_len) {
++    return 0;
++  }
++  OPENSSL_memcpy(out_read, read.data(), read.size());
++  OPENSSL_memcpy(out_write, write.data(), write.size());
++  *out_len = read.size();
++  return 1;
++}
++
++int SSL_process_post_handshake(SSL *ssl, const uint8_t *msg, size_t msg_len) {
++  SSLImpl *ssl_impl = FromOpaque(ssl);
++  if (msg_len < 4 || msg[0] != SSL3_MT_NEW_SESSION_TICKET ||
++      ssl_impl->server || SSL_version(ssl) != TLS1_3_VERSION ||
++      ((size_t{msg[1]} << 16) | (size_t{msg[2]} << 8) | msg[3]) !=
++          msg_len - 4) {
++    OPENSSL_PUT_ERROR(SSL, SSL_R_UNEXPECTED_MESSAGE);
++    return 0;
++  }
++  SSLMessage message;
++  message.is_v2_hello = false;
++  message.type = msg[0];
++  CBS_init(&message.raw, msg, msg_len);
++  CBS_init(&message.body, msg + 4, msg_len - 4);
++  return tls13_post_handshake(ssl_impl, message);
++}
++
+ int SSL_CTX_set_tls13_cipher_order(SSL_CTX *ctx, const uint16_t *order,
+                                     size_t order_len) {
+   for (size_t i = 0; i < order_len; i++) {

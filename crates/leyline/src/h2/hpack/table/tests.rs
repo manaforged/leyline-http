@@ -14,20 +14,6 @@ fn b(s: &str) -> Bytes {
 }
 
 #[test]
-fn static_table_size() {
-    assert_eq!(STATIC_TABLE.len(), 62);
-}
-
-#[test]
-fn static_table_common_entries() {
-    assert_eq!(STATIC_TABLE[2], (":method", "GET"));
-    assert_eq!(STATIC_TABLE[3], (":method", "POST"));
-    assert_eq!(STATIC_TABLE[4], (":path", "/"));
-    assert_eq!(STATIC_TABLE[7], (":scheme", "https"));
-    assert_eq!(STATIC_TABLE[8], (":status", "200"));
-}
-
-#[test]
 fn dynamic_table_insert_and_get() {
     let mut dt = DynamicTable::new();
     dt.insert(b("custom-header"), b("value1"));

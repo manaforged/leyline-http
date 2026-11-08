@@ -12,7 +12,7 @@ let session = Session::builder()
     .browser(Browser::Chrome154)
     .timeout(Duration::from_secs(30))
     .build()?;
-let page = session.get("https://example.com/").send().await?.text().await?;
+let page = session.get("https://example.com/").text().await?;
 session.save("session.json")?;
 # drop(page);
 # Ok(())

@@ -26,7 +26,7 @@ impl Response {
     /// Parses every `Link` header of the response.
     pub fn links(&self) -> Vec<Link> {
         let mut out = Vec::new();
-        for value in self.parts.headers.get_all(LINK) {
+        for value in self.parts.headers.map().get_all(LINK) {
             if let Ok(text) = value.to_str() {
                 out.extend(parse_links(text, &self.parts.url));
             }
@@ -146,20 +146,8 @@ impl<'a> Parser<'a> {
     }
 
     fn quoted(&mut self) -> String {
-        self.pos += 1;
-        let mut out = String::new();
-        let mut chars = self.src[self.pos..].char_indices();
-        while let Some((offset, c)) = chars.next() {
-            match c {
-                '"' => {
-                    self.pos += offset + 1;
-                    return out;
-                }
-                '\\' => out.extend(chars.next().map(|(_, escaped)| escaped)),
-                other => out.push(other),
-            }
-        }
-        self.pos = self.src.len();
+        let (out, used) = crate::util::unquote(&self.src[self.pos..]);
+        self.pos += used;
         out
     }
 

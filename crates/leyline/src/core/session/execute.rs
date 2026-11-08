@@ -2,238 +2,59 @@ use std::borrow::Cow;
 
 use url::Url;
 
-use crate::FetchSite;
-use crate::core::transport::{ErrorBudget, Prepared, ResponseMode};
-use std::sync::Arc;
-
-use crate::profile::RequestKind;
+use crate::core::FetchSite;
+use crate::pool::Prepared;
 
 use self::auth::{DigestLeg, unreplayable_body};
-use self::journey::{Journey, redirect_location};
+use self::journey::Journey;
 use super::Session;
-use crate::core::body::Body;
-use crate::core::config::Timeout;
-use crate::core::deadline::Deadline;
-use crate::core::digest::DigestAuth;
-use crate::core::error::{Cause, Error, Result};
-use crate::core::headers::HeaderList;
+use crate::core::Redirect;
+use crate::core::config::Origin;
+use crate::core::request::Draft;
 use crate::core::response::{Response, ResponseBody};
-use crate::core::{BodyRules, Proxy, Redirect};
-use crate::trace;
-use crate::util::{redact, without_userinfo};
-use tracing::Instrument as _;
+use crate::error::{Error, Result};
+use crate::util::{is_redirect_status, redirect_target, without_userinfo};
+use crate::wire::Body;
 
 mod auth;
 mod headers;
 mod journey;
 mod response;
 
-pub(crate) struct Attempt(Box<Parts>);
-
-pub(crate) struct Parts {
-    pub(crate) method: http::Method,
-    pub(crate) url: Arc<Url>,
-    pub(crate) preset: Option<RequestKind>,
-    pub(crate) body: Body,
-    pub(crate) headers: Option<HeaderList>,
-    pub(crate) deadline: Deadline,
-    pub(crate) response: ResponseMode,
-    pub(crate) body_rules: BodyRules,
-    pub(crate) proxy: Option<Proxy>,
-    pub(crate) header_order: Option<Vec<String>>,
-    pub(crate) redirect: Option<Redirect>,
-    pub(crate) digest: Option<DigestAuth>,
-    pub(crate) initiator: Option<Url>,
-    pub(crate) trusted_origin: Option<Url>,
-}
-
-impl std::ops::Deref for Attempt {
-    type Target = Parts;
-
-    fn deref(&self) -> &Parts {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for Attempt {
-    fn deref_mut(&mut self) -> &mut Parts {
-        &mut self.0
-    }
-}
-
-impl From<Parts> for Attempt {
-    fn from(parts: Parts) -> Self {
-        Self(Box::new(parts))
-    }
-}
-
-impl Attempt {
-    pub(crate) fn again(&self, body: Body, headers: Option<HeaderList>) -> Attempt {
-        Attempt::from(Parts {
-            method: self.method.clone(),
-            url: Arc::clone(&self.url),
-            preset: self.preset,
-            body,
-            headers,
-            deadline: self.deadline,
-            response: self.response,
-            body_rules: self.body_rules,
-            proxy: self.proxy.clone(),
-            header_order: self.header_order.clone(),
-            redirect: self.redirect.clone(),
-            digest: self.digest.clone(),
-            initiator: self.initiator.clone(),
-            trusted_origin: self.trusted_origin.clone(),
-        })
-    }
-}
-
 impl Session {
-    pub(crate) fn deadline(&self, request: Option<&Timeout>) -> Deadline {
-        Deadline::new(&self.inner.timeouts, request)
-    }
-
-    pub(crate) fn error_budget(deadline: &Deadline, rules: &BodyRules) -> ErrorBudget {
-        ErrorBudget::new(
-            deadline.error_body_wait(),
-            rules.max_error_body.min(rules.max_body_size),
-        )
-    }
-
-    pub(crate) async fn attempt(&self, attempt: Attempt) -> Result<Response> {
-        let deadline = attempt.deadline;
-        let span = tracing::debug_span!(
-            "session.execute",
-            http.method = attempt.method.as_str(),
-            http.url = redact(attempt.url.as_str()),
-            pool.hit = tracing::field::Empty,
-        );
-        let inner: std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<Response>> + Send + '_>,
-        > = Box::pin(self.execute_inner(attempt));
-        let inner = inner.instrument(span);
-        trace::scope(self.inner.trace.as_ref(), async move {
-            let out = self.unless_shut_down(deadline.total(inner)).await;
-            trace::done(match &out {
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
-            });
-            out
-        })
-        .await
-    }
-
-    pub(crate) fn unless_shut_down<T, F>(&self, fut: F) -> UnlessShutDown<'_, F>
-    where
-        F: std::future::Future<Output = Result<T>>,
-    {
-        UnlessShutDown {
-            stop: self.inner.shutdown.cancelled(),
-            fut,
-        }
-    }
-
-    /// Shuts the session down so that pending and new requests fail; await it to wait for the last autosave.
-    pub fn shutdown(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
-        self.inner.shutdown.cancel();
-        let writers = std::mem::take(&mut *self.writers());
-        async move {
-            for writer in writers {
-                drop(writer.await);
-            }
-        }
-    }
-
-    pub(crate) fn track_writer(&self, writer: tokio::task::JoinHandle<()>) {
-        let mut writers = self.writers();
-        writers.retain(|running| !running.is_finished());
-        writers.push(writer);
-    }
-
-    fn writers(&self) -> std::sync::MutexGuard<'_, Vec<tokio::task::JoinHandle<()>>> {
-        self.inner
-            .writers
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-    }
-
-    pub(crate) fn stopped(&self) -> impl std::future::Future<Output = ()> + Send + 'static {
-        let token = self.inner.shutdown.clone();
-        async move { token.cancelled().await }
-    }
-
-    /// Returns whether `shutdown` has been called on this session.
-    pub fn is_shut_down(&self) -> bool {
-        self.inner.shutdown.is_cancelled()
-    }
-
-    pub(crate) fn traced<'a, F>(
-        &'a self,
-        method: &'a str,
-        original_url: &'a str,
-        streamed: bool,
-        request: F,
-    ) -> impl std::future::Future<Output = Result<Response>> + 'a
-    where
-        F: std::future::Future<Output = (Result<Response>, u32)> + 'a,
-    {
-        use futures_util::FutureExt;
-        let hook = self.inner.trace.as_ref();
-        trace::scope(
-            hook,
-            request.map(move |(out, attempts)| {
-                if hook.is_some() {
-                    let finish = trace::Finish {
-                        method,
-                        original_url,
-                        attempts,
-                        streamed,
-                    };
-                    trace::summary(&finish, out.as_ref());
-                }
-                out
-            }),
-        )
-    }
-
-    async fn execute_inner(&self, attempt: Attempt) -> Result<Response> {
-        let Parts {
-            method,
-            url,
-            preset,
-            body,
-            headers: extra_headers,
-            deadline,
-            response,
-            body_rules,
-            proxy: request_proxy,
-            header_order,
-            redirect,
-            digest,
-            initiator,
-            trusted_origin,
-        } = *attempt.0;
-        let redirect_policy = redirect.as_ref().unwrap_or(&self.inner.redirect_policy);
-        let request_proxy = request_proxy.as_ref();
-        let header_order = header_order.as_deref();
+    pub(super) async fn execute_inner(&self, attempt: Box<Draft>) -> Result<Response> {
+        let url = attempt
+            .url
+            .expect("invariant: send stores the prepared URL before the attempt");
+        let response = attempt.response;
         let mut journey = Journey::begin(
             self.hsts_upgrade(&url),
-            method.to_string(),
-            body,
-            extra_headers,
-            initiator,
+            attempt.method,
+            attempt.body,
+            (!attempt.headers.is_empty()).then_some(attempt.headers),
+            attempt.carry.initiator,
             self.session_referer(),
         )
-        .trusting(trusted_origin.as_ref());
+        .trusting(attempt.trusted_origin);
+        let redirect_policy = attempt
+            .carry
+            .redirect
+            .as_ref()
+            .unwrap_or(&self.inner.inputs.redirect_policy);
+        let request_proxy = attempt.carry.proxy.as_ref();
+        let header_order = attempt.carry.header_order.as_deref();
 
-        let mut digest = digest.map(DigestLeg::new);
-        let redirect_cap = redirect_policy.max_redirects_hint();
+        let mut digest = attempt.carry.digest_auth.map(DigestLeg::new);
         let mut pass = None;
         let mut answered = false;
+        let mut refreshed = false;
         loop {
             drop(pass.take());
-            pass = self.admit_host(&journey.url).await;
-            let headers = self.leg_headers(&journey, preset, header_order);
+            pass = self.admit_host(&journey.url).await?;
+            let refresh = self
+                .refresh_version(&journey, digest.as_ref())
+                .filter(|_| !refreshed);
+            let headers = self.leg_headers(&journey, attempt.carry.preset, header_order);
             journey.authorized = None;
             let audit_headers = self.audit_copy(&headers);
 
@@ -251,23 +72,54 @@ impl Session {
                     body: step_body,
                     proxy,
                     response,
+                    body_limit: crate::error::BodyLimit::session(
+                        attempt.carry.body_rules.max_body_size
+                    ),
+                    stale_resend: !attempt.carry.retrying,
                 }));
-                deadline.response_header(send).await
+                attempt.deadline.response_header(send).await
             }
             .map_err(leg_error(answered))?;
             answered |= leg.status != http::StatusCode::UNAUTHORIZED;
             journey.timing.add_leg(&leg.timing);
 
-            self.store_cookies(&leg.headers, &journey.url);
-            self.note_hsts(&journey.url, &leg.headers);
+            let seen = leg.headers.seen();
+            if seen.cookies {
+                self.store_cookies(leg.headers.map(), &journey.url);
+            }
+            if seen.hsts {
+                self.note_hsts(&journey.url, leg.headers.map());
+            }
             #[cfg(feature = "http3")]
-            self.note_alt_svc(&journey.url, &leg.headers);
+            if seen.alt_svc {
+                self.note_alt_svc(&journey.url, leg.headers.map());
+            }
+            #[cfg(not(feature = "http3"))]
+            let _ = seen.alt_svc;
+
+            if leg.status == http::StatusCode::UNAUTHORIZED
+                && let Some(version) = refresh
+                && replay_body.is_some()
+            {
+                let token = self
+                    .inner
+                    .inputs
+                    .bearer
+                    .as_ref()
+                    .expect("invariant: refresh version requires bearer auth");
+                drop(leg);
+                self.unless_shut_down(attempt.deadline.total(token.renew(version)))
+                    .await?;
+                journey.body =
+                    replay_body.expect("invariant: replayable body checked before refresh");
+                refreshed = true;
+                continue;
+            }
 
             let next = Turn {
                 code: leg.status.as_u16(),
                 headers: &leg.headers,
                 redirect_policy,
-                redirect_cap,
             };
             if next.take(&mut journey, digest.as_mut(), replay_body)? {
                 drop(leg.body);
@@ -276,13 +128,35 @@ impl Session {
             }
 
             let mut response = self
-                .assemble_response(leg, journey, audit_headers, response, body_rules, &deadline)
+                .assemble_response(
+                    leg,
+                    journey,
+                    audit_headers,
+                    response,
+                    attempt.carry.body_rules,
+                    &attempt.deadline,
+                )
                 .await?;
             if let ResponseBody::Streaming(body) = &mut response.parts.body {
                 body.hold(pass.take());
             }
             return Ok(response);
         }
+    }
+
+    pub(crate) fn download_key(
+        &self,
+        url: &Url,
+        headers: &crate::core::headers::HeaderList,
+    ) -> Result<[u8; 32]> {
+        use sha2::{Digest, Sha256};
+        let headers: Vec<_> = headers
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_bytes()))
+            .collect();
+        let bytes = serde_json::to_vec(&(url.as_str(), headers, self.profile_id()))
+            .map_err(Error::from_json)?;
+        Ok(Sha256::digest(bytes).into())
     }
 
     fn session_referer(&self) -> Option<&str> {
@@ -320,18 +194,11 @@ fn leg_error(answered: bool) -> impl Fn(Error) -> Error {
     move |err| if answered { err.after_response() } else { err }
 }
 
-pub(crate) fn url_origin(url: &Url) -> Cow<'_, str> {
-    if url.has_authority() && url.username().is_empty() && url.password().is_none() {
-        return Cow::Borrowed(&url[..url::Position::BeforePath]);
-    }
-    let host = url.host_str().unwrap_or("");
-    Cow::Owned(match url.port() {
-        Some(port) => format!("{}://{}:{}", url.scheme(), host, port),
-        None => format!("{}://{}", url.scheme(), host),
-    })
-}
-
-pub(crate) fn referer_for<'a>(prev: Option<&'a str>, current_origin: &str) -> Cow<'a, str> {
+pub(crate) fn referer_for<'a>(
+    prev: Option<&'a str>,
+    current: &Url,
+    current_origin: &str,
+) -> Cow<'a, str> {
     let Some(prev) = prev else {
         return Cow::Owned(format!("{current_origin}/"));
     };
@@ -341,10 +208,10 @@ pub(crate) fn referer_for<'a>(prev: Option<&'a str>, current_origin: &str) -> Co
     let Ok(parsed) = Url::parse(prev) else {
         return Cow::Owned(format!("{current_origin}/"));
     };
-    if parsed.scheme() == "https" && !current_origin.starts_with("https:") {
+    if Origin::downgrades(&parsed, current) {
         return Cow::Borrowed("");
     }
-    let origin = url_origin(&parsed);
+    let origin = Origin::ascii(&parsed);
     if origin != current_origin {
         return Cow::Owned(format!("{origin}/"));
     }
@@ -361,14 +228,11 @@ mod redact_tests;
 mod referer_tests;
 #[cfg(test)]
 mod reorder_tests;
-#[cfg(test)]
-mod wrap_tests;
 
 struct Turn<'a> {
     code: u16,
-    headers: &'a [(http::HeaderName, http::HeaderValue)],
+    headers: &'a crate::wire::Fields,
     redirect_policy: &'a Redirect,
-    redirect_cap: usize,
 }
 
 impl Turn<'_> {
@@ -378,14 +242,12 @@ impl Turn<'_> {
         digest: Option<&mut DigestLeg>,
         replay_body: Option<Body>,
     ) -> Result<bool> {
-        if let Some(location) = redirect_location(self.code, self.headers)
+        if is_redirect_status(self.code)
+            && let Some(location) = redirect_target(self.code, self.headers.map())
             && let Some(hop) = journey.approved_hop(self.redirect_policy, self.code, &location)
         {
             journey.follow(hop, self.code, &location, replay_body)?;
-            if journey.chain.len() > self.redirect_cap {
-                return Err(Error::new(Cause::Redirect)
-                    .with_message(format!("too many redirects (max {})", self.redirect_cap)));
-            }
+            self.redirect_policy.check_hops(journey.chain.len())?;
             if let Some(digest) = digest {
                 journey.authorized = digest.next_hop(journey)?;
             }
@@ -393,39 +255,12 @@ impl Turn<'_> {
         }
         if self.code == 401
             && let Some(digest) = digest
-            && let Some(authorized) = digest.answer(journey, self.headers)?
+            && let Some(authorized) = digest.answer(journey, self.headers.map())?
         {
             journey.body = replay_body.ok_or_else(unreplayable_body)?;
             journey.authorized = Some(authorized);
             return Ok(true);
         }
         Ok(false)
-    }
-}
-
-pin_project_lite::pin_project! {
-    pub(crate) struct UnlessShutDown<'a, F> {
-        #[pin]
-        stop: tokio_util::sync::WaitForCancellationFuture<'a>,
-        #[pin]
-        fut: F,
-    }
-}
-
-impl<T, F> std::future::Future for UnlessShutDown<'_, F>
-where
-    F: std::future::Future<Output = Result<T>>,
-{
-    type Output = Result<T>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<T>> {
-        let this = self.project();
-        if this.stop.poll(cx).is_ready() {
-            return std::task::Poll::Ready(Err(Error::shut_down()));
-        }
-        this.fut.poll(cx)
     }
 }

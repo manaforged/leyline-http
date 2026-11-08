@@ -9,12 +9,8 @@
 use leyline::{Browser, Platform, Session};
 use serde_json::Value;
 
-const PEET_URL: &str = "https://tls.peet.ws/api/all";
-
 async fn peet(session: &Session) -> Value {
-    let resp = session.get(PEET_URL).send().await.expect("navigate failed");
-    assert_eq!(resp.status(), 200, "status {}", resp.status());
-    serde_json::from_str(&resp.text().await.unwrap()).expect("non-JSON body")
+    crate::echo::get(session).await
 }
 
 fn ext<'a>(json: &'a Value, prefix: &str) -> &'a Value {

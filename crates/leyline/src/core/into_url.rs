@@ -1,9 +1,25 @@
+use std::cell::RefCell;
+use std::sync::Arc;
+
 use url::Url;
 
-use crate::core::error::{Cause, Error, Result};
+use crate::error::{Error, Kind, Result};
 
-mod sealed {
-    pub trait Sealed {}
+pub(crate) mod sealed {
+    use std::sync::Arc;
+
+    use url::Url;
+
+    use crate::error::Result;
+
+    pub trait Sealed {
+        fn shared_url(self, base: Option<&Url>) -> Result<Arc<Url>>
+        where
+            Self: super::IntoUrl + Sized,
+        {
+            self.into_url_with_base(base).map(Arc::new)
+        }
+    }
 }
 
 /// Converts a value into a parsed `Url`.
@@ -21,19 +37,44 @@ pub trait IntoUrl: sealed::Sealed {
     }
 }
 
+thread_local! {
+    static LAST: RefCell<Option<Arc<Url>>> = const { RefCell::new(None) };
+}
+
 fn parse_with_base(raw: &str, base: Option<&Url>) -> Result<Url> {
-    if raw.chars().any(|c| c.is_ascii_control()) {
-        return Err(Error::new(Cause::Url).with_message("URL contains a control character"));
+    shared_with_base(raw, base).map(Arc::unwrap_or_clone)
+}
+
+fn shared_with_base(raw: &str, base: Option<&Url>) -> Result<Arc<Url>> {
+    if let Some(url) =
+        LAST.with_borrow(|last| last.as_ref().filter(|url| url.as_str() == raw).cloned())
+    {
+        return Ok(url);
     }
-    match (Url::parse(raw), base) {
+    if raw.chars().any(|c| c.is_ascii_control()) {
+        return Err(Error::new(Kind::Url).with_message("URL contains a control character"));
+    }
+    let parsed = Url::parse(raw);
+    if let Ok(url) = &parsed
+        && url.as_str() == raw
+    {
+        let shared = Arc::new(url.clone());
+        LAST.set(Some(Arc::clone(&shared)));
+        return Ok(shared);
+    }
+    match (parsed, base) {
         (Err(url::ParseError::RelativeUrlWithoutBase), Some(base)) => {
-            base.join(raw).map_err(Error::from_url_parse)
+            base.join(raw).map(Arc::new).map_err(Error::from)
         }
-        (parsed, _) => parsed.map_err(Error::from_url_parse),
+        (parsed, _) => parsed.map(Arc::new).map_err(Error::from),
     }
 }
 
-impl sealed::Sealed for &str {}
+impl sealed::Sealed for &str {
+    fn shared_url(self, base: Option<&Url>) -> Result<Arc<Url>> {
+        shared_with_base(self, base)
+    }
+}
 impl IntoUrl for &str {
     fn into_url(self) -> Result<Url> {
         parse_with_base(self, None)
@@ -44,7 +85,11 @@ impl IntoUrl for &str {
     }
 }
 
-impl sealed::Sealed for String {}
+impl sealed::Sealed for String {
+    fn shared_url(self, base: Option<&Url>) -> Result<Arc<Url>> {
+        shared_with_base(&self, base)
+    }
+}
 impl IntoUrl for String {
     fn into_url(self) -> Result<Url> {
         self.as_str().into_url()
@@ -55,7 +100,11 @@ impl IntoUrl for String {
     }
 }
 
-impl sealed::Sealed for &String {}
+impl sealed::Sealed for &String {
+    fn shared_url(self, base: Option<&Url>) -> Result<Arc<Url>> {
+        shared_with_base(self, base)
+    }
+}
 impl IntoUrl for &String {
     fn into_url(self) -> Result<Url> {
         self.as_str().into_url()

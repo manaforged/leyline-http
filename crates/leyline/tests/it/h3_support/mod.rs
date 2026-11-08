@@ -65,6 +65,7 @@ pub enum Reply {
     Truncate(usize, u64),
     Encoded(usize),
     Flood(usize),
+    EarlyHints(usize),
 }
 
 #[derive(Clone, Copy)]
@@ -218,6 +219,18 @@ impl Peer {
                         .expect("response head");
                     self.flooding.push((stream, length));
                     self.held.push(stream);
+                }
+                Reply::EarlyHints(length) => {
+                    h3.send_response(quic, stream, &status(b"103"), false)
+                        .expect("informational head");
+                    let head = [
+                        leyline_quiche::h3::Header::new(b":status", b"201"),
+                        leyline_quiche::h3::Header::new(b"x-final", b"yes"),
+                    ];
+                    h3.send_additional_headers(quic, stream, &head, false, false)
+                        .expect("final head");
+                    h3.send_body(quic, stream, &vec![b'x'; length], true)
+                        .expect("response body");
                 }
                 Reply::Truncate(length, code) => {
                     h3.send_response(quic, stream, &status(b"200"), false)

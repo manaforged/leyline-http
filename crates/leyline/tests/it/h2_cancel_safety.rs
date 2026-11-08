@@ -6,46 +6,27 @@ use std::time::Duration;
 use support::*;
 use tokio::io::AsyncReadExt;
 
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody};
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::FrameType;
 
 fn test_config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65535),
-            (SettingId::MaxFrameSize, 16384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: std::time::Duration::from_secs(10),
-        header_block_reassembly_timeout: std::time::Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
 #[tokio::test]
 async fn cancelled_send_request_rst_streams_the_slot() {
     let (client_io, mut server_io) = tokio::io::duplex(65_536);
+    let (headers_tx, headers_rx) = tokio::sync::oneshot::channel();
+    let (reset_tx, reset_rx) = tokio::sync::oneshot::channel();
 
     let server = tokio::spawn(async move {
         read_preface(&mut server_io).await;
@@ -56,6 +37,7 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         let (h, _) = read_frame(&mut server_io).await;
         assert_eq!(h.frame_type, FrameType::Headers as u8);
         let request_stream_id = h.stream_id;
+        headers_tx.send(()).unwrap_or_default();
 
         let started = std::time::Instant::now();
         let mut saw_rst = false;
@@ -82,11 +64,12 @@ async fn cancelled_send_request_rst_streams_the_slot() {
             "driver should RST_STREAM(CANCEL) within 3s of the caller dropping the future"
         );
 
+        reset_tx.send(()).unwrap_or_default();
         let mut sink = [0u8; 256];
         drop(server_io.read(&mut sink).await);
     });
 
-    let handle = leyline::h2::start(client_io, test_config())
+    let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
 
@@ -103,21 +86,21 @@ async fn cancelled_send_request_rst_streams_the_slot() {
         drop(
             handle_clone
                 .send_shared(
-                    Arc::new(Head {
-                        pseudo,
-                        headers: vec![],
-                    }),
-                    RequestBody::None,
+                    Arc::new(Head::new(pseudo, vec![])),
+                    leyline::Body::default(),
                     false,
                 )
                 .await,
         );
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::timeout(Duration::from_secs(5), headers_rx)
+        .await
+        .expect("the request reaches the server")
+        .expect("server task waiting");
     pending.abort();
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(tokio::time::timeout(Duration::from_secs(5), reset_rx).await);
 
     drop(handle);
 

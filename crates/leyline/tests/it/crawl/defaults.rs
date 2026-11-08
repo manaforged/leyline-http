@@ -42,7 +42,7 @@ async fn a_crawl_requests_one_url_per_normalized_address() {
         .host_limits(leyline::HostLimits::new().max_in_flight(4))
         .build()
         .unwrap();
-    let mut crawl = session.crawl(server.url("/"));
+    let mut crawl = session.crawl(server.url("/")).host_limits(unpaced());
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }

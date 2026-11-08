@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::StreamExt;
-use leyline::pool::{H1Body, H1Response, H1ResponseBody, H1Target, Pool, send_request_h1_pooled};
-use leyline::profile::ProfileRegistry;
-use leyline::tls::FingerprintConnector;
+use leyline::internals::pool::{Pool, TransportBody, TransportResponse, send_request_h1_pooled};
+use leyline::internals::profile::ProfileRegistry;
+use leyline::internals::tls::FingerprintConnector;
 use leyline::{Browser, Platform};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -61,19 +61,15 @@ async fn absolute_form_target_strips_userinfo_and_fragment() {
     let pool = Arc::new(Pool::new());
     let connector = connector();
     let url = url::Url::parse("http://user:pw@example.com/a?b#frag").unwrap();
-    let proxy = format!("http://{addr}");
+    let proxy = leyline::internals::pool::ProxyUrl::parse(format!("http://{addr}")).unwrap();
     let resp = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        "example.com",
-        80,
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         Some(&proxy),
-        H1Target::AbsoluteForm,
         false,
     )
     .await
@@ -90,7 +86,7 @@ async fn absolute_form_target_strips_userinfo_and_fragment() {
 
 async fn run_against_with_stats(
     server_response: &'static [u8],
-) -> (String, leyline::pool::ConnectionStats) {
+) -> (String, leyline::internals::pool::ConnectionStats) {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -119,24 +115,22 @@ async fn run_against_with_stats(
     let err = send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        "127.0.0.1",
-        addr.port(),
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         false,
     )
     .await
-    .err()
-    .expect("must reject framing conflict");
+    .expect_err("must reject framing conflict");
     (format!("{err}"), pool.stats())
 }
 
-async fn informational_response(chunks: &'static [&'static [u8]], stream: bool) -> H1Response {
+async fn informational_response(
+    chunks: &'static [&'static [u8]],
+    stream: bool,
+) -> TransportResponse {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
@@ -163,15 +157,11 @@ async fn informational_response(chunks: &'static [&'static [u8]], stream: bool) 
     send_request_h1_pooled(
         &pool,
         &connector,
-        "http",
-        "127.0.0.1",
-        addr.port(),
         "GET",
         &url,
         vec![],
-        H1Body::Empty,
+        leyline::Body::default(),
         None,
-        H1Target::OriginForm,
         stream,
     )
     .await
@@ -187,8 +177,13 @@ async fn coalesced_informational_and_final_buffered_response_preserves_final_byt
     .await;
 
     assert_eq!(response.status, 200);
-    assert!(response.headers.contains(&("X-Final".into(), "yes".into())));
-    let H1ResponseBody::Buffered(body) = response.body else {
+    assert!(
+        response
+            .headers
+            .iter()
+            .any(|(name, value)| name == "x-final" && value == "yes")
+    );
+    let TransportBody::Buffered(body) = response.body else {
         panic!("buffered request returns a buffered body");
     };
     assert_eq!(body, b"hello");
@@ -206,8 +201,13 @@ async fn split_informational_and_final_streaming_response_preserves_final_bytes(
     .await;
 
     assert_eq!(response.status, 200);
-    assert!(response.headers.contains(&("X-Final".into(), "yes".into())));
-    let H1ResponseBody::Streaming(mut body) = response.body else {
+    assert!(
+        response
+            .headers
+            .iter()
+            .any(|(name, value)| name == "x-final" && value == "yes")
+    );
+    let TransportBody::Streaming(mut body) = response.body else {
         panic!("streaming request returns a streaming body");
     };
     assert_eq!(body.next().await.unwrap().unwrap().as_ref(), b"hello");

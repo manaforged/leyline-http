@@ -1,6 +1,6 @@
 use leyline_bssl::ssl::SslContextBuilder;
 
-use super::LoadedTrust;
+use super::TrustKey;
 use super::files::add_root_file;
 
 pub(super) fn env_roots_set() -> bool {
@@ -9,7 +9,7 @@ pub(super) fn env_roots_set() -> bool {
         .any(|name| std::env::var(name).is_ok_and(|value| !value.trim().is_empty()))
 }
 
-pub(super) fn wire_env_trust(builder: &mut SslContextBuilder, trust: &mut LoadedTrust) -> bool {
+pub(super) fn wire_env_trust(builder: &mut SslContextBuilder, trust: &mut TrustKey) -> bool {
     let mut loaded_any = false;
     if let Ok(file) = std::env::var("SSL_CERT_FILE") {
         let file = file.trim();

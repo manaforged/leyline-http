@@ -6,7 +6,7 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use futures_util::{Stream, TryFutureExt};
 
-use crate::core::body::{Body, BodyKind};
+use crate::wire::{Body, BodyKind};
 
 mod debug;
 
@@ -59,7 +59,7 @@ impl Part {
     }
 
     /// Creates a part that streams the file at `path`, using its file name, or `file` when it has none.
-    pub fn file(path: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn file(path: impl AsRef<Path>) -> crate::Result<Self> {
         let path = path.as_ref().to_path_buf();
         let metadata = std::fs::metadata(&path)?;
         let filename = path
@@ -118,6 +118,16 @@ impl Form {
             parts: Vec::new(),
             boundary: random_boundary(),
         }
+    }
+
+    /// Appends the text field `name`.
+    pub fn text(self, name: impl Into<String>, value: impl Into<String>) -> Self {
+        self.part(name, Part::text(value))
+    }
+
+    /// Appends the file at `path` under the field `name`.
+    pub fn file(self, name: impl Into<String>, path: impl AsRef<Path>) -> crate::Result<Self> {
+        Ok(self.part(name, Part::file(path)?))
     }
 
     /// Appends `part` under the field `name`.

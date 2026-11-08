@@ -36,6 +36,7 @@ mod credentials_hidden;
 mod deadlines_and_lifecycle;
 mod devices;
 mod digest_redirects;
+mod echo;
 mod ergonomics;
 mod error_body_budget;
 #[cfg(feature = "bench-internals")]
@@ -43,7 +44,6 @@ mod fingerprint_conformance;
 mod forms_and_relay;
 mod future_size;
 mod h1_error_body;
-mod h1_failures;
 #[cfg(feature = "bench-internals")]
 mod h2_backpressure;
 #[cfg(feature = "bench-internals")]
@@ -68,6 +68,8 @@ mod h2_flow_overflow;
 mod h2_frame_roundtrip;
 #[cfg(feature = "bench-internals")]
 mod h2_hostile_server;
+#[cfg(feature = "bench-internals")]
+mod h2_idle_ping;
 #[cfg(feature = "bench-internals")]
 mod h2_informational_e2e;
 #[cfg(feature = "bench-internals")]
@@ -96,8 +98,6 @@ mod h2_shutdown_streaming_e2e;
 mod h2_stream_delivery;
 #[cfg(feature = "bench-internals")]
 mod h2_stream_lifecycle;
-#[cfg(feature = "bench-internals")]
-mod h2_stream_state;
 #[cfg(feature = "bench-internals")]
 mod h2_write_batching;
 mod h3_body_cap;
@@ -155,6 +155,7 @@ mod responses_and_errors;
 mod retry_rules;
 mod retry_unsent_redirect;
 mod robots;
+mod run_per_core;
 mod samesite_cookies;
 mod send_sync;
 mod server_chosen_urls;

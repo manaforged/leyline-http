@@ -1,6 +1,6 @@
 #![no_main]
 
-use leyline::fuzz::read_chunked_body;
+use leyline::internals::fuzz::read_chunked_body;
 use libfuzzer_sys::fuzz_target;
 use tokio::runtime::Builder;
 

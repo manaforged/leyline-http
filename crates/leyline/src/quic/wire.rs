@@ -1,7 +1,10 @@
 use leyline_quiche as quiche;
 use quiche::TransportParamEntry;
+use rand::Rng;
 use rand::seq::SliceRandom;
-use rand::{Rng, RngCore};
+
+use crate::quic::error::QuicError;
+use crate::util::random_bytes;
 
 use crate::profile::{
     H3ConnectionIdLength, H3CryptoReorder, H3CryptoSplit, H3Grease, H3Order, H3Profile, H3Setting,
@@ -29,31 +32,26 @@ pub(crate) fn connection_id_len(len: &H3ConnectionIdLength) -> usize {
     }
 }
 
-pub(crate) fn random_bytes(len: usize) -> Vec<u8> {
-    let mut out = vec![0u8; len];
-    rand::rng().fill_bytes(&mut out);
-    out
+pub(crate) fn sends_datagrams(h3: &H3Profile) -> bool {
+    h3.transport_parameters
+        .iter()
+        .flatten()
+        .any(|p| p.id == Some(MAX_DATAGRAM_FRAME_SIZE))
 }
 
-impl H3Profile {
-    pub(crate) fn sends_datagrams(&self) -> bool {
-        self.transport_parameters
-            .iter()
-            .flatten()
-            .any(|p| p.id == Some(MAX_DATAGRAM_FRAME_SIZE))
-    }
-
-    pub(crate) fn transport_plan(&self) -> Result<Option<Vec<TransportParamEntry>>, String> {
-        let Some(params) = &self.transport_parameters else {
-            return Ok(None);
-        };
-        let entries = params
-            .iter()
-            .map(transport_entry)
-            .collect::<Result<Vec<_>, String>>()?;
-        let pinned: Vec<bool> = params.iter().map(|p| p.pinned).collect();
-        Ok(Some(reorder(entries, &pinned, self.transport_order)))
-    }
+pub(crate) fn transport_plan(
+    h3: &H3Profile,
+) -> Result<Option<Vec<TransportParamEntry>>, QuicError> {
+    let Some(params) = &h3.transport_parameters else {
+        return Ok(None);
+    };
+    let entries = params
+        .iter()
+        .map(transport_entry)
+        .collect::<Result<Vec<_>, String>>()
+        .map_err(QuicError::Config)?;
+    let pinned: Vec<bool> = params.iter().map(|p| p.pinned).collect();
+    Ok(Some(reorder(entries, &pinned, h3.transport_order)))
 }
 
 fn transport_entry(param: &H3TransportParam) -> Result<TransportParamEntry, String> {
@@ -101,30 +99,28 @@ fn reorder<T>(entries: Vec<T>, pinned: &[bool], order: H3Order) -> Vec<T> {
         .collect()
 }
 
-impl H3Profile {
-    pub(crate) fn crypto_split(&self) -> quiche::InitialCryptoSplit {
-        match (self.initial_crypto_split, self.initial_crypto_reorder) {
-            (H3CryptoSplit::Fill, _) => quiche::InitialCryptoSplit::Fill,
-            (H3CryptoSplit::Even, H3CryptoReorder::None) => quiche::InitialCryptoSplit::Even,
-            (H3CryptoSplit::Even, H3CryptoReorder::SniMidpoint) => {
-                quiche::InitialCryptoSplit::EvenSniSlice
-            }
+pub(crate) fn crypto_split(h3: &H3Profile) -> quiche::InitialCryptoSplit {
+    match (h3.initial_crypto_split, h3.initial_crypto_reorder) {
+        (H3CryptoSplit::Fill, _) => quiche::InitialCryptoSplit::Fill,
+        (H3CryptoSplit::Even, H3CryptoReorder::None) => quiche::InitialCryptoSplit::Even,
+        (H3CryptoSplit::Even, H3CryptoReorder::SniMidpoint) => {
+            quiche::InitialCryptoSplit::EvenSniSlice
         }
     }
+}
 
-    pub(crate) fn compatible_versions(&self) -> Vec<u32> {
-        let versions: Vec<u32> = self
-            .transport_parameters
-            .iter()
-            .flatten()
-            .filter_map(|param| param.versions.as_ref())
-            .flat_map(|info| info.available.iter().copied())
-            .collect();
-        if versions.is_empty() {
-            vec![quiche::PROTOCOL_VERSION]
-        } else {
-            versions
-        }
+pub(crate) fn compatible_versions(h3: &H3Profile) -> Vec<u32> {
+    let versions: Vec<u32> = h3
+        .transport_parameters
+        .iter()
+        .flatten()
+        .filter_map(|param| param.versions.as_ref())
+        .flat_map(|info| info.available.iter().copied())
+        .collect();
+    if versions.is_empty() {
+        vec![quiche::PROTOCOL_VERSION]
+    } else {
+        versions
     }
 }
 

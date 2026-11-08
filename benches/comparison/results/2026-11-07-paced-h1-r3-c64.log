@@ -1,0 +1,96 @@
+leyline header names (hyper map order; pseudo-headers not shown): host user-agent accept accept-encoding connection
+  host: 127.0.0.1:38071
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+  connection: keep-alive
+leyline TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+hyper header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding host
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+  host: 127.0.0.1:38071
+hyper TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+reqwest header names (hyper map order; pseudo-headers not shown): accept user-agent accept-encoding host
+  accept: */*
+  user-agent: bench/1.0
+  accept-encoding: gzip, deflate, br, zstd
+  host: 127.0.0.1:38071
+reqwest TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+wreq header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding host
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+  host: 127.0.0.1:38071
+wreq TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+ureq header names (hyper map order; pseudo-headers not shown): host user-agent accept accept-encoding
+  host: 127.0.0.1:38071
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+ureq TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+curl header names (hyper map order; pseudo-headers not shown): host user-agent accept accept-encoding
+  host: 127.0.0.1:38071
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+curl TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=http/1.1 handshake=Some(Full)
+nethttp header names (hyper map order; pseudo-headers not shown): host user-agent accept accept-encoding
+  host: 127.0.0.1:38071
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+nethttp TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+fasthttp header names (hyper map order; pseudo-headers not shown): user-agent host accept accept-encoding
+  user-agent: bench/1.0
+  host: 127.0.0.1:38071
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+fasthttp TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn= handshake=Some(Full)
+all clients sent: accept-encoding: gzip, deflate, br, zstd; accept: */*; user-agent: bench/1.0
+1 c64 leyline 20000 10 199968 19997.7 33 70 84 33 70 84 30220 2129.10
+1 c64 hyper 20000 10 199968 19997.2 35 72 88 35 72 88 26796 2601.06
+1 c64 reqwest 20000 10 199968 19997.9 37 72 88 37 72 88 27608 3837.32
+1 c64 wreq 20000 10 199968 19998.0 36 72 88 36 72 88 29328 3629.71
+1 c64 ureq 20000 10 199968 19999.9 24 44 50 24 44 50 59516 5019.04
+1 c64 curl 20000 10 199968 19998.3 19 31 38 19 31 38 33572 3586.02
+1 c64 nethttp 20000 10 199968 19997.9 29 59 208 29 59 208 99708 5008.60
+1 c64 fasthttp 20000 10 199968 19998.6 29 53 63 29 53 63 101888 2695.45
+2 c64 fasthttp 20000 10 199968 19999.4 28 51 59 28 51 59 90808 2687.83
+2 c64 nethttp 20000 10 199968 19998.2 29 61 201 29 61 201 106692 4956.46
+2 c64 curl 20000 10 199968 19998.6 19 32 39 19 32 39 33996 3577.93
+2 c64 ureq 20000 10 199968 19999.9 24 45 50 24 45 50 59220 4756.26
+2 c64 wreq 20000 10 199968 19997.2 37 76 95 37 76 95 29096 3649.62
+2 c64 reqwest 20000 10 199968 19998.2 37 74 92 37 74 92 28672 3836.13
+2 c64 hyper 20000 10 199968 19998.0 34 71 86 34 71 86 26432 2583.92
+2 c64 leyline 20000 10 199968 19999.6 32 66 80 32 66 80 29896 2135.21
+3 c64 leyline 20000 10 199968 19997.8 33 66 80 33 66 80 29760 2117.60
+3 c64 hyper 20000 10 199968 19997.0 35 70 85 35 70 85 27252 2600.17
+3 c64 reqwest 20000 10 199968 19996.7 37 74 93 37 74 93 28256 3849.51
+3 c64 wreq 20000 10 199968 19996.3 38 75 92 38 75 92 28584 3623.59
+3 c64 ureq 20000 10 199968 19999.9 26 49 61 26 49 61 59140 5660.91
+3 c64 curl 20000 10 199968 19998.7 18 31 39 18 31 39 33516 3482.94
+3 c64 nethttp 20000 10 199968 19999.1 29 60 208 29 60 208 96256 4947.61
+3 c64 fasthttp 20000 10 199968 19999.7 28 52 60 28 52 60 119040 2680.15
+ls: cannot access 'java-client/lib': No such file or directory
+
+open-loop cells: latency from the scheduled send time when the worker was behind it (coordinated omission), else from the send; first second left out; CPU per request at the same offered rate; medians over runs and rounds; lower is better
+
+c64      lib                 rate achieved   p50_us   p99_us  p999_us cpu_us/req  rss_MiB rounds
+         curl               20000    1.000       19       31       39      16.26     32.8      3
+         ureq               20000    1.000       24       45       50      22.81     57.8      3
+         fasthttp           20000    1.000       28       52       60      12.22     99.5      3
+         nethttp            20000    1.000       29       60      208      22.53     97.4      3
+         leyline            20000    1.000       33       66       80       9.68     29.2      3
+         hyper              20000    1.000       35       71       86      11.82     26.2      3
+         reqwest            20000    1.000       37       74       92      17.44     27.6      3
+         wreq               20000    1.000       37       75       92      16.50     28.4      3
+
+open-loop paired ratio, leyline over rival (same run, same round); 95% t-interval on log ratio; below 1 means leyline is lower
+c64      leyline           vs hyper      p99 0.948 [0.896, 1.004] tie; CPU/req 0.820 [0.805, 0.835] less CPU; single-run, 3 rounds
+c64      leyline           vs reqwest    p99 0.918 [0.811, 1.039] tie; CPU/req 0.554 [0.546, 0.562] less CPU; single-run, 3 rounds
+c64      leyline           vs wreq       p99 0.906 [0.777, 1.056] tie; CPU/req 0.585 [0.583, 0.588] less CPU; single-run, 3 rounds
+c64      leyline           vs ureq       p99 1.465 [1.191, 1.801] higher; CPU/req 0.415 [0.329, 0.523] less CPU; single-run, 3 rounds
+c64      leyline           vs curl       p99 2.148 [1.917, 2.408] higher; CPU/req 0.599 [0.581, 0.618] less CPU; single-run, 3 rounds
+c64      leyline           vs nethttp    p99 1.122 [0.993, 1.268] tie; CPU/req 0.428 [0.421, 0.435] less CPU; single-run, 3 rounds
+c64      leyline           vs fasthttp   p99 1.295 [1.232, 1.360] higher; CPU/req 0.791 [0.785, 0.798] less CPU; single-run, 3 rounds

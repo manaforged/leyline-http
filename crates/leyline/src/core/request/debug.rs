@@ -3,33 +3,41 @@ use std::fmt;
 use http::HeaderValue;
 
 use super::RequestBuilder;
-use crate::trace::masked;
+use crate::util::masked;
 use crate::util::redact;
 
 impl fmt::Debug for RequestBuilder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RequestBuilder")
-            .field("method", &self.method)
+            .field("method", &self.draft.method)
             .field(
                 "url",
-                &redact(self.url.as_ref().map_or("", url::Url::as_str)),
+                &redact(self.draft.url.as_deref().map_or("", url::Url::as_str)),
             )
-            .field("query", &masked_query(&self.query_params))
+            .field("query", &masked_query(&self.draft.query_params))
             .field(
                 "headers",
-                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), shown(v)))),
+                &masked(
+                    self.draft
+                        .headers
+                        .iter()
+                        .map(|(k, v)| (k.as_str(), shown(v))),
+                ),
             )
-            .field("body", &self.body)
-            .field("preset", &self.preset)
-            .field("timeouts", &self.timeouts)
-            .field("retry_policy", &self.retry_policy)
-            .field("proxy", &self.proxy)
-            .field("redirect", &self.redirect)
-            .field("digest_auth", &self.digest_auth.as_ref().map(|_| "***"))
-            .field("compress", &self.compress)
-            .field("stream_response", &self.stream_response)
-            .field("header_order", &self.header_order)
-            .field("error", &self.builder_error)
+            .field("body", &self.draft.body)
+            .field("preset", &self.draft.carry.preset)
+            .field("timeouts", &self.draft.carry.timeouts)
+            .field("retry_policy", &self.draft.carry.retry_policy)
+            .field("proxy", &self.draft.carry.proxy)
+            .field("redirect", &self.draft.carry.redirect)
+            .field(
+                "digest_auth",
+                &self.draft.carry.digest_auth.as_ref().map(|_| "***"),
+            )
+            .field("compress", &self.draft.compress)
+            .field("stream_response", &self.draft.carry.stream_response)
+            .field("header_order", &self.draft.carry.header_order)
+            .field("error", &self.draft.builder_error)
             .finish_non_exhaustive()
     }
 }

@@ -24,7 +24,7 @@ system trust-store loading, and streaming bodies always compile.
 | `socks` | no | SOCKS5 proxies, and HTTP/3 through a SOCKS5 proxy. Without it, a `socks5://` or `socks5h://` session proxy, proxy list entry, or environment proxy fails `build()` with `Kind::Config`, and one set on a request fails that request with `Kind::Proxy`. |
 | `tower` | no | Implements `tower_service::Service` for `Session`. See [Service integration](service-integration.md#use-the-tower-adapter). |
 | `test-util` | no | Adds `leyline::testing`. Enable it in `[dev-dependencies]` only. See [Testing](testing.md). |
-| `bench-internals` | no | Makes internal items public for Leyline's own tests, benches, and fuzz targets. Outside the semver promise. |
+| `bench-internals` | no | Adds the hidden `leyline::internals` module for Leyline's own tests, benches, and fuzz targets. Outside the semver promise. |
 | `full` | no | Every feature above except `test-util` and `bench-internals`. |
 
 Each compression feature gates both the body codec and the matching RFC 8879

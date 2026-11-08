@@ -1,8 +1,8 @@
 #![no_main]
 
 use bytes::Bytes;
-use leyline::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
-use leyline::h2::hpack::Decoder;
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
+use leyline::internals::h2::hpack::Decoder;
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -13,7 +13,8 @@ fuzz_target!(|data: &[u8]| {
         let header = FrameHeader::parse(rest[..FRAME_HEADER_LEN].try_into().expect("9 bytes"));
         rest = &rest[FRAME_HEADER_LEN..];
         let Some(payload) = rest.get(..header.length as usize) else {
-            break;         };
+            break;
+        };
         rest = &rest[header.length as usize..];
         let frame = match Frame::parse(header, Bytes::copy_from_slice(payload)) {
             Ok(frame) => frame,

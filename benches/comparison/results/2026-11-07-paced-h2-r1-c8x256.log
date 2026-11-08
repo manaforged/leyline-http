@@ -1,0 +1,67 @@
+leyline header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+leyline TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
+hyper header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+hyper TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
+reqwest header names (hyper map order; pseudo-headers not shown): accept user-agent accept-encoding
+  accept: */*
+  user-agent: bench/1.0
+  accept-encoding: gzip, deflate, br, zstd
+reqwest TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
+wreq header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+wreq TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
+curl header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+curl TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
+h2 header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding
+  user-agent: bench/1.0
+  accept: */*
+  accept-encoding: gzip, deflate, br, zstd
+h2 TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
+all clients sent: accept-encoding: gzip, deflate, br, zstd; accept: */*; user-agent: bench/1.0
+1 c8x256 leyline 50000 10 499888 49996.2 60 124 147 60 124 147 50996 4351.23
+1 c8x256 hyper 50000 10 499888 49993.2 73 130 156 73 130 156 46268 7008.01
+1 c8x256 reqwest 50000 10 499888 49995.7 78 146 174 78 146 174 48464 10295.69
+1 c8x256 wreq 50000 10 499888 49995.8 74 141 170 74 141 170 49036 10060.38
+1 c8x256 curl 50000 10 499888 49995.5 61 89 120 61 89 120 48016 5582.58
+1 c8x256 h2 50000 10 499888 49992.3 56 115 136 56 115 136 43696 5329.78
+2 c8x256 h2 50000 10 499888 49992.5 56 114 134 56 114 134 43540 5335.28
+2 c8x256 curl 50000 10 499888 49995.6 61 91 114 61 91 114 47820 5853.36
+2 c8x256 wreq 50000 10 499888 49995.6 74 138 161 74 138 161 49668 9891.13
+2 c8x256 reqwest 50000 10 499888 49992.8 78 150 178 78 150 178 47608 10492.71
+2 c8x256 hyper 50000 10 499888 49994.8 75 142 162 75 142 162 45912 7088.42
+2 c8x256 leyline 50000 10 499888 49997.2 60 122 145 60 122 145 51460 4357.52
+3 c8x256 leyline 50000 10 499888 49994.8 60 116 136 60 116 136 51732 4372.09
+3 c8x256 hyper 50000 10 499888 49991.8 75 141 161 75 141 161 45388 7136.42
+3 c8x256 reqwest 50000 10 499888 49994.2 78 150 182 78 150 182 48616 10517.01
+3 c8x256 wreq 50000 10 499888 49995.6 73 134 162 73 134 162 48976 9997.97
+3 c8x256 curl 50000 10 499888 49995.4 61 87 104 61 87 104 47532 5700.83
+3 c8x256 h2 50000 10 499888 49995.2 56 108 128 56 108 128 43676 5322.58
+ls: cannot access 'java-client/lib': No such file or directory
+
+open-loop cells: latency from the scheduled send time when the worker was behind it (coordinated omission), else from the send; first second left out; CPU per request at the same offered rate; medians over runs and rounds; lower is better
+
+c8x256   lib                 rate achieved   p50_us   p99_us  p999_us cpu_us/req  rss_MiB rounds
+         curl               50000    1.000       61       89      114      10.37     46.7      3
+         h2                 50000    1.000       56      114      134       9.69     42.7      3
+         leyline            50000    1.000       60      122      145       7.92     50.3      3
+         wreq               50000    1.000       74      138      162      18.18     47.9      3
+         hyper              50000    1.000       75      141      161      12.89     44.8      3
+         reqwest            50000    1.000       78      150      178      19.08     47.3      3
+
+open-loop paired ratio, leyline over rival (same run, same round); 95% t-interval on log ratio; below 1 means leyline is lower
+c8x256   leyline           vs hyper      p99 0.877 [0.726, 1.059] tie; CPU/req 0.616 [0.606, 0.627] less CPU; single-run, 3 rounds
+c8x256   leyline           vs reqwest    p99 0.811 [0.722, 0.912] lower; CPU/req 0.418 [0.408, 0.428] less CPU; single-run, 3 rounds
+c8x256   leyline           vs wreq       p99 0.876 [0.853, 0.900] lower; CPU/req 0.437 [0.427, 0.447] less CPU; single-run, 3 rounds
+c8x256   leyline           vs curl       p99 1.355 [1.277, 1.439] higher; CPU/req 0.763 [0.721, 0.809] less CPU; single-run, 3 rounds
+c8x256   leyline           vs h2         p99 1.074 [1.064, 1.084] higher; CPU/req 0.818 [0.811, 0.825] less CPU; single-run, 3 rounds

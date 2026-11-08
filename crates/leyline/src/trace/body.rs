@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 
-use super::{CURRENT, Ctx, Event, ms};
+use super::{CURRENT, Ctx, Event};
+use crate::wire::ResponseTiming;
 
 pub(crate) struct BodyWatch {
     ctx: Ctx,
@@ -58,7 +59,7 @@ pub(super) fn render(
     elapsed: Duration,
     outcome: Result<(), Option<&std::io::Error>>,
 ) {
-    let elapsed_ms = ms(elapsed);
+    let elapsed_ms = ResponseTiming::span(elapsed);
     match outcome {
         Ok(()) => {
             tracing::info!(target: "leyline::trace", id, bytes, elapsed_ms, outcome = "complete", "body")

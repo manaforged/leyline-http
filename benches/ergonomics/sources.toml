@@ -1,0 +1,70 @@
+# Documentation checked on 2026-11-06. Versions are pinned in rust/*/Cargo.toml,
+# python/requirements.txt, and node/package.json.
+# native: task -> "library" (built in), an extra package name, or "hand" (written by hand).
+
+[rust.leyline-http]
+docs = ["https://docs.rs/leyline-http", "https://manaforged.github.io/leyline-http/guide/streaming.html", "https://manaforged.github.io/leyline-http/guide/retries-and-timeouts.html"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "library", t05 = "futures", t06 = "library plus a caller retry loop", t07 = "library", t08 = "library", t09 = "library", t10 = "library" }
+
+[rust.reqwest]
+docs = ["https://docs.rs/reqwest/0.13.5/reqwest/struct.ClientBuilder.html", "https://docs.rs/reqwest/latest/reqwest/retry/struct.Builder.html", "https://docs.rs/reqwest/latest/reqwest/multipart/index.html", "https://docs.rs/reqwest-retry/latest/reqwest_retry/", "https://docs.rs/reqwest-eventsource/latest/reqwest_eventsource/"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "hand", t05 = "futures", t06 = "hand", t07 = "library", t08 = "reqwest-eventsource", t09 = "library", t10 = "library" }
+notes = "reqwest::retry documents no backoff or Retry-After. reqwest-retry 0.9.1 failed the fixture: first gap 0.218 s against Retry-After: 1. Task 4 is therefore written by hand. The failed program stays as rust/reqwest-retry-t04.rs.txt."
+
+[rust.ureq]
+docs = ["https://docs.rs/ureq/3.5.1/ureq/", "https://docs.rs/ureq/3.5.1/ureq/config/struct.ConfigBuilder.html", "https://docs.rs/ureq/latest/ureq/unversioned/multipart/index.html"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "hand", t05 = "hand with std threads", t06 = "hand", t07 = "library", t08 = "hand", t09 = "library", t10 = "library" }
+
+[rust.wreq]
+docs = ["https://docs.rs/wreq/0.16.3/wreq/"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "hand", t05 = "futures", t06 = "hand", t07 = "library", t08 = "hand", t09 = "library", t10 = "library" }
+
+[python.leyline]
+docs = ["https://manaforged.github.io/leyline-http/", "wrappers/python/README.md"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "library", t05 = "library max_in_flight", t06 = "library", t07 = "library", t08 = "library", t09 = "library", t10 = "library" }
+notes = "Programs use the default session, which sends a Chrome identity. browser='none' sends none."
+
+[python.requests]
+docs = ["https://requests.readthedocs.io/en/latest/user/advanced/", "https://urllib3.readthedocs.io/en/stable/reference/urllib3.util.html", "https://pypi.org/project/requests-sse/"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "library with urllib3 Retry", t05 = "hand with ThreadPoolExecutor", t06 = "hand", t07 = "library", t08 = "requests-sse", t09 = "library", t10 = "library" }
+
+[python.httpx]
+docs = ["https://www.python-httpx.org/quickstart/", "https://www.python-httpx.org/advanced/clients/", "https://www.python-httpx.org/advanced/transports/", "https://pypi.org/project/httpx-sse/", "https://tenacity.readthedocs.io/en/latest/"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "tenacity", t05 = "library Limits", t06 = "hand", t07 = "library", t08 = "httpx-sse plus a caller reconnect loop", t09 = "library", t10 = "library" }
+notes = "httpx documents that its built-in retries cover connection errors only and points to tenacity for a 503."
+
+[python.aiohttp]
+docs = ["https://docs.aiohttp.org/en/stable/client_quickstart.html", "https://docs.aiohttp.org/en/stable/client_advanced.html", "https://pypi.org/project/aiohttp-sse-client2/", "https://tenacity.readthedocs.io/en/latest/"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "tenacity", t05 = "library TCPConnector", t06 = "hand", t07 = "library", t08 = "aiohttp-sse-client2", t09 = "library", t10 = "library" }
+notes = "aiohttp-retry 2.9.1 has no Retry-After handling (no match for retry.after in its source), so task 4 uses tenacity."
+
+[python.curl_cffi]
+docs = ["https://curl-cffi.readthedocs.io/en/latest/quick_start.html", "https://curl-cffi.readthedocs.io/en/latest/api.html"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "hand", t05 = "library max_clients", t06 = "hand", t07 = "library", t08 = "hand", t09 = "library", t10 = "library" }
+notes = "curl_cffi RetryStrategy retries failed requests by count and delay; a 503 is not a failure to it, so task 4 is written by hand."
+
+[python.niquests]
+docs = ["https://niquests.readthedocs.io/en/latest/user/quickstart.html"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "library", t05 = "hand with asyncio.Semaphore", t06 = "hand", t07 = "library", t08 = "library plus a caller reconnect loop", t09 = "library", t10 = "library" }
+
+[node.leyline-http]
+docs = ["https://manaforged.github.io/leyline-http/", "wrappers/node/README.md"]
+native = { t01 = "library", t02 = "library", t03 = "library", t04 = "library", t05 = "library maxInFlight", t06 = "library", t07 = "library", t08 = "library", t09 = "library", t10 = "library" }
+notes = "Programs use the default session, which sends a Chrome identity. browser: 'none' sends none."
+
+[node.fetch]
+docs = ["https://nodejs.org/api/globals.html#fetch", "https://github.com/EventSource/eventsource"]
+native = { t01 = "library", t02 = "library", t03 = "hand", t04 = "hand", t05 = "p-limit", t06 = "hand", t07 = "library", t08 = "eventsource", t09 = "undici 6, the version Node 22 bundles", t10 = "hand" }
+notes = "fetch has no redirect cap option, so task 10 walks redirects by hand. A ProxyAgent from undici 8 throws UND_ERR_INVALID_ARG in Node 22's fetch; undici 6.21.2 works."
+
+[node.axios]
+docs = ["https://axios.rest/pages/advanced/request-config", "https://github.com/3846masa/axios-cookiejar-support", "https://www.npmjs.com/package/axios-retry"]
+native = { t01 = "library", t02 = "library", t03 = "axios-cookiejar-support, tough-cookie", t04 = "axios-retry", t05 = "p-limit", t06 = "hand", t07 = "library postForm", t08 = "hand", t09 = "library", t10 = "library" }
+
+[node.got]
+docs = ["https://github.com/sindresorhus/got/blob/main/documentation/2-options.md", "https://github.com/sindresorhus/got/blob/main/documentation/7-retry.md", "https://github.com/sindresorhus/got/blob/main/documentation/tips.md"]
+native = { t01 = "library", t02 = "library", t03 = "tough-cookie", t04 = "library", t05 = "library with node:http Agent", t06 = "hand", t07 = "library", t08 = "hand", t09 = "hpagent", t10 = "library" }
+
+[node.undici]
+docs = ["https://undici.nodejs.org/", "https://raw.githubusercontent.com/nodejs/undici/main/docs/docs/api/RetryHandler.md", "https://raw.githubusercontent.com/nodejs/undici/main/docs/docs/api/EventSource.md", "https://raw.githubusercontent.com/nodejs/undici/main/docs/docs/api/ProxyAgent.md", "https://raw.githubusercontent.com/nodejs/undici/main/docs/docs/api/Dispatcher.md"]
+native = { t01 = "library", t02 = "library", t03 = "hand", t04 = "library RetryAgent", t05 = "library Agent", t06 = "hand", t07 = "library", t08 = "library EventSource (experimental)", t09 = "library", t10 = "library interceptor" }

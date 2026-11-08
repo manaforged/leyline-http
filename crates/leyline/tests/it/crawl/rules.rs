@@ -17,6 +17,7 @@ async fn a_crawl_that_respects_robots_obeys_robots_txt_and_nofollow() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .respect(Respect::Robots);
     let mut kept = Vec::new();
     while let Some(page) = crawl.next().await {
@@ -51,7 +52,10 @@ async fn a_crawl_ignores_robots_rules_when_told() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/")).respect(None);
+    let mut crawl = Session::new()
+        .crawl(server.url("/"))
+        .host_limits(unpaced())
+        .respect(None);
     let mut pages = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -74,6 +78,7 @@ async fn a_crawl_for_ai_training_obeys_content_signals() {
     let server = testing::Server::http(handler).await.unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .respect(Respect::AiTraining);
     assert!(crawl.next().await.is_none());
     assert_eq!(crawl.skipped(SkipReason::Signal), 1);
@@ -81,6 +86,7 @@ async fn a_crawl_for_ai_training_obeys_content_signals() {
 
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .respect(Respect::Robots);
     crawl.next().await.unwrap().unwrap();
 }
@@ -111,6 +117,7 @@ async fn a_crawl_reads_sitemaps_from_robots_and_indexes() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
+        .host_limits(unpaced())
         .respect(Respect::Robots);
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
@@ -146,7 +153,7 @@ async fn a_crawl_falls_back_to_sitemap_xml() {
         _ => testing::Response::new(404),
     })
     .unwrap();
-    let mut crawl = Session::new().crawl(server.url("/"));
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut pages = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -160,7 +167,7 @@ async fn a_crawl_applies_the_sites_crawl_delay() {
     let stamps = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let seen = stamps.clone();
     let server = testing::Server::http(move |request| match request.target.as_str() {
-        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 2\n"),
+        "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 0.4\n"),
         path => {
             seen.lock().unwrap().push(std::time::Instant::now());
             match path {
@@ -171,16 +178,14 @@ async fn a_crawl_applies_the_sites_crawl_delay() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .respect(Respect::Robots);
+    let mut crawl = brisk().crawl(server.url("/")).respect(Respect::Robots);
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
     let stamps = stamps.lock().unwrap().clone();
     assert_eq!(stamps.len(), 3);
     assert!(
-        stamps[1] - stamps[0] >= Duration::from_millis(1900),
+        stamps[1] - stamps[0] >= Duration::from_millis(380),
         "{:?}",
         stamps[1] - stamps[0]
     );
@@ -200,7 +205,10 @@ async fn a_crawl_reads_robots_txt_again_after_a_day() {
         .host_limits(leyline::HostLimits::new().max_in_flight(4))
         .build()
         .unwrap();
-    let mut crawl = session.crawl(server.url("/")).respect(Respect::Robots);
+    let mut crawl = session
+        .crawl(server.url("/"))
+        .respect(Respect::Robots)
+        .host_limits(unpaced());
     crawl.next().await.unwrap().unwrap();
     tokio::time::pause();
     tokio::time::advance(Duration::from_secs(25 * 60 * 60)).await;
@@ -234,7 +242,7 @@ async fn a_crawl_for_ai_training_obeys_content_usage_by_path_and_header() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new())
+        .host_limits(unpaced())
         .respect(Respect::AiTraining);
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
@@ -255,9 +263,7 @@ async fn a_crawl_obeys_robots_rules_by_default() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());
@@ -280,9 +286,7 @@ async fn a_crawl_retries_a_robots_txt_that_fails_with_500() {
     })
     .await
     .unwrap();
-    let mut crawl = Session::new()
-        .crawl(server.url("/"))
-        .host_limits(leyline::HostLimits::new());
+    let mut crawl = Session::new().crawl(server.url("/")).host_limits(unpaced());
     let mut pages = 0;
     while let Some(page) = crawl.next().await {
         page.unwrap();
@@ -310,8 +314,8 @@ async fn a_crawl_obeys_the_robots_group_of_its_agent() {
     .unwrap();
     let mut crawl = Session::new()
         .crawl(server.url("/"))
-        .agent("mybot/1.0 (+https://example.com/bot)")
-        .host_limits(leyline::HostLimits::new());
+        .host_limits(unpaced())
+        .agent("mybot/1.0 (+https://example.com/bot)");
     while let Some(page) = crawl.next().await {
         page.unwrap();
     }
@@ -332,8 +336,8 @@ async fn a_crawl_reads_a_page_larger_than_the_session_cap() {
     let session = Session::builder().max_body_size(1024).build().unwrap();
     let mut crawl = session
         .crawl(server.url("/"))
-        .max_body_size(4096)
-        .host_limits(leyline::HostLimits::new());
+        .host_limits(unpaced())
+        .max_body_size(4096);
     let page = crawl.next().await.unwrap().unwrap();
     assert!(page.html().len() > 2000);
 }

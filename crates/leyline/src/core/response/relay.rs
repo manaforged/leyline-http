@@ -1,45 +1,25 @@
 use http::HeaderMap;
 use http::header::{
-    CONNECTION, CONTENT_ENCODING, CONTENT_LENGTH, HeaderName, PROXY_AUTHENTICATE,
-    PROXY_AUTHORIZATION, TE, TRAILER, TRANSFER_ENCODING, UPGRADE,
+    CONNECTION, CONTENT_ENCODING, PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TRAILER,
 };
 
 use super::Response;
-use crate::core::session::decompress::Decoder;
-
-const KEEP_ALIVE: &str = "keep-alive";
-const PROXY_CONNECTION: &str = "proxy-connection";
+use crate::core::decompress::{Decoder, strip_decoded};
 
 impl Response {
     /// Returns the headers to forward to a client, without hop-by-hop headers and encoding headers for a decoded body.
     pub fn relay_headers(&self) -> HeaderMap {
-        let mut out = relay_headers(&self.parts.headers);
+        let mut out = relay_headers(self.parts.headers.map());
         if self.decodes_body() && out.contains_key(CONTENT_ENCODING) {
-            out.remove(CONTENT_ENCODING);
-            out.remove(CONTENT_LENGTH);
+            strip_decoded(&mut out);
         }
         out
     }
 
     pub(crate) fn decodes_body(&self) -> bool {
-        let encoding = self.content_coding();
-        Decoder::new(encoding.as_deref(), &self.parts.compression)
+        Decoder::new(&self.content_coding(), &self.parts.compression)
             .is_ok_and(|decoder| decoder.is_some())
     }
-}
-
-fn hop_by_hop() -> [HeaderName; 9] {
-    [
-        CONNECTION,
-        HeaderName::from_static(KEEP_ALIVE),
-        HeaderName::from_static(PROXY_CONNECTION),
-        PROXY_AUTHENTICATE,
-        PROXY_AUTHORIZATION,
-        TE,
-        TRAILER,
-        TRANSFER_ENCODING,
-        UPGRADE,
-    ]
 }
 
 /// Returns a copy of `headers` without hop-by-hop headers.
@@ -53,7 +33,10 @@ pub fn relay_headers(headers: &HeaderMap) -> HeaderMap {
         .map(|token| token.trim().to_ascii_lowercase())
         .filter(|token| !token.is_empty())
         .collect();
-    for name in hop_by_hop() {
+    for name in crate::wire::HOP_BY_HOP {
+        out.remove(name);
+    }
+    for name in [PROXY_AUTHENTICATE, PROXY_AUTHORIZATION, TRAILER] {
         out.remove(name);
     }
     for name in &listed {

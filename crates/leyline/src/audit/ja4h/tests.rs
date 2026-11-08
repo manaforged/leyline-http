@@ -9,7 +9,7 @@ fn ja4h_no_cookies() {
     ];
     let input = Ja4hInput {
         method: "GET",
-        http_version: "2",
+        version: http::Version::HTTP_2,
         headers: &headers,
     };
     let fp = compute_ja4h(&input);
@@ -31,7 +31,7 @@ fn section_a_format() {
     ];
     let input = Ja4hInput {
         method: "POST",
-        http_version: "2",
+        version: http::Version::HTTP_2,
         headers: &headers,
     };
     let a = input.section_a();

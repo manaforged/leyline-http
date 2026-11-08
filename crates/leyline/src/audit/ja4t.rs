@@ -1,4 +1,4 @@
-use crate::tcp::TcpProfile;
+use crate::profile::TcpProfile;
 
 pub fn compute_ja4t(tcp: &TcpProfile) -> String {
     let options = tcp

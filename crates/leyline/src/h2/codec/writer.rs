@@ -1,24 +1,30 @@
+use std::pin::Pin;
+use std::task::{Context, Poll, ready};
+
 use bytes::{Buf, BytesMut};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::h2::H2Error;
-use crate::h2::config::DEFAULT_MAX_FRAME_SIZE;
-use crate::h2::frame::{Encode, FRAME_HEADER_LEN, SettingsFrame};
 
 const CAP: usize = 64 * 1024;
 const CEILING: usize = 4 * CAP;
+const START: usize = 1024;
 
-pub struct FrameWriter<W> {
-    inner: W,
+pub struct FrameWriter {
     buf: BytesMut,
     unflushed: bool,
 }
 
-impl<W: AsyncWrite + Unpin> FrameWriter<W> {
-    pub fn new(writer: W) -> Self {
+impl Default for FrameWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FrameWriter {
+    pub fn new() -> Self {
         Self {
-            inner: writer,
-            buf: BytesMut::with_capacity(DEFAULT_MAX_FRAME_SIZE as usize + FRAME_HEADER_LEN),
+            buf: BytesMut::with_capacity(START),
             unflushed: false,
         }
     }
@@ -39,41 +45,43 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
         !self.buf.is_empty() || self.unflushed
     }
 
-    pub async fn write_some(&mut self) -> Result<(), H2Error> {
+    pub fn poll_write_some<W: AsyncWrite + Unpin + ?Sized>(
+        &mut self,
+        io: &mut W,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), H2Error>> {
         if self.buf.is_empty() {
-            self.inner.flush().await?;
+            ready!(Pin::new(&mut *io).poll_flush(cx))?;
             self.unflushed = false;
-            return Ok(());
+            return Poll::Ready(Ok(()));
         }
-        let n = self.inner.write(&self.buf).await?;
+        let n = ready!(Pin::new(&mut *io).poll_write(cx, &self.buf))?;
         if n == 0 {
-            return Err(std::io::Error::from(std::io::ErrorKind::WriteZero).into());
+            return Poll::Ready(Err(
+                std::io::Error::from(std::io::ErrorKind::WriteZero).into()
+            ));
         }
         self.buf.advance(n);
         self.unflushed = true;
-        Ok(())
+        Poll::Ready(Ok(()))
     }
 
-    pub async fn write_preface(&mut self) -> Result<(), H2Error> {
+    pub fn write_preface(&mut self) {
         self.buf
             .extend_from_slice(b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n");
-        Ok(())
     }
 
-    pub(crate) async fn write_frame<F: Encode>(&mut self, frame: &F) -> Result<(), H2Error> {
-        frame.encode(&mut self.buf);
-        Ok(())
+    pub(crate) fn out(&mut self) -> &mut BytesMut {
+        &mut self.buf
     }
 
-    pub async fn write_settings(&mut self, frame: &SettingsFrame) -> Result<(), H2Error> {
-        self.write_frame(frame).await?;
-        self.flush().await
-    }
-
-    pub async fn flush(&mut self) -> Result<(), H2Error> {
-        self.inner.write_all(&self.buf).await?;
+    pub async fn flush<W: AsyncWrite + Unpin + ?Sized>(
+        &mut self,
+        io: &mut W,
+    ) -> Result<(), H2Error> {
+        io.write_all(&self.buf).await?;
         self.buf.clear();
-        self.inner.flush().await?;
+        io.flush().await?;
         self.unflushed = false;
         Ok(())
     }

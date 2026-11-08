@@ -237,7 +237,7 @@ async fn chrome_default_has_no_brand_overlay() {
         .find(|l| l.to_lowercase().starts_with("sec-ch-ua:"))
         .expect("sec-ch-ua header present")
         .to_lowercase();
-    let major = Browser::default_browser().version();
+    let major = Browser::default().version();
     assert!(
         sec_ch_ua_line.contains(&format!(r#""google chrome";v="{major}""#)),
         "Chrome sec-ch-ua should identify as Google Chrome {major}:\n{req}"

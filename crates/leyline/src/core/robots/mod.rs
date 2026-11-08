@@ -7,12 +7,16 @@ use std::time::Duration;
 use url::Url;
 
 #[cfg(feature = "html")]
+pub(crate) use fetch::{MAX_REDIRECTS, Reply, crawl_retry, fallback, read_capped};
+#[cfg(feature = "html")]
 pub(crate) use pattern::normalize;
 pub(crate) use pattern::{Pattern, path_bytes};
 
+use crate::util::{lookup, product_token};
+
 const ROBOTS_PATH: &str = "/robots.txt";
 const BYTE_ORDER_MARK: char = '\u{feff}';
-const ANY_AGENT: &str = "*";
+pub(crate) const ANY_AGENT: &str = "*";
 
 /// A use of fetched content that robots.txt content signals can allow or deny.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -55,13 +59,6 @@ impl Purpose {
     fn from_label(label: &str) -> Option<Purpose> {
         lookup(&USAGE_LABELS, label)
     }
-}
-
-pub(crate) fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
-    table
-        .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(key.trim()))
-        .map(|(_, value)| *value)
 }
 
 /// Where a `Robots` value came from, which decides the default when no rule matches.
@@ -146,14 +143,6 @@ impl Agent {
     }
 }
 
-pub(crate) fn product_token(agent: &str) -> &str {
-    let agent = agent.trim();
-    let end = agent
-        .find(|c: char| !(c.is_ascii_alphabetic() || matches!(c, '_' | '-')))
-        .unwrap_or(agent.len());
-    &agent[..end]
-}
-
 #[derive(Default)]
 struct Group {
     agents: HashSet<Agent>,
@@ -218,7 +207,7 @@ fn pref(
     Some((purpose(key)?, lookup(values, value)?))
 }
 
-fn usage_prefs(prefs: &str) -> impl Iterator<Item = (Purpose, bool)> + '_ {
+pub(crate) fn usage_prefs(prefs: &str) -> impl Iterator<Item = (Purpose, bool)> + '_ {
     prefs
         .split(',')
         .filter_map(|entry| pref(entry, Purpose::from_label, &USAGE_VALUES))
@@ -229,11 +218,6 @@ fn scoped_usage(value: &str) -> (Option<Pattern>, &str) {
         Some((path, prefs)) if path.starts_with(['/', '*']) => (Pattern::parse(path), prefs),
         _ => (None, value),
     }
-}
-
-#[cfg(feature = "html")]
-pub(crate) fn header_uses(value: &str) -> impl Iterator<Item = (Purpose, bool)> + '_ {
-    usage_prefs(value)
 }
 
 impl Robots {

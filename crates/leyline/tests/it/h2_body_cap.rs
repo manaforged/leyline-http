@@ -4,7 +4,7 @@ use crate::tls_support;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use leyline::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, FrameHeader, FrameType};
 use leyline::{Kind, Session, Tls};
 use support::{
     read_preface, write_data, write_response_headers, write_server_settings, write_settings_ack,

@@ -4,11 +4,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use bytes::BytesMut;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::{DataFrame, FrameType, HeadersFrame};
-use leyline::h2::hpack;
-use leyline::h2::{Head, RequestBody};
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::{DataFrame, FrameType, HeadersFrame};
+use leyline::internals::h2::hpack;
 use support::*;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
@@ -16,33 +17,11 @@ const END_STREAM: u8 = 0x1;
 
 fn config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65_535),
-            (SettingId::MaxFrameSize, 16_384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65_535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
@@ -114,24 +93,24 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         drop(server_io.shutdown().await);
     });
 
-    let handle = leyline::h2::start(client_io, config())
+    let handle = leyline::internals::h2::start(client_io, config())
         .await
         .expect("handshake");
 
     let resp = tokio::time::timeout(
         Duration::from_secs(5),
         handle.send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.com".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: vec![],
-            }),
-            RequestBody::None,
+                vec![],
+            )),
+            leyline::Body::default(),
             false,
         ),
     )
@@ -143,7 +122,7 @@ async fn early_hints_103_is_skipped_final_status_wins() {
         resp.status, 200,
         "1xx Early Hints must be skipped, not returned as the final status"
     );
-    let leyline::h2::ResponseBody::Buffered(body) = resp.body else {
+    let leyline::internals::pool::TransportBody::Buffered(body) = resp.body else {
         panic!("buffered body")
     };
     assert_eq!(body, b"<html>ok</html>");
@@ -200,23 +179,23 @@ async fn endless_early_hints_fail_the_request() {
         server_io
     });
 
-    let handle = leyline::h2::start(client_io, config())
+    let handle = leyline::internals::h2::start(client_io, config())
         .await
         .expect("handshake");
     let result = tokio::time::timeout(
         Duration::from_secs(5),
         handle.send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.com".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: vec![],
-            }),
-            RequestBody::None,
+                vec![],
+            )),
+            leyline::Body::default(),
             false,
         ),
     )

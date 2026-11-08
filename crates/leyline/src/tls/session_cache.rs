@@ -53,8 +53,10 @@ fn fresh(der: &[u8], now_secs: u64) -> bool {
 
 impl SessionCache {
     pub(crate) fn new(policy: TrustIdentity) -> Self {
+        let mut entries = LruCache::unbounded();
+        entries.resize(CAPACITY);
         Self {
-            entries: Arc::new(Mutex::new(LruCache::new(CAPACITY))),
+            entries: Arc::new(Mutex::new(entries)),
             policy,
         }
     }
@@ -127,3 +129,7 @@ impl SessionCache {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "session_cache_tests.rs"]
+mod tests;

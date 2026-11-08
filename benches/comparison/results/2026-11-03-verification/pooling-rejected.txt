@@ -1,0 +1,6 @@
+refusing to pool: certificate_verification differs or is unknown
+  results/2026-11-03-verified-adapters/rows.txt: trusted-ca
+  results/2026-11-03-release-clients-h2-r1/rows.txt: absent
+refusing to pool: ca_sha256 differs or is unknown
+  results/2026-11-03-verified-adapters/rows.txt: 0f7f993f451ecd3a17978f2ccf2776dfbc8b796bf1ecd6754a6254a9b0c2310d
+  results/2026-11-03-release-clients-h2-r1/rows.txt: absent

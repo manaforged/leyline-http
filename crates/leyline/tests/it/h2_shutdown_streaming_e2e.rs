@@ -5,10 +5,11 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::StreamExt;
-use leyline::h2::config::{H2Config, PseudoOrder, SettingId};
-use leyline::h2::connection::PseudoHeaders;
-use leyline::h2::frame::FrameType;
-use leyline::h2::{Head, RequestBody, ResponseBody};
+use leyline::internals::h2::H2Config;
+use leyline::internals::h2::H2Limits;
+use leyline::internals::h2::Head;
+use leyline::internals::h2::connection::PseudoHeaders;
+use leyline::internals::h2::frame::FrameType;
 use support::*;
 use tokio::io::AsyncWriteExt;
 use tokio::time::{sleep, timeout};
@@ -19,33 +20,11 @@ const CHUNK_LEN: usize = 8 * 1024;
 
 fn config() -> H2Config {
     H2Config {
-        settings: vec![
-            (SettingId::HeaderTableSize, 4096),
-            (SettingId::EnablePush, 0),
-            (SettingId::InitialWindowSize, 65_535),
-            (SettingId::MaxFrameSize, 16_384),
-        ],
-        settings_order: vec![
-            SettingId::HeaderTableSize,
-            SettingId::EnablePush,
-            SettingId::InitialWindowSize,
-            SettingId::MaxFrameSize,
-        ],
-        pseudo_order: [
-            PseudoOrder::Method,
-            PseudoOrder::Authority,
-            PseudoOrder::Scheme,
-            PseudoOrder::Path,
-        ],
-        initial_connection_window_size: 65_535,
-        default_priority: None,
-        rst_stream_flood_threshold: 100,
-        rst_stream_flood_window: Duration::from_secs(10),
-        max_response_body_bytes: 100 * 1024 * 1024,
-        max_header_block_bytes: 256 * 1024,
-        settings_flood_threshold: 100,
-        settings_flood_window: Duration::from_secs(10),
-        header_block_reassembly_timeout: Duration::from_secs(10),
+        limits: H2Limits {
+            settings_flood_threshold: 100,
+            ..H2Limits::default()
+        },
+        ..H2Config::default()
     }
 }
 
@@ -68,9 +47,9 @@ async fn streaming_upload_completes_after_last_handle_drops() {
             }
         };
 
-        let mut enc = leyline::h2::hpack::Encoder::new();
+        let mut enc = leyline::internals::h2::hpack::Encoder::new();
         let fragment = enc.encode_header_block(&[(":status", "200")]);
-        let hf = leyline::h2::frame::HeadersFrame {
+        let hf = leyline::internals::h2::frame::HeadersFrame {
             stream_id,
             end_stream: false,
             end_headers: true,
@@ -97,7 +76,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         }
         assert_eq!(received, CHUNKS * CHUNK_LEN, "full upload must arrive");
 
-        let done = leyline::h2::frame::DataFrame {
+        let done = leyline::internals::h2::frame::DataFrame {
             stream_id,
             end_stream: true,
             data: Bytes::from_static(b"done"),
@@ -109,7 +88,7 @@ async fn streaming_upload_completes_after_last_handle_drops() {
         drop(server_io.shutdown().await);
     });
 
-    let handle = leyline::h2::start(client_io, config())
+    let handle = leyline::internals::h2::start(client_io, config())
         .await
         .expect("handshake");
 
@@ -123,20 +102,17 @@ async fn streaming_upload_completes_after_last_handle_drops() {
 
     let resp = handle
         .send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "POST".into(),
                     scheme: "https".into(),
                     authority: "example.com".into(),
                     path: "/upload".into(),
                     protocol: None,
                 },
-                headers: vec![("user-agent".into(), "test".into())],
-            }),
-            RequestBody::Streaming {
-                stream: Box::pin(stream),
-                length_hint: None,
-            },
+                vec![("user-agent".into(), "test".into())],
+            )),
+            leyline::Body::stream(stream, None),
             true,
         )
         .await
@@ -146,11 +122,11 @@ async fn streaming_upload_completes_after_last_handle_drops() {
     drop(handle);
 
     let mut body = match resp.body {
-        ResponseBody::Streaming(rx) => rx,
+        leyline::internals::pool::TransportBody::Streaming(rx) => rx,
         other => panic!("expected streaming body, got {other:?}"),
     };
     let mut got = Vec::new();
-    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(5), body.recv())
+    while let Some(chunk) = tokio::time::timeout(Duration::from_secs(5), body.next())
         .await
         .expect("response stalled: upload never completed during shutdown")
     {
@@ -206,22 +182,22 @@ async fn abandoned_response_is_reset_before_shutdown() {
             }
         }
     });
-    let handle = leyline::h2::start(client, config())
+    let handle = leyline::internals::h2::start(client, config())
         .await
         .expect("connection");
     let response = handle
         .send_shared(
-            Arc::new(Head {
-                pseudo: PseudoHeaders {
+            Arc::new(Head::new(
+                PseudoHeaders {
                     method: "GET".into(),
                     scheme: "https".into(),
                     authority: "example.test".into(),
                     path: "/".into(),
                     protocol: None,
                 },
-                headers: Vec::new(),
-            }),
-            RequestBody::None,
+                Vec::new(),
+            )),
+            leyline::Body::default(),
             true,
         )
         .await

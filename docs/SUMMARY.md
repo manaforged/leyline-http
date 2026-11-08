@@ -25,6 +25,7 @@
 - [Network](guide/network.md)
 - [Logging and tracing](guide/logging.md)
 - [Service integration](guide/service-integration.md)
+- [Throughput](guide/throughput.md)
 - [Testing](guide/testing.md)
 
 # Reference

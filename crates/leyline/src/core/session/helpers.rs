@@ -1,13 +1,22 @@
+use std::future::Future;
+
 use http::Method;
 
 use crate::cookie::Jar;
-use crate::pool::OriginFlag;
 use crate::profile::{Browser, RequestKind};
 
 use super::{Session, SessionBuilder};
+use crate::core::Redirect;
+use crate::core::config::HostPass;
+use crate::core::config::Proxy;
+use crate::core::into_url::IntoUrl;
 use crate::core::request::RequestBuilder;
+use crate::core::response::Response;
 use crate::core::retry::Retry;
-use crate::core::{Body, Error, IntoUrl, Proxy, ProxyUrl, Redirect, Response, Result, Timeout};
+use crate::deadline::Timeout;
+use crate::error::{Error, Result};
+use crate::net::ProxyUrl;
+use crate::wire::Body;
 
 impl Session {
     /// Returns a `SessionBuilder` with default settings.
@@ -20,10 +29,6 @@ impl Session {
         Self::builder().into_builtin()
     }
 
-    pub(crate) fn from_browser(browser: Browser) -> Self {
-        Self::builder().identity(browser).into_builtin()
-    }
-
     /// Returns a new `Tab` on this session with no page open.
     pub fn tab(&self) -> crate::core::Tab {
         crate::core::Tab::new(self.clone())
@@ -31,11 +36,11 @@ impl Session {
 
     /// Returns the session cookie jar.
     pub fn cookies(&self) -> &Jar {
-        &self.inner.cookie_jar
+        self.inner.inputs.jar()
     }
 
     pub(crate) fn proxy_url(&self) -> Option<ProxyUrl> {
-        self.inner.proxy_config.primary().map(ProxyUrl::configured)
+        self.inner.inputs.proxy_config.primary_url().cloned()
     }
 
     /// Returns the primary proxy URL with its credentials masked.
@@ -45,7 +50,7 @@ impl Session {
     }
 
     pub(crate) fn base_url(&self) -> Option<&url::Url> {
-        self.inner.base_url.as_ref()
+        self.inner.inputs.base_url.as_ref()
     }
 
     pub(super) fn changed(&self, change: impl FnOnce(&mut super::SessionInner)) -> Self {
@@ -61,6 +66,7 @@ impl Session {
             self.inner.pool.stats(),
             self.inner.host_limits.stats(),
             self.inner
+                .inputs
                 .proxy_pool
                 .as_ref()
                 .map(crate::core::proxy_pool::ProxyPool::stats)
@@ -69,8 +75,15 @@ impl Session {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn host_limits(&self) -> &crate::core::config::HostLimits {
+    pub(crate) fn host_limits(&self) -> &crate::core::config::HostGates {
         &self.inner.host_limits
+    }
+
+    pub(crate) fn per_core(&self) -> Self {
+        let mut session = self.clone();
+        std::sync::Arc::make_mut(&mut session.inner).pool =
+            std::sync::Arc::new(self.inner.pool.sibling());
+        session
     }
 
     #[cfg(feature = "html")]
@@ -79,53 +92,38 @@ impl Session {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn with_crawl_pace(&self, pace: crate::core::config::HostLimits) -> Self {
-        self.changed(|inner| inner.crawl_pace = Some(pace))
+    pub(crate) fn with_extra_gates(&self, gates: crate::core::config::HostGates) -> Self {
+        self.changed(|inner| inner.extra_gates = Some(gates))
     }
 
-    pub(crate) async fn admit_host(&self, url: &url::Url) -> Option<crate::core::config::HostPass> {
-        #[cfg(feature = "html")]
-        let pace = self.inner.crawl_pace.as_ref();
-        #[cfg(not(feature = "html"))]
-        let pace = None;
-        self.inner.host_limits.admit_with(pace, url).await
-    }
-
-    #[cfg(feature = "html")]
-    pub(crate) fn shut_down_signal(&self) -> tokio_util::sync::WaitForCancellationFutureOwned {
-        self.inner.shutdown.clone().cancelled_owned()
+    pub(crate) fn admit_host(
+        &self,
+        url: &url::Url,
+    ) -> impl Future<Output = Result<Option<HostPass>>> {
+        self.inner
+            .host_limits
+            .admit_with(self.inner.extra_gates.as_ref(), url)
     }
 
     pub(crate) fn observe_host(
         &self,
         url: &url::Url,
         status: http::StatusCode,
-        wait: Option<std::time::Duration>,
+        wait: impl Fn() -> Option<std::time::Duration>,
     ) {
-        self.inner.host_limits.observe(url, status, wait);
-        #[cfg(feature = "html")]
-        if let Some(pace) = &self.inner.crawl_pace {
-            pace.observe(url, status, wait);
+        for gates in std::iter::once(&self.inner.host_limits).chain(&self.inner.extra_gates) {
+            gates.observe(url, status, &wait);
         }
     }
 
-    #[cfg(feature = "html")]
-    pub(crate) fn crawl_limits(
-        &self,
-        polite: impl FnOnce() -> crate::core::config::HostLimits,
-    ) -> crate::core::config::HostLimits {
-        self.inner
-            .crawl_limits
-            .get_or_init(|| polite().armed())
-            .clone()
-    }
-
     pub(crate) fn proxy_pool(&self) -> Option<&crate::core::proxy_pool::ProxyPool> {
-        self.inner.proxy_pool.as_ref()
+        self.inner.inputs.proxy_pool.as_ref()
     }
 
     pub(crate) fn without_proxy_pool(&self) -> Self {
-        self.changed(|inner| inner.proxy_pool = None)
+        self.changed(|inner| {
+            inner.inputs.proxy_pool = None;
+        })
     }
 
     pub(crate) fn downgrade(&self) -> std::sync::Weak<super::SessionInner> {
@@ -145,11 +143,11 @@ impl Session {
     }
 
     pub(crate) fn default_retry(&self) -> &crate::core::retry::Retry {
-        &self.inner.default_retry
+        &self.inner.inputs.default_retry
     }
 
     pub(crate) fn body_rules(&self) -> crate::core::BodyRules {
-        self.inner.compression
+        self.inner.inputs.compression
     }
 
     /// Opens a pooled connection to an HTTPS `url` ahead of the first request.
@@ -159,13 +157,14 @@ impl Session {
     }
 
     async fn warm(&self, url: url::Url) -> Result<()> {
-        if url.scheme() != "https" || self.inner.protocol_policy == super::Protocol::Http1 {
+        if crate::wire::Scheme::of(&url) != Some(crate::wire::Scheme::Https)
+            || !self.inner.inputs.protocol_policy.dials_h2()
+        {
             return Ok(());
         }
-        let host = url.host_str().unwrap_or("");
-        let port = url.port_or_known_default().unwrap_or(443);
+        let (host, port) = crate::wire::host_port(&url)?;
         let proxy = self.proxy_for(&url, None)?;
-        let opened = crate::pool::checkout_handle(
+        crate::pool::checkout_handle(
             &self.inner.pool,
             &self.inner.connector,
             &self.inner.h2_config,
@@ -173,17 +172,8 @@ impl Session {
             port,
             proxy,
         )
-        .await;
-        match opened {
-            Ok(_) => Ok(()),
-            Err(error) if error.alpn().is_some() => {
-                self.inner
-                    .pool
-                    .remember(OriginFlag::H1Only, host, port, proxy);
-                Ok(())
-            }
-            Err(error) => Err(error),
-        }
+        .await
+        .map(drop)
     }
 
     /// Returns a request builder for `method` and `url`.
@@ -199,9 +189,13 @@ impl Session {
     pub(crate) fn http_request(&self, req: http::Request<Body>) -> RequestBuilder {
         let (mut parts, body) = req.into_parts();
         let url = url::Url::parse(&parts.uri.to_string());
-        let mut builder = RequestBuilder::new(self, parts.method, url.as_ref().ok().cloned());
+        let mut builder = RequestBuilder::new(
+            self,
+            parts.method,
+            url.as_ref().ok().cloned().map(std::sync::Arc::new),
+        );
         if let Err(err) = url {
-            builder.fail(Error::from_url_parse(err));
+            builder.fail(Error::from(err));
         }
         for (name, value) in &parts.headers {
             builder = builder.header(name.clone(), value.clone());
@@ -259,22 +253,18 @@ impl Session {
 pub(super) fn base_url(url: impl IntoUrl) -> Result<url::Url> {
     let url = url.into_url()?;
     if url.cannot_be_a_base() {
-        return Err(
-            crate::core::error::Error::new(crate::core::error::Cause::Config)
-                .with_message(format!("base URL {url} cannot be a base")),
-        );
+        return Err(crate::error::Error::config(format!(
+            "base URL {url} cannot be a base"
+        )));
     }
     Ok(url)
 }
 
-pub(in crate::core::session) fn header_values<'a>(
-    headers: &'a [(http::HeaderName, http::HeaderValue)],
-    name: &'a str,
-) -> impl Iterator<Item = &'a http::HeaderValue> {
-    headers
-        .iter()
-        .filter(move |(k, _)| *k == name)
-        .map(|(_, v)| v)
+pub(in crate::core::session) fn header_values(
+    headers: &http::HeaderMap,
+    name: http::HeaderName,
+) -> impl Iterator<Item = &http::HeaderValue> {
+    headers.get_all(name).iter()
 }
 
 impl Default for Session {
@@ -289,17 +279,25 @@ impl std::fmt::Debug for Session {
         debug
             .field(
                 "browser",
-                &self.inner.browser.map(|b| b.branded(self.inner.brand)),
+                &self
+                    .inner
+                    .browser
+                    .map(|b| b.branded(self.inner.inputs.brand)),
             )
             .field("platform", &self.inner.platform)
             .field(
                 "proxy",
-                &self.inner.proxy_config.primary().map(crate::util::redact),
+                &self
+                    .inner
+                    .inputs
+                    .proxy_config
+                    .primary()
+                    .map(crate::util::redact),
             )
-            .field("timeout", &self.inner.timeouts.total_limit())
-            .field("protocol_policy", &self.inner.protocol_policy);
+            .field("timeout", &self.inner.inputs.timeouts.total_limit())
+            .field("protocol_policy", &self.inner.inputs.protocol_policy);
         if let Some(audit) = &self.inner.audit_tls {
-            debug.field("ja4", &audit.ja4);
+            debug.field("ja4", &audit.tcp().ja4());
         }
         debug.finish()
     }
@@ -312,7 +310,7 @@ impl std::fmt::Display for Session {
             None if self.inner.impersonates => self.inner.profile.meta.name.clone(),
             None => "bare".to_string(),
         };
-        let config = &self.inner.proxy_config;
+        let config = &self.inner.inputs.proxy_config;
         let proxy = match config.primary() {
             _ if config.rejects() => "rejected".into(),
             Some(url) => crate::util::redact(url),
@@ -328,6 +326,6 @@ impl std::fmt::Display for Session {
 
 impl From<Browser> for Session {
     fn from(browser: Browser) -> Self {
-        Self::from_browser(browser)
+        Self::builder().identity(browser).into_builtin()
     }
 }

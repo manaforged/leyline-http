@@ -4,7 +4,8 @@ use super::assign::{Entry, Item, Owner, assign};
 use super::entity::decode;
 use super::fieldset::Fieldsets;
 use super::scan::{Scanner, Tag};
-use super::{Button, Form, FormEnctype, FormMethod, lookup};
+use super::{Button, Form, FormEnctype, FormMethod};
+use crate::util::lookup;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Control {
@@ -51,7 +52,9 @@ struct Builder {
     ids: HashMap<String, Option<usize>>,
 }
 
-pub(super) fn forms(document: &str) -> Vec<Form> {
+/// Returns every form in the document.
+#[must_use]
+pub fn forms(document: &str) -> Vec<Form> {
     let mut builder = Builder {
         base: super::base(document),
         ..Builder::default()

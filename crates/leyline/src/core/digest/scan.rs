@@ -33,13 +33,8 @@ pub(super) fn pairs(body: &str) -> Vec<Pair<'_>> {
 fn value(body: &str, i: usize) -> (String, usize) {
     let bytes = body.as_bytes();
     if i < bytes.len() && bytes[i] == b'"' {
-        let start = i + 1;
-        let mut j = start;
-        while j < bytes.len() && bytes[j] != b'"' {
-            j += 1;
-        }
-        let end = if j < bytes.len() { j + 1 } else { j };
-        (body[start..j].to_string(), end)
+        let (val, used) = crate::util::unquote(&body[i..]);
+        (val, i + used)
     } else {
         let start = i;
         let mut j = start;

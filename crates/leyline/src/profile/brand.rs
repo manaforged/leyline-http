@@ -1,9 +1,6 @@
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
-use serde::Deserialize;
-
-use crate::Error;
+use crate::error::Error;
 use crate::profile::{BrowserHeaders, BrowserProfile, HeaderStyle, Platform, TlsProfile};
 
 include!(concat!(env!("OUT_DIR"), "/chromium_brand.rs"));
@@ -82,7 +79,7 @@ impl ChromiumBrand {
             platform,
         };
         let row = brand_row(self).ok_or_else(unverified)?;
-        let Some(token) = row.ua_token.as_deref() else {
+        let Some(token) = row.ua_token else {
             return Ok(None);
         };
         if row.desktop_only && !is_desktop(platform) {
@@ -91,7 +88,7 @@ impl ChromiumBrand {
         let version = row
             .version(chromium_major, ua_seed(profile_user_agent))
             .ok_or_else(unverified)?;
-        let product = match row.product.as_deref() {
+        let product = match row.product {
             Some(name) => Some((name, version_major(&version).ok_or_else(unverified)?)),
             None => None,
         };
@@ -143,22 +140,18 @@ pub(crate) struct BrandOverlay {
     pub(crate) sec_ch_ua: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug)]
 struct BrandRow {
-    product: Option<String>,
-    ua_token: Option<String>,
-    #[serde(default)]
+    product: Option<&'static str>,
+    ua_token: Option<&'static str>,
     follow_chromium: bool,
-    #[serde(default)]
     desktop_only: bool,
-    #[serde(default)]
-    versions: HashMap<String, Vec<String>>,
+    versions: &'static [(&'static str, &'static [&'static str])],
     header_style: Option<HeaderStyle>,
-    #[serde(default)]
     tls: BrandTls,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug)]
 struct BrandTls {
     request_trust_anchors: Option<bool>,
 }
@@ -182,19 +175,24 @@ impl BrandRow {
         if self.follow_chromium {
             return Some(format!("{chromium_major}.0.0.0"));
         }
-        let builds = self.versions.get(&chromium_major.to_string())?;
+        let major = chromium_major.to_string();
+        let builds = self.builds(&major)?;
         let count = u64::try_from(builds.len()).ok().filter(|n| *n > 0)?;
-        builds.get(usize::try_from(seed % count).ok()?).cloned()
+        builds
+            .get(usize::try_from(seed % count).ok()?)
+            .map(|build| (*build).to_owned())
+    }
+
+    fn builds(&self, chromium_major: &str) -> Option<&'static [&'static str]> {
+        self.versions
+            .iter()
+            .find(|(major, _)| *major == chromium_major)
+            .map(|(_, builds)| *builds)
     }
 }
 
-static BRANDS: LazyLock<HashMap<String, BrandRow>> = LazyLock::new(|| {
-    toml::from_str(include_str!("../../profiles/brands.toml"))
-        .expect("built-in brand table is statically valid")
-});
-
 fn brand_row(brand: ChromiumBrand) -> Option<&'static BrandRow> {
-    BRANDS.get(brand.label())
+    BRAND_ROWS.get(brand as usize)
 }
 
 fn version_major(version: &str) -> Option<u32> {

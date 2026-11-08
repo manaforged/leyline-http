@@ -5,9 +5,11 @@ use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use url::Url;
 
 use crate::core::body_stream::BodyStream;
-use crate::core::error::{Cause, Error};
-use crate::trace::masked;
+use crate::error::{Error, Kind};
+use crate::util::masked;
 use crate::util::redact;
+use crate::wire::ResponseTiming;
+use crate::wire::is_error_status;
 
 mod body;
 mod download;
@@ -23,80 +25,8 @@ pub use relay::relay_headers;
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
-    Streaming(BodyStream),
+    Streaming(Box<BodyStream>),
     Taken,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HttpVersion {
-    Http1_1,
-    Http2,
-    #[cfg(feature = "http3")]
-    Http3,
-}
-
-impl From<HttpVersion> for http::Version {
-    fn from(version: HttpVersion) -> Self {
-        match version {
-            HttpVersion::Http1_1 => Self::HTTP_11,
-            HttpVersion::Http2 => Self::HTTP_2,
-            #[cfg(feature = "http3")]
-            HttpVersion::Http3 => Self::HTTP_3,
-        }
-    }
-}
-
-impl HttpVersion {
-    pub(crate) fn ja4h_token(self) -> &'static str {
-        match self {
-            Self::Http1_1 => "1",
-            Self::Http2 => "2",
-            #[cfg(feature = "http3")]
-            Self::Http3 => "3",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ResponseTiming {
-    pub(crate) reused: bool,
-    pub(crate) connect_ms: Option<u32>,
-    pub(crate) send_ms: u32,
-    pub(crate) total_ms: u32,
-}
-
-impl ResponseTiming {
-    pub(crate) fn accumulator() -> Self {
-        Self {
-            reused: true,
-            connect_ms: None,
-            send_ms: 0,
-            total_ms: 0,
-        }
-    }
-
-    pub(crate) fn leg(started: std::time::Instant, connect_ms: Option<u32>) -> Self {
-        let total_ms = Self::millis(started);
-        Self {
-            reused: connect_ms.is_none(),
-            connect_ms,
-            send_ms: total_ms.saturating_sub(connect_ms.unwrap_or(0)),
-            total_ms,
-        }
-    }
-
-    pub(crate) fn millis(start: std::time::Instant) -> u32 {
-        u32::try_from(start.elapsed().as_millis()).unwrap_or(u32::MAX)
-    }
-
-    pub(crate) fn add_leg(&mut self, leg: &ResponseTiming) {
-        self.total_ms = self.total_ms.saturating_add(leg.total_ms);
-        self.send_ms = self.send_ms.saturating_add(leg.send_ms);
-        if let Some(c) = leg.connect_ms {
-            self.connect_ms = Some(self.connect_ms.unwrap_or(0).saturating_add(c));
-        }
-        self.reused &= leg.reused;
-    }
 }
 
 #[doc = include_str!("../../docs/response.md")]
@@ -106,15 +36,15 @@ pub struct Response {
 
 pub(crate) struct Parts {
     pub(crate) status: StatusCode,
-    pub(crate) version: HttpVersion,
-    pub(crate) headers: HeaderMap,
-    pub(crate) trailers: Vec<(HeaderName, HeaderValue)>,
+    pub(crate) version: http::Version,
+    pub(crate) headers: crate::wire::Fields,
+    pub(crate) trailers: Option<Box<HeaderMap>>,
     pub(crate) body: ResponseBody,
-    pub(crate) url: Url,
+    pub(crate) url: Arc<Url>,
     pub(crate) redirect_chain: Vec<Url>,
     pub(crate) request_headers: Vec<(String, String)>,
-    pub(crate) tls: Option<crate::pool::TlsInfo>,
-    pub(crate) request_method: String,
+    pub(crate) tls: Option<crate::wire::TlsInfo>,
+    pub(crate) request_method: Option<http::Method>,
     pub(crate) timing: ResponseTiming,
     pub(crate) audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     pub(crate) audit_cache: OnceLock<crate::audit::Fingerprint>,
@@ -138,7 +68,7 @@ impl Response {
 
     /// Returns the HTTP version of the response.
     pub fn version(&self) -> http::Version {
-        self.parts.version.into()
+        self.parts.version
     }
 
     /// Returns whether every attempt reused a pooled connection.
@@ -199,12 +129,15 @@ impl Response {
 
     /// Returns the response headers.
     pub fn headers(&self) -> &HeaderMap {
-        &self.parts.headers
+        self.parts.headers.map()
     }
 
     /// Returns the response trailers.
     pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
-        self.parts.trailers.iter().map(|(k, v)| (k, v))
+        self.parts
+            .trailers
+            .iter()
+            .flat_map(|trailers| trailers.iter())
     }
 
     /// Parses each `Set-Cookie` header of the response into a cookie.
@@ -212,6 +145,7 @@ impl Response {
         let url = &self.parts.url;
         self.parts
             .headers
+            .map()
             .get_all(http::header::SET_COOKIE)
             .iter()
             .filter_map(move |value| {
@@ -256,11 +190,12 @@ impl Response {
 
     /// Returns the `content-length` header value as a number.
     pub fn content_length(&self) -> Option<u64> {
-        self.header("content-length").and_then(|v| v.parse().ok())
+        self.header("content-length")
+            .and_then(crate::util::content_length)
     }
 
     /// Returns the response, or an error of kind `Kind::Status` when the status is an error.
-    pub fn error_for_status(&self) -> crate::core::Result<&Self> {
+    pub fn error_for_status(&self) -> crate::error::Result<&Self> {
         match self.status_error() {
             Some(err) => Err(err),
             None => Ok(self),
@@ -272,10 +207,10 @@ impl Response {
             return None;
         }
         Some(
-            Error::new(Cause::Status)
+            Error::new(Kind::Status)
                 .with_status(self.parts.status)
-                .with_url(self.parts.url.clone())
-                .with_headers(self.parts.headers.clone())
+                .with_url(Url::clone(&self.parts.url))
+                .with_headers(self.parts.headers.map().clone())
                 .with_trail(self.parts.attempts, self.parts.proxy.clone()),
         )
     }
@@ -284,26 +219,24 @@ impl Response {
     pub fn fingerprint(&self) -> Option<&crate::audit::Fingerprint> {
         let tls = self.parts.audit_tls.as_ref()?;
         Some(self.parts.audit_cache.get_or_init(|| {
-            let ja4h = crate::audit::compute_ja4h(&crate::audit::Ja4hInput {
-                method: &self.parts.request_method,
-                http_version: self.parts.version.ja4h_token(),
-                headers: &self.parts.request_headers,
-            });
-            crate::audit::Fingerprint {
-                ja4: tls.ja4.clone(),
-                ja3: tls.ja3.clone(),
-                h2_fingerprint: tls.h2_fingerprint.clone(),
-                ja4t: tls.ja4t.clone(),
-                ja4h,
-                permutes_extensions: tls.permutes_extensions,
-                request_headers: self.parts.request_headers.clone(),
-            }
+            tls.for_request(
+                self.parts
+                    .request_method
+                    .as_ref()
+                    .map_or("", http::Method::as_str),
+                self.parts.version,
+                &self.parts.request_headers,
+            )
         }))
     }
 
     /// Returns the named header value as text, or `None` when it is absent or not visible ASCII.
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.parts.headers.get(name).and_then(|v| v.to_str().ok())
+        self.parts
+            .headers
+            .map()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
     }
 }
 
@@ -325,6 +258,7 @@ impl fmt::Debug for Response {
                 &masked(
                     self.parts
                         .headers
+                        .map()
                         .iter()
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
@@ -335,6 +269,7 @@ impl fmt::Debug for Response {
                     self.parts
                         .trailers
                         .iter()
+                        .flat_map(|trailers| trailers.iter())
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
             )
@@ -356,7 +291,3 @@ impl fmt::Debug for Response {
 
 #[cfg(test)]
 mod tests;
-
-pub(crate) fn is_error_status(status: u16) -> bool {
-    status >= 400
-}
