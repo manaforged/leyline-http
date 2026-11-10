@@ -51,7 +51,7 @@ if [ "${BUILD:-1}" = 1 ]; then
       floor) (cd floor-client && cargo build --release -q && cp target/release/floor ../bin/floor) ;;
       nethttp|tlsclient|fasthttp) (cd go && go build -o "../bin/$lib" "./$lib") ;;
       dotnet-httpclient) (cd dotnet-client && $DOTNET publish -c Release -o bin --nologo -v q) ;;
-      undici|axios|fetch|got) (cd node-client && npm install --silent) ;;
+      undici|axios|fetch|got) (cd node-client && npm ci --silent) ;;
       okhttp|apache-httpclient) sh java-client/fetch-deps.sh >/dev/null ;;
     esac || exit 1
   done
