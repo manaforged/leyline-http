@@ -15,6 +15,8 @@ const LIBRARIES: [(&str, &[&str]); 2] = [("crypto", &["bcm", "crypto"]), ("ssl",
 const PREBUILT_NASM: &str = "prebuilt";
 const BUILD_DIR: &str = "bssl-build";
 const BUNDLED_SOURCE: &str = "deps/boringssl";
+const CXX_RUNTIME_DIR: &str = "src";
+const CXX_RUNTIME: &str = "cxx_runtime.cc";
 const NASM_FORMAT: &str = "win64";
 const NASM_INCLUDES: [&str; 2] = ["-Igen/", "-Iinclude/"];
 const CXX_STANDARD: &str = "c++17";
@@ -220,6 +222,9 @@ fn build_library(
     let mut build = base_build(config, src);
     build.out_dir(out);
     build.files(source_lists(src, groups, "srcs")?);
+    if config.target_os == "linux" {
+        build.file(config.manifest_dir.join(CXX_RUNTIME_DIR).join(CXX_RUNTIME));
+    }
     match assembly {
         Assembly::Gas => {
             build.files(source_lists(src, groups, assembly.key())?);
@@ -233,13 +238,13 @@ fn build_library(
     build.try_compile(name).map_err(io::Error::other)
 }
 
-fn watch_sources(config: &Config, prebuilt: &Path) {
+fn watch_sources(config: &Config, prebuilt: &Path, runtime: &Path) {
     let source = config
         .env
         .source_path
         .clone()
         .unwrap_or_else(|| config.manifest_dir.join(BUNDLED_SOURCE));
-    for path in [source.as_path(), prebuilt] {
+    for path in [source.as_path(), prebuilt, runtime] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
 }
@@ -259,10 +264,11 @@ pub(crate) fn build_boringssl_or_get_prebuilt(config: &Config) -> io::Result<&'s
         let out = config.out_dir.join(BUILD_DIR);
         fs::create_dir_all(&out)?;
         let prebuilt = config.manifest_dir.join(PREBUILT_NASM);
-        watch_sources(config, &prebuilt);
+        let runtime = config.manifest_dir.join(CXX_RUNTIME_DIR);
+        watch_sources(config, &prebuilt, &runtime.join(CXX_RUNTIME));
         let compiler = base_build(config, src).get_compiler();
         let extra = [config.target.clone(), format!("{:?}", nasm_program())];
-        let stamp = fingerprint::inputs(&[src, &prebuilt], &compiler, &extra)?;
+        let stamp = fingerprint::inputs(&[src, &prebuilt, &runtime], &compiler, &extra)?;
         let outputs: Vec<String> = LIBRARIES
             .iter()
             .map(|(name, _)| archive_file(config, name))

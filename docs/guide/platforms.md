@@ -42,8 +42,9 @@ Other variables:
 - `LEYLINE_BSSL_ASSUME_PATCHED` skips the patches for a tree that already
   carries them. It needs `LEYLINE_BSSL_PATH` or `LEYLINE_BSSL_SOURCE_PATH`.
 - `LEYLINE_BSSL_RUST_CPPLIB` replaces the C++ standard library that the
-  build links: by default `c++` on macOS, `stdc++` on Linux, none on
-  Windows.
+  build links: by default `c++` on macOS and none on Windows. On Linux the
+  build links none when a trial link of the BoringSSL archives succeeds
+  without one, and `stdc++` otherwise.
 - `LEYLINE_BSSL_SYSROOT` gives `bindgen` a sysroot when the `bindgen`
   feature is on.
 

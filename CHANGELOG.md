@@ -74,6 +74,8 @@ version and publish as separate crates.
 - Sending a `Message::Ping` or `Message::Pong` with a payload over 125 bytes fails with `Kind::Request`.
 - On a reused HTTP/1.1 connection, `Response::peer_certificate`, `tls_version`, and `tls_cipher` report that connection's values, not those of the first connection to the host.
 - The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.
+- On Linux a binary no longer loads `libstdc++`: `leyline-bssl-sys` supplies the two C++ runtime symbols that BoringSSL uses and links `libstdc++` only when a trial link shows that it is needed. `LEYLINE_BSSL_RUST_CPPLIB=stdc++` restores the link.
+- The zstd decoder is built without the legacy frame formats and the dictionary builder, which removes about 230 KB of code from a binary.
 
 ## 0.2.0 - 2026-11-08
 
