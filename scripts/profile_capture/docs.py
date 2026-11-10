@@ -132,6 +132,10 @@ def browser_id_row(text: str, variant: str) -> str:
     return text.rstrip("\n") + f"\n{variant} = {max(ids.values(), default=-1) + 1}\n"
 
 
+def add_browser_id(variant: str) -> list[str]:
+    return [str(BROWSER_IDS.relative_to(ROOT))] if update(BROWSER_IDS, lambda t: browser_id_row(t, variant)) else []
+
+
 def update(path: Path, edit) -> bool:
     before = path.read_text()
     after = edit(before)
@@ -151,9 +155,7 @@ def document(family: str, major: int, previous: int, captured: str, phrase: str,
             if qpack
             else f"add a QPACK golden row for {family}-{major} to {QPACK_GOLDEN.relative_to(ROOT)}"
         )
-    label = FAMILIES[family]["label"]
-    if update(BROWSER_IDS, lambda t: browser_id_row(t, f"{label}{major}")):
-        changed.append(str(BROWSER_IDS.relative_to(ROOT)))
+    changed += add_browser_id(f"{FAMILIES[family]['label']}{major}")
     if write_profiles():
         changed.append(str(TABLE.relative_to(ROOT)))
     if update(CHANGELOG, lambda t: changelog_entry(t, family, major, version, phrase)):

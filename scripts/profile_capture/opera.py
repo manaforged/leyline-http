@@ -6,7 +6,7 @@ import tomllib
 from .binaries import major_of, numeric_key, opera_linux
 from .chrome import dump_chrome
 from .config import BRANDS, OPERA, PEET_URL, ROOT
-from .docs import TABLE, write_profiles
+from .docs import TABLE, add_browser_id, write_profiles
 from .net import http_text
 from .toml_text import add_list_item
 
@@ -46,10 +46,11 @@ def fill_opera(dry: bool) -> list[tuple[str, int, str]]:
     text = add_list_item(BRANDS.read_text(), section, f'"{chromium}"', OPERA["brand_version"].format(major=brand))
     BRANDS.write_text(text)
     print(f"updated {BRANDS.relative_to(ROOT)}: [{section}] \"{chromium}\" has {brand}")
-    for path in document_brand():
+    for path in document_brand(f"{OPERA['brand']}{brand}"):
         print(f"updated {path}")
     return []
 
 
-def document_brand() -> list[str]:
-    return [str(TABLE.relative_to(ROOT))] if write_profiles() else []
+def document_brand(variant: str) -> list[str]:
+    changed = add_browser_id(variant)
+    return changed + ([str(TABLE.relative_to(ROOT))] if write_profiles() else [])
