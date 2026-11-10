@@ -9,6 +9,8 @@ use crate::net::normalize_host;
 pub(super) struct Rule {
     pub(super) max_in_flight: Option<usize>,
     pub(super) interval: Option<Duration>,
+    #[serde(default)]
+    interval_configured: bool,
 }
 
 impl Rule {
@@ -22,6 +24,7 @@ impl Rule {
     }
 
     fn per_second(mut self, rate: f64) -> Self {
+        self.interval_configured = true;
         self.interval = if rate.is_finite() && rate > 0.0 {
             Duration::try_from_secs_f64(rate.recip()).ok()
         } else {
@@ -241,12 +244,19 @@ impl HostLimits {
 
     #[cfg(feature = "html")]
     pub(crate) fn filled_from(mut self, defaults: &HostLimits) -> Self {
+        let mut widest = 0;
         for rule in
             std::iter::once(&mut self.rule).chain(self.overrides.iter_mut().map(|(_, rule)| rule))
         {
             rule.max_in_flight = rule.max_in_flight.or(defaults.rule.max_in_flight);
-            rule.interval = rule.interval.or(defaults.rule.interval);
+            if !rule.interval_configured {
+                rule.interval = defaults.rule.interval;
+            }
+            widest = widest.max(rule.max_in_flight.unwrap_or(0));
         }
+        self.max_total = self
+            .max_total
+            .or_else(|| defaults.max_total.map(|total| total.max(widest)));
         if self.pause.statuses.is_empty() {
             self.pause.statuses.clone_from(&defaults.pause.statuses);
         }

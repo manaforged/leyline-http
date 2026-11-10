@@ -10,8 +10,16 @@ use crate::wire::Scheme;
 
 mod queues;
 
-const MAX_URL_BYTES: usize = 2048;
-pub(super) const MAX_DEPTH: usize = 64;
+const DEFAULT_MAX_URL_BYTES: usize = 2048;
+const DEFAULT_MAX_DEPTH: usize = 64;
+
+fn default_max_url_size() -> Option<usize> {
+    Some(DEFAULT_MAX_URL_BYTES)
+}
+
+fn default_max_depth() -> Option<usize> {
+    Some(DEFAULT_MAX_DEPTH)
+}
 
 /// Which URLs a crawl follows, relative to the seed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -24,6 +32,8 @@ pub enum Scope {
     Domain,
     /// Follows URLs on the seed's host under the seed's directory path.
     Prefix,
+    /// Follows URLs on any host.
+    Any,
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -31,6 +41,7 @@ enum Bound {
     Host(String),
     Domain(String),
     Prefix { host: String, dir: String },
+    Any,
 }
 
 fn host(url: &Url) -> Option<String> {
@@ -65,6 +76,7 @@ impl Bound {
                 host,
                 dir: directory(url.path()),
             },
+            Scope::Any => Bound::Any,
         })
     }
 
@@ -82,6 +94,7 @@ impl Bound {
                 candidate == *host
                     && (path.starts_with(dir.as_str()) || path == dir.trim_end_matches('/'))
             }
+            Bound::Any => true,
         }
     }
 }
@@ -95,6 +108,8 @@ pub(super) struct Queued {
     pub(super) widen: bool,
     pub(super) attempts: u32,
     pub(super) chain: Vec<String>,
+    #[serde(default)]
+    pub(super) previous: Vec<Url>,
 }
 
 impl Queued {
@@ -107,6 +122,7 @@ impl Queued {
             widen: false,
             attempts: 0,
             chain: Vec::new(),
+            previous: Vec::new(),
         }
     }
 
@@ -119,7 +135,7 @@ impl Queued {
     }
 }
 
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub(super) struct Frontier {
     #[serde(with = "queues")]
     queues: HashMap<Origin, VecDeque<Queued>>,
@@ -128,6 +144,25 @@ pub(super) struct Frontier {
     redirected: HashSet<String>,
     bounds: Vec<Bound>,
     pub(super) scope: Scope,
+    #[serde(default = "default_max_depth")]
+    pub(super) max_depth: Option<usize>,
+    #[serde(default = "default_max_url_size")]
+    pub(super) max_url_size: Option<usize>,
+}
+
+impl Default for Frontier {
+    fn default() -> Self {
+        Self {
+            queues: HashMap::new(),
+            order: VecDeque::new(),
+            seen: HashSet::new(),
+            redirected: HashSet::new(),
+            bounds: Vec::new(),
+            scope: Scope::default(),
+            max_depth: default_max_depth(),
+            max_url_size: default_max_url_size(),
+        }
+    }
 }
 
 pub(super) fn same_site(from: &Url, to: &Url) -> bool {
@@ -167,9 +202,11 @@ impl Frontier {
 
     fn admit(&mut self, mut queued: Queued, redirect: bool) -> bool {
         queued.url.set_fragment(None);
-        let usable = Scheme::of(&queued.url).is_some()
-            && queued.url.as_str().len() <= MAX_URL_BYTES
-            && queued.depth <= MAX_DEPTH;
+        let within_size = self
+            .max_url_size
+            .is_none_or(|max| queued.url.as_str().len() <= max);
+        let within_depth = self.max_depth.is_none_or(|max| queued.depth <= max);
+        let usable = Scheme::of(&queued.url).is_some() && within_size && within_depth;
         if !usable {
             return false;
         }
@@ -214,8 +251,9 @@ impl Frontier {
             || order.len() != self.queues.len()
             || self.queues.keys().any(|origin| !order.contains(origin))
             || self.queues.values().flatten().any(|queued| {
-                queued.url.as_str().len() > MAX_URL_BYTES
-                    || queued.depth > MAX_DEPTH
+                self.max_url_size
+                    .is_some_and(|max| queued.url.as_str().len() > max)
+                    || self.max_depth.is_some_and(|max| queued.depth > max)
                     || Scheme::of(&queued.url).is_none()
                     || !self.has_seen(&queued.url)
                     || (!queued.seed && !self.in_scope(&queued.url))

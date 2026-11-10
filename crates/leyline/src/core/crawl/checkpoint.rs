@@ -19,7 +19,12 @@ use crate::core::session::Session;
 use crate::error::{Error, Kind, Result};
 use crate::util::version::{self, Versioned};
 
-const MAX_CHECKPOINT_BYTES: u64 = 64 * 1024 * 1024;
+const DEFAULT_MAX_CHECKPOINT_BYTES: u64 = 64 * 1024 * 1024;
+
+fn checkpoint_limit(session: &Session) -> u64 {
+    let body = session.body_rules().configured_max_body().unwrap_or(0) as u64;
+    DEFAULT_MAX_CHECKPOINT_BYTES.max(body)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum CheckpointVersion {
@@ -69,10 +74,11 @@ impl Crawl {
         while let Some(event) = self.tasks.next().await {
             self.handle(event);
         }
+        let max_bytes = checkpoint_limit(&self.session);
         let saved = Checkpoint::capture(self)?;
         atomic::blocking(move |waiting| {
             let bytes = serde_json::to_vec(&saved).map_err(Error::from_json)?;
-            if bytes.len() as u64 > MAX_CHECKPOINT_BYTES {
+            if bytes.len() as u64 > max_bytes {
                 return Err(too_large());
             }
             waiting.check()?;
@@ -83,11 +89,12 @@ impl Crawl {
 
     /// Loads a checkpoint with a supplied session and rechecks robots.txt before sending new requests.
     pub fn load(session: &Session, path: impl AsRef<Path>) -> Result<Self> {
+        let max_bytes = checkpoint_limit(session);
         let mut bytes = Vec::new();
         std::fs::File::open(path)?
-            .take(MAX_CHECKPOINT_BYTES + 1)
+            .take(max_bytes.saturating_add(1))
             .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAX_CHECKPOINT_BYTES {
+        if bytes.len() as u64 > max_bytes {
             return Err(too_large());
         }
         let saved: Checkpoint = serde_json::from_slice(&bytes).map_err(Error::from_json)?;
@@ -164,7 +171,7 @@ impl Checkpoint {
 
     fn restore(self, session: &Session) -> Result<Crawl> {
         self.frontier.validate()?;
-        if self.stats.pages() > self.dedup.kept() as u64 {
+        if self.settings.dedup && self.stats.pages() > self.dedup.kept() as u64 {
             return Err(Error::config(
                 "checkpoint page count exceeds its duplicate history",
             ));
@@ -190,6 +197,8 @@ impl Checkpoint {
                 Ok(SitemapFile {
                     url,
                     attempts,
+                    hops: 0,
+                    previous: Vec::new(),
                     not_before: at.map(monotonic).transpose()?,
                 })
             })

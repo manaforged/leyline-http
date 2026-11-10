@@ -341,6 +341,11 @@ impl HostGates {
         self.limits.rule_for(&origin.host).max_in_flight
     }
 
+    #[cfg(feature = "html")]
+    pub(crate) fn max_total(&self) -> Option<usize> {
+        self.limits.max_total()
+    }
+
     fn gate(&self, origin: Origin) -> Arc<HostGate> {
         let rule = self.limits.rule_for(&origin.host);
         self.gates.gate(origin, rule.max_in_flight)

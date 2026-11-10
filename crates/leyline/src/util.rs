@@ -147,8 +147,10 @@ pub(crate) fn redirect_location(
     status: u16,
     headers: &http::HeaderMap,
     base: &url::Url,
-) -> Option<url::Url> {
-    redirect_target(status, headers).and_then(|to| base.join(&to).ok())
+) -> Option<(String, url::Url)> {
+    let location = redirect_target(status, headers)?.into_owned();
+    let to = base.join(&location).ok()?;
+    Some((location, to))
 }
 
 pub(crate) fn request_target(url: &url::Url) -> &str {

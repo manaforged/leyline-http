@@ -12,7 +12,7 @@ use crate::core::config::Origin;
 use crate::deadline::Deadline;
 use crate::error::Result;
 
-const ALARM_FLOOR: Duration = Duration::from_millis(10);
+const ALARM_FLOOR: Duration = Duration::from_millis(1);
 
 #[derive(Default)]
 pub(super) struct Clock {
@@ -139,10 +139,13 @@ impl Crawl {
     fn halt(&mut self) {
         self.frontier.clear();
         self.sitemaps.queue.clear();
+        self.sitemaps.clear_in_flight();
         self.clock.delayed.clear();
         self.clock.alarm = None;
         self.clock.alarm_at = None;
         self.clock.room = false;
+        self.busy.clear();
+        self.pages_in_flight = 0;
         self.tasks = FuturesUnordered::new();
     }
 }

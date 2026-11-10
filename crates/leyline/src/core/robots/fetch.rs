@@ -16,24 +16,7 @@ use crate::core::retry::RetryPlan;
 use crate::core::session::Session;
 use crate::error::{Error, Result};
 
-pub(crate) const MAX_REDIRECTS: usize = 5;
-const MAX_BYTES: usize = 512 * 1024;
-const RETRIES: u32 = 3;
-#[cfg(feature = "html")]
-const CRAWL_RETRIES: u32 = 4;
-#[cfg(feature = "html")]
-const CRAWL_BACKOFF: Duration = Duration::from_secs(1);
-#[cfg(feature = "html")]
-const CRAWL_MAX_BACKOFF: Duration = Duration::from_secs(8);
-
-#[cfg(feature = "html")]
-pub(crate) fn crawl_retry() -> Retry {
-    Retry::new(CRAWL_RETRIES)
-        .when(|attempt| {
-            attempt.is_transient() || attempt.status().is_some_and(|s| s.is_server_error())
-        })
-        .backoff(CRAWL_BACKOFF, CRAWL_MAX_BACKOFF)
-}
+const DEFAULT_MAX_BYTES: usize = 512 * 1024;
 
 fn get(
     session: &Session,
@@ -77,12 +60,8 @@ impl Reply {
         retry: &Retry,
         attempt: u32,
         trusted: Option<Url>,
-        max_body: Option<usize>,
     ) -> Reply {
-        let mut request = get(session, url, Redirect::none(), retry.once(), trusted);
-        if let Some(bytes) = max_body {
-            request = request.max_body_size(bytes);
-        }
+        let request = get(session, url, Redirect::none(), retry.once(), trusted);
         let result = request.stream().send().await;
         match retry.plan(&result, attempt) {
             RetryPlan::Backoff(wait) => Reply::Later(wait),
@@ -105,9 +84,9 @@ fn empty_source(status: StatusCode) -> Option<RobotsSource> {
     (!status.is_success()).then_some(RobotsSource::Unavailable)
 }
 
-fn parse_capped(bytes: &[u8], agent: &str) -> Robots {
+fn parse_capped(bytes: &[u8], cap: usize, agent: &str) -> Robots {
     let body = String::from_utf8_lossy(bytes);
-    let whole = match bytes.len() >= MAX_BYTES {
+    let whole = match bytes.len() >= cap {
         true => body.rfind('\n').map_or("", |end| &body[..end]),
         false => &body,
     };
@@ -115,9 +94,9 @@ fn parse_capped(bytes: &[u8], agent: &str) -> Robots {
 }
 
 impl Session {
-    /// Fetches and parses the site's robots.txt for `agent`, with 3 retries and up to 5 redirects.
+    /// Fetches and parses the site's robots.txt for `agent`, using the session's policies or 3 retries and up to 5 redirects.
     pub fn robots(&self, url: impl IntoUrl, agent: &str) -> impl Future<Output = Result<Robots>> {
-        self.robots_with(url, agent, Retry::new(RETRIES), None)
+        self.robots_with(url, agent, self.default_retry().for_robots(), None)
     }
 
     pub(crate) async fn robots_with(
@@ -128,10 +107,14 @@ impl Session {
         trusted: Option<Url>,
     ) -> Result<Robots> {
         let target = url.into_url_with_base(self.base_url())?.join(ROBOTS_PATH)?;
+        let cap = self
+            .body_rules()
+            .configured_max_body()
+            .unwrap_or(DEFAULT_MAX_BYTES);
         let builder = get(
             self,
             &target,
-            Redirect::limit(MAX_REDIRECTS),
+            self.redirect_policy().for_robots(),
             retry,
             trusted,
         );
@@ -142,8 +125,8 @@ impl Session {
         if let Some(source) = empty_source(response.status()) {
             return Ok(Robots::empty(source));
         }
-        match read_capped(self, response, MAX_BYTES).await {
-            Ok(bytes) => Ok(parse_capped(&bytes, agent)),
+        match read_capped(self, response, cap).await {
+            Ok(bytes) => Ok(parse_capped(&bytes, cap, agent)),
             Err(err) => fallback(err),
         }
     }

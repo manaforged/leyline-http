@@ -164,6 +164,43 @@ impl Response {
         Ok((bytes, stopped_by == StopReason::PredicateMatched))
     }
 
+    #[cfg(feature = "html")]
+    pub(crate) async fn read_sniffed(
+        mut self,
+        sniff_bytes: usize,
+        accept: fn(&[u8]) -> bool,
+    ) -> Result<Option<Vec<u8>>> {
+        let max_body = self.parts.compression.max_body_size;
+        let uncompressed =
+            self.content_coding() == Codings::Absent || !self.parts.compression.decode;
+        let declared = uncompressed.then(|| self.content_length()).flatten();
+        let declared_exceeds =
+            declared.is_some_and(|len| usize::try_from(len).unwrap_or(usize::MAX) > max_body);
+        let limit = max_body.saturating_add(1).max(sniff_bytes);
+        self.parts.compression.max_body_size = limit;
+        let mut out = Vec::new();
+        self.read_prefix_into(
+            limit,
+            |buf, _| {
+                buf.len() >= sniff_bytes
+                    && (!accept(&buf[..sniff_bytes]) || declared_exceeds || buf.len() > max_body)
+            },
+            &mut out,
+            &mut false,
+        )
+        .await?;
+        if !accept(&out[..out.len().min(sniff_bytes)]) {
+            return Ok(None);
+        }
+        let cap = BodyLimit::session(max_body);
+        if let Some(len) = declared {
+            cap.admit(0, usize::try_from(len).unwrap_or(usize::MAX))
+                .map_err(BodyLimit::error)?;
+        }
+        cap.admit(0, out.len()).map_err(BodyLimit::error)?;
+        Ok(Some(out))
+    }
+
     async fn read_prefix_into<F>(
         self,
         limit: usize,

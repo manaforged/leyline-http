@@ -4,11 +4,10 @@ use url::Url;
 
 use super::referer_for;
 use crate::core::Redirect;
-use crate::core::attempt::Attempt;
 use crate::core::config::Origin;
 use crate::core::headers::HeaderList;
 use crate::error::{Error, Kind, Result};
-use crate::util::{is_body_header, without_userinfo};
+use crate::util::is_body_header;
 use crate::wire::Body;
 use crate::wire::ResponseTiming;
 use crate::wire::Scheme;
@@ -136,14 +135,7 @@ impl Journey {
         status: u16,
         location: &str,
     ) -> Option<Url> {
-        let hop = without_userinfo(Url::clone(&self.url));
-        let follows = policy.follows(&Attempt::redirect(
-            status,
-            &hop,
-            Some(location),
-            &self.chain,
-        ));
-        follows.then_some(hop)
+        policy.approved_hop(status, &self.url, location, &self.chain)
     }
 
     pub(super) fn follow(

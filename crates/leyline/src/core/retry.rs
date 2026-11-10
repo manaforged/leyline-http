@@ -19,6 +19,15 @@ pub(crate) enum RetryPlan {
 const DEFAULT_MIN_BACKOFF: Duration = Duration::from_millis(100);
 const DEFAULT_MAX_BACKOFF: Duration = Duration::from_secs(1);
 const DEFAULT_MAX_WAIT: Duration = Duration::from_secs(60);
+const DEFAULT_ROBOTS_RETRIES: u32 = 3;
+#[cfg(feature = "html")]
+const DEFAULT_CRAWL_PAGE_RETRIES: u32 = 2;
+#[cfg(feature = "html")]
+const DEFAULT_CRAWL_ROBOTS_RETRIES: u32 = 4;
+#[cfg(feature = "html")]
+const DEFAULT_CRAWL_ROBOTS_MIN_BACKOFF: Duration = Duration::from_secs(1);
+#[cfg(feature = "html")]
+const DEFAULT_CRAWL_ROBOTS_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
 type RetryPredicate = dyn Fn(&Attempt<'_>) -> bool + Send + Sync;
 
@@ -27,6 +36,7 @@ type RetryPredicate = dyn Fn(&Attempt<'_>) -> bool + Send + Sync;
 #[must_use]
 pub struct Retry {
     count: u32,
+    configured: bool,
     when: Option<Arc<RetryPredicate>>,
     backoff: Backoff,
     max_wait: Duration,
@@ -94,10 +104,51 @@ impl From<u32> for Retry {
 }
 
 impl Retry {
+    pub(crate) fn unset() -> Self {
+        Self {
+            configured: false,
+            ..Self::new(0)
+        }
+    }
+
+    pub(crate) fn for_robots(&self) -> Self {
+        if self.configured {
+            self.clone()
+        } else {
+            Self::new(DEFAULT_ROBOTS_RETRIES)
+        }
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn for_crawl_page(&self) -> Self {
+        if self.configured {
+            self.clone()
+        } else {
+            Self::new(DEFAULT_CRAWL_PAGE_RETRIES)
+        }
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn for_crawl_robots(&self) -> Self {
+        if self.configured {
+            self.clone()
+        } else {
+            Self::new(DEFAULT_CRAWL_ROBOTS_RETRIES)
+                .when(|attempt| {
+                    attempt.is_transient() || attempt.status().is_some_and(|s| s.is_server_error())
+                })
+                .backoff(
+                    DEFAULT_CRAWL_ROBOTS_MIN_BACKOFF,
+                    DEFAULT_CRAWL_ROBOTS_MAX_BACKOFF,
+                )
+        }
+    }
+
     /// Returns a policy with `count` retries, exponential backoff from 100 ms to 1 s, and a 60 s maximum server wait.
     pub fn new(count: u32) -> Self {
         Self {
             count,
+            configured: true,
             when: None,
             backoff: Backoff::exponential(DEFAULT_MIN_BACKOFF, DEFAULT_MAX_BACKOFF),
             max_wait: DEFAULT_MAX_WAIT,
