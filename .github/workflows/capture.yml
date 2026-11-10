@@ -137,6 +137,16 @@ jobs:
           status=${PIPESTATUS[0]}
           if [[ $status -ne 0 && $status -ne 2 ]]; then exit "$status"; fi
 
+      - name: wire golden rows for the new profile
+        run: |
+          golden=crates/leyline/tests/fixtures/wire_golden.txt
+          LEYLINE_BLESS=1 cargo test -p leyline-http --locked --features bench-internals --test it -- wire_golden::
+          if git diff --numstat -- "$golden" | awk '$2 != 0 { found = 1 } END { exit !found }'; then
+            echo "::error::$golden changed rows of profiles that were already landed"
+            git diff -- "$golden"
+            exit 1
+          fi
+
       - name: profile tests
         run: |
           cargo test -p leyline-http --locked --features bench-internals --lib --test it -- profile fingerprint_conformance::
