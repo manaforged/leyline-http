@@ -75,7 +75,7 @@ html = ["multipart"]
 full = ["default", "tower", "socks"]
 
 [dependencies]
-http-cache-semantics = { version = "2.1", default-features = false }
+http-cache-semantics = { version = "2.1.1", default-features = false }
 # External deps absorbed from sub-crates
 # -- from leyline-quiche (external BSD-2 fork, stays as path dep)
 leyline-quiche = { workspace = true, optional = true }
@@ -112,7 +112,7 @@ base64 = { workspace = true }
 
 # -- HTTP / WebSocket
 tokio-tungstenite = { workspace = true, optional = true }
-http = "1"
+http = "1.4"
 
 # -- misc
 bytes = { workspace = true }

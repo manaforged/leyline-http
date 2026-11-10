@@ -8,6 +8,12 @@ behaviour, and each change is listed here. The BoringSSL crates
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
 version and publish as separate crates.
 
+## Unreleased
+
+### Changed
+
+- The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.
+
 ## 0.2.0 - 2026-11-08
 
 0.2 replaces most of the 0.1 API with fewer types: configuration moves onto `SessionBuilder` setters, and each job has one name. The [upgrade guide](UPGRADE.md) maps the changed 0.1.6 names. The sections below list new features, behavior changes, removals without a replacement, and fixes.
