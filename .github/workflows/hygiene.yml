@@ -3,15 +3,15 @@ name: hygiene
 on:
   push:
     branches: [main]
-    tags: ['v*']
-  pull_request:
+    tags: ["v*"]
+  pull_request_target:
+    types: [opened, edited, synchronize, reopened]
   merge_group:
-  workflow_call:
   workflow_dispatch:
 
 concurrency:
-  group: leyline-hygiene-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: hygiene-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request_target' }}
 
 permissions:
   contents: read
@@ -26,9 +26,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check repository content and commit messages
+      - name: Check repository content and change metadata
         env:
           HYGIENE_PATTERNS: ${{ secrets.HYGIENE_PATTERNS }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         shell: bash
         run: |
           set -euo pipefail
@@ -37,6 +39,11 @@ jobs:
           if [ ! -s "$patterns" ]; then
             echo '::error::Configure the HYGIENE_PATTERNS repository secret.'
             exit 1
+          fi
+          target=HEAD
+          if [ -n "$PR_NUMBER" ]; then
+            git fetch --no-tags --no-recurse-submodules origin "+refs/pull/$PR_NUMBER/head"
+            target=FETCH_HEAD
           fi
           failed=0
           scan() {
@@ -54,12 +61,16 @@ jobs:
             [ "$type" = blob ] || continue
             git cat-file blob "$object" | strings > "$RUNNER_TEMP/hygiene-content"
             scan "$RUNNER_TEMP/hygiene-content" "Repository content"
-          done < <(git ls-tree -r -z HEAD)
-          if previous=$(git describe --tags --abbrev=0 --match 'v*' HEAD^ 2>/dev/null); then
-            range="$previous..HEAD"
+          done < <(git ls-tree -r -z "$target")
+          if [ -n "$BASE" ] && [[ ! "$BASE" =~ ^0+$ ]] && git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            range="$BASE..$target"
+          elif previous=$(git describe --tags --abbrev=0 --match 'v*' "$target^" 2>/dev/null); then
+            range="$previous..$target"
           else
-            range=HEAD
+            range="$target"
           fi
           git log --format=%B "$range" > "$RUNNER_TEMP/hygiene-messages"
           scan "$RUNNER_TEMP/hygiene-messages" "Commit messages"
+          jq -r '.pull_request.title // "", .pull_request.body // ""' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/hygiene-pr"
+          scan "$RUNNER_TEMP/hygiene-pr" "Pull request metadata"
           exit "$failed"

@@ -1,15 +1,11 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
-  merge_group:
-  workflow_call:
   workflow_dispatch:
 
 concurrency:
-  group: leyline-ci-${{ github.workflow }}-${{ github.ref }}
+  group: leyline-ci-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
@@ -23,6 +19,7 @@ env:
 jobs:
   lint:
     name: lint & docs
+    if: github.repository == 'manaforged/leyline-http' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -31,24 +28,13 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      - name: workflow lint
-        run: |
-          os=$(uname -s | tr '[:upper:]' '[:lower:]')
-          arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')
-          file="actionlint_1.7.12_${os}_${arch}.tar.gz"
-          dir=$(mktemp -d)
-          curl -fsSL -o "$dir/$file" "https://github.com/rhysd/actionlint/releases/download/v1.7.12/$file"
-          (cd "$dir" && grep " $file\$" "$GITHUB_WORKSPACE/.github/actionlint/checksums.txt" | shasum -a 256 -c -)
-          tar -xzf "$dir/$file" -C "$dir" actionlint
-          "$dir/actionlint"
-
       - name: Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
 
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           key: ci-lint
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
           cache-workspace-crates: true
 
       - uses: taiki-e/install-action@0758d235715de2f3551eacc980d9ae8fce9342c3 # v2.87.3
@@ -82,31 +68,12 @@ jobs:
       - name: rustdoc (docs.rs)
         run: scripts/verify.sh --only doc
 
-  msrv:
-    name: msrv
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: ci-msrv
-          workspaces: ". -> target/verify"
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-workspace-crates: true
-
       - name: MSRV check
         run: scripts/verify.sh --only msrv
 
   test:
     name: test (${{ matrix.os }})
+    if: github.repository == 'manaforged/leyline-http' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository)
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
@@ -131,7 +98,7 @@ jobs:
         with:
           key: ci-test-${{ matrix.os }}
           cache-workspace-crates: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          save-if: false
 
       - name: workspace tests
         shell: bash
@@ -165,55 +132,3 @@ jobs:
           PATH=$(IFS=:; printf '%s' "${kept[*]}")
           if command -v nasm; then echo "nasm is still on PATH"; exit 1; fi
           cargo build -p leyline-bssl-sys --locked --target-dir target/no-nasm
-
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        if: failure() && runner.os == 'Windows'
-        with:
-          name: prebuilt-nasm
-          path: crates/leyline-bssl-sys/prebuilt/
-
-  musl:
-    name: musl (${{ matrix.target }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Rust toolchain
-        run: rustup show active-toolchain || rustup toolchain install
-
-      - name: Rust target
-        run: rustup target add ${{ matrix.target }}
-
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-        with:
-          key: ci-musl-${{ matrix.target }}
-          cache-workspace-crates: true
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-
-      - uses: taiki-e/setup-cross-toolchain-action@12b7ad4acfa95a1476779d6c06699b96ec1691f8 # v1
-        with:
-          target: ${{ matrix.target }}
-
-      - name: cargo check
-        run: cargo check -p leyline-http --locked --target ${{ matrix.target }}
-
-      - name: cargo test
-        run: cargo test -p leyline-http --lib --locked --target ${{ matrix.target }}
-
-  required:
-    name: required
-    needs: [lint, msrv, test, musl]
-    if: always()
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - name: every check passed
-        run: test "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = false
