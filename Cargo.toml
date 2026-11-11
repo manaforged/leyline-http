@@ -13,7 +13,7 @@ exclude = [
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
-rust-version = "1.96" # MSRV: two releases behind stable
+rust-version = "1.96" # MSRV: supports every stable release from the last six months
 authors = ["Thomas Gardiner <thomas@manaforge.tech>"]
 license = "MIT"
 repository = "https://github.com/manaforged/leyline-http"

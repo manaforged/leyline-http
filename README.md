@@ -42,7 +42,7 @@ async fn main() -> leyline::Result<()> {
 }
 ```
 
-Rust 1.96 or later. Building BoringSSL needs a C and C++ compiler and `git`.
+Rust 1.96 or later. Leyline supports every stable Rust released in the last six months; a minor release may raise the minimum to drop older ones. Building BoringSSL needs a C and C++ compiler and `git`.
 
 To crawl a site while respecting `robots.txt` and per-host rate limits:
 
