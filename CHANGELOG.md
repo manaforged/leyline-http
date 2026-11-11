@@ -10,6 +10,11 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- A Firefox 160 profile, `Browser::Firefox160`, from captures of Firefox 160.0
+  on macOS, Linux, and Windows.
+
 ### Changed
 
 - The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.
