@@ -30,6 +30,7 @@
 | Firefox 157 | `Firefox157` | `browser` | `firefox-157.0` | gated | tls.peet.ws 2026-10-04 Firefox 157.0 macOS and Linux --headless; quic.browserleaks.com Linux headful |
 | Firefox 158 | `Firefox158` | `browser` | `firefox-158.0` | gated | tls.peet.ws 2026-10-13 Firefox 158.0 macOS, Linux, and Windows --headless; quic.browserleaks.com Linux headful |
 | Firefox 159 | `Firefox159` | `browser` | `firefox-159.0` | gated | tls.peet.ws 2026-10-29 Firefox 159.0 macOS, Linux, and Windows --headless; quic.browserleaks.com Linux headful |
+| Firefox 160 | `Firefox160` | `browser` | `firefox-160.0` | gated | tls.peet.ws 2026-11-11 Firefox 160.0 macOS, Linux, and Windows --headless; quic.browserleaks.com Linux headful |
 | Safari 18 | `Safari18` | `browser` | `safari-18.6-20621.3.11.11.3` | gated | tls.peet.ws 2026-09-25 Safari 18.6 (20621.3.11.11.3) macOS 15.7.7 (24G720) VM through safaridriver |
 | Safari 26 | `Safari26` | `browser` | `safari-26.6.2-21624.5.1.11.3` | gated | tls.peet.ws 2026-09-25 Safari 26.6.2 (21624.5.1.11.3) macOS 26.6.2 VM through safaridriver |
 | Safari 27 | `Safari27` | `browser` | `safari-27.0-21625.1.29.18.28` | gated | tls.peet.ws 2026-09-25 Safari 27.0 (21625.1.29.18.28) macOS 26.6.2 VM through safaridriver |

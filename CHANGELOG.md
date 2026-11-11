@@ -55,6 +55,7 @@ version and publish as separate crates.
 - `Page::headers` and `Page::header` expose the non-sensitive response headers of each crawled page and preserve them across `Crawl::save` and `Crawl::load`.
 - `Session::base_url`, `cookie::Cookie::parse`, and `cookie::Jar::{len, is_empty, cookies_for}` expose the session base URL, standalone `Set-Cookie` parsing, and RFC 6265 send-order cookie matching.
 - `testing::Server::https_on` starts a local HTTPS test server on a pre-bound `std::net::TcpListener` without an active Tokio runtime on the calling thread.
+- A Firefox 160 profile, `Browser::Firefox160`, from captures of Firefox 160.0 on macOS, Linux, and Windows.
 
 ### Fixed
 
