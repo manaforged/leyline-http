@@ -6,4 +6,5 @@ description = "Upstream quiche example key and BoringSSL sources that quote PEM 
 paths = [
   '''crates/leyline-quiche/examples/cert\.key''',
   '''crates/leyline-bssl/src/(dsa|ec|pkey|rsa|symm)\.rs''',
+  '''crates/leyline-bssl/test/(key|rsa|rsa-encrypted)\.pem''',
 ]
