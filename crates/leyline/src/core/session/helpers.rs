@@ -92,8 +92,19 @@ impl Session {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn with_extra_gates(&self, gates: crate::core::config::HostGates) -> Self {
-        self.changed(|inner| inner.extra_gates = Some(gates))
+    pub(crate) fn for_crawl(
+        &self,
+        gates: crate::core::config::HostGates,
+        max_body: Option<usize>,
+        redirect: Redirect,
+    ) -> Self {
+        self.changed(|inner| {
+            inner.extra_gates = Some(gates);
+            if let Some(bytes) = max_body {
+                inner.inputs.compression.set_max_body_size(bytes);
+            }
+            inner.inputs.redirect_policy = redirect;
+        })
     }
 
     pub(crate) fn admit_host(
@@ -144,6 +155,15 @@ impl Session {
 
     pub(crate) fn default_retry(&self) -> &crate::core::retry::Retry {
         &self.inner.inputs.default_retry
+    }
+
+    pub(crate) fn redirect_policy(&self) -> &Redirect {
+        &self.inner.inputs.redirect_policy
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn max_connections(&self) -> usize {
+        self.inner.inputs.pool_config.max_connections
     }
 
     pub(crate) fn body_rules(&self) -> crate::core::BodyRules {

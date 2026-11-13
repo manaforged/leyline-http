@@ -370,3 +370,75 @@ async fn a_saved_crawl_resumes_without_fetching_a_page_twice() {
             .all(|page| fetched.contains(&page.to_string()))
     );
 }
+
+#[cfg(feature = "html")]
+#[tokio::test]
+async fn a_saved_crawl_preserves_tunable_policies() {
+    use leyline::{HostLimits, Scope, SkipReason};
+
+    let external = Server::http(|request: &Request| match request.target.as_str() {
+        "/ext" => Response::new(200)
+            .header("content-type", "text/html")
+            .body(r#"<a href="/too-deep">deep</a>"#),
+        _ => Response::new(404),
+    })
+    .await
+    .expect("start external server");
+    let ext_url = format!("http://localhost:{}/ext", external.addr().port());
+    let server = Server::http(move |request: &Request| match request.target.as_str() {
+        "/" => Response::new(200)
+            .header("content-type", "text/html")
+            .body(format!(
+                r#"<a href="/copy">copy</a><a href="/hop">hop</a><a href="{ext_url}">ext</a><p>{}</p>"#,
+                "same ".repeat(25)
+            )),
+        "/copy" => Response::new(200)
+            .header("content-type", "text/html")
+            .body(format!("<p>{}</p>", "same ".repeat(25))),
+        "/hop" => Response::new(302).header("location", "/moved"),
+        _ => Response::new(404),
+    })
+    .await
+    .expect("start origin server");
+
+    let mut crawl = builder()
+        .build()
+        .expect("build session")
+        .crawl(server.url("/"))
+        .respect(None)
+        .scope(Scope::Any)
+        .max_depth(1)
+        .max_sitemaps(0)
+        .dedup(false)
+        .redirect(0)
+        .host_limits(HostLimits::new());
+    let first = crawl
+        .next()
+        .await
+        .expect("seed item")
+        .expect("seed page")
+        .url()
+        .path()
+        .to_owned();
+    let path = scratch("crawl-tunable").join("crawl.json");
+    crawl.save(&path).await.expect("save checkpoint");
+    drop(crawl);
+
+    let mut resumed =
+        leyline::Crawl::load(&builder().build().expect("build resume session"), &path)
+            .expect("load checkpoint");
+    let mut pages = vec![first];
+    while let Some(page) = resumed.next().await {
+        pages.push(page.expect("resumed page").url().path().to_owned());
+    }
+    pages.sort();
+    assert_eq!(pages, ["/", "/copy", "/ext"]);
+    assert_eq!(resumed.skipped(SkipReason::Redirects), 1);
+    assert!(
+        !server
+            .requests()
+            .await
+            .iter()
+            .any(|req| req.target == "/sitemap.xml")
+    );
+}

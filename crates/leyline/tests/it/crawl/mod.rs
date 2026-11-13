@@ -7,6 +7,7 @@ mod rules;
 mod scope;
 mod sitemaps;
 mod skips;
+mod tunable;
 
 pub(super) use std::collections::BTreeSet;
 pub(super) use std::time::Duration;

@@ -10,6 +10,15 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- `Scope::Any` follows links and sitemaps across any host while keeping `Authorization` and default `Cookie` headers scoped to the seed origin.
+- `Crawl::redirect`, `Crawl::max_depth`, `Crawl::max_url_size`, `Crawl::max_sitemaps`, `Crawl::max_crawl_delay`, `Crawl::robots_max_age`, `Crawl::dedup`, and `Crawl::dedup_min_words` configure or lift each built-in crawl bound while keeping polite defaults out of the box, and `Crawl::limit` now accepts `None` to clear an earlier cap.
+
+### Fixed
+
+- `Crawl` and `Session::robots` now honor an explicit `SessionBuilder::retry(0)`, `SessionBuilder::redirect`, `SessionBuilder::max_body_size`, and `HostLimits` concurrency above 16 requests instead of clamping or overriding them with internal defaults, and untyped HTML pages enforce `max_body_size` instead of a fixed 10 MiB cap.
+
 ### Changed
 
 - The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.

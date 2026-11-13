@@ -55,7 +55,7 @@ pub struct SessionBuilder {
     pub(in crate::core::session) proxy_config: Proxy,
     dns_config: DnsConfig,
     pub(in crate::core::session) timeouts: Timeout,
-    pool_config: PoolConfig,
+    pub(in crate::core::session) pool_config: PoolConfig,
     socket_config: SocketOptions,
     pub(in crate::core::session) redirect_policy: Redirect,
     pub(in crate::core::session) compression: BodyRules,
@@ -100,7 +100,7 @@ impl SessionBuilder {
             timeouts: Timeout::default(),
             pool_config: PoolConfig::default(),
             socket_config: SocketOptions::default(),
-            redirect_policy: Redirect::default(),
+            redirect_policy: Redirect::unset(),
             compression: BodyRules::default(),
             websocket_config: WebSocketOptions::default(),
             https_only: false,
@@ -117,7 +117,7 @@ impl SessionBuilder {
             cache: 0,
             http_identity: None,
             tls_trust: Tls::default(),
-            default_retry: crate::core::retry::Retry::new(0),
+            default_retry: crate::core::retry::Retry::unset(),
             trace: None,
             base_url: None,
             languages: None,
@@ -448,7 +448,7 @@ impl SessionBuilder {
 
     /// Sets the maximum decoded response body size in bytes.
     pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.compression.max_body_size = bytes;
+        self.compression.set_max_body_size(bytes);
         self
     }
 
