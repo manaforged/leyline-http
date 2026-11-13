@@ -2,6 +2,7 @@ use std::borrow::Cow;
 
 use crate::header_str::HeaderStr;
 use crate::profile::{HeaderPosition, infer_anchor};
+use crate::util::header_position;
 use crate::wire::HeaderPair;
 
 use crate::core::headers::HeaderList;
@@ -30,10 +31,7 @@ pub(crate) fn apply_extra_headers(
             .filter(|e| e.anchor.is_none() && e.name.as_str() == lower)
             .map(|e| (Cow::Owned(e.name.as_str().to_string()), text(&e.value)))
             .collect();
-        if let Some(pos) = headers
-            .iter()
-            .position(|(k, _)| k.eq_ignore_ascii_case(&lower))
-        {
+        if let Some(pos) = header_position(headers, &lower) {
             headers.remove(pos);
             for (offset, item) in values_in_order.into_iter().enumerate() {
                 let insert_at = (pos + offset).min(headers.len());
@@ -78,10 +76,7 @@ fn anchor_target_index(headers: &[HeaderPair], anchor: Option<HeaderPosition>) -
     let Some(anchor) = anchor else {
         return headers.len();
     };
-    let Some(idx) = headers
-        .iter()
-        .position(|(k, _)| k.eq_ignore_ascii_case(anchor.anchor_name()))
-    else {
+    let Some(idx) = header_position(headers, anchor.anchor_name()) else {
         return headers.len();
     };
     if anchor.is_before() { idx } else { idx + 1 }

@@ -50,8 +50,7 @@ impl Parser {
 
     pub(super) fn read(&mut self, bytes: &mut Bytes) -> Result<Option<Event>> {
         if self.buffered() > self.max {
-            return Err(Error::new(Kind::BodyLimit)
-                .with_message("server-sent event exceeds max_event_size"));
+            return Err(oversized());
         }
         while bytes.has_remaining() {
             let byte = bytes.get_u8();
@@ -65,8 +64,7 @@ impl Parser {
                 }
             } else {
                 if self.buffered() >= self.max {
-                    return Err(Error::new(Kind::BodyLimit)
-                        .with_message("server-sent event exceeds max_event_size"));
+                    return Err(oversized());
                 }
                 self.line.push(byte);
             }
@@ -103,8 +101,7 @@ impl Parser {
         let value = value.strip_prefix(' ').unwrap_or(value);
         self.field(field, value);
         if self.buffered() > self.max {
-            return Err(Error::new(Kind::BodyLimit)
-                .with_message("server-sent event exceeds max_event_size"));
+            return Err(oversized());
         }
         Ok(None)
     }
@@ -125,6 +122,10 @@ impl Parser {
             _ => {}
         }
     }
+}
+
+fn oversized() -> Error {
+    Error::new(Kind::BodyLimit).with_message("server-sent event exceeds max_event_size")
 }
 
 #[cfg(test)]

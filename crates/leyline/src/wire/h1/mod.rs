@@ -273,9 +273,7 @@ fn chunk_size_value(line: &[u8]) -> Option<u64> {
 }
 
 pub(crate) fn contains_header<K: AsRef<str>, V>(headers: &[(K, V)], name: &str) -> bool {
-    headers
-        .iter()
-        .any(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
+    crate::util::header_position(headers, name).is_some()
 }
 
 pub(crate) fn is_valid_token(s: &str) -> bool {

@@ -10,8 +10,6 @@ use crate::cookie::Cookie;
 use crate::cookie::parse;
 use crate::util::lock;
 
-use self::evict::settle;
-
 mod evict;
 mod persist;
 
@@ -71,19 +69,7 @@ impl Jar {
         }
         let mut jar = lock(&self.inner);
         for cookie in incoming {
-            let domain = cookie.domain.to_lowercase();
-            let entries = jar.cookies.entry(domain.clone()).or_default();
-            let added = match entries.iter().position(|c| c.same_slot(&cookie)) {
-                Some(pos) => {
-                    entries[pos] = cookie;
-                    false
-                }
-                None => {
-                    entries.push(cookie);
-                    true
-                }
-            };
-            settle(&mut jar, &domain, added);
+            jar.put(cookie, |_, _| true);
         }
         drop(jar);
         self.changed();
@@ -117,7 +103,7 @@ impl Jar {
         }
     }
 
-    fn apply(&self, mut cookie: Cookie, url: &Url) -> bool {
+    fn apply(&self, cookie: Cookie, url: &Url) -> bool {
         if !cookie.within_limits() {
             return false;
         }
@@ -133,26 +119,14 @@ impl Jar {
         }
 
         let mut jar = lock(&self.inner);
-        let domain = cookie.domain.to_lowercase();
         if cookie.is_expired() {
+            let domain = cookie.domain.to_lowercase();
             return jar.expire(&domain, &cookie, parse::secure_origin(url));
         }
-
-        let entries = jar.cookies.entry(domain.clone()).or_default();
-
-        let mut added = false;
-        if let Some(pos) = entries.iter().position(|c| c.same_slot(&cookie)) {
-            if entries[pos].secure && !cookie.secure {
-                return false;
-            }
-            cookie.creation_time = entries[pos].creation_time;
-            entries[pos] = cookie;
-        } else {
-            entries.push(cookie);
-            added = true;
-        }
-        settle(&mut jar, &domain, added);
-        true
+        jar.put(cookie, |held, new| {
+            new.creation_time = held.creation_time;
+            new.secure || !held.secure
+        })
     }
 
     pub(crate) fn store_response_cookies(&self, headers: &[&str], url: &Url) {

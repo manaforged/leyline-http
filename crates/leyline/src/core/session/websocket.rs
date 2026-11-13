@@ -72,9 +72,8 @@ impl Session {
     }
 
     fn websocket_headers(&self, http_url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {
-        let caller_has = |name: &str| caller.get(name).is_some();
         let mut headers = Vec::new();
-        self.merge_session_headers(&mut headers, &caller_has, false, http_url);
+        self.merge_session_headers(&mut headers, Some(caller), false, http_url);
         apply_extra_headers(&mut headers, caller, false);
         let site = super::execute::SiteContext {
             fetch_site: crate::core::FetchSite::SameOrigin,

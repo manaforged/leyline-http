@@ -60,10 +60,18 @@ impl JarInner {
         if !cookie.within_limits() {
             return;
         }
+        self.put(cookie, |held, new| held.creation_time <= new.creation_time);
+    }
+
+    pub(super) fn put(
+        &mut self,
+        mut cookie: Cookie,
+        replaces: impl FnOnce(&Cookie, &mut Cookie) -> bool,
+    ) -> bool {
         let domain = cookie.domain.to_lowercase();
         let entries = self.cookies.entry(domain.clone()).or_default();
         let added = match entries.iter().position(|c| c.same_slot(&cookie)) {
-            Some(pos) if entries[pos].creation_time > cookie.creation_time => return,
+            Some(pos) if !replaces(&entries[pos], &mut cookie) => return false,
             Some(pos) => {
                 entries[pos] = cookie;
                 false
@@ -74,6 +82,7 @@ impl JarInner {
             }
         };
         settle(self, &domain, added);
+        true
     }
 
     pub(super) fn prune(&mut self) {

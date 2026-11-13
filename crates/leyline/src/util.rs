@@ -84,10 +84,14 @@ pub(crate) fn header_first<'a, K: AsRef<str>, V: AsRef<[u8]>>(
     headers: &'a [(K, V)],
     name: &str,
 ) -> Option<&'a str> {
+    let (_, value) = &headers[header_position(headers, name)?];
+    std::str::from_utf8(value.as_ref()).ok()
+}
+
+pub(crate) fn header_position<K: AsRef<str>, V>(headers: &[(K, V)], name: &str) -> Option<usize> {
     headers
         .iter()
-        .find(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
-        .and_then(|(_, v)| std::str::from_utf8(v.as_ref()).ok())
+        .position(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
 }
 
 pub(crate) fn content_length(value: &str) -> Option<u64> {

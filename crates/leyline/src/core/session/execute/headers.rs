@@ -15,7 +15,7 @@ use crate::core::session::Session;
 use crate::header_str::HeaderStr;
 use crate::profile::RequestKind;
 use crate::profile::preset::{HeaderContext, Plan};
-use crate::util::{cross_origin_header, header_first};
+use crate::util::{cross_origin_header, header_first, header_position};
 use crate::wire::HeaderPair;
 use crate::wire::RequestHeaders;
 use crate::wire::{Body, BodyKind, Scheme};
@@ -42,14 +42,11 @@ impl Session {
         if plan.has_origin() {
             shape_origin(&mut headers, current_method, request.origin_downgrade);
         }
-        let caller_has = |name: &str| {
-            extra_headers
-                .is_some_and(|h| h.iter().any(|(k, _)| k.as_str().eq_ignore_ascii_case(name)))
-        };
+        let caller_has = |name: &str| extra_headers.is_some_and(|h| h.get(name).is_some());
         if caller_has(USER_AGENT.as_str()) {
             headers.retain(|(name, _)| !client_hint(name) || caller_has(name));
         }
-        self.merge_session_headers(&mut headers, &caller_has, strip_sensitive, current_url);
+        self.merge_session_headers(&mut headers, extra_headers, strip_sensitive, current_url);
 
         if let Some(extra) = extra_headers {
             apply_extra_headers(&mut headers, extra, strip_sensitive);
@@ -182,10 +179,11 @@ impl Session {
     pub(in crate::core::session) fn merge_session_headers(
         &self,
         headers: &mut Vec<HeaderPair>,
-        caller_has: &dyn Fn(&str) -> bool,
+        caller: Option<&HeaderList>,
         strip_sensitive: bool,
         target: &Url,
     ) {
+        let caller_has = |name: &str| caller.is_some_and(|h| h.get(name).is_some());
         let profile = self
             .inner
             .header_plan
@@ -198,8 +196,8 @@ impl Session {
             if caller_has(k) || (strip_sensitive && cross_origin_header(k)) {
                 continue;
             }
-            let same = |(hk, _): &HeaderPair| hk == k || hk.eq_ignore_ascii_case(k);
-            let at = match headers.iter().position(same) {
+            let same = |(hk, _): &HeaderPair| hk.eq_ignore_ascii_case(k);
+            let at = match header_position(headers, k) {
                 Some(first) if !set[first] => {
                     headers[first].1 = v;
                     set[first] = repeats;
@@ -306,12 +304,6 @@ impl Session {
 }
 
 const CORS_MODES: [&str; 2] = ["cors", "websocket"];
-const CLIENT_HINT: &str = "sec-ch-ua";
-
-fn client_hint(name: &str) -> bool {
-    name.get(..CLIENT_HINT.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CLIENT_HINT))
-}
 
 fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
     if !referer.is_empty() && header_first(headers, "referer").is_none() {
@@ -356,4 +348,11 @@ fn sends_origin(method: &Method, headers: &[HeaderPair]) -> bool {
     let cross_origin = header_first(headers, "sec-fetch-site")
         .is_some_and(|site| FetchSite::parse(site) != Some(FetchSite::SameOrigin));
     cors && cross_origin
+}
+
+const CLIENT_HINT: &str = "sec-ch-ua";
+
+fn client_hint(name: &str) -> bool {
+    name.get(..CLIENT_HINT.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CLIENT_HINT))
 }
