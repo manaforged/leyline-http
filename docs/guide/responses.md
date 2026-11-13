@@ -254,6 +254,10 @@ a user name without a password, replaced by `***`. It is `None` for a direct
 connection. Under a proxy list it names the proxy of the attempt that
 produced the response.
 
+`remote_addr()` returns the socket address the connection was opened to: the
+server's resolved address on a direct connection, and the proxy's address
+through a proxy. It is `None` when `from_cache()` is `true`.
+
 ### Timing
 
 These calls report time summed across redirect legs, on every protocol. They
@@ -287,6 +291,68 @@ println!(
 # Ok(())
 # }
 ```
+
+## Cache hits
+
+`from_cache()` is `true` when the body came from the session's HTTP cache.
+That covers a fresh entry, answered with no request, and a stale entry that
+the server confirmed with a `304`. A session has a cache only after
+`SessionBuilder::cache(bytes)`; see
+[Cache responses](api-clients.md#cache-responses).
+
+To make the session check with the server, send the request header
+`cache-control: no-cache`. The header makes the session revalidate the stored
+entry; it does not bypass the cache.
+
+```rust,no_run
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::builder().cache(1 << 20).build()?;
+let first = session.get("https://example.com/doc").send().await?;
+let second = session.get("https://example.com/doc").send().await?;
+println!("{} {:?}", first.from_cache(), first.remote_addr());
+println!("{} {:?}", second.from_cache(), second.remote_addr());
+let checked = session
+    .get("https://example.com/doc")
+    .header("cache-control", "no-cache")
+    .send().await?;
+# drop(checked);
+# Ok(())
+# }
+```
+
+These requests never use the cache, so `from_cache()` is `false` for them:
+
+- A method other than `GET`.
+- A `.stream()` request.
+- A request with a body.
+- A URL with credentials.
+- A request with a `Range`, `If-None-Match`, or `If-Modified-Since` header.
+
+## Convert to an http::Response
+
+`into_http()?` converts the response into an `http::Response<Body>` for code
+that uses the `http` crate's types. The body streams decoded, the final `Url`
+is in the extensions, and the headers that describe a decoded encoding are
+left out. Send the request with `.stream()` so that the body is not buffered
+first.
+
+```rust,no_run
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let resp = session.get("https://example.com/big").stream().send().await?;
+let http = resp.into_http()?;
+let final_url = http.extensions().get::<leyline::Url>().map(leyline::Url::as_str);
+println!("{} {final_url:?}", http.status());
+let mut body = http.into_body();
+while let Some(chunk) = body.next().await {
+    println!("{} bytes", chunk?.len());
+}
+# Ok(())
+# }
+```
+
+`Body::next` returns the next chunk, an error that ends the body, or `None`
+after the last chunk. See [Streaming](streaming.md#stream-a-response-body).
 
 ## Classify a block response
 

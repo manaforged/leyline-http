@@ -209,6 +209,36 @@ still runs before the next proxy. When retries run out you get the last
 response, for example the 403. See
 [Retries and timeouts](retries-and-timeouts.md).
 
+## Choose the proxy with a closure
+
+`Proxy::custom(choose)` calls your closure with the URL of each request and
+of each redirect hop. Return `Some(proxy)` to send that request through a
+proxy, or `None` to send it direct.
+
+```rust,no_run
+use leyline::{Proxy, Session};
+
+# fn run() -> leyline::Result<()> {
+let session = Session::builder()
+    .proxy(Proxy::custom(|url| {
+        url.path()
+            .starts_with("/geo/")
+            .then(|| Proxy::from("http://user:pass@proxy.example:8080"))
+    }))
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
+Limits:
+
+- The returned `Proxy` must hold one proxy. A `Proxy::list`, a
+  `Proxy::identified`, or another `Proxy::custom` fails the request with
+  `Kind::Config`.
+- The environment proxies do not apply to a session with a custom proxy.
+- `Session::save` does not save the closure.
+
 ## Use a proxy list
 
 `Proxy::list(urls)` makes a proxy that picks one of its URLs for each

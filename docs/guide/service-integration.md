@@ -12,8 +12,8 @@ profile, the TLS context, and the trust store; a clone is an `Arc` clone that
 shares the pool, the cookie jar, and the identity, so it keeps the warm
 connections.
 
-`Session`, `RequestBuilder`, `Response`, `Body`, and `Error` are
-`Send + Sync`. `leyline::http` is the `http` 1.x crate, so
+`Session`, `Response`, and `Error` are `Send + Sync`, and a `RequestBuilder`
+and the future from `send` are `Send`. `leyline::http` is the `http` 1.x crate, so
 its `StatusCode`, `HeaderMap`, and `Request` pass to and from axum 0.8 and
 hyper 1 with no conversion.
 
@@ -212,7 +212,7 @@ println!("{size} bytes");
 
 Enable it with `features = ["tower"]`; the example also needs
 `tower-service = "0.3"`. The response body is a `leyline::Body`, a
-`Stream<Item = std::io::Result<Bytes>>`, so a framework that takes a byte
+`Stream<Item = leyline::Result<Bytes>>`, so a framework that takes a byte
 stream, such as axum with `Body::from_stream`, forwards it as it is. To
 forward the response, keep the status and the body and filter the headers:
 
@@ -234,6 +234,60 @@ pub async fn relay(
 }
 # }
 ```
+
+### Write your own service
+
+To change each request or response in a service of your own, build it from
+two calls. `Session::request_from(request)` turns the `http::Request<Body>`
+into a `RequestBuilder`, with the options in its extensions applied, and
+`Response::into_http()` turns the answer into an `http::Response<Body>`. Call
+`.stream()` between them so that the service returns at the response head.
+
+```rust,no_run
+# #[cfg(feature = "tower")]
+# mod example {
+use std::future::Future;
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use leyline::http::{HeaderValue, Request, Response};
+use leyline::{Body, Session};
+use tower_service::Service;
+
+#[derive(Clone)]
+pub struct Upstream {
+    session: Session,
+}
+
+impl Upstream {
+    pub fn new(session: Session) -> Self {
+        Self { session }
+    }
+}
+
+impl Service<Request<Body>> for Upstream {
+    type Response = Response<Body>;
+    type Error = leyline::Error;
+    type Future = Pin<Box<dyn Future<Output = leyline::Result<Response<Body>>> + Send>>;
+
+    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<leyline::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, mut request: Request<Body>) -> Self::Future {
+        request
+            .headers_mut()
+            .insert("x-forwarded-by", HeaderValue::from_static("gateway"));
+        let send = self.session.request_from(request).stream().send();
+        Box::pin(async move { send.await?.into_http() })
+    }
+}
+# }
+```
+
+`into_http` leaves out the headers that describe a decoded encoding and puts
+the final `leyline::Url` in the extensions. See
+[Read, change, or copy a request](requests.md#read-change-or-copy-a-request).
 
 ### Limit and time out upstream calls
 

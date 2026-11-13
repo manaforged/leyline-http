@@ -48,14 +48,14 @@ does the same as awaiting the builder and returns a named future.
 | Pinned browser | `Session::builder().browser(Browser::Chrome154).build()` | One fixed browser profile |
 
 Use a plain session for APIs. Use a browser session when the server checks
-that the client is a browser. A `user-agent` pair in `SessionBuilder::headers`
-replaces the default `user-agent` on either kind.
+that the client is a browser. `SessionBuilder::user_agent` replaces the
+default `user-agent` on either kind.
 
 ```rust,no_run
 use leyline::{Browser, Session};
 
 # fn run() -> leyline::Result<()> {
-let plain = Session::builder().headers([("user-agent", "my-app/1.0")]).build()?;
+let plain = Session::builder().user_agent("my-app/1.0").build()?;
 let chrome = Session::from(Browser::default());
 let pinned = Session::builder().browser(Browser::Chrome154).build()?;
 # drop((plain, chrome, pinned));

@@ -127,8 +127,26 @@ let raw = session
 # }
 ```
 
-To stream a request body, pass `Body::stream`; see
-[Streaming](streaming.md#stream-a-request-body).
+`Body::file(path)?` streams a file from disk and sends its size as
+`Content-Length`. It fails when the file cannot be inspected.
+
+```rust,no_run
+use leyline::Body;
+
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let resp = session
+    .put("https://example.com/upload")
+    .body(Body::file("upload.bin")?)
+    .send().await?;
+# let _ = resp;
+# Ok(())
+# }
+```
+
+`Body::as_bytes()` returns the bytes of a body held in memory, and `None` for
+a streamed body. To stream a request body from any source, pass
+`Body::stream`; see [Streaming](streaming.md#stream-a-request-body).
 
 ### Upload multipart forms
 
@@ -287,6 +305,7 @@ of a page.
 | `timeout(..)` | Overrides the session timeouts |
 | `redirect(policy)` | Overrides the redirect policy; see [Redirects](redirects.md) |
 | `retry(policy)` | Overrides the retry policy |
+| `protocol(Protocol)` | Forces the HTTP version for this request and the redirects it follows, on the session's connection pool |
 | `label(text)` | Names the request in the trace summary and the `Log` line; see [Logging and tracing](logging.md) |
 
 To use another cookie jar for some requests, derive a session with
@@ -300,6 +319,10 @@ which bounds the request up to the head of a streamed response; set
 field keeps the session value, and `None` turns that timeout off. `connect`
 is session-wide, because connections are pooled. See
 [Retries and timeouts](retries-and-timeouts.md).
+
+`protocol` takes a `Protocol`, such as `Protocol::Http1`. A version the
+server cannot speak fails the request: a forced HTTP/2 request to an
+HTTP/1.1 server fails with `Kind::Http2`.
 
 ```rust,no_run
 use std::time::Duration;
@@ -324,6 +347,51 @@ let resp = session
     .label("account-7")
     .send().await?;
 println!("{} cookies", guest.all().len());
+let legacy = session
+    .get("https://example.com/legacy")
+    .protocol(leyline::Protocol::Http1)
+    .send().await?;
+# drop((resp, legacy));
+# Ok(())
+# }
+```
+
+## Read, change, or copy a request
+
+`RequestBuilder::build()?` converts a request into an `http::Request<Body>`
+without sending it. The result holds the absolute URL with the query, the
+headers you set on the request, the body, and the per-request options as
+typed extensions: `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`, and
+`Protocol`. The download options `sha256`, `progress`, and `resume` are not
+carried. `build` returns the error a setter recorded, such as an invalid
+header.
+
+`Session::request_from(request)` turns an `http::Request<Body>` back into a
+`RequestBuilder`, so `.stream()`, `.send()`, and `.text()` work on it.
+
+`RequestBuilder::try_clone()` copies a request with every option, so you can
+send it more than once. It returns `None` when the body is a stream or a
+setter recorded an error.
+
+```rust,no_run
+use leyline::http::HeaderValue;
+
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let mut request = session
+    .post("https://example.com/items")
+    .query([("page", "2")])
+    .json(&serde_json::json!({ "name": "ada" }))
+    .build()?;
+println!("{} {} {:?}", request.method(), request.uri(), request.body().as_bytes());
+request.headers_mut().insert("x-trace", HeaderValue::from_static("t1"));
+let resp = session.request_from(request).send().await?;
+
+let first = session.put("https://example.com/doc").body("payload");
+if let Some(second) = first.try_clone() {
+    let (a, b) = tokio::join!(first.send(), second.send());
+    println!("{} {}", a?.status(), b?.status());
+}
 # drop(resp);
 # Ok(())
 # }
@@ -331,12 +399,14 @@ println!("{} cookies", guest.all().len());
 
 ## Send an http::Request
 
-`Session::execute` sends an `http::Request<Body>` with its method, URI,
-headers, and body. It reads an optional `RequestKind`, `Timeout`,
-`Retry`, `Redirect`, and `Proxy` from the request
-extensions, infers the request kind from `content-type` as the builder does, and
-reads the whole response before it returns. Digest authentication and
-response streaming need the `RequestBuilder`.
+`Session::execute(request)` sends an `http::Request<Body>` with its method,
+URI, headers, and body. It is `session.request_from(request).send()`: it
+reads an optional `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`, and
+`Protocol` from the request extensions, infers the request kind from
+`content-type` as the builder does, and reads the whole response before it
+returns. `http::Request::version` is ignored; to force a version, insert a
+`Protocol` extension. To stream the response or use digest authentication,
+call `request_from` and set it on the `RequestBuilder`.
 
 ```rust,no_run
 use leyline::Body;

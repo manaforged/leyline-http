@@ -30,8 +30,8 @@ let policy = Retry::new(3).wait_header(RATE_RESET).max_wait(MAX_RATE_WAIT).when(
 let api = Session::builder()
     .base_url(BASE_URL)
     .bearer_auth(&token)
-    .headers([("user-agent", USER_AGENT)])
-    .headers([("accept", "application/json")])
+    .user_agent(USER_AGENT)
+    .header("accept", "application/json")
     .timeout(
         Timeout::new()
             .connect(Duration::from_secs(5))
@@ -48,7 +48,8 @@ let api = Session::builder()
 | --- | --- |
 | `base_url` | Resolves a relative request URL. End it with `/` to keep the last path segment |
 | `bearer_auth` | Sends `authorization: Bearer <token>` to the `base_url` origin when a `base_url` is set, and to every host otherwise |
-| `headers` | Default headers for every request; a `user-agent` pair replaces `leyline/<version>` |
+| `user_agent` | Replaces the default `user-agent`, `leyline/<version>` |
+| `header` | One default header for every request; `headers` takes several pairs |
 | `timeout(Timeout)` | `connect` bounds each connection, `total` the whole send |
 | `retry` | The default `Retry` of every request |
 

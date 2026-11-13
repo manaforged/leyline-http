@@ -17,8 +17,8 @@ use leyline::{Browser, Platform, Session};
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
     .browser(Browser::Firefox154).platform(Platform::MacOS)
-    .headers([("user-agent", "my-tool/1.0 (+https://my-tool.example)")])
-    .headers([("accept", "application/json")])
+    .user_agent("my-tool/1.0 (+https://my-tool.example)")
+    .header("accept", "application/json")
     .build()?;
 # let _ = session;
 # Ok(())
@@ -32,12 +32,19 @@ either. A trust-store problem then fails each request that needs it with
 `Kind::Proxy`. To add settings to a browser session, start from
 `Session::builder().browser(b)`, whose `build()` reports those problems.
 
-`SessionBuilder::headers` takes any iterator of `(name, value)` pairs, or
-references to pairs, where both sides are `AsRef<str>`. An entry replaces a
-default or profile header of the same name, compared without case.
-A `user-agent` pair replaces the default `user-agent`, and a later pair wins.
-On a browser session, a session `user-agent` also removes the profile's `sec-ch-ua` client
-hint, so the user agent and the hint never name different browsers.
+Three setters add default headers, which go out on every request:
+
+| Setter | Effect |
+| --- | --- |
+| `user_agent(value)` | Sets the `User-Agent`, in place of the default or the browser profile's value |
+| `header(name, value)` | Adds one default header |
+| `headers(pairs)` | Adds each `(name, value)` pair of an iterator |
+
+An entry replaces a default or profile header of the same name, compared
+without case. A `user-agent` entry replaces the default `user-agent`, and a
+later one wins. An invalid name or value fails `build()`. On a browser session, a session `user-agent` also removes the
+profile's `sec-ch-ua` client hint, so the user agent and the hint never name
+different browsers.
 
 When a session has a browser and you do not call `protocol`, it uses
 `Protocol::Race` if the `http3` feature is on and the profile's `[h3]`
@@ -77,6 +84,12 @@ drops it. `RequestBuilder::bearer_auth` overrides it for one request, which
 is how to reach a second host. An `authorization` header set with `headers`
 is not scoped. `Debug` output masks the token.
 
+`basic_auth(user, password)` sends `authorization: Basic <credentials>` with
+the same scope as `bearer_auth`: every origin, or only the `base_url` origin
+when one is set, and never across a redirect to another origin. It replaces a
+bearer token or a default `authorization` header set before it. `basic_auth`
+together with `refresh_token` fails `build()` with `Kind::Config`.
+
 `base_url(url)` resolves a relative `&str` or `String` request URL by the
 rules of `Url::join` (RFC 3986). A `Url` value goes out unchanged.
 
@@ -109,6 +122,73 @@ let health = staging.get("/health").send().await?;
 session token moves with it and goes to the new base URL's origin. `build()`
 returns `Kind::Config` for a base URL that does not parse or cannot be a
 base.
+
+## Change each request before it is sent
+
+`SessionBuilder::before_send(hook)` runs a closure on every request of the
+session. Use it for a value that differs per request, such as a request id or
+a signature over the body. The hook receives a
+`&mut http::Request<Body>` and returns `leyline::Result<()>`.
+
+```rust,no_run
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use leyline::http::HeaderValue;
+
+# async fn run() -> leyline::Result<()> {
+let next_id = AtomicU64::new(1);
+let session = leyline::Session::builder()
+    .before_send(move |request| {
+        let id = next_id.fetch_add(1, Ordering::Relaxed);
+        let size = request.body().as_bytes().map_or(0, <[u8]>::len);
+        let summary = format!("{} {} {size}", request.method(), request.uri().path());
+        let headers = request.headers_mut();
+        headers.insert("x-request-id", HeaderValue::from(id));
+        headers.insert("x-summary", HeaderValue::try_from(summary)?);
+        Ok(())
+    })
+    .build()?;
+let resp = session.post("https://api.example/items").body("hello").send().await?;
+# drop(resp);
+# Ok(())
+# }
+```
+
+The hook sees:
+
+- The method.
+- The absolute URL.
+- The headers you set on the request. It does not see the session's default
+  headers, the profile headers, `Cookie`, `Host`, or `Content-Length`.
+- The body. `Body::as_bytes()` returns its bytes, or `None` for a stream.
+
+Leyline sends the header changes the hook makes and a body it replaces. It
+ignores changes to the method, the URL, and the extensions.
+
+- The hook runs before every attempt: the first send and each retry. It does
+  not run again for a redirect hop.
+- Each retry starts again from your original headers and body, so a hook that
+  adds a header does not add it twice.
+- An error from the hook fails the request.
+- A second `before_send` call adds a hook that runs after the first.
+- A WebSocket handshake from `RequestBuilder::websocket()` does not pass
+  through the hook.
+
+## Turn cookies off
+
+`SessionBuilder::cookies(None)` turns cookie storage off. The session sends no
+`Cookie` header from the jar and ignores every `Set-Cookie`. `Session::save`
+records the setting, and `Session::load` restores it.
+
+```rust,no_run
+# fn run() -> leyline::Result<()> {
+let stateless = leyline::Session::builder().cookies(None).build()?;
+# let _ = stateless;
+# Ok(())
+# }
+```
+
+To use a jar of your own, see [Cookies](cookies.md#share-or-fork-a-jar).
 
 ## Set the languages
 
@@ -224,7 +304,7 @@ browser has no identity for the platform.
 the values `build()` resolved. `browser()` and `hello()` are `None` for a
 plain or loaded-profile session. `Session::user_agent()`
 returns the `User-Agent` the session sends, including one from
-`SessionBuilder::headers`.
+`SessionBuilder::user_agent` or `SessionBuilder::headers`.
 
 ```rust,no_run
 use leyline::{Browser, Platform};

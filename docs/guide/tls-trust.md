@@ -43,9 +43,10 @@ one config. A file or certificate that cannot be parsed fails with
 
 ## Pin a certificate
 
-`pin_cert_sha256` takes the SHA-256 digest of the server's leaf
-certificate in DER form. The handshake succeeds only when the chain verifies
-and the leaf matches a pin. A pin adds no root.
+`pin_cert_sha256` takes the SHA-256 digest of the server's whole leaf
+certificate in DER form. It is a certificate pin, not a public-key pin: a
+digest of the certificate's public key does not match. The handshake succeeds
+only when the chain verifies and the leaf matches a pin. A pin adds no root.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -61,8 +62,8 @@ let session = leyline::Session::builder()
 
 Pins apply to every host the session contacts, so give a pinned host its own
 session. Add a pin for each certificate you expect, including the next one
-before a rotation. To read the digest of a live certificate, hash the
-`peer_cert_der` field of `Response::tls()`.
+before a rotation. To read the digest of a live certificate, hash the DER
+bytes that `Response::peer_certificate()` returns.
 
 A saved TLS session resumes only in a session that loaded the same pins,
 roots, and client certificate, compared by content; any other session makes a
@@ -74,8 +75,8 @@ no source.
 
 ## Present a client certificate
 
-For mutual TLS, give `client_cert` a PEM certificate chain and its
-private key.
+For mutual TLS, give `client_cert` two PEM files: the certificate chain, leaf
+first, and its unencrypted private key.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -85,6 +86,21 @@ let session = leyline::Session::builder()
         leyline::Tls::new()
             .client_cert("/etc/myorg/client.pem", "/etc/myorg/client.key"),
     )
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
+When the certificate comes from a secret store and not from disk, give
+`client_cert_pem` the same two PEM documents as bytes in memory. It replaces
+any `client_cert` files, and `Debug` output never prints the bytes.
+
+```rust,no_run
+# fn run(chain_pem: Vec<u8>, key_pem: Vec<u8>) -> leyline::Result<()> {
+let session = leyline::Session::builder()
+    .browser(leyline::Browser::default())
+    .tls(leyline::Tls::new().client_cert_pem(chain_pem, key_pem))
     .build()?;
 # let _ = session;
 # Ok(())
@@ -124,7 +140,7 @@ no longer matches its browser profile:
 
 A server that cannot meet the floor fails the handshake with `Kind::Tls`;
 an `https://` proxy that cannot meet it fails with `Kind::Proxy`.
-`Response::tls()` reports the negotiated version in `version`. HTTP/3 always
+`Response::tls_version()` reports the negotiated version. HTTP/3 always
 uses TLS 1.3, so the floor does not change a QUIC handshake.
 
 ## Turn verification off

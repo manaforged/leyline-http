@@ -57,7 +57,8 @@ println!("{} pages, {} errors", crawl.pages(), crawl.errors());
 | Setter | Default | Effect |
 | --- | --- | --- |
 | `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
-| `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; a last path segment with a dot and a letter after it is a file, so end a directory seed with a slash. `Any`: any host |
+| `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; see [Filter the links to follow](#filter-the-links-to-follow). `Any`: any host |
+| `filter(keep)` | none | Follows a link only when the closure returns `true` for its URL, on top of the scope |
 | `limit(n)` or `limit(None)` | none | Stops after `n` kept pages, or removes the cap |
 | `agent(name)` | `*` | The robots.txt group and meta robots name the crawl obeys. A full user agent works; its product token is matched. A site with no group for the name falls back to `*` |
 | `max_body_size(n)` | the session's | The largest page, sitemap, or robots.txt body the crawl reads, without a new session |
@@ -79,8 +80,10 @@ falls back to `*`. Across all hosts, concurrency defaults to 16 in flight and sc
 
 For each URL, in order, the crawl:
 
-1. Skips a URL that is not `http` or `https`, is out of scope, or was queued
-   before. URLs are compared after the fragment is dropped, the query
+1. Skips a URL that is not `http` or `https`, is out of scope, is rejected
+   by the `filter`, or was queued before. An out-of-scope link counts as
+   `SkipReason::Scope`, and a link the filter rejects as
+   `SkipReason::Filter`. URLs are compared after the fragment is dropped, the query
    parameters are sorted, and percent-encoding is normalized; the request
    goes out as written.
 2. Unless robots are ignored, skips a URL that robots.txt disallows, and uses the site's
@@ -137,6 +140,40 @@ by default.
 `Session::shutdown()` ends the crawl: requests in flight fail with the
 shut-down error and nothing new starts. Dropping the `Crawl` cancels its
 requests. `Session::crawl` needs the `html` feature, which is on by default.
+
+## Filter the links to follow
+
+`Scope::Prefix` keeps the crawl on the seed's host and under the seed's
+directory:
+
+| Seed path | Last segment | Directory |
+| --- | --- | --- |
+| `/docs/a.html` | Has a file extension that contains a letter | `/docs/`, the path up to the last `/` |
+| `/docs/a` | Has no file extension | `/docs/a/`, the whole path |
+
+For any other rule, add `Crawl::filter` with a closure over the URL. The
+crawl applies it on top of the scope to every discovered link, sitemap URL,
+and redirect target, and never to the seed. A rejected link counts under
+`SkipReason::Filter`.
+
+```rust,no_run
+use leyline::{Scope, Session, SkipReason};
+
+# async fn run() -> leyline::Result<()> {
+let mut crawl = Session::new()
+    .crawl("https://example.com/docs/")
+    .scope(Scope::Host)
+    .filter(|url| url.path().starts_with("/docs/") && url.query().is_none());
+while let Some(page) = crawl.next().await {
+    println!("{}", page?.url());
+}
+println!("{} links rejected", crawl.skipped(SkipReason::Filter));
+# Ok(())
+# }
+```
+
+A checkpoint does not save the filter. Call `filter` again on the crawl that
+`Crawl::load` returns; see [Save and resume a crawl](#save-and-resume-a-crawl).
 
 ## Build the crawl session
 
@@ -741,7 +778,8 @@ idempotent. Drain buffered crawl errors through `next()` before saving; otherwis
 Checkpoints are versioned JSON with a 64 MiB size limit, written with mode 0600
 on Unix. They contain URLs and page bodies, so treat them as account data and
 load only files your application wrote. They do not save cookies or application
-callbacks. Use `Session::save` separately and supply the restored session to
+callbacks, the `filter` closure included: call `Crawl::load(&session, path)?.filter(..)`
+to set it again. Use `Session::save` separately and supply the restored session to
 `Crawl::load` when the crawl requires an account.
 
 ## Next

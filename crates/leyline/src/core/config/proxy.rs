@@ -82,7 +82,7 @@ impl Proxy {
         Self::default()
     }
 
-    /// Sets one proxy for every scheme, replacing any earlier all-scheme proxy.
+    /// Sets one proxy URL for every scheme, with any username and password inside it as in `http://user:pass@host:8080`, replacing any earlier all-scheme proxy.
     pub fn all(mut self, proxy_url: impl Into<String>) -> Self {
         self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
         self.rules

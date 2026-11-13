@@ -1,6 +1,6 @@
 The cookie store of a session, with RFC 6265bis rules.
 
-[`Session::cookies`](crate::Session::cookies) returns the session's jar; clones of the session share it. A jar saves with serde, and a saved session includes it.
+[`Session::cookies`](crate::Session::cookies) returns the session's jar; clones of the session share it. [`insert`](crate::cookie::Jar::insert) stores a [`Cookie`](crate::cookie::Cookie) built with `Cookie::new`. A jar saves with serde, and a saved session includes it.
 
 ```rust
 use leyline::Url;

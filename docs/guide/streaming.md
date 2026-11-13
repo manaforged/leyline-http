@@ -52,13 +52,16 @@ For retries or replayable redirects, buffer the body and send it as `Bytes`.
 
 ## Stream a response body
 
-Call `.stream()` on the request builder. The response arrives with the
-headers, and `bytes_stream()` returns the decoded body as a
-`futures_util::Stream<Item = leyline::Result<Bytes>>`.
+Without `.stream()`, `send` reads the whole body into memory, up to
+`max_body_size` (100 MiB by default), before it returns. Call `.stream()` on
+the request builder to change that: `send` returns when the headers arrive,
+and the body comes off the connection as you read it.
+
+`bytes_stream()` returns the decoded body as a `Body`. `Body::next().await`
+returns the next chunk as `Option<leyline::Result<Bytes>>`: `None` after the
+last chunk, and an error that ends the body.
 
 ```rust,no_run
-use futures_util::StreamExt;
-
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let resp = session
@@ -79,6 +82,35 @@ println!("{total} bytes");
 
 `text()`, `bytes()`, and `json()` also work on a `.stream()` response: they
 drain and decode it. A streamed response carries no trailers.
+
+`Body` is also a `futures_util::Stream<Item = leyline::Result<Bytes>>`, for
+code that takes a stream or uses the `StreamExt` combinators.
+
+### Read the body as AsyncRead
+
+A `leyline::Error` converts into a `std::io::Error`, so a streamed `Body`
+fits `tokio_util::io::StreamReader`, which is a `tokio::io::AsyncRead`. The
+`io::Error` keeps the `leyline::Error` inside, and `leyline::Error::find`
+returns it.
+
+```rust,no_run
+use futures_util::TryStreamExt;
+use tokio::io::AsyncReadExt;
+use tokio_util::io::StreamReader;
+
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let resp = session.get("https://example.com/big").stream().send().await?;
+let body = resp.bytes_stream()?.map_err(std::io::Error::from);
+let mut reader = std::pin::pin!(StreamReader::new(body));
+let mut start = [0u8; 16];
+match reader.read(&mut start).await {
+    Ok(n) => println!("{:?}", &start[..n]),
+    Err(err) => println!("{:?}", leyline::Error::find(&err).map(leyline::Error::kind)),
+}
+# Ok(())
+# }
+```
 
 ### Decoded or raw
 

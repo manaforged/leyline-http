@@ -1,6 +1,6 @@
-Which proxy a session or request uses: one URL, rules per scheme, or a list to rotate through.
+Which proxy a session or request uses: one URL, rules per scheme, a list to rotate through, or a closure that chooses.
 
-A URL string converts into a `Proxy` for every scheme, so `.proxy("socks5h://host:1080")` is enough for one proxy. `Proxy::new()` sets a proxy per scheme, a bypass list, and whether the `HTTP_PROXY` family of variables applies. `Proxy::list(urls)` rotates: each request takes the origin's sticky proxy, or else the next healthy one. A proxy error or a block counts a strike; after `ban_after` strikes, 3 by default, the proxy is banned for `ban_for`, 60 s by default. `Proxy::identified` gives each proxy its own [`Browser`](crate::Browser) and [`Platform`](crate::Platform). Clones of a list share its health. The scheme picks the protocol: `http`, `https`, `socks5`, or `socks5h` for name resolution at the proxy; `socks5` and `socks5h` need the `socks` feature. A saved session stores the proxy URL without its password.
+A URL string converts into a `Proxy` for every scheme, so `.proxy("socks5h://host:1080")` is enough for one proxy. `Proxy::new()` sets a proxy per scheme, a bypass list, and whether the `HTTP_PROXY` family of variables applies. `Proxy::list(urls)` rotates: each request takes the origin's sticky proxy, or else the next healthy one. A proxy error or a block counts a strike; after `ban_after` strikes, 3 by default, the proxy is banned for `ban_for`, 60 s by default. `Proxy::identified` gives each proxy its own [`Browser`](crate::Browser) and [`Platform`](crate::Platform). Clones of a list share its health. [`Proxy::custom`](crate::Proxy::custom) calls a closure with the URL of each request and redirect hop; it returns one proxy, or `None` to send direct. The scheme picks the protocol: `http`, `https`, `socks5`, or `socks5h` for name resolution at the proxy; `socks5` and `socks5h` need the `socks` feature. A saved session stores the proxy URL without its password, and does not store a `custom` closure.
 
 ```rust,no_run
 use leyline::{Proxy, Session};
@@ -17,6 +17,6 @@ let session = Session::builder().proxy(proxy).build()?;
 
 # Errors
 
-[`SessionBuilder::build`](crate::SessionBuilder::build) returns [`Kind::Config`](crate::Kind::Config) for a proxy URL that does not parse, and for an `identified` list on a session with no browser. A request or WebSocket given a list returns `Kind::Config`. A request returns [`Kind::Proxy`](crate::Kind::Proxy) when the proxy connect or authentication fails, and [`Kind::ProxyTarget`](crate::Kind::ProxyTarget) when the proxy cannot reach the origin.
+[`SessionBuilder::build`](crate::SessionBuilder::build) returns [`Kind::Config`](crate::Kind::Config) for a proxy URL that does not parse, and for an `identified` list on a session with no browser. A request or WebSocket given a list returns `Kind::Config`, and so does a request whose `custom` closure returns a list, an `identified` list, or another `custom`. A request returns [`Kind::Proxy`](crate::Kind::Proxy) when the proxy connect or authentication fails, and [`Kind::ProxyTarget`](crate::Kind::ProxyTarget) when the proxy cannot reach the origin.
 
 See also: [Proxies](https://manaforged.github.io/leyline-http/guide/proxies.html).
