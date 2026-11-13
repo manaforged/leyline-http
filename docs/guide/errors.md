@@ -152,7 +152,7 @@ body. See
 | --- | --- |
 | `is_connect()` | Kind `Connect` or `Dns`, a TLS handshake failure, or a timeout while connecting. A TLS certificate, host name, or pin failure is false |
 | `is_proxy()` | The proxy itself failed, before the tunnel was up, a proxy timeout included. See [Decide whether to ban a proxy](proxies.md#decide-whether-to-ban-a-proxy) |
-| `is_retryable()` | Kind `Timeout`, `is_connect()`, a reset, aborted, or closed connection, an I/O failure while dialing or talking to a proxy, or a proxy answer of 502, 503, or 504 to `CONNECT` |
+| `is_retryable()` | Kind `Timeout`, `is_connect()`, a reset, aborted, or closed connection, an I/O failure while dialing or talking to a proxy, a proxy answer of 502, 503, or 504 to `CONNECT`, or a `Kind::Status` error with status 429, 502, 503, or 504 |
 | `is_shut_down()` | The session was shut down with `Session::shutdown()` |
 
 The default retry rule retries what `is_retryable()` accepts. See

@@ -53,6 +53,7 @@ version and publish as separate crates.
 - `RequestBuilder::build` followed by `Session::request_from` keeps the download options `sha256`, `progress`, and `resume`.
 - A `Proxy::custom` inside `Proxy::list` or `Proxy::identified` fails `build()` with `Kind::Config`.
 - `Proxy` is `UnwindSafe` and `RefUnwindSafe` again.
+- `Error::is_retryable` is true for a `Kind::Status` error with status 429, 502, 503, or 504, the statuses the default retry rule retries.
 - A session's `Display` and `Debug` output names a proxy list as `pool(N)` and a closure as `custom`, where both printed no proxy.
 - A link that `Crawl` drops because it is out of scope now counts under `SkipReason::Scope`.
 - A `leyline::blocking::Session` can reach a `testing::Server` started from the same thread; the server no longer needs the caller to drive its runtime, and `testing::Server::http_on` works from synchronous code.

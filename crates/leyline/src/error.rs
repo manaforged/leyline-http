@@ -16,7 +16,7 @@ mod marker;
 mod profile;
 
 pub(crate) use cause::Cause;
-pub(crate) use classify::is_gateway_status;
+pub(crate) use classify::{is_gateway_status, is_transient_status};
 pub(crate) use limit::BodyLimit;
 pub(crate) use profile::ProfileChanged;
 

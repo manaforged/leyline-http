@@ -41,12 +41,18 @@ impl Error {
         self.inner.kind == Kind::Status
     }
 
-    /// Returns true for a timeout, a connect failure, a closed connection, or a transient proxy failure.
+    /// Returns true for a timeout, a connect failure, a closed connection, a transient proxy failure, or a 429, 502, 503 or 504 status error.
     pub fn is_retryable(&self) -> bool {
-        self.is_timeout()
+        self.is_transient_status()
+            || self.is_timeout()
             || self.is_connect()
             || self.is_connection_closed()
             || self.is_proxy_transient()
+    }
+
+    fn is_transient_status(&self) -> bool {
+        let status = self.inner.status.filter(|_| self.is_status());
+        status.is_some_and(is_transient_status)
     }
 
     fn is_proxy_transient(&self) -> bool {
@@ -137,6 +143,10 @@ const GATEWAY_STATUSES: [http::StatusCode; 3] = [
     http::StatusCode::SERVICE_UNAVAILABLE,
     http::StatusCode::GATEWAY_TIMEOUT,
 ];
+
+pub(crate) fn is_transient_status(status: http::StatusCode) -> bool {
+    status == http::StatusCode::TOO_MANY_REQUESTS || is_gateway_status(status.as_u16())
+}
 
 pub(crate) fn is_gateway_status(code: u16) -> bool {
     GATEWAY_STATUSES

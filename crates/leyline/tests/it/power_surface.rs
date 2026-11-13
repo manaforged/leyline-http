@@ -761,3 +761,30 @@ fn a_builder_builds_a_blocking_session() -> Check {
     assert_eq!(text, "hi");
     Ok(())
 }
+
+#[tokio::test]
+async fn a_status_error_is_retryable_when_the_retry_rule_would_retry_it() -> Check {
+    let server = testing::Server::http(|request| {
+        let code = request
+            .target()
+            .trim_start_matches('/')
+            .parse()
+            .unwrap_or(500);
+        testing::Response::new(code)
+    })
+    .await?;
+    let session = Session::new();
+    let mut verdicts = Vec::new();
+
+    for code in [404, 429, 500, 502, 503, 504] {
+        let path = format!("/{code}");
+        let error = session.get(server.url(&path)).error_for_status().await;
+        let error = error.err().ok_or("an error status must fail the request")?;
+        verdicts.push((error.kind(), error.is_retryable()));
+    }
+
+    let retryable: Vec<bool> = verdicts.iter().map(|(_, retry)| *retry).collect();
+    assert!(verdicts.iter().all(|(kind, _)| *kind == Kind::Status));
+    assert_eq!(retryable, [false, true, false, true, true, true]);
+    Ok(())
+}
