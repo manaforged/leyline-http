@@ -149,7 +149,7 @@ impl Proxy {
         self.map_pool(|pool| pool.ban_for(duration))
     }
 
-    /// Calls `choose` with the URL of each request and each redirect hop: `None` sends it with no proxy, and `Some` must hold one proxy, so a `Proxy::list`, `Proxy::identified` or `Proxy::custom` fails the request with `Kind::Config`.
+    /// Calls `choose` once with the URL of each request and each redirect hop: `None` sends it with no proxy, and `Some` must hold one proxy, so a `Proxy::list`, `Proxy::identified` or `Proxy::custom` fails the request with `Kind::Config`; of the other setters only `no_proxy` applies.
     pub fn custom<F>(choose: F) -> Self
     where
         F: Fn(&url::Url) -> Option<Proxy> + Send + Sync + 'static,
@@ -211,6 +211,9 @@ impl Proxy {
     }
 
     fn primary_rule(&self) -> Option<&ProxyRule> {
+        if self.is_custom() {
+            return None;
+        }
         self.rules
             .iter()
             .find(|r| r.scheme == ProxyRuleScheme::All)
@@ -225,7 +228,11 @@ impl Proxy {
     }
 
     pub(crate) fn uses_env(&self) -> bool {
-        self.use_env && self.custom.is_none()
+        self.use_env && !self.is_custom()
+    }
+
+    pub(crate) fn is_custom(&self) -> bool {
+        self.custom.is_some()
     }
 
     pub(crate) fn proxy_for(
@@ -235,6 +242,9 @@ impl Proxy {
         let Some(choose) = &self.custom else {
             return Ok(self.rule_for(url)?.map(Cow::Borrowed));
         };
+        if self.bypasses(url.host_str().unwrap_or("")) {
+            return Ok(None);
+        }
         let Some(chosen) = choose(url) else {
             return Ok(None);
         };
@@ -256,10 +266,14 @@ impl Proxy {
         let Some(winner) = self.rules.iter().find(|rule| rule.matches(scheme)) else {
             return Ok(None);
         };
-        if (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches(host) {
+        if self.bypasses(host) {
             return Ok(None);
         }
         winner.proxy().map(Some)
+    }
+
+    fn bypasses(&self, host: &str) -> bool {
+        (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches(host)
     }
 }
 

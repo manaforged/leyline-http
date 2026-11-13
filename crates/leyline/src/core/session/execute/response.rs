@@ -23,6 +23,9 @@ impl Session {
         resp_headers: &http::HeaderMap,
         url: &Url,
     ) {
+        if !self.stores_cookies() {
+            return;
+        }
         let set_cookies: Vec<&str> = header_values(resp_headers, http::header::SET_COOKIE)
             .filter_map(|v| v.to_str().ok())
             .collect();

@@ -33,10 +33,10 @@ version and publish as separate crates.
 - `Events::last_event_id` resumes a server-sent event stream from a known event id.
 - `Crawl::filter` follows a link only when a closure accepts its URL; a rejected link counts under `SkipReason::Filter`.
 - `testing::Response::abort_after` drops the connection part-way through the body.
-- `RequestBuilder::protocol` forces the HTTP version for one request on the session's own connection pool; it travels through `build` and `request_from` as a `Protocol` extension.
+- `RequestBuilder::protocol` forces the HTTP version for one request, and its WebSocket handshake, on the session's own connection pool and without the HTTP cache; it travels through `build` and `request_from` as a `Protocol` extension.
 - `Response::remote_addr` returns the socket address the connection was opened to, and `trace::Event::Connect` carries it as `addr`.
 - `Response::from_cache` tells whether the body came from the session's HTTP cache.
-- `Proxy::custom` chooses the proxy for each request and redirect hop with a closure over the URL; `None` sends the request with no proxy.
+- `Proxy::custom` chooses the proxy for each request and redirect hop with a closure over the URL; `None` sends the request with no proxy, and `no_proxy` on it still applies.
 - `std::io::Error::from(leyline::Error)` keeps the `leyline::Error` inside, and `Error::find` recovers it, so a streamed `Body` fits `tokio_util::io::StreamReader`.
 - `Scope::Any` follows links and sitemaps across any host while keeping `Authorization` and default `Cookie` headers scoped to the seed origin.
 - `Crawl::redirect`, `Crawl::max_depth`, `Crawl::max_url_size`, `Crawl::max_sitemaps`, `Crawl::max_crawl_delay`, `Crawl::robots_max_age`, `Crawl::dedup`, and `Crawl::dedup_min_words` configure or lift each built-in crawl bound while keeping polite defaults out of the box, and `Crawl::limit` now accepts `None` to clear an earlier cap.

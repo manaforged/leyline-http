@@ -26,11 +26,12 @@ impl From<io::Error> for Error {
         if let Some(limit) = BodyLimit::of_io(&e) {
             return limit.error();
         }
-        if e.kind() == io::ErrorKind::TimedOut {
-            return Error::new(Kind::Timeout).with_source(e);
-        }
         if !e.get_ref().is_some_and(|inner| inner.is::<Error>()) {
-            return Error::new(Kind::Io).with_source(e);
+            let kind = match e.kind() {
+                io::ErrorKind::TimedOut => Kind::Timeout,
+                _ => Kind::Io,
+            };
+            return Error::new(kind).with_source(e);
         }
         match e.into_inner().map(|inner| inner.downcast::<Error>()) {
             Some(Ok(err)) => *err,

@@ -1,5 +1,5 @@
-use super::Draft;
-use crate::core::config::{Origin, Proxy};
+use super::{Carry, Draft};
+use crate::core::config::Origin;
 use crate::core::proxy_pool::{Lease, ProxyPool};
 use crate::core::response::Response;
 use crate::core::retry::Retry;
@@ -41,7 +41,7 @@ impl<'a> Route<'a> {
             this.hooked(hook)?;
         }
         let lease = self.lease(&mut this);
-        let used = self.used_proxy(this.carry.proxy.as_ref());
+        let used = self.used_proxy(&mut this.carry);
         crate::trace::note_proxy(used.as_deref());
         let leased = match &lease {
             Some(lease) => Some(lease.session(self.session)?),
@@ -78,8 +78,15 @@ impl<'a> Route<'a> {
             });
     }
 
-    fn used_proxy(&self, proxy: Option<&Proxy>) -> Option<String> {
-        let used = self.session.proxy_for(&self.url, proxy).ok().flatten();
-        used.map(|proxy| proxy.as_str().to_owned())
+    fn used_proxy(&self, carry: &mut Carry) -> Option<String> {
+        let chosen = self.session.proxy_for(&self.url, carry.proxy.as_ref());
+        let used = chosen.ok()?;
+        let name = used.as_deref().map(|proxy| proxy.as_str().to_owned());
+        if let Some(std::borrow::Cow::Owned(proxy)) = used {
+            carry.first_hop = Some(Some(proxy));
+        } else if name.is_none() && self.session.proxy_is_custom(carry.proxy.as_ref()) {
+            carry.first_hop = Some(None);
+        }
+        name
     }
 }

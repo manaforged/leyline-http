@@ -49,6 +49,12 @@ impl Session {
             .proxy_for(url)
     }
 
+    pub(crate) fn proxy_is_custom(&self, request: Option<&Proxy>) -> bool {
+        request
+            .unwrap_or(&self.inner.inputs.proxy_config)
+            .is_custom()
+    }
+
     #[cfg(feature = "http3")]
     fn h3_target<'a>(&'a self, config: &'a H3Config) -> H3Target<'a> {
         H3Target {
@@ -71,8 +77,10 @@ impl Session {
             ))));
         }
         Either::Right(match &self.inner.cache {
-            Some(cache) => Either::Left(Box::pin(self.send_cached(req, cache, protocol))),
-            None => Either::Right(self.send_transport(req, protocol)),
+            Some(cache) if protocol == self.inner.inputs.protocol_policy => {
+                Either::Left(Box::pin(self.send_cached(req, cache, protocol)))
+            }
+            _ => Either::Right(self.send_transport(req, protocol)),
         })
     }
 

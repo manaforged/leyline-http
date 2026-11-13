@@ -173,6 +173,10 @@ ignores changes to the method, the URL, and the extensions.
 - A second `before_send` call adds a hook that runs after the first.
 - A WebSocket handshake from `RequestBuilder::websocket()` does not pass
   through the hook.
+- Headers the hook leaves in place keep their order, and headers it adds go
+  last.
+- With a hook set, a request whose URL is longer than 65,534 bytes fails,
+  because an `http::Uri` cannot hold it.
 
 ## Turn cookies off
 

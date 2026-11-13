@@ -21,9 +21,7 @@ impl Session {
             let conn = self
                 .websocket_with_options(&http_url, headers, carry)
                 .await?;
-            if self.stores_cookies() {
-                self.store_cookies(&conn.header_map(), &http_url);
-            }
+            self.store_cookies(&conn.header_map(), &http_url);
             Ok::<_, Error>(conn)
         };
         self.unless_shut_down(self.deadline(carry.timeouts.as_ref()).total(handshake))
@@ -37,6 +35,7 @@ impl Session {
         carry: &Carry,
     ) -> Result<WebSocket> {
         let config = self.inner.inputs.websocket_config;
+        let protocol = carry.protocol.unwrap_or(self.inner.inputs.protocol_policy);
         let proxy = self.proxy_for(http_url, carry.proxy.as_ref())?;
         let extra_headers = self.websocket_headers(http_url, extra_headers);
         let origin = Origin::ascii(http_url);
@@ -55,7 +54,7 @@ impl Session {
             options: &config,
         };
 
-        if config.prefer_http2 && self.inner.inputs.protocol_policy.tcp_offers_h2() {
+        if config.prefer_http2 && protocol.tcp_offers_h2() {
             if let Some(conn) = WebSocket::connect_h2(
                 &self.inner.pool,
                 &self.inner.connector,

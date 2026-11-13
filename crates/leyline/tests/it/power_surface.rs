@@ -426,6 +426,10 @@ async fn a_timeout_converts_to_a_timed_out_io_error_that_keeps_its_source() -> C
     assert_eq!(io.kind(), std::io::ErrorKind::TimedOut);
     let source = leyline::Error::find(&io).ok_or("the leyline error stays reachable")?;
     assert_eq!(source.kind(), Kind::Timeout);
+    let shown = source.to_string();
+    let back = leyline::Error::from(io);
+    assert_eq!(back.kind(), Kind::Timeout);
+    assert_eq!(back.to_string(), shown);
     Ok(())
 }
 
@@ -455,5 +459,79 @@ async fn one_request_can_force_its_protocol_and_keep_it_through_build() -> Check
         "a plain HTTP/1.1 server cannot answer a forced HTTP/3 request"
     );
     assert_eq!(server.requests().await.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_proxy_closure_runs_once_per_request_and_honors_its_bypass_list() -> Check {
+    let direct = testing::Server::http(|_| ok("direct")).await?;
+    let proxy = testing::Server::http(|_| ok("proxied")).await?;
+    let through = proxy.url("/");
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = std::sync::Arc::clone(&calls);
+    let choose = leyline::Proxy::custom(move |_| {
+        counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some(leyline::Proxy::from(through.as_str()))
+    });
+    let session = Session::builder().proxy(choose.clone()).build()?;
+    let bypassing = Session::builder()
+        .proxy(choose.no_proxy(["127.0.0.1"]))
+        .build()?;
+
+    let via = session.get(direct.url("/a")).await?;
+    let once = calls.load(std::sync::atomic::Ordering::SeqCst);
+    let straight = bypassing.get(direct.url("/b")).await?;
+
+    assert_eq!(once, 1);
+    assert!(via.proxy().is_some());
+    assert_eq!(straight.proxy(), None);
+    assert_eq!(via.text().await?, "proxied");
+    assert_eq!(straight.text().await?, "direct");
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_hook_that_removes_one_header_keeps_the_order_of_the_rest() -> Check {
+    let server = testing::Server::http(|_| ok("hi")).await?;
+    let session = Session::builder()
+        .before_send(|request| {
+            request.headers_mut().remove("x-first");
+            Ok(())
+        })
+        .build()?;
+
+    session
+        .get(server.url("/"))
+        .header("x-first", "1")
+        .header("x-second", "2")
+        .header("x-third", "3")
+        .header("x-fourth", "4")
+        .await?;
+
+    let seen = server.requests().await;
+    let head = seen[0].head().to_ascii_lowercase();
+    let at = |name: &str| head.find(name);
+    assert_eq!(at("x-first"), None);
+    assert!(
+        at("x-second") < at("x-third") && at("x-third") < at("x-fourth"),
+        "{head}"
+    );
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_forced_protocol_skips_the_cache() -> Check {
+    let server =
+        testing::Server::http(|_| ok("fresh").header("cache-control", "max-age=60")).await?;
+    let session = Session::builder().cache(1 << 20).build()?;
+
+    session.get(server.url("/doc")).await?;
+    let forced = session
+        .get(server.url("/doc"))
+        .protocol(leyline::Protocol::Http1)
+        .await?;
+
+    assert!(!forced.from_cache());
+    assert_eq!(server.requests().await.len(), 2);
     Ok(())
 }

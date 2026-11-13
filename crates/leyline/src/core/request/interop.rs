@@ -13,22 +13,23 @@ use crate::error::{Error, Result};
 use crate::profile::{HeaderPosition, RequestKind};
 use crate::wire::Body;
 
-type Anchors = HeaderMap<HeaderPosition>;
+#[derive(Clone, Default)]
+struct Layout(Vec<(http::HeaderName, Option<HeaderPosition>)>);
 
 impl Draft {
     pub(super) fn hooked(&mut self, hook: &BeforeSend) -> Result<()> {
-        let anchors = anchors(&self.headers);
+        let layout = Layout::of(&self.headers);
         let mut request = self.as_http()?;
         let outcome = hook(&mut request);
         let (parts, body) = request.into_parts();
         self.body = body;
         outcome?;
-        self.headers = listed(&parts.headers, &anchors)?;
+        self.headers = layout.list(&parts.headers)?;
         Ok(())
     }
 
     pub(super) fn into_http(mut self) -> Result<http::Request<Body>> {
-        let anchors = anchors(&self.headers);
+        let layout = Layout::of(&self.headers);
         let mut request = self.as_http()?;
         let carry = &mut self.carry;
         let options = request.extensions_mut();
@@ -49,8 +50,8 @@ impl Draft {
         if let Some(protocol) = carry.protocol.take() {
             options.insert(protocol);
         }
-        if !anchors.is_empty() {
-            options.insert(anchors);
+        if !layout.0.is_empty() {
+            options.insert(layout);
         }
         options.insert(self.carry);
         Ok(request)
@@ -87,8 +88,8 @@ impl RequestBuilder {
             builder.fail(Error::from(err));
         }
         let options = &mut parts.extensions;
-        let anchors = options.remove::<Anchors>().unwrap_or_default();
-        match listed(&parts.headers, &anchors) {
+        let layout = options.remove::<Layout>().unwrap_or_default();
+        match layout.list(&parts.headers) {
             Ok(headers) => builder.draft.headers = headers,
             Err(err) => builder.fail(err),
         }
@@ -120,23 +121,37 @@ impl RequestBuilder {
     }
 }
 
-fn anchors(headers: &HeaderList) -> Anchors {
-    let mut anchors = Anchors::default();
-    for entry in headers.entries() {
-        if let Some(anchor) = entry.anchor {
-            anchors.append(entry.name.clone(), anchor);
-        }
+impl Layout {
+    fn of(headers: &HeaderList) -> Self {
+        Self(
+            headers
+                .entries()
+                .map(|entry| (entry.name.clone(), entry.anchor))
+                .collect(),
+        )
     }
-    anchors
-}
 
-fn listed(headers: &HeaderMap, anchors: &Anchors) -> Result<HeaderList> {
-    let mut list = HeaderList::new();
-    for (name, value) in headers {
-        match anchors.get(name) {
-            Some(anchor) => list.append_anchored(*anchor, name.clone(), value.clone())?,
-            None => list.append(name.clone(), value.clone())?,
+    fn list(&self, headers: &HeaderMap) -> Result<HeaderList> {
+        let mut left: Vec<_> = headers
+            .keys()
+            .map(|name| (name, headers.get_all(name).iter()))
+            .collect();
+        let mut list = HeaderList::new();
+        for (name, anchor) in &self.0 {
+            let values = left.iter_mut().find(|(kept, _)| *kept == name);
+            let Some(value) = values.and_then(|(_, values)| values.next()) else {
+                continue;
+            };
+            match anchor {
+                Some(anchor) => list.append_anchored(*anchor, name.clone(), value.clone())?,
+                None => list.append(name.clone(), value.clone())?,
+            }
         }
+        for (name, values) in left {
+            for value in values {
+                list.append(name.clone(), value.clone())?;
+            }
+        }
+        Ok(list)
     }
-    Ok(list)
 }

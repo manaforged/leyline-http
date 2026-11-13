@@ -22,7 +22,8 @@ mod journey;
 mod response;
 
 impl Session {
-    pub(super) async fn execute_inner(&self, attempt: Box<Draft>) -> Result<Response> {
+    pub(super) async fn execute_inner(&self, mut attempt: Box<Draft>) -> Result<Response> {
+        let mut first_hop = attempt.carry.first_hop.take();
         let url = attempt
             .url
             .expect("invariant: send stores the prepared URL before the attempt");
@@ -65,9 +66,12 @@ impl Session {
             let step_body = std::mem::take(&mut journey.body);
             let replay_body = step_body.try_clone();
 
-            let proxy = self
-                .proxy_for(&journey.url, request_proxy)
-                .map_err(leg_error(answered))?;
+            let proxy = match first_hop.take() {
+                Some(chosen) => chosen.map(std::borrow::Cow::Owned),
+                None => self
+                    .proxy_for(&journey.url, request_proxy)
+                    .map_err(leg_error(answered))?,
+            };
             let leg = {
                 let prepared = Prepared {
                     method: &journey.method,
@@ -89,7 +93,7 @@ impl Session {
             journey.timing.add_leg(&leg.timing);
 
             let seen = leg.headers.seen();
-            if seen.cookies && self.stores_cookies() {
+            if seen.cookies {
                 self.store_cookies(leg.headers.map(), &journey.url);
             }
             if seen.hsts {

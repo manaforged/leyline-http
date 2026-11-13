@@ -237,6 +237,11 @@ Limits:
   `Proxy::identified`, or another `Proxy::custom` fails the request with
   `Kind::Config`.
 - The environment proxies do not apply to a session with a custom proxy.
+- `no_proxy` on the custom proxy still applies: a host on that list is sent
+  direct and the closure is not called. `all`, `http`, and `https` on it have
+  no effect.
+- The closure runs once for each request and each redirect hop, so it may
+  keep a counter to rotate.
 - `Session::save` does not save the closure.
 
 ## Use a proxy list
