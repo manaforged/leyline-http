@@ -10,7 +10,7 @@ fn plain() -> Session {
 
 #[tokio::test]
 async fn pages_follow_next_links_and_stop_on_a_loop() {
-    let server = testing::Server::http(|req| match req.target.as_str() {
+    let server = testing::Server::http(|req| match req.target() {
         "/items" => testing::Response::new(200)
             .header("link", "</items?page=2>; rel=\"next\"")
             .body("one"),

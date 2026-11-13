@@ -299,9 +299,10 @@ impl RequestBuilder {
         self
     }
 
-    /// Sets the maximum response body size in bytes, overriding the session setting.
-    pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.draft.carry.body_rules.max_body_size = bytes;
+    /// Sets the maximum response body size in bytes, overriding the session setting; `None` removes the cap.
+    pub fn max_body_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.draft.carry.body_rules.max_body_size =
+            bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP);
         self
     }
 
@@ -379,19 +380,19 @@ impl RequestBuilder {
     }
 
     /// Sets the `authorization` header to a bearer token.
-    pub fn bearer_auth(mut self, token: &str) -> Self {
+    pub fn bearer_auth(mut self, token: impl AsRef<str>) -> Self {
         self.put(
             http::header::AUTHORIZATION,
-            crate::util::bearer_credentials(token),
+            crate::util::bearer_credentials(token.as_ref()),
         );
         self
     }
 
     /// Sets the `authorization` header to HTTP Basic credentials.
-    pub fn basic_auth(mut self, username: &str, password: &str) -> Self {
+    pub fn basic_auth(mut self, username: impl AsRef<str>, password: impl AsRef<str>) -> Self {
         self.put(
             http::header::AUTHORIZATION,
-            crate::util::basic_credentials(username, password),
+            crate::util::basic_credentials(username.as_ref(), password.as_ref()),
         );
         self
     }
@@ -409,8 +410,8 @@ impl RequestBuilder {
     }
 
     /// Answers an HTTP Digest challenge with the given credentials.
-    pub fn digest_auth(mut self, username: &str, password: &str) -> Self {
-        self.draft.carry.digest_auth = Some(DigestAuth::new(username, password));
+    pub fn digest_auth(mut self, username: impl AsRef<str>, password: impl AsRef<str>) -> Self {
+        self.draft.carry.digest_auth = Some(DigestAuth::new(username.as_ref(), password.as_ref()));
         self
     }
 

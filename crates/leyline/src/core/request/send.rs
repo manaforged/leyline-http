@@ -55,7 +55,6 @@ impl RequestBuilder {
             let attempts = run_attempts(
                 &session,
                 attempt,
-                &url,
                 &retry_policy,
                 &deadline,
                 label,
@@ -120,12 +119,7 @@ impl RequestBuilder {
 
     pub(super) fn prepare(&mut self) -> Result<Arc<url::Url>> {
         let url = self.resolve()?;
-        if Scheme::of(&url).is_none() {
-            return Err(Error::config(format!(
-                "unsupported URL scheme `{}`: requests need http or https",
-                url.scheme()
-            )));
-        }
+        http_scheme(&url)?;
         self.infer_from_content_type();
 
         if let Some(encoding) = self.draft.compress {
@@ -159,17 +153,26 @@ impl std::future::IntoFuture for RequestBuilder {
     }
 }
 
+pub(super) fn http_scheme(url: &url::Url) -> Result<()> {
+    if Scheme::of(url).is_none() {
+        return Err(Error::config(format!(
+            "unsupported URL scheme `{}`: requests need http or https",
+            url.scheme()
+        )));
+    }
+    Ok(())
+}
+
 async fn run_attempts(
     session: &crate::core::session::Session,
     mut attempt: Box<Draft>,
-    url: &Arc<url::Url>,
     retry_policy: &Retry,
     deadline: &Deadline,
     label: Option<String>,
     exhausted: &mut bool,
 ) -> (Result<Response>, u32) {
     crate::trace::note_label(label);
-    let mut route = Route::new(session, Arc::clone(url), &attempt, retry_policy);
+    let mut route = Route::new(session, &attempt, retry_policy);
     if retry_policy.is_none() {
         return (counted(route.send(attempt).await, 1), 1);
     }

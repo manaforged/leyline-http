@@ -11,21 +11,45 @@ pub(super) const CLOSE: &str = "close";
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Request {
-    /// The request method.
-    pub method: String,
-    /// The request target as sent, such as `/path?query`.
-    pub target: String,
-    /// The request headers in the order received.
-    pub headers: Vec<(String, String)>,
-    /// The request body after any chunked decoding.
-    pub body: Vec<u8>,
-    /// The request line, such as `GET /path HTTP/1.1`.
-    pub request_line: String,
-    /// The request line and headers as received, without the body.
-    pub raw: Vec<u8>,
+    pub(super) method: String,
+    pub(super) target: String,
+    pub(super) headers: Vec<(String, String)>,
+    pub(super) body: Vec<u8>,
+    pub(super) request_line: String,
+    pub(super) raw: Vec<u8>,
 }
 
 impl Request {
+    /// Returns the request method as sent, such as `GET`.
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// Returns the request target as sent, such as `/path?query`.
+    pub fn target(&self) -> &str {
+        &self.target
+    }
+
+    /// Returns the request headers as name and value pairs in the order received.
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
+    /// Returns the request body after any chunked decoding.
+    pub fn body(&self) -> &[u8] {
+        &self.body
+    }
+
+    /// Returns the request line, such as `GET /path HTTP/1.1`.
+    pub fn request_line(&self) -> &str {
+        &self.request_line
+    }
+
+    /// Returns the request line and headers as received, without the body.
+    pub fn raw(&self) -> &[u8] {
+        &self.raw
+    }
+
     /// Returns the first value of the named header, ignoring case.
     pub fn header(&self, name: &str) -> Option<&str> {
         self.header_values(name).into_iter().next()

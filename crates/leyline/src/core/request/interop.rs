@@ -2,6 +2,8 @@ use std::sync::Arc;
 
 use http::HeaderMap;
 
+use super::download::Download;
+use super::send::http_scheme;
 use super::{Carry, Draft, RequestBuilder};
 use crate::core::Redirect;
 use crate::core::config::Proxy;
@@ -20,11 +22,18 @@ impl Draft {
     pub(super) fn hooked(&mut self, hook: &BeforeSend) -> Result<()> {
         let layout = Layout::of(&self.headers);
         let mut request = self.as_http()?;
+        let sent = request.uri().clone();
         let outcome = hook(&mut request);
         let (parts, body) = request.into_parts();
         self.body = body;
         outcome?;
         self.headers = layout.list(&parts.headers)?;
+        self.method = parts.method;
+        if parts.uri != sent {
+            let url = absolute(&parts.uri)?;
+            http_scheme(&url)?;
+            self.url = Some(url);
+        }
         Ok(())
     }
 
@@ -53,6 +62,9 @@ impl Draft {
         if !layout.0.is_empty() {
             options.insert(layout);
         }
+        if let Some(download) = self.download.take() {
+            options.insert(download);
+        }
         options.insert(self.carry);
         Ok(request)
     }
@@ -78,14 +90,10 @@ impl Draft {
 impl RequestBuilder {
     pub(crate) fn from_http(session: &Session, request: http::Request<Body>) -> Self {
         let (mut parts, body) = request.into_parts();
-        let url = url::Url::parse(&parts.uri.to_string());
-        let mut builder = Self::new(
-            session,
-            parts.method,
-            url.as_ref().ok().cloned().map(Arc::new),
-        );
+        let url = absolute(&parts.uri);
+        let mut builder = Self::new(session, parts.method, url.as_ref().ok().cloned());
         if let Err(err) = url {
-            builder.fail(Error::from(err));
+            builder.fail(err);
         }
         let options = &mut parts.extensions;
         let layout = options.remove::<Layout>().unwrap_or_default();
@@ -94,6 +102,7 @@ impl RequestBuilder {
             Err(err) => builder.fail(err),
         }
         builder.draft.body = body;
+        builder.draft.download = options.remove::<Box<Download>>();
         if let Some(rest) = options.remove::<Carry>() {
             let fresh = std::mem::replace(&mut builder.draft.carry, rest);
             builder.draft.carry.preset = fresh.preset;
@@ -119,6 +128,10 @@ impl RequestBuilder {
         }
         builder
     }
+}
+
+fn absolute(uri: &http::Uri) -> Result<Arc<url::Url>> {
+    Ok(Arc::new(url::Url::parse(&uri.to_string())?))
 }
 
 impl Layout {

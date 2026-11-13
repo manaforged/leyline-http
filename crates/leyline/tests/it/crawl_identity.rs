@@ -180,7 +180,7 @@ async fn identity_sessions_keep_each_identity_cookies_apart() {
     assert!(
         session
             .cookies()
-            .get(&"http://origin.test/".parse().unwrap(), "sid")
+            .get("http://origin.test/", "sid")
             .is_none()
     );
 }

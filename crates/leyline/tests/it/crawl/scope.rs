@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn a_crawl_follows_a_redirected_seed_to_its_new_host() {
-    let target = testing::Server::http(|request| match request.target.as_str() {
+    let target = testing::Server::http(|request| match request.target() {
         "/start" => html(r#"<p>start</p><a href="/next">N</a>"#),
         "/next" => html("<p>next</p>"),
         _ => testing::Response::new(404),
@@ -10,7 +10,7 @@ async fn a_crawl_follows_a_redirected_seed_to_its_new_host() {
     .await
     .unwrap();
     let location = target.url("/start");
-    let seed = testing::Server::http(move |request| match request.target.as_str() {
+    let seed = testing::Server::http(move |request| match request.target() {
         "/" => testing::Response::new(301).header("location", location.as_str()),
         _ => testing::Response::new(404),
     })
@@ -32,7 +32,7 @@ async fn a_crawl_follows_a_redirected_seed_to_its_new_host() {
 async fn a_crawl_keeps_a_page_that_redirects_back_to_itself_through_a_check() {
     let visits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let count = visits.clone();
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/" => html(r#"<a href="/article">A</a>"#),
         "/article" if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 => {
             testing::Response::new(302).header("location", "/check")
@@ -53,7 +53,7 @@ async fn a_crawl_keeps_a_page_that_redirects_back_to_itself_through_a_check() {
 
 #[tokio::test]
 async fn a_domain_crawl_from_an_address_stays_on_that_address() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="http://127.1.0.1:9/x">X</a><a href="/y">Y</a>"#),
         _ => html("<p>y</p>"),
     })
@@ -71,7 +71,7 @@ async fn a_domain_crawl_from_an_address_stays_on_that_address() {
 
 #[tokio::test]
 async fn a_seed_redirected_to_another_site_yields_only_that_page() {
-    let target = testing::Server::http(|request| match request.target.as_str() {
+    let target = testing::Server::http(|request| match request.target() {
         "/start" => html(r#"<p>start</p><a href="/next">N</a>"#),
         _ => html("<p>next</p>"),
     })
@@ -99,7 +99,7 @@ async fn a_crawl_sends_credentials_only_to_its_seed_origin() {
         .await
         .unwrap();
     let location = format!("http://localhost:{}/landing", other.addr().port());
-    let seed = testing::Server::http(move |request| match request.target.as_str() {
+    let seed = testing::Server::http(move |request| match request.target() {
         "/" => testing::Response::new(301).header("location", location.as_str()),
         _ => testing::Response::new(404),
     })
@@ -116,10 +116,13 @@ async fn a_crawl_sends_credentials_only_to_its_seed_origin() {
         page.unwrap();
     }
     let asked = seed.requests().await;
-    let first = asked.iter().find(|request| request.target == "/").unwrap();
+    let first = asked
+        .iter()
+        .find(|request| request.target() == "/")
+        .unwrap();
     assert_eq!(first.header("authorization"), Some("Bearer secret-token"));
     let sent = other.requests().await;
-    assert!(sent.iter().any(|request| request.target == "/landing"));
+    assert!(sent.iter().any(|request| request.target() == "/landing"));
     assert!(
         sent.iter()
             .all(|request| request.header("authorization").is_none())
@@ -132,14 +135,14 @@ async fn a_redirected_seed_stops_at_its_first_off_site_page() {
         .await
         .unwrap();
     let onward = format!("http://localhost:{}/third", third.addr().port());
-    let second = testing::Server::http(move |request| match request.target.as_str() {
+    let second = testing::Server::http(move |request| match request.target() {
         "/second" => testing::Response::new(302).header("location", onward.as_str()),
         _ => testing::Response::new(404),
     })
     .await
     .unwrap();
     let away = format!("http://localhost:{}/second", second.addr().port());
-    let seed = testing::Server::http(move |request| match request.target.as_str() {
+    let seed = testing::Server::http(move |request| match request.target() {
         "/" => testing::Response::new(301).header("location", away.as_str()),
         _ => testing::Response::new(404),
     })
@@ -157,7 +160,7 @@ async fn a_redirected_seed_stops_at_its_first_off_site_page() {
 
 #[tokio::test]
 async fn a_prefix_crawl_keeps_a_dotted_directory_as_its_prefix() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/v2.0" => html(r#"<a href="/v2.0/page">P</a><a href="/other">O</a>"#),
         _ => html("<p>page</p>"),
     })
@@ -177,7 +180,7 @@ async fn a_prefix_crawl_keeps_a_dotted_directory_as_its_prefix() {
 
 #[tokio::test]
 async fn a_prefix_crawl_from_a_dotted_directory_ending_in_a_slash_stays_inside_it() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/docs.old/" => html(r#"<a href="/docs.old/page">P</a><a href="/other">O</a>"#),
         _ => html("<p>page</p>"),
     })
@@ -201,7 +204,7 @@ async fn a_crawl_counts_a_redirect_that_leaves_its_scope() {
         .await
         .unwrap();
     let away = format!("http://localhost:{}/x", other.addr().port());
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/" => html(r#"<a href="/out">O</a>"#),
         "/out" => testing::Response::new(302).header("location", away.as_str()),
         _ => testing::Response::new(404),
@@ -223,7 +226,7 @@ async fn a_domain_crawl_keeps_other_hosts_of_its_site_and_its_credentials_on_the
     let links = format!(
         r#"<a href="http://blog.example.test:{port}/post">B</a><a href="http://other.test:{port}/away">O</a>"#
     );
-    let server = testing::Server::http_on(listener, move |request| match request.target.as_str() {
+    let server = testing::Server::http_on(listener, move |request| match request.target() {
         "/" => html(&links),
         _ => html("<p>page</p>"),
     })
@@ -246,12 +249,12 @@ async fn a_domain_crawl_keeps_other_hosts_of_its_site_and_its_credentials_on_the
     let sent = server.requests().await;
     let post = sent
         .iter()
-        .find(|request| request.target == "/post")
+        .find(|request| request.target() == "/post")
         .unwrap();
     assert!(post.header("authorization").is_none());
     assert!(post.header("cookie").is_none());
-    assert!(!sent.iter().any(|request| request.target == "/away"));
-    let home = sent.iter().find(|request| request.target == "/").unwrap();
+    assert!(!sent.iter().any(|request| request.target() == "/away"));
+    let home = sent.iter().find(|request| request.target() == "/").unwrap();
     assert_eq!(home.header("authorization"), Some("Bearer secret-token"));
 }
 
@@ -264,7 +267,7 @@ async fn a_crawl_filter_keeps_a_path_prefix_and_drops_paged_urls() {
             .collect();
         html(&format!("<p>page with {} links</p>{anchors}", links.len()))
     }
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/docs/a" => page(&["/docs/a?page=2", "/docs/deep/1", "/blog/x"]),
         "/docs/deep/1" => page(&["/docs/deep/2"]),
         "/docs/deep/2" | "/docs/a?page=2" | "/blog/x" => page(&[]),

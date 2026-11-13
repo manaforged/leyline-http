@@ -43,11 +43,11 @@ impl SessionBuilder {
             .proxy_pool
             .iter()
             .flat_map(ProxyPool::configs)
-            .any(crate::core::config::Proxy::is_pool)
+            .any(|config| !config.is_single())
         {
             return Err(Error::config(
                 "a Proxy::list or Proxy::identified entry must be one proxy, not another \
-                 Proxy::list or Proxy::identified",
+                 Proxy::list or Proxy::identified, and not a Proxy::custom",
             ));
         }
         if !self.impersonates()

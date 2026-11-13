@@ -14,7 +14,7 @@ const UPLOAD_PAGE: &str = r#"<html><head><base href="/app/"></head><body>
 </form></body></html>"#;
 
 fn upload_site(req: &testing::Request) -> testing::Response {
-    match req.target.as_str() {
+    match req.target() {
         "/pages/upload" => testing::Response::new(200).body(UPLOAD_PAGE),
         _ => testing::Response::new(200),
     }
@@ -33,10 +33,10 @@ async fn submit_form_follows_enctype_and_base_href() {
     let form = html::Form::find(&page.text().await.unwrap(), "up").unwrap();
     tab.submit_form(&form).await.unwrap();
     let posted = server.requests().await.pop().unwrap();
-    assert_eq!(posted.target, "/app/send");
+    assert_eq!(posted.target(), "/app/send");
     let kind = posted.header("content-type").unwrap_or_default();
     assert!(kind.starts_with("multipart/form-data"), "{kind}");
-    let body = String::from_utf8_lossy(&posted.body);
+    let body = String::from_utf8_lossy(posted.body());
     assert!(body.contains("name=\"title\""), "{body}");
 }
 
@@ -145,7 +145,7 @@ fn relay_drops_proxy_authentication_fields() {
 #[tokio::test]
 async fn pages_does_not_repeat_the_first_page_after_a_redirect() {
     let server = testing::Server::http(|req| {
-        if req.target == "/items" {
+        if req.target() == "/items" {
             testing::Response::new(302)
                 .close()
                 .header("location", "/items/")
@@ -202,7 +202,7 @@ const TEXTAREA_PAGE: &str =
 #[tokio::test]
 async fn a_textarea_line_break_is_sent_as_crlf() {
     let server = testing::Server::http(|req| {
-        if req.target == "/page" {
+        if req.target() == "/page" {
             testing::Response::new(200).body(TEXTAREA_PAGE)
         } else {
             testing::Response::new(200)
@@ -220,7 +220,7 @@ async fn a_textarea_line_break_is_sent_as_crlf() {
     let form = html::Form::find(&page.text().await.unwrap(), "t").unwrap();
     tab.submit_form(&form).await.unwrap();
     let posted = server.requests().await.pop().unwrap();
-    assert_eq!(posted.body, b"t=a%0D%0Ab");
+    assert_eq!(posted.body(), b"t=a%0D%0Ab");
 }
 
 #[test]

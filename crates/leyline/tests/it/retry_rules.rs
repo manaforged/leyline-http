@@ -131,8 +131,8 @@ async fn an_unsent_streaming_body_is_retried() {
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let sent = proxy.next_request().await.unwrap();
-    assert_eq!(sent.target, "http://origin.test/upload");
-    assert_eq!(sent.body, b"part-one,part-two");
+    assert_eq!(sent.target(), "http://origin.test/upload");
+    assert_eq!(sent.body(), b"part-one,part-two");
 }
 
 #[tokio::test]

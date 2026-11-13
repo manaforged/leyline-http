@@ -133,9 +133,9 @@ impl Events {
         crate::util::lock(&self.settings).retry = retry.into();
         self
     }
-    /// Caps the bytes held for one event; the default is one MiB.
-    pub fn max_event_size(self, bytes: usize) -> Self {
-        crate::util::lock(&self.settings).max = bytes;
+    /// Caps the bytes held for one event, one MiB by default; `None` removes the cap.
+    pub fn max_event_size(self, bytes: impl Into<Option<usize>>) -> Self {
+        crate::util::lock(&self.settings).max = bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP);
         self
     }
     /// Sets the id of the last event already received, sent as `Last-Event-ID` on the first connection and replaced by each newer event id on reconnection.

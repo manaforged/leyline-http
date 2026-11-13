@@ -283,7 +283,7 @@ async fn a_failed_streamed_attempt_frees_its_slot_during_the_retry_wait() {
     let served = Arc::new(AtomicUsize::new(0));
     let count = Arc::clone(&served);
     let server = testing::Server::http(move |req| {
-        if req.target == "/a" && count.fetch_add(1, Ordering::SeqCst) == 0 {
+        if req.target() == "/a" && count.fetch_add(1, Ordering::SeqCst) == 0 {
             testing::Response::new(503)
                 .close()
                 .header("retry-after", "3")

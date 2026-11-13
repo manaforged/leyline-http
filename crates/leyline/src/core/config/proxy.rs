@@ -13,7 +13,14 @@ use crate::wire::Scheme;
 use super::host::pattern_matches;
 use crate::net::normalize_host;
 
-type Choose = Arc<dyn Fn(&url::Url) -> Option<Proxy> + Send + Sync>;
+type Chooser = dyn Fn(&url::Url) -> Option<Proxy> + Send + Sync;
+
+#[derive(Clone)]
+pub(super) struct Choose(Arc<Chooser>);
+
+impl std::panic::UnwindSafe for Choose {}
+
+impl std::panic::RefUnwindSafe for Choose {}
 
 #[doc = include_str!("../../../docs/proxy.md")]
 #[derive(Clone)]
@@ -155,7 +162,7 @@ impl Proxy {
         F: Fn(&url::Url) -> Option<Proxy> + Send + Sync + 'static,
     {
         Self {
-            custom: Some(Arc::new(choose)),
+            custom: Some(Choose(Arc::new(choose))),
             ..Self::new()
         }
     }
@@ -206,7 +213,19 @@ impl Proxy {
     }
 
     pub(crate) fn shown(&self) -> Option<String> {
-        self.primary().map(crate::util::redact)
+        self.primary().map(redact)
+    }
+
+    pub(crate) fn summary(&self, pool: Option<&ProxyPool>) -> Option<String> {
+        match pool.or(self.pool.as_ref()) {
+            Some(pool) => Some(format!("pool({})", pool.len())),
+            None if self.is_custom() => Some("custom".to_owned()),
+            None => self.shown(),
+        }
+    }
+
+    pub(crate) fn is_single(&self) -> bool {
+        self.pool.is_none() && self.custom.is_none()
     }
 
     pub(crate) fn is_pool(&self) -> bool {
@@ -253,10 +272,10 @@ impl Proxy {
         if self.bypasses(url.host_str().unwrap_or("")) {
             return Ok(None);
         }
-        let Some(chosen) = choose(url) else {
+        let Some(chosen) = (choose.0)(url) else {
             return Ok(None);
         };
-        if chosen.is_custom() || chosen.is_pool() {
+        if !chosen.is_single() {
             return Err(Error::config(
                 "a Proxy::custom closure must return one proxy, not a Proxy::list, \
                  Proxy::identified or Proxy::custom",

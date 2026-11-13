@@ -104,7 +104,7 @@ impl super::Session {
         }
         let version = self.inner.inputs.credential.as_ref()?.version()?;
         if journey.tainted
-            || !self.bearer_in_scope(&journey.url)
+            || !self.credential_in_scope(&journey.url)
             || journey
                 .extra
                 .as_ref()

@@ -219,17 +219,20 @@ fn quoted_len(input: &str) -> usize {
     input.len() + input.bytes().filter(|b| matches!(b, b'"' | b'\\')).count()
 }
 
+fn has_control(input: &str) -> bool {
+    input.bytes().any(|b| b.is_ascii_control())
+}
+
 fn escape_quoted(input: &str) -> Option<Vec<u8>> {
+    if has_control(input) {
+        return None;
+    }
     let mut out = Vec::with_capacity(input.len() + 2);
     for b in input.bytes() {
-        match b {
-            0x00..=0x1F | 0x7F => return None,
-            b'"' | b'\\' => {
-                out.push(b'\\');
-                out.push(b);
-            }
-            _ => out.push(b),
+        if matches!(b, b'"' | b'\\') {
+            out.push(b'\\');
         }
+        out.push(b);
     }
     Some(out)
 }
@@ -263,7 +266,7 @@ fn render_part_headers(boundary: &str, part: &Part) -> io::Result<Bytes> {
     out.extend_from_slice(b"\r\n");
 
     if let Some(mime) = &part.mime {
-        if mime.bytes().any(|b| matches!(b, 0x00..=0x1F | 0x7F)) {
+        if has_control(mime) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "multipart part `mime` contains control characters",
@@ -275,8 +278,7 @@ fn render_part_headers(boundary: &str, part: &Part) -> io::Result<Bytes> {
     }
 
     for (k, v) in &part.extra_headers {
-        let bad = k.bytes().any(|b| matches!(b, 0x00..=0x1F | 0x7F))
-            || v.bytes().any(|b| matches!(b, 0x00..=0x0A | 0x0D | 0x7F));
+        let bad = has_control(k) || v.bytes().any(|b| matches!(b, 0x00..=0x0A | 0x0D | 0x7F));
         if bad {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,

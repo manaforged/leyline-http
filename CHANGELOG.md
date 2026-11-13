@@ -18,17 +18,21 @@ version and publish as separate crates.
 - `Tls::pin_sha256` is renamed `Tls::pin_cert_sha256`; it pins the whole leaf certificate, not its public key.
 - `Message::Ping` and `Message::Pong` carry their payload as `Vec<u8>`.
 - `testing::Request::text` returns the request body; `testing::Request::head` returns the request line and headers.
+- `cookie::Cookie`, `Link`, and `testing::Request` have private fields and a getter named for each field, such as `cookie.name()` and `request.target()`.
+- A `cookie::Jar` method given `&text.parse().unwrap()` no longer infers the URL type; pass the string itself.
+- A second `SessionBuilder::header` call with the same name adds a value where it replaced the first; `user_agent`, `bearer_auth`, and `basic_auth` still replace.
+- A request that sets `user-agent` no longer sends the browser profile's `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform` headers unless the request sets them.
 
 ### Added
 
-- `SessionBuilder::before_send` runs a hook on every request before each attempt; the hook reads the method, URL, headers and body, and its header and body changes are sent.
+- `SessionBuilder::before_send` runs a hook on every request before each attempt; the hook may change the method, URL, headers and body.
 - `RequestBuilder::build` converts a request into an `http::Request`, and `Session::request_from` converts one back into a `RequestBuilder`, so a request can be read, changed, streamed, or sent from a `tower` service of your own.
 - `RequestBuilder::try_clone` copies a request with a buffered body so it can be sent more than once.
 - `Response::into_http` converts a response into an `http::Response` that streams the body.
 - `Body::file`, `Body::as_bytes`, `Body::try_clone`, and `Body::next`. `Body::next` reads a streamed body without `futures_util::StreamExt`.
 - `SessionBuilder::user_agent`, `SessionBuilder::header`, and `SessionBuilder::basic_auth` set one default for every request.
 - `SessionBuilder::cookies(None)` turns cookie storage off.
-- `cookie::Cookie::new` and `cookie::Jar::insert` build a cookie from its fields and store it.
+- `cookie::Cookie::new`, `cookie::Cookie::builder`, and `cookie::Jar::insert` build a cookie from its fields and store it. Every `Jar` method takes the URL as a string or a `Url`.
 - `Tls::client_cert_pem` takes the client certificate chain and key as PEM bytes in memory.
 - `Events::last_event_id` resumes a server-sent event stream from a known event id.
 - `Crawl::filter` follows a link only when a closure accepts its URL; a rejected link counts under `SkipReason::Filter`.
@@ -37,12 +41,19 @@ version and publish as separate crates.
 - `Response::remote_addr` returns the socket address the connection was opened to, and `trace::Event::Connect` carries it as `addr`.
 - `Response::from_cache` tells whether the body came from the session's HTTP cache.
 - `Proxy::custom` chooses the proxy for each request and redirect hop with a closure over the URL; `None` sends the request with no proxy, and `no_proxy` on it still applies.
+- `SessionBuilder::build_blocking` builds a `blocking::Session`.
+- `None` turns off the cap or the cache in `SessionBuilder::cache`, `max_body_size`, and `max_error_body_size`, `RequestBuilder::max_body_size`, `Crawl::max_body_size`, and `Events::max_event_size`.
+- `bearer_auth`, `basic_auth`, and `digest_auth` take a `String` as well as a `&str`.
 - `std::io::Error::from(leyline::Error)` keeps the `leyline::Error` inside, and `Error::find` recovers it, so a streamed `Body` fits `tokio_util::io::StreamReader`.
 - `Scope::Any` follows links and sitemaps across any host while keeping `Authorization` and default `Cookie` headers scoped to the seed origin.
 - `Crawl::redirect`, `Crawl::max_depth`, `Crawl::max_url_size`, `Crawl::max_sitemaps`, `Crawl::max_crawl_delay`, `Crawl::robots_max_age`, `Crawl::dedup`, and `Crawl::dedup_min_words` configure or lift each built-in crawl bound while keeping polite defaults out of the box, and `Crawl::limit` now accepts `None` to clear an earlier cap.
 
 ### Fixed
 
+- `RequestBuilder::build` followed by `Session::request_from` keeps the download options `sha256`, `progress`, and `resume`.
+- A `Proxy::custom` inside `Proxy::list` or `Proxy::identified` fails `build()` with `Kind::Config`.
+- `Proxy` is `UnwindSafe` and `RefUnwindSafe` again.
+- A session's `Display` and `Debug` output names a proxy list as `pool(N)` and a closure as `custom`, where both printed no proxy.
 - A link that `Crawl` drops because it is out of scope now counts under `SkipReason::Scope`.
 - A `leyline::blocking::Session` can reach a `testing::Server` started from the same thread; the server no longer needs the caller to drive its runtime, and `testing::Server::http_on` works from synchronous code.
 - `Crawl` and `Session::robots` now honor an explicit `SessionBuilder::retry(0)`, `SessionBuilder::redirect`, `SessionBuilder::max_body_size`, and `HostLimits` concurrency above 16 requests instead of clamping or overriding them with internal defaults, and untyped HTML pages enforce `max_body_size` instead of a fixed 10 MiB cap.

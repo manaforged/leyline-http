@@ -87,7 +87,7 @@ async fn samesite_follows_the_sent_fetch_site() {
             req.header_values("cookie").len(),
             0,
             "{}",
-            String::from_utf8_lossy(&req.raw)
+            String::from_utf8_lossy(req.raw())
         );
     }
     server.shutdown().await;
@@ -383,7 +383,7 @@ async fn an_https_initiator_sends_a_null_origin_to_http() {
         req.header_values("origin"),
         vec!["null"],
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     server.shutdown().await;
 }

@@ -5,6 +5,7 @@ use std::time::SystemTime;
 use tokio::sync::watch;
 use url::Url;
 
+use crate::IntoUrl;
 use crate::cookie::Cookie;
 use crate::cookie::parse;
 use crate::util::lock;
@@ -88,15 +89,25 @@ impl Jar {
         self.changed();
     }
 
-    /// Parses a `Set-Cookie` header value received from `url` and stores the cookie.
-    pub fn store(&self, url: &Url, set_cookie: &str) {
+    /// Parses a `Set-Cookie` header value received from `url` and stores the cookie, and ignores a `url` that does not parse.
+    pub fn store(&self, url: impl IntoUrl, set_cookie: &str) {
+        if let Ok(url) = url.into_url() {
+            self.store_from(&url, set_cookie);
+        }
+    }
+
+    fn store_from(&self, url: &Url, set_cookie: &str) {
         self.put(url, parse::parse_set_cookie(set_cookie, url));
     }
 
-    /// Stores `cookie` as if a response from `url` had set it, with the host of `url` as its domain when `cookie.domain` is empty, and ignores a cookie that `url` may not set.
-    pub fn insert(&self, url: &Url, cookie: Cookie) {
-        if plain_token(&cookie.name) && !cookie.name.contains('=') && plain_token(&cookie.value) {
-            self.put(url, parse::admit_cookie(&cookie, url));
+    /// Stores `cookie` as if a response from `url` had set it, with the host of `url` as its domain when the cookie has none, and ignores a cookie that `url` may not set and a `url` that does not parse.
+    pub fn insert(&self, url: impl IntoUrl, cookie: Cookie) {
+        if let Ok(url) = url.into_url()
+            && plain_token(&cookie.name)
+            && !cookie.name.contains('=')
+            && plain_token(&cookie.value)
+        {
+            self.put(&url, parse::admit_cookie(&cookie, &url));
         }
     }
 
@@ -146,13 +157,13 @@ impl Jar {
 
     pub(crate) fn store_response_cookies(&self, headers: &[&str], url: &Url) {
         for header in headers {
-            self.store(url, header);
+            self.store_from(url, header);
         }
     }
 
-    /// Returns the `Cookie` header value to send to `url`, or `None` when no cookie matches.
-    pub fn header_for(&self, url: &Url) -> Option<String> {
-        self.cookie_header_for(url, false, true)
+    /// Returns the `Cookie` header value to send to `url`, or `None` when no cookie matches or `url` does not parse.
+    pub fn header_for(&self, url: impl IntoUrl) -> Option<String> {
+        self.cookie_header_for(&url.into_url().ok()?, false, true)
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -166,23 +177,17 @@ impl Jar {
         lax_allowed: bool,
     ) -> Option<String> {
         use crate::cookie::record::SameSite;
-        let domain = url.host_str().unwrap_or("");
-        let path = url.path();
-        let is_secure = parse::secure_origin(url);
-
         let mut jar = lock(&self.inner);
         if jar.total == 0 {
             return None;
         }
         let now = SystemTime::now();
+        let sent = sent_to(url);
 
         let mut matching: Vec<&mut Cookie> = Vec::with_capacity(8);
         for entries in jar.cookies.values_mut() {
             for cookie in entries.iter_mut() {
-                if cookie.is_expired() {
-                    continue;
-                }
-                if !cookie.matches(domain, path, is_secure) {
+                if !sent(&*cookie) {
                     continue;
                 }
                 if cross_site {
@@ -223,8 +228,11 @@ impl Jar {
         self.changed_if(removed)
     }
 
-    /// Removes cookies with the given name that match the host of `url` and returns the count removed.
-    pub fn remove(&self, url: &Url, name: &str) -> usize {
+    /// Removes cookies with the given name that match the host of `url` and returns the count removed, zero when `url` does not parse.
+    pub fn remove(&self, url: impl IntoUrl, name: &str) -> usize {
+        let Ok(url) = url.into_url() else {
+            return 0;
+        };
         let host = url.host_str().unwrap_or("");
         let removed =
             lock(&self.inner).remove_where(|c| c.name == name && c.matches(host, &c.path, true));
@@ -246,22 +254,20 @@ impl Jar {
         out
     }
 
-    /// Returns the value of the unexpired cookie named `name` that would be sent to `url`.
-    pub fn get(&self, url: &Url, name: &str) -> Option<String> {
-        let domain = url.host_str().unwrap_or("");
-        let path = url.path();
-        let is_secure = parse::secure_origin(url);
-
+    /// Returns the value of the unexpired cookie named `name` that would be sent to `url`, or `None` when there is none or `url` does not parse.
+    pub fn get(&self, url: impl IntoUrl, name: &str) -> Option<String> {
+        let url = url.into_url().ok()?;
+        let sent = sent_to(&url);
         let jar = lock(&self.inner);
         jar.cookies
             .values()
             .flatten()
-            .find(|c| c.name == name && c.matches(domain, path, is_secure) && !c.is_expired())
+            .find(|c| c.name == name && sent(c))
             .map(|c| c.value.clone())
     }
 
-    /// Stores a cookie with path `/` for `url`, and ignores names or values that contain `;` or control characters.
-    pub fn set(&self, url: &Url, name: &str, value: &str) {
+    /// Stores a cookie with path `/` for `url`, and ignores names or values that contain `;` or control characters and a `url` that does not parse.
+    pub fn set(&self, url: impl IntoUrl, name: &str, value: &str) {
         self.insert(url, Cookie::new(name, value));
     }
 
@@ -290,6 +296,13 @@ impl std::fmt::Debug for Jar {
             .field("total", &jar.total)
             .finish()
     }
+}
+
+fn sent_to(url: &Url) -> impl Fn(&Cookie) -> bool {
+    let domain = url.host_str().unwrap_or("");
+    let path = url.path();
+    let is_secure = parse::secure_origin(url);
+    move |cookie: &Cookie| cookie.matches(domain, path, is_secure) && !cookie.is_expired()
 }
 
 fn plain_token(text: &str) -> bool {

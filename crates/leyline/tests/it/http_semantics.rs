@@ -69,8 +69,8 @@ async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
     assert_eq!(resp.status(), 200);
     assert_eq!(
         resp.cookies()
-            .find(|c| c.name == "token")
-            .map(|c| c.value)
+            .find(|c| c.name() == "token")
+            .map(|c| c.value().to_owned())
             .as_deref(),
         Some("\"quoted value\""),
         "Response::cookies() must reflect the RFC parser (quotes kept)"
@@ -78,7 +78,7 @@ async fn response_cookies_use_the_rfc_parser_not_a_hand_parser() {
     assert_eq!(
         session
             .cookies()
-            .get(&url::Url::parse(&format!("{base}/")).unwrap(), "token")
+            .get(url::Url::parse(&format!("{base}/")).unwrap(), "token")
             .as_deref(),
         Some("\"quoted value\""),
         "Response::cookies() and the jar must not diverge"

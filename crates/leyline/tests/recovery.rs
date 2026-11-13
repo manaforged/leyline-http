@@ -325,7 +325,7 @@ async fn a_saved_crawl_resumes_without_fetching_a_page_twice() {
     use leyline::HostLimits;
 
     let server = Server::http(|request: &Request| {
-        let html = match request.target.as_str() {
+        let html = match request.target() {
             "/" => r#"<a href="/a">a</a><a href="/b">b</a><a href="/c">c</a>"#,
             _ => r#"<a href="/">home</a>"#,
         };
@@ -354,7 +354,7 @@ async fn a_saved_crawl_resumes_without_fetching_a_page_twice() {
         .requests()
         .await
         .into_iter()
-        .map(|request| request.target)
+        .map(|request| request.target().to_owned())
         .collect();
     fetched.sort();
     let before = fetched.len();
@@ -376,7 +376,7 @@ async fn a_saved_crawl_resumes_without_fetching_a_page_twice() {
 async fn a_saved_crawl_preserves_tunable_policies() {
     use leyline::{HostLimits, Scope, SkipReason};
 
-    let external = Server::http(|request: &Request| match request.target.as_str() {
+    let external = Server::http(|request: &Request| match request.target() {
         "/ext" => Response::new(200)
             .header("content-type", "text/html")
             .body(r#"<a href="/too-deep">deep</a>"#),
@@ -385,7 +385,7 @@ async fn a_saved_crawl_preserves_tunable_policies() {
     .await
     .expect("start external server");
     let ext_url = format!("http://localhost:{}/ext", external.addr().port());
-    let server = Server::http(move |request: &Request| match request.target.as_str() {
+    let server = Server::http(move |request: &Request| match request.target() {
         "/" => Response::new(200)
             .header("content-type", "text/html")
             .body(format!(
@@ -439,6 +439,6 @@ async fn a_saved_crawl_preserves_tunable_policies() {
             .requests()
             .await
             .iter()
-            .any(|req| req.target == "/sitemap.xml")
+            .any(|req| req.target() == "/sitemap.xml")
     );
 }

@@ -37,7 +37,7 @@ pub(super) async fn targets(server: &testing::Server) -> BTreeSet<String> {
         .requests()
         .await
         .into_iter()
-        .map(|request| request.target)
+        .map(|request| request.target().to_owned())
         .collect()
 }
 

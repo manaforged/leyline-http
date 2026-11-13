@@ -155,9 +155,9 @@ impl SessionBuilder {
         self
     }
 
-    /// Enables a private in-memory HTTP cache with a byte budget; zero disables caching.
-    pub fn cache(mut self, bytes: usize) -> Self {
-        self.cache = bytes;
+    /// Enables a private in-memory HTTP cache with a byte budget; `None` or zero disables caching, which is the default.
+    pub fn cache(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.cache = bytes.into().unwrap_or(0);
         self
     }
 
@@ -455,15 +455,16 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the maximum decoded response body size in bytes.
-    pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.compression.set_max_body_size(bytes);
+    /// Sets the maximum decoded response body size in bytes, 100 MiB by default; `None` removes the cap.
+    pub fn max_body_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.compression
+            .set_max_body_size(bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP));
         self
     }
 
-    /// Sets the maximum number of error response body bytes kept in an `Error`.
-    pub fn max_error_body_size(mut self, bytes: usize) -> Self {
-        self.compression.max_error_body = bytes;
+    /// Sets the maximum number of error response body bytes kept in an `Error`, 64 KiB by default; `None` keeps the body up to `max_body_size`.
+    pub fn max_error_body_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.compression.max_error_body = bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP);
         self
     }
 
@@ -585,7 +586,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Runs `hook` on every request before each attempt, after any hook already set: it reads the method, URL, request headers and body, its header and body changes are sent, and its error fails the request.
+    /// Runs `hook` on every request before each attempt, after any hook already set: it may change the method, URL, headers and body, the URL it leaves must be an absolute `http` or `https` URL, and its error fails the request.
     pub fn before_send<F>(mut self, hook: F) -> Self
     where
         F: Fn(&mut http::Request<Body>) -> Result<()> + Send + Sync + 'static,
@@ -607,7 +608,7 @@ impl SessionBuilder {
         self.header(USER_AGENT, value.into())
     }
 
-    /// Adds one default header sent on every request, and fails the build when the name or value is invalid.
+    /// Adds one default header sent on every request, keeping earlier values of the same name, and fails the build when the name or value is invalid.
     pub fn header(
         self,
         name: impl TryInto<http::HeaderName>,
@@ -658,6 +659,11 @@ impl SessionBuilder {
     /// Builds the session and fails with `Kind::Config` when a setting is invalid.
     pub fn build(self) -> Result<Session> {
         self.build_with(InvalidEnvProxy::FailBuild)
+    }
+
+    /// Builds a `blocking::Session`, whose calls run on the calling thread, and fails with `Kind::Config` when a setting is invalid.
+    pub fn build_blocking(self) -> Result<crate::blocking::Session> {
+        crate::blocking::Session::new(self)
     }
 
     fn build_with(mut self, on_invalid: InvalidEnvProxy) -> Result<Session> {

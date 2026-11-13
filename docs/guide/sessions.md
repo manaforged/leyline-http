@@ -162,13 +162,15 @@ The hook sees:
   headers, the profile headers, `Cookie`, `Host`, or `Content-Length`.
 - The body. `Body::as_bytes()` returns its bytes, or `None` for a stream.
 
-Leyline sends the header changes the hook makes and a body it replaces. It
-ignores changes to the method, the URL, and the extensions.
+Leyline sends the method, the URL, the headers, and the body the hook leaves,
+so a hook can sign the query string. The URL must stay an absolute `http` or
+`https` URL, or the request fails. Leyline ignores changes to the
+extensions.
 
 - The hook runs before every attempt: the first send and each retry. It does
   not run again for a redirect hop.
-- Each retry starts again from your original headers and body, so a hook that
-  adds a header does not add it twice.
+- Each retry starts again from your original method, URL, headers and body,
+  so a hook that adds a header does not add it twice.
 - An error from the hook fails the request.
 - A second `before_send` call adds a hook that runs after the first.
 - A WebSocket handshake from `RequestBuilder::websocket()` does not pass
@@ -347,7 +349,7 @@ Code without an async runtime uses `blocking::Session`. It owns a small runtime 
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
-let session = leyline::blocking::Session::new(leyline::Session::builder())?;
+let session = leyline::Session::builder().build_blocking()?;
 let body = session.block_on(async {
     session.get("https://example.com/").text().await
 })?;

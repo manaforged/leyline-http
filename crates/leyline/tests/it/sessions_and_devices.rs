@@ -119,7 +119,12 @@ async fn a_block_moves_the_origin_to_another_proxy() {
     session.get("http://origin.test/a").send().await.unwrap();
     let moved = tokio::time::timeout(Duration::from_secs(5), async {
         session.get("http://origin.test/b").send().await.unwrap();
-        second.next_request().await.unwrap().request_line
+        second
+            .next_request()
+            .await
+            .unwrap()
+            .request_line()
+            .to_owned()
     })
     .await
     .expect("the challenge did not move the origin off the first proxy");
@@ -178,7 +183,7 @@ async fn a_file_part_takes_a_mime_type() {
         .send()
         .await
         .unwrap();
-    let body = String::from_utf8(server.requests().await[0].body.clone()).unwrap();
+    let body = String::from_utf8(server.requests().await[0].body().to_vec()).unwrap();
     assert!(body.contains("filename=\"logo.png\""), "{body}");
     assert!(
         body.contains("Content-Type: image/png") || body.contains("content-type: image/png"),

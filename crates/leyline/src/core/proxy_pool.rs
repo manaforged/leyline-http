@@ -80,6 +80,10 @@ impl ProxyPool {
         self.entries.iter().any(|entry| entry.identity.is_some())
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     pub(crate) fn configs(&self) -> impl Iterator<Item = &Proxy> {
         self.entries.iter().map(|entry| &entry.config)
     }

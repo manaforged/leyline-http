@@ -45,7 +45,7 @@ async fn row(server: &testing::Server, label: String, session: leyline::Result<S
     session.get(server.url("/")).send().await.unwrap();
     let request = server.next_request().await.unwrap();
     let headers = request
-        .headers
+        .headers()
         .iter()
         .filter(|(name, _)| !name.eq_ignore_ascii_case("host"))
         .map(|(name, value)| format!("{name}: {value}"))

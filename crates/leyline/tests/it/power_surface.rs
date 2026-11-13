@@ -98,10 +98,10 @@ async fn a_built_request_can_be_read_and_sent_back_through_the_session() -> Chec
     assert_eq!(text, b"built");
     let seen = server.requests().await;
     assert_eq!(seen.len(), 1);
-    assert_eq!(seen[0].target, "/items?page=2");
+    assert_eq!(seen[0].target(), "/items?page=2");
     assert_eq!(seen[0].header("x-trace"), Some("t1"));
     assert_eq!(seen[0].header("content-type"), Some("application/json"));
-    assert_eq!(seen[0].body, br#"{"name":"ada"}"#);
+    assert_eq!(seen[0].body(), br#"{"name":"ada"}"#);
     Ok(())
 }
 
@@ -122,13 +122,7 @@ async fn one_request_is_cloned_and_sent_twice_but_a_streamed_one_is_not() -> Che
     let seen = server.requests().await;
     let sent: Vec<(&str, Option<&str>, &[u8])> = seen
         .iter()
-        .map(|request| {
-            (
-                request.method.as_str(),
-                request.header("x-copy"),
-                request.body.as_slice(),
-            )
-        })
+        .map(|request| (request.method(), request.header("x-copy"), request.body()))
         .collect();
     assert_eq!(sent, [("PUT", Some("yes"), &b"payload"[..]); 2]);
 
@@ -156,7 +150,7 @@ async fn a_file_is_sent_as_the_request_body_with_its_length() -> Check {
     assert_eq!(response?.status(), 200);
     let seen = server.requests().await;
     assert_eq!(seen[0].header("content-length"), Some("200000"));
-    assert_eq!(seen[0].body, content);
+    assert_eq!(seen[0].body(), content);
     Ok(())
 }
 
@@ -198,9 +192,10 @@ async fn a_hand_built_cookie_is_sent_only_where_its_fields_allow() -> Check {
     let server = testing::Server::http(|_| ok("hi")).await?;
     let origin = Url::parse(&server.url("/"))?;
     let jar = Jar::new();
-    let mut cookie = Cookie::new("sid", "abc");
-    cookie.path = "/app".to_owned();
-    cookie.http_only = true;
+    let cookie = Cookie::builder("sid", "abc")
+        .path("/app")
+        .http_only(true)
+        .build();
     jar.insert(&origin, cookie);
     jar.store(&origin, "theme=dark; Path=/");
     let session = Session::builder().cookies(jar.clone()).build()?;
@@ -216,10 +211,10 @@ async fn a_hand_built_cookie_is_sent_only_where_its_fields_allow() -> Check {
     let stored = jar.all();
     let sid = stored
         .iter()
-        .find(|cookie| cookie.name == "sid")
+        .find(|cookie| cookie.name() == "sid")
         .ok_or("sid is stored")?;
     assert_eq!(
-        (sid.domain.as_str(), sid.host_only, sid.http_only),
+        (sid.domain(), sid.host_only(), sid.http_only()),
         ("127.0.0.1", true, true)
     );
     Ok(())
@@ -288,7 +283,7 @@ async fn a_body_cut_by_the_mock_server_fails_the_read() -> Check {
 fn a_blocking_session_reaches_a_mock_server_started_on_its_own_runtime() -> Check {
     let session = leyline::blocking::Session::new(Session::builder())?;
     let server = session.block_on(testing::Server::http(|request| {
-        testing::Response::new(200).body(request.body.clone())
+        testing::Response::new(200).body(request.body().to_vec())
     }))?;
 
     let text = session.block_on(session.post(server.url("/echo")).body("ping").text())?;
@@ -368,12 +363,12 @@ async fn a_proxy_closure_routes_one_path_through_a_proxy_and_the_rest_direct() -
     assert_eq!(straight.text().await?, "direct");
     let proxied = proxy.requests().await;
     assert_eq!(proxied.len(), 1);
-    assert_eq!(proxied[0].target, direct.url("/via/a"));
+    assert_eq!(proxied[0].target(), direct.url("/via/a"));
     let reached: Vec<String> = direct
         .requests()
         .await
         .into_iter()
-        .map(|request| request.target)
+        .map(|request| request.target().to_owned())
         .collect();
     assert_eq!(reached, ["/plain"]);
     Ok(())
@@ -553,5 +548,216 @@ async fn one_request_forces_http3_on_a_session_that_defaults_to_tcp() -> Check {
 
     assert_eq!(response.version(), leyline::http::Version::HTTP_3);
     assert_eq!(response.bytes().await?.len(), 4096);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_hook_can_sign_the_url_and_change_the_method() -> Check {
+    let server = testing::Server::http(|_| ok("hi")).await?;
+    let session = Session::builder()
+        .before_send(|request| {
+            let signed = format!("{}&sig=abc", request.uri());
+            *request.uri_mut() = signed.parse()?;
+            *request.method_mut() = leyline::http::Method::PUT;
+            Ok(())
+        })
+        .build()?;
+
+    let response = session.post(server.url("/pay?n=1")).body("x").await?;
+
+    let seen = server.requests().await;
+    assert_eq!(
+        (seen[0].method(), seen[0].target()),
+        ("PUT", "/pay?n=1&sig=abc")
+    );
+    assert_eq!(response.url().query(), Some("n=1&sig=abc"));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_hook_that_leaves_a_relative_url_fails_the_request() -> Check {
+    let server = testing::Server::http(|_| ok("hi")).await?;
+    let session = Session::builder()
+        .before_send(|request| {
+            *request.uri_mut() = leyline::http::Uri::from_static("/only-a-path");
+            Ok(())
+        })
+        .build()?;
+
+    let failed = session.get(server.url("/")).await;
+
+    assert_eq!(failed.err().map(|error| error.kind()), Some(Kind::Url));
+    assert!(server.requests().await.is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_download_checksum_survives_build_and_request_from() -> Check {
+    let server = testing::Server::http(|_| ok("payload")).await?;
+    let session = Session::new();
+    let path = std::env::temp_dir().join(format!("leyline-sum-{}.bin", std::process::id()));
+
+    let request = session.get(server.url("/file")).sha256([7; 32]).build()?;
+    let failed = session.request_from(request).download_to(&path).await;
+    let kept = path.exists();
+    if kept {
+        std::fs::remove_file(&path)?;
+    }
+
+    let error = failed
+        .err()
+        .ok_or("a wrong checksum must fail the download")?;
+    assert_eq!(error.kind(), Kind::Body);
+    assert!(error.to_string().contains("SHA-256"), "{error}");
+    assert!(!kept);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_request_user_agent_drops_the_browser_client_hints() -> Check {
+    let server = testing::Server::http(|_| ok("hi")).await?;
+    let session = Session::builder()
+        .browser(leyline::Browser::Chrome154)
+        .build()?;
+
+    session.get(server.url("/browser")).await?;
+    session
+        .get(server.url("/bot"))
+        .header("user-agent", "acme-bot/1.0")
+        .await?;
+    session
+        .get(server.url("/mixed"))
+        .header("user-agent", "acme-bot/1.0")
+        .header("sec-ch-ua-platform", "\"Linux\"")
+        .await?;
+
+    let seen = server.requests().await;
+    let hints = |index: usize| -> Vec<&str> {
+        seen[index]
+            .headers()
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .filter(|name| name.to_ascii_lowercase().starts_with("sec-ch-ua"))
+            .collect()
+    };
+    assert!(hints(0).len() >= 3, "{:?}", hints(0));
+    assert_eq!(seen[1].header("user-agent"), Some("acme-bot/1.0"));
+    assert!(hints(1).is_empty(), "{:?}", hints(1));
+    assert_eq!(hints(2).len(), 1);
+    assert_eq!(seen[2].header("sec-ch-ua-platform"), Some("\"Linux\""));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_session_header_set_twice_sends_both_values_in_order() -> Check {
+    let server = testing::Server::http(|_| ok("hi")).await?;
+    let session = Session::builder()
+        .header("x-tag", "a")
+        .header("x-tag", "b")
+        .build()?;
+
+    session.get(server.url("/both")).await?;
+    session.get(server.url("/one")).header("x-tag", "c").await?;
+
+    let seen = server.requests().await;
+    assert_eq!(seen[0].header_values("x-tag"), ["a", "b"]);
+    assert_eq!(seen[1].header_values("x-tag"), ["c"]);
+    Ok(())
+}
+
+#[test]
+fn a_proxy_list_rejects_a_closure_entry_and_a_session_names_its_proxy_setup() -> Check {
+    let closure = || leyline::Proxy::custom(|_| None);
+    let nested = Session::builder()
+        .proxy(leyline::Proxy::list([closure()]))
+        .build();
+    let pooled = Session::builder()
+        .proxy(leyline::Proxy::list([
+            "http://user:secret@127.0.0.1:1",
+            "http://127.0.0.1:2",
+        ]))
+        .build()?;
+    let custom = Session::builder().proxy(closure()).build()?;
+
+    assert_eq!(nested.err().map(|error| error.kind()), Some(Kind::Config));
+    assert!(pooled.to_string().contains("proxy=pool(2)"), "{pooled}");
+    assert!(!format!("{pooled} {pooled:?}").contains("secret"));
+    assert!(custom.to_string().contains("proxy=custom"), "{custom}");
+    assert_eq!((pooled.proxy(), custom.proxy()), (None, None));
+    Ok(())
+}
+
+#[test]
+fn a_proxy_is_unwind_safe() {
+    fn unwind_safe<T: std::panic::UnwindSafe + std::panic::RefUnwindSafe>() {}
+    unwind_safe::<leyline::Proxy>();
+}
+
+#[test]
+fn a_jar_takes_url_strings_and_a_built_cookie_covers_subdomains() -> Check {
+    let jar = Jar::new();
+
+    jar.set("https://shop.example/", "sid", "1");
+    jar.set("not a url", "lost", "1");
+    let shared = Cookie::builder("team", "core")
+        .domain("example.com")
+        .secure(true)
+        .build();
+    jar.insert("https://www.example.com/", shared);
+
+    assert_eq!(
+        jar.get("https://shop.example/", "sid").as_deref(),
+        Some("1")
+    );
+    assert_eq!(jar.get("not a url", "sid"), None);
+    assert_eq!(
+        jar.get("https://api.example.com/", "team").as_deref(),
+        Some("core")
+    );
+    assert_eq!(jar.get("http://api.example.com/", "team"), None);
+    let names: Vec<String> = jar
+        .all()
+        .iter()
+        .map(|cookie| cookie.name().to_owned())
+        .collect();
+    assert!(!names.contains(&"lost".to_owned()), "{names:?}");
+    Ok(())
+}
+
+#[tokio::test]
+async fn none_removes_a_size_cap_for_one_request_and_turns_the_cache_off() -> Check {
+    let server = testing::Server::http(|_| {
+        testing::Response::new(200)
+            .header("cache-control", "max-age=60")
+            .body(vec![b'x'; 4096])
+    })
+    .await?;
+    let session = Session::builder()
+        .max_body_size(1024)
+        .cache(1 << 20)
+        .cache(None)
+        .build()?;
+
+    let capped = session.get(server.url("/big")).bytes().await;
+    let open = session
+        .get(server.url("/big"))
+        .max_body_size(None)
+        .bytes()
+        .await?;
+
+    assert!(capped.err().is_some());
+    assert_eq!(open.len(), 4096);
+    assert_eq!(server.requests().await.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn a_builder_builds_a_blocking_session() -> Check {
+    let session = Session::builder().retry(0).build_blocking()?;
+    let server = session.block_on(testing::Server::http(|_| ok("hi")))?;
+
+    let text = session.block_on(session.get(server.url("/")).text())?;
+
+    assert_eq!(text, "hi");
     Ok(())
 }

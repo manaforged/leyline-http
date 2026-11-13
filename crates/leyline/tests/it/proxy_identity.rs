@@ -28,7 +28,7 @@ async fn proxies_that_share_an_identity_keep_separate_jars() {
     session.get("http://origin.test/a").send().await.unwrap();
     session.get("http://origin.test/b").send().await.unwrap();
     let sent = second.next_request().await.unwrap();
-    assert_eq!(sent.target, "http://origin.test/b");
+    assert_eq!(sent.target(), "http://origin.test/b");
     assert!(
         sent.header_values("cookie").is_empty(),
         "{:?}",

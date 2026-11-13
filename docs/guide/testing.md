@@ -47,18 +47,18 @@ A handler is any `Fn(&testing::Request) -> testing::Response + Send + Sync +
 'static`. It runs on a blocking thread, so a handler that blocks delays only
 its own response.
 
-| `testing::Request` | Holds |
+| `testing::Request` method | Returns |
 | --- | --- |
-| `method`, `target`, `body` | The method, the request target, and the body |
-| `headers` | Every header in wire order, with the case the client sent |
-| `request_line` | The first line, such as `GET /items HTTP/1.1` |
-| `raw` | The request head as received: request line, headers, and the empty line, byte for byte |
+| `method()`, `target()`, `body()` | The method, the request target, and the body |
+| `headers()` | Every header in wire order, with the case the client sent |
+| `request_line()` | The first line, such as `GET /items HTTP/1.1` |
+| `raw()` | The request head as received: request line, headers, and the empty line, byte for byte |
 | `text()` | The body as text, with invalid UTF-8 replaced |
 | `head()` | The request line and headers as text, without the body, with invalid UTF-8 replaced |
 | `header(name)` | The first value of a header. The name match ignores case |
 | `header_values(name)` | Every value of a header, in wire order |
 
-Use `raw` or `header_values(name).len()` to check what a parsed map hides: header case,
+Use `raw()` or `header_values(name).len()` to check what a parsed map hides: header case,
 order, and duplicates.
 
 | `testing::Response` | Does |
@@ -103,9 +103,9 @@ assert_eq!(resp.header("x-echo-id"), Some("test-1"));
 
 let sent = server.requests().await;
 assert_eq!(sent.len(), 1);
-assert_eq!(sent[0].method, "POST");
-assert_eq!(sent[0].target, "/items");
-assert_eq!(sent[0].body, b"hello");
+assert_eq!(sent[0].method(), "POST");
+assert_eq!(sent[0].target(), "/items");
+assert_eq!(sent[0].body(), b"hello");
 assert_eq!(sent[0].text(), "hello");
 assert!(sent[0].head().starts_with("POST /items"));
 # Ok(())
@@ -179,9 +179,9 @@ A `leyline::blocking::Session` reaches a `testing::Server` from a plain
 # fn run() -> leyline::Result<()> {
 use leyline::testing;
 
-let session = leyline::blocking::Session::new(leyline::Session::builder())?;
+let session = leyline::Session::builder().build_blocking()?;
 let server = session.block_on(testing::Server::http(|request| {
-    testing::Response::new(200).body(request.body.clone())
+    testing::Response::new(200).body(request.body().to_vec())
 }))?;
 let text = session.block_on(session.post(server.url("/echo")).body("ping").text())?;
 assert_eq!(text, "ping");
@@ -208,7 +208,7 @@ use leyline::testing;
 const LIMIT: Duration = Duration::from_millis(100);
 const STALL: Duration = Duration::from_millis(500);
 
-let server = testing::Server::http(|request| match request.target.as_str() {
+let server = testing::Server::http(|request| match request.target() {
     "/slow-head" => testing::Response::new(200).delay(STALL),
     _ => testing::Response::new(200).chunks(["first", "second"], STALL),
 })
@@ -309,7 +309,7 @@ let proxy = testing::Server::http(|_| testing::Response::new(200)).await?;
 let session = Session::builder().proxy(proxy.url("")).build()?;
 session.get("http://upstream.test/path").send().await?;
 let seen = proxy.requests().await;
-assert_eq!(seen[0].target, "http://upstream.test/path");
+assert_eq!(seen[0].target(), "http://upstream.test/path");
 # Ok(())
 # }
 ```

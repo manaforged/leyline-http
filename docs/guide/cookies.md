@@ -43,36 +43,39 @@ assert_eq!(jar.remove(&url, "token"), 1);
 | `all()` | Every stored cookie, sorted by domain then name, expired ones included |
 | `snapshot()`, `merge(other)` | Fork and merge. See [Share or fork a jar](#share-or-fork-a-jar) |
 
-A `Cookie` has the public fields `name`, `value`, `domain`, `path`, `secure`,
-`http_only`, `same_site` (`Strict`, `Lax`, or `None`), `expires`,
-`creation_time`, and `host_only`. `Cookie::is_expired()` tells whether the
+A `Cookie` has a getter for each attribute: `name()`, `value()`, `domain()`,
+`path()`, `secure()`, `http_only()`, `same_site()` (`Strict`, `Lax`, or
+`None`), `expires()`, `creation_time()`, and `host_only()`.
+`Cookie::is_expired()` tells whether the
 expiry has passed.
 
 ### Build a cookie from its fields
 
 `Cookie::new(name, value)` makes a session cookie with the path `/`, for one
-host only, with `SameSite::Lax`. Set the public fields you need (`domain`,
-`path`, `expires`, `secure`, `http_only`, and `same_site`), then call
-`jar.insert(&url, cookie)`.
+host only, with `SameSite::Lax`. To set more, start with
+`Cookie::builder(name, value)`, call the setters you need (`domain`, `path`,
+`expires`, `secure`, `http_only`, and `same_site`), then `build()` and
+`jar.insert(url, cookie)`. Every `Jar` method takes the URL as a string or a
+`Url`; a URL that does not parse is ignored.
 
 ```rust,no_run
-use leyline::Url;
 use leyline::cookie::Cookie;
 
 # fn run() -> Result<(), Box<dyn std::error::Error>> {
 let session = leyline::Session::new();
-let url = Url::parse("https://www.example.com/")?;
-let mut cookie = Cookie::new("sid", "abc");
-cookie.path = "/app".to_owned();
-cookie.secure = true;
-cookie.http_only = true;
-session.cookies().insert(&url, cookie);
+let cookie = Cookie::builder("sid", "abc")
+    .path("/app")
+    .secure(true)
+    .http_only(true)
+    .build();
+session.cookies().insert("https://www.example.com/", cookie);
 println!("{} cookies", session.cookies().all().len());
 # Ok(())
 # }
 ```
 
-An empty `domain` takes the host of the URL. The jar applies the rules it
+Without `domain` the cookie matches only the host of the URL; with it the
+cookie also matches subdomains. The jar applies the rules it
 applies to a `Set-Cookie` header from that URL, and ignores a cookie the URL
 may not set: for example, it drops a `secure` cookie for an `http://` URL.
 
@@ -92,7 +95,7 @@ jar.
 let session = leyline::Session::new();
 let resp = session.get("https://shop.example/login").send().await?;
 for cookie in resp.cookies() {
-    println!("set {}={} for {}", cookie.name, cookie.value, cookie.domain);
+    println!("set {}={} for {}", cookie.name(), cookie.value(), cookie.domain());
 }
 # Ok(())
 # }

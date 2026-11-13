@@ -64,7 +64,7 @@ async fn retry_if_and_wait_header_handle_a_rate_limit() {
         .requests()
         .await
         .into_iter()
-        .map(|r| r.target)
+        .map(|r| r.target().to_owned())
         .collect();
     assert_eq!(targets, ["/limited", "/limited"]);
 }

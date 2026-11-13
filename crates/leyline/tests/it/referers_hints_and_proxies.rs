@@ -33,7 +33,7 @@ async fn https_page_to_http_target_is_cross_site_without_referer() {
     assert!(
         req.header_values("referer").is_empty(),
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     assert_eq!(req.header_values("origin"), ["https://shop.example"]);
     assert_eq!(req.header_values("sec-fetch-site"), ["cross-site"]);
@@ -59,7 +59,7 @@ async fn link_navigation_differs_from_a_typed_url() {
     let link = server.next_request().await.unwrap();
     assert_eq!(link.header_values("sec-fetch-site"), ["same-origin"]);
     assert_eq!(link.header_values("referer"), [server.url("/page")]);
-    let names: Vec<&str> = link.headers.iter().map(|(n, _)| n.as_str()).collect();
+    let names: Vec<&str> = link.headers().iter().map(|(n, _)| n.as_str()).collect();
     let at = |n: &str| {
         names
             .iter()
@@ -295,7 +295,7 @@ async fn tower_service_streams_with_proxy_and_metadata() {
     );
     assert_eq!(response.version(), http::Version::HTTP_11);
     assert_eq!(
-        proxy.next_request().await.unwrap().request_line,
+        proxy.next_request().await.unwrap().request_line(),
         "GET http://origin.test/thing HTTP/1.1"
     );
 }

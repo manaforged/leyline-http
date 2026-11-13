@@ -46,6 +46,10 @@ impl Session {
         self.inner.proxy_shown.as_deref()
     }
 
+    fn proxy_summary(&self) -> Option<String> {
+        self.inner.inputs.proxy_config.summary(self.proxy_pool())
+    }
+
     pub(crate) fn base_url(&self) -> Option<&url::Url> {
         self.inner.inputs.base_url.as_ref()
     }
@@ -282,7 +286,7 @@ impl std::fmt::Debug for Session {
                     .map(|b| b.branded(self.inner.inputs.brand)),
             )
             .field("platform", &self.inner.platform)
-            .field("proxy", &self.inner.inputs.proxy_config.shown())
+            .field("proxy", &self.proxy_summary())
             .field("timeout", &self.inner.inputs.timeouts.total_limit())
             .field("protocol_policy", &self.inner.inputs.protocol_policy);
         if let Some(audit) = &self.inner.audit_tls {
@@ -299,10 +303,9 @@ impl std::fmt::Display for Session {
             None if self.inner.impersonates => self.inner.profile.meta.name.clone(),
             None => "bare".to_string(),
         };
-        let config = &self.inner.inputs.proxy_config;
-        let proxy = match config.primary() {
-            _ if config.rejects() => "rejected".into(),
-            Some(url) => crate::util::redact(url),
+        let proxy = match self.proxy_summary() {
+            _ if self.inner.inputs.proxy_config.rejects() => "rejected".into(),
+            Some(summary) => summary,
             None => "none".into(),
         };
         write!(

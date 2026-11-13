@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use http::Method;
-use http::header::AUTHORIZATION;
+use http::header::{AUTHORIZATION, USER_AGENT};
 use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
@@ -46,6 +46,9 @@ impl Session {
             extra_headers
                 .is_some_and(|h| h.iter().any(|(k, _)| k.as_str().eq_ignore_ascii_case(name)))
         };
+        if caller_has(USER_AGENT.as_str()) {
+            headers.retain(|(name, _)| !client_hint(name) || caller_has(name));
+        }
         self.merge_session_headers(&mut headers, &caller_has, strip_sensitive, current_url);
 
         if let Some(extra) = extra_headers {
@@ -183,41 +186,51 @@ impl Session {
         strip_sensitive: bool,
         target: &Url,
     ) {
-        for (k, v) in self.session_defaults(target) {
+        let profile = self
+            .inner
+            .header_plan
+            .append()
+            .iter()
+            .map(|(k, v)| (k.as_str(), HeaderStr::from_static(v.as_str()), false));
+        let session = self.session_defaults(target).map(|(k, v)| (k, v, true));
+        let mut set = vec![false; headers.len()];
+        for (k, v, repeats) in profile.chain(session) {
             if caller_has(k) || (strip_sensitive && cross_origin_header(k)) {
                 continue;
             }
-            match headers
-                .iter()
-                .position(|(hk, _)| hk == k || hk.eq_ignore_ascii_case(k))
-            {
-                Some(pos) => headers[pos].1 = v,
-                None => headers.push((Cow::Owned(k.to_owned()), v)),
-            }
+            let same = |(hk, _): &HeaderPair| hk == k || hk.eq_ignore_ascii_case(k);
+            let at = match headers.iter().position(same) {
+                Some(first) if !set[first] => {
+                    headers[first].1 = v;
+                    set[first] = repeats;
+                    continue;
+                }
+                Some(first) => first + headers[first..].iter().take_while(|&h| same(h)).count(),
+                None => headers.len(),
+            };
+            headers.insert(at, (Cow::Owned(k.to_owned()), v));
+            set.insert(at, repeats);
         }
     }
 
     fn session_defaults<'a>(&'a self, target: &Url) -> impl Iterator<Item = (&'a str, HeaderStr)> {
-        let bearer = self
+        let credential = self
             .inner
             .inputs
             .credential
             .as_ref()
-            .filter(|_| self.bearer_in_scope(target));
+            .filter(|_| self.credential_in_scope(target));
         let defaults = &self.inner.default_headers;
-        let slot = bearer.map_or(defaults.len(), |b| b.slot.min(defaults.len()));
+        let slot = credential.map_or(defaults.len(), |c| c.slot.min(defaults.len()));
         let pair = |(k, v): &'a (String, HeaderStr)| (k.as_str(), v.clone());
-        self.inner
-            .header_plan
-            .append()
+        defaults[..slot]
             .iter()
-            .map(|(k, v)| (k.as_str(), HeaderStr::from_static(v.as_str())))
-            .chain(defaults[..slot].iter().map(pair))
-            .chain(bearer.map(|b| (AUTHORIZATION.as_str(), b.value())))
+            .map(pair)
+            .chain(credential.map(|c| (AUTHORIZATION.as_str(), c.value())))
             .chain(defaults[slot..].iter().map(pair))
     }
 
-    pub(in crate::core::session) fn bearer_in_scope(&self, target: &Url) -> bool {
+    pub(in crate::core::session) fn credential_in_scope(&self, target: &Url) -> bool {
         self.inner
             .inputs
             .base_url
@@ -293,6 +306,12 @@ impl Session {
 }
 
 const CORS_MODES: [&str; 2] = ["cors", "websocket"];
+const CLIENT_HINT: &str = "sec-ch-ua";
+
+fn client_hint(name: &str) -> bool {
+    name.get(..CLIENT_HINT.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CLIENT_HINT))
+}
 
 fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
     if !referer.is_empty() && header_first(headers, "referer").is_none() {

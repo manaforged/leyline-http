@@ -153,11 +153,11 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     let a = url::Url::parse("https://1.2.3.4/").unwrap();
     jar.store(&a, "k=v; Domain=3.4; Path=/");
     assert_eq!(
-        jar.get(&url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
+        jar.get(url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
         None
     );
     assert_eq!(
-        jar.get(&url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
+        jar.get(url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
         Some("v".into())
     );
 }

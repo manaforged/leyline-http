@@ -366,8 +366,8 @@ let legacy = session
 without sending it. The result holds the absolute URL with the query, the
 headers you set on the request, the body, and the per-request options as
 typed extensions: `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`, and
-`Protocol`. The download options `sha256`, `progress`, and `resume` are not
-carried. `build` returns the error a setter recorded, such as an invalid
+`Protocol`. The download options `sha256`, `progress`, and `resume` travel
+with it too. `build` returns the error a setter recorded, such as an invalid
 header.
 
 `Session::request_from(request)` turns an `http::Request<Body>` back into a

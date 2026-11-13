@@ -62,13 +62,18 @@ impl Credential {
 
 impl SessionBuilder {
     /// Sets the `Authorization: Bearer` header, sent to every origin, or only to the `base_url` origin when one is set, and never across a cross-origin redirect.
-    pub fn bearer_auth(self, token: &str) -> Self {
-        self.credential(Token::Fixed(crate::util::bearer_credentials(token)))
+    pub fn bearer_auth(self, token: impl AsRef<str>) -> Self {
+        self.credential(Token::Fixed(crate::util::bearer_credentials(
+            token.as_ref(),
+        )))
     }
 
     /// Sets the `Authorization` header to HTTP Basic credentials with the same origin scope as `bearer_auth`, replacing a bearer token or default `Authorization` header set before it.
-    pub fn basic_auth(self, user: &str, password: &str) -> Self {
-        self.credential(Token::Basic(crate::util::basic_credentials(user, password)))
+    pub fn basic_auth(self, user: impl AsRef<str>, password: impl AsRef<str>) -> Self {
+        self.credential(Token::Basic(crate::util::basic_credentials(
+            user.as_ref(),
+            password.as_ref(),
+        )))
     }
 
     fn credential(mut self, value: Token) -> Self {

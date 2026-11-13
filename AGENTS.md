@@ -49,7 +49,7 @@ let again = Session::load("session.json")?.build()?;
 - Build one session and clone it into tasks. A new session per request opens new connections and loses cookies.
 - Pass a `Duration` to `timeout`, a `u32` to `retry`, and a URL string to `proxy`; each converts into the full config type.
 - Set session defaults on the builder with `user_agent("acme-bot/1.0")`, `header("x-api-key", key)`, and `basic_auth(user, password)`. With a `base_url`, `basic_auth` and `bearer_auth` go only to that origin.
-- Call `Session::builder().before_send(|request| { ..; Ok(()) })` to add a request id or a signature: the hook runs before every attempt, retries included, and its header and body changes are sent.
+- Call `Session::builder().before_send(|request| { ..; Ok(()) })` to add a request id or a signature: the hook runs before every attempt, retries included, and its changes to the method, URL, headers and body are sent.
 - Without `.stream()`, `send` reads the whole body into memory, up to `max_body_size`, before it returns. For a large body, call `.stream()` on the request, then read chunks with `resp.bytes_stream()?` and `body.next().await`.
 - Call `request.build()?` to read a request as an `http::Request<Body>`, `session.request_from(request)` to turn one back into a builder, `request.try_clone()` to send a buffered request twice, and `response.into_http()?` to hand a response to code that uses the `http` crate.
 - Call `.protocol(Protocol::Http1)` on a request to force its HTTP version; the request still uses the session's connections.
@@ -65,7 +65,7 @@ let again = Session::load("session.json")?.build()?;
 - Pair `bearer_auth` and `base_url` with `refresh_token` to share an asynchronous token refresh after a 401.
 - Use `crawl.save(path).await?` and `Crawl::load(&session, path)?` to resume pending pages and duplicate history.
 - Call `crawl.filter(|url| url.path().starts_with("/docs/"))` to follow only the links a closure accepts. A checkpoint does not save the filter, so set it again after `Crawl::load`.
-- Seed a cookie with `Cookie::new(name, value)` from `leyline::cookie` and `session.cookies().insert(&url, cookie)`. `Session::builder().cookies(None)` turns cookie storage off.
+- Seed a cookie with `session.cookies().set("https://example.com/", name, value)`, or build one with `Cookie::builder(name, value).path("/app").secure(true).build()` from `leyline::cookie` and pass it to `session.cookies().insert(url, cookie)`. `Session::builder().cookies(None)` turns cookie storage off.
 - For mutual TLS with a certificate held in memory, pass `Tls::new().client_cert_pem(chain_pem, key_pem)` to `SessionBuilder::tls`.
 - Pass `Proxy::custom(|url| ..)` to `proxy` to choose the proxy for each request from its URL; return `None` to send it direct.
 - Test against `leyline::testing::Server` (feature `test-util`): in a handler, `request.text()` is the request body and `request.head()` the request line and headers, and `testing::Response::abort_after(n)` drops the connection after `n` body bytes.

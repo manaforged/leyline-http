@@ -199,9 +199,9 @@ impl Crawl {
         self
     }
 
-    /// Sets the largest body the crawl reads, overriding the session's `max_body_size`.
-    pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.settings.max_body = Some(bytes);
+    /// Sets the largest body the crawl reads, overriding the session's `max_body_size`; `None` removes the cap.
+    pub fn max_body_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.settings.max_body = Some(bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP));
         self
     }
 

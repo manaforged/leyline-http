@@ -20,13 +20,13 @@ async fn caller_user_agent_replaces_no_preset_default() {
 
     assert_eq!(resp.status(), 200);
     let req = server.next_request().await.unwrap();
-    assert!(req.request_line.starts_with("GET /ua HTTP/1.1"));
+    assert!(req.request_line().starts_with("GET /ua HTTP/1.1"));
     assert_eq!(req.header_values("user-agent"), vec!["X"]);
     assert_eq!(
         req.header_values("user-agent").len(),
         1,
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     server.shutdown().await;
 }
@@ -63,25 +63,25 @@ async fn bulk_headers_replace_all_no_preset_defaults() {
         req.header_values("user-agent").len(),
         1,
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     assert_eq!(
         req.header_values("accept").len(),
         1,
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     assert_eq!(
         req.header_values("accept-encoding").len(),
         1,
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     assert_eq!(
         req.header_values("accept-language").len(),
         1,
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     server.shutdown().await;
 }
@@ -133,7 +133,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
     assert_eq!(resp.status(), 200);
     let req = server.next_request().await.unwrap();
     assert!(
-        req.request_line
+        req.request_line()
             .starts_with("GET /dx?a=1&space=hello+world HTTP/1.1")
     );
     assert_eq!(req.header_values("x-owned"), vec!["yes"]);
@@ -161,7 +161,7 @@ async fn dx_helpers_accept_common_pair_shapes_and_header_shortcuts() {
 
     assert_eq!(resp.status(), 200);
     let req = server.next_request().await.unwrap();
-    assert!(req.request_line.starts_with("POST /login HTTP/1.1"));
+    assert!(req.request_line().starts_with("POST /login HTTP/1.1"));
     assert_eq!(
         req.header_values("content-type"),
         vec!["application/x-www-form-urlencoded"]
@@ -245,7 +245,7 @@ async fn caller_referer_wins_over_navigate_preset_referer() {
         req.header_values("referer").len(),
         1,
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     server.shutdown().await;
 }
@@ -343,7 +343,7 @@ async fn caller_dnt_wins_over_edge_brand_overlay() {
         req.header_values("dnt").len(),
         1,
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     server.shutdown().await;
 }
@@ -377,7 +377,7 @@ async fn anchored_headers_interleave_at_preset_slots() {
     assert_eq!(resp.status(), 200);
     let req = server.next_request().await.unwrap();
 
-    let names: Vec<String> = req.headers.iter().map(|(k, _)| k.clone()).collect();
+    let names: Vec<String> = req.headers().iter().map(|(k, _)| k.clone()).collect();
     let wire = req.head();
     let pos = |n: &str| {
         names
@@ -420,7 +420,7 @@ async fn plain_authorization_rides_after_user_agent() {
 
     assert_eq!(resp.status(), 200);
     let req = server.next_request().await.unwrap();
-    let names: Vec<String> = req.headers.iter().map(|(k, _)| k.clone()).collect();
+    let names: Vec<String> = req.headers().iter().map(|(k, _)| k.clone()).collect();
     let ua = names
         .iter()
         .position(|h| h.eq_ignore_ascii_case("user-agent"))
@@ -429,6 +429,6 @@ async fn plain_authorization_rides_after_user_agent() {
         .iter()
         .position(|h| h.eq_ignore_ascii_case("authorization"))
         .expect("caller-set authorization on wire");
-    assert_eq!(auth, ua + 1, "{}", String::from_utf8_lossy(&req.raw));
+    assert_eq!(auth, ua + 1, "{}", String::from_utf8_lossy(req.raw()));
     server.shutdown().await;
 }

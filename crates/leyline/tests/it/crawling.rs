@@ -56,7 +56,7 @@ async fn an_http1_only_origin_takes_one_browser_handshake_and_a_streamed_body() 
         .unwrap();
     assert_eq!(accepted.load(Ordering::SeqCst), 1);
     let recorded = server.requests().await;
-    assert_eq!(recorded[0].body, b"part-one,part-two");
+    assert_eq!(recorded[0].body(), b"part-one,part-two");
 }
 
 async fn slow_server(delay: Duration) -> (u16, Arc<AtomicUsize>, Arc<AtomicUsize>) {
@@ -149,7 +149,7 @@ async fn a_proxy_pool_bans_a_dead_proxy_and_keeps_crawling() {
     }
     for path in ["/a", "/b", "/c"] {
         assert_eq!(
-            good.next_request().await.unwrap().request_line,
+            good.next_request().await.unwrap().request_line(),
             format!("GET http://origin.test{path} HTTP/1.1")
         );
     }

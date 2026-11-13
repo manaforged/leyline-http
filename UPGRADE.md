@@ -20,6 +20,12 @@ For new code, start with the [five main types](AGENTS.md#the-five-types). The [u
 | `Tls::pin_sha256(digest)` | `Tls::pin_cert_sha256(digest)` |
 | `Message::Ping`, `Message::Pong` | `Message::Ping(payload)`, `Message::Pong(payload)`; pass `Vec::new()` for an empty payload and match with `Message::Ping(_)` |
 | `testing::Request::text()` for the request line and headers | `testing::Request::head()`; `text()` now returns the body |
+| `request.method`, `.target`, `.headers`, `.body`, `.request_line`, `.raw` on `testing::Request` | `request.method()`, `.target()`, `.headers()`, `.body()`, `.request_line()`, `.raw()`; each returns a borrowed value, so add `.to_owned()` or `.to_vec()` to keep one |
+| `link.url`, `link.rel`, `link.params` | `link.url()`, `link.rel()`, `link.params()` |
+| `cookie.name`, `.value`, `.domain`, `.path`, `.secure`, `.http_only`, `.same_site`, `.expires`, `.creation_time`, `.host_only` | the getter of the same name, such as `cookie.name()` |
+| `let mut c = Cookie::new(n, v); c.path = p; c.secure = true;` | `Cookie::builder(n, v).path(p).secure(true).build()`; `.domain(d)` makes the cookie match subdomains of `d`, and `host_only` has no setter |
+| `jar.set(&"https://example.com/".parse().unwrap(), n, v)` | `jar.set("https://example.com/", n, v)`; every `Jar` method takes a string or a `Url` |
+| `.header("x-tag", "a").header("x-tag", "b")` on `SessionBuilder` to replace `a` | call `header` once per name; both values are now sent |
 
 ## Breaking changes in 0.2.0
 
@@ -48,7 +54,7 @@ Search for the old type or method name. A row marked removed has no direct repla
 | `Preset`, `HeaderAnchor` | `RequestKind`, `HeaderPosition` |
 | `RequestBuilder::preset`, `anchored`, `initiator`, `tag`, `compress` | `kind`, `header_at`, `from_page`, `label`, `compress_body` |
 | `FetchSite` | removed; `from_page(url)` sets the site and referrer context, `Sec-Fetch-Site` included |
-| `SessionBuilder::user_agent(ua)` | `.headers([("user-agent", ua)])` |
+| `SessionBuilder::user_agent(ua)` | removed in 0.2.0: `.headers([("user-agent", ua)])`; later releases have `user_agent(ua)` again |
 | `SessionBuilder::expect_profile_id(id)` | `Session::load(path)`, whose `build()` fails with `is_profile_changed()`, or a check of `session.profile_id()` |
 | `.headers(&[("a", "b")])` | `.headers([("a", "b")])`, `.headers(vec)`, or `.headers(&header_map)`; each pair converts like `header(name, value)` |
 | `BlockSignal { vendor, kind }`, `BlockKind` | `Block::Challenge(vendor)`, `Block::Captcha(vendor)`, `Block::Denied(vendor)`; `block.vendor()` |

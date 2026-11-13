@@ -4,4 +4,4 @@ pub(crate) mod parse;
 mod record;
 
 pub use jar::Jar;
-pub use record::{Cookie, SameSite};
+pub use record::{Cookie, CookieBuilder, SameSite};

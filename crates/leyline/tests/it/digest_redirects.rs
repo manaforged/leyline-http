@@ -77,7 +77,7 @@ async fn digest_authorizes_a_same_origin_redirect_without_a_new_challenge() {
     let answered = server.next_request().await.unwrap();
     let first = answered.header_values("authorization").join("");
     let redirected = server.next_request().await.unwrap();
-    assert!(redirected.request_line.starts_with("GET /next "));
+    assert!(redirected.request_line().starts_with("GET /next "));
     let auth = redirected.header_values("authorization").join("");
     assert!(auth.contains("uri=\"/next\""), "{auth}");
     assert!(auth.contains("nonce=\"same-origin-step\""), "{auth}");
@@ -108,7 +108,7 @@ async fn digest_sends_no_credentials_outside_the_protection_space() {
     server.next_request().await.unwrap();
     server.next_request().await.unwrap();
     let outside = server.next_request().await.unwrap();
-    assert!(outside.request_line.starts_with("GET /admin/y "));
+    assert!(outside.request_line().starts_with("GET /admin/y "));
     assert_eq!(
         outside.header_values("authorization").len(),
         0,
@@ -156,7 +156,7 @@ async fn digest_sends_no_credentials_after_a_cross_origin_bounce() {
         server.next_request().await.unwrap();
     }
     let back = server.next_request().await.unwrap();
-    assert!(back.request_line.starts_with("GET /back "));
+    assert!(back.request_line().starts_with("GET /back "));
     assert_eq!(
         back.header_values("authorization").len(),
         0,

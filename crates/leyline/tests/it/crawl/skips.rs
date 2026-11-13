@@ -17,7 +17,7 @@ async fn kept_and_stats(
 
 #[tokio::test]
 async fn a_crawl_skips_a_block_page() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/wall">W</a>"#),
         "/wall" => html("<p>checking your browser</p>").header("cf-mitigated", "challenge"),
         _ => testing::Response::new(404),
@@ -31,7 +31,7 @@ async fn a_crawl_skips_a_block_page() {
 
 #[tokio::test]
 async fn a_training_crawl_skips_a_noai_page_and_a_robots_crawl_keeps_it() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/art">A</a>"#),
         "/art" => html(r#"<meta name="robots" content="noai"><p>artwork</p>"#),
         _ => testing::Response::new(404),
@@ -48,7 +48,7 @@ async fn a_training_crawl_skips_a_noai_page_and_a_robots_crawl_keeps_it() {
 #[tokio::test]
 async fn a_crawl_gives_up_after_five_redirects() {
     let server = testing::Server::http(|request| {
-        let target = request.target.as_str();
+        let target = request.target();
         match target.strip_prefix("/hop") {
             Some(n) => {
                 let next = n.parse::<u32>().unwrap() + 1;
@@ -67,7 +67,7 @@ async fn a_crawl_gives_up_after_five_redirects() {
 
 #[tokio::test]
 async fn a_crawl_obeys_a_nofollow_page_and_an_x_robots_tag() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/closed">C</a><a href="/tagged">T</a>"#),
         "/closed" => html(r#"<meta name="robots" content="nofollow"><a href="/behind">B</a>"#),
         "/tagged" => html("<p>tagged</p>").header("x-robots-tag", "noindex"),
@@ -83,7 +83,7 @@ async fn a_crawl_obeys_a_nofollow_page_and_an_x_robots_tag() {
 
 #[tokio::test]
 async fn a_crawl_skips_a_site_whose_robots_txt_stays_down() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/robots.txt" => testing::Response::new(503).header("retry-after", "0"),
         _ => html("<p>page</p>"),
     })
@@ -94,7 +94,7 @@ async fn a_crawl_skips_a_site_whose_robots_txt_stays_down() {
         .requests()
         .await
         .iter()
-        .filter(|request| request.target == "/robots.txt")
+        .filter(|request| request.target() == "/robots.txt")
         .count();
     assert_eq!(robots, 5);
     assert!(kept.is_empty());
@@ -104,7 +104,7 @@ async fn a_crawl_skips_a_site_whose_robots_txt_stays_down() {
 
 #[tokio::test]
 async fn a_nofollow_page_does_not_queue_its_canonical_page() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/alias">A</a>"#),
         "/alias" => html(
             r#"<meta name="robots" content="nofollow"><link rel="canonical" href="/target"><p>alias</p>"#,
@@ -133,7 +133,7 @@ async fn a_crawl_page_hides_url_secrets_in_debug_output() {
 
 #[tokio::test]
 async fn a_stalled_page_body_ends_at_the_session_deadline() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/robots.txt" => testing::Response::new(404),
         "/" => html(r#"<a href="/stall">S</a>"#),
         _ => testing::Response::new(200)

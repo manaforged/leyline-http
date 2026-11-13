@@ -22,7 +22,7 @@ async fn a_crawl_runs_more_than_sixteen_pages_at_once_when_host_limits_allow_it(
     let links: String = (0..24)
         .map(|i| format!(r#"<a href="/p{i}">{i}</a>"#))
         .collect();
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/" => html(&links),
         path if path.starts_with("/p") => {
             seen.lock().expect("arrivals lock").push(Instant::now());
@@ -54,7 +54,7 @@ async fn a_crawl_runs_more_than_sixteen_pages_at_once_when_host_limits_allow_it(
 
 #[tokio::test]
 async fn a_zero_retry_session_does_not_retry_crawl_pages_or_robots() {
-    let pages = testing::Server::http(|request| match request.target.as_str() {
+    let pages = testing::Server::http(|request| match request.target() {
         "/robots.txt" | "/sitemap.xml" => testing::Response::new(404),
         "/" => html(r#"<a href="/busy">B</a>"#),
         "/busy" => testing::Response::new(503),
@@ -72,11 +72,11 @@ async fn a_zero_retry_session_does_not_retry_crawl_pages_or_robots() {
         .requests()
         .await
         .iter()
-        .filter(|req| req.target == "/busy")
+        .filter(|req| req.target() == "/busy")
         .count();
     assert_eq!(busy_hits, 1);
 
-    let down = testing::Server::http(|request| match request.target.as_str() {
+    let down = testing::Server::http(|request| match request.target() {
         "/robots.txt" => testing::Response::new(503),
         _ => html("<p>page</p>"),
     })
@@ -88,7 +88,7 @@ async fn a_zero_retry_session_does_not_retry_crawl_pages_or_robots() {
         .requests()
         .await
         .iter()
-        .filter(|req| req.target == "/robots.txt")
+        .filter(|req| req.target() == "/robots.txt")
         .count();
     assert_eq!(crawl_robots_hits, 1);
 
@@ -105,7 +105,7 @@ async fn a_zero_retry_session_does_not_retry_crawl_pages_or_robots() {
 #[tokio::test]
 async fn a_crawl_honors_the_sessions_redirect_policy() {
     let server = testing::Server::http(|request| {
-        let target = request.target.as_str();
+        let target = request.target();
         if target == "/robots.txt" || target == "/sitemap.xml" {
             return testing::Response::new(404);
         }
@@ -143,7 +143,7 @@ async fn a_crawl_honors_the_sessions_redirect_policy() {
 
 #[tokio::test]
 async fn crawl_redirect_overrides_the_session_for_pages_and_sitemaps() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/robots.txt" => testing::Response::new(404),
         "/sitemap.xml" => testing::Response::new(302).header("location", "/moved-map.xml"),
         "/moved-map.xml" => testing::Response::new(200)
@@ -177,7 +177,7 @@ async fn crawl_redirect_overrides_the_session_for_pages_and_sitemaps() {
 async fn an_untyped_html_page_obeys_max_body_size() {
     let html_body = format!("<!doctype html><p>{}</p>", "x".repeat(2000));
     let json_body = format!(r#"{{"blob":"{}"}}"#, "y".repeat(2000));
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/robots.txt" | "/sitemap.xml" => testing::Response::new(404),
         "/" => html(r#"<a href="/bare">B</a><a href="/blob">J</a>"#),
         "/bare" => testing::Response::new(200).body(html_body.clone()),
@@ -212,7 +212,7 @@ async fn max_body_size_governs_robots_and_sitemaps() {
     let padding = "# ".to_owned() + &"p".repeat(600) + "\n";
     let huge_robots = format!("User-agent: *\n{}Disallow: /secret\n", padding.repeat(900));
     assert!(huge_robots.len() > 512 * 1024);
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/robots.txt" => testing::Response::new(200)
             .header("content-type", "text/plain")
             .body(huge_robots.clone()),
@@ -235,7 +235,7 @@ async fn max_body_size_governs_robots_and_sitemaps() {
         "<urlset><url><loc>{}</loc></url></urlset>",
         "https://unused.example/".to_owned() + &"a".repeat(2048)
     ));
-    let map_server = testing::Server::http(move |request| match request.target.as_str() {
+    let map_server = testing::Server::http(move |request| match request.target() {
         "/robots.txt" => testing::Response::new(404),
         "/sitemap.xml" => testing::Response::new(200)
             .header("content-type", "application/gzip")
@@ -257,7 +257,7 @@ async fn max_body_size_governs_robots_and_sitemaps() {
 async fn limit_depth_url_size_and_sitemaps_are_tunable() {
     let long_path = format!("/{}", "x".repeat(2200));
     let long_for_server = long_path.clone();
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/robots.txt" => testing::Response::new(404),
         "/sitemap.xml" => testing::Response::new(200)
             .header("content-type", "application/xml")
@@ -295,7 +295,7 @@ async fn limit_depth_url_size_and_sitemaps_are_tunable() {
 async fn max_crawl_delay_and_robots_max_age_are_tunable() {
     let robots_reads = Arc::new(AtomicUsize::new(0));
     let reads = Arc::clone(&robots_reads);
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/robots.txt" => {
             let n = reads.fetch_add(1, Ordering::SeqCst);
             let body = if n == 0 {
@@ -334,7 +334,7 @@ async fn dedup_and_dedup_min_words_control_copy_filtering() {
         .collect::<Vec<_>>()
         .join(" ");
     let four = "alpha beta gamma delta";
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/robots.txt" | "/sitemap.xml" => testing::Response::new(404),
         "/" => {
             html(r#"<a href="/a">a</a><a href="/b">b</a><a href="/s1">s1</a><a href="/s2">s2</a>"#)
@@ -376,7 +376,7 @@ async fn dedup_and_dedup_min_words_control_copy_filtering() {
 
 #[tokio::test]
 async fn scope_any_follows_external_hosts_without_leaking_credentials() {
-    let external = testing::Server::http(|request| match request.target.as_str() {
+    let external = testing::Server::http(|request| match request.target() {
         "/robots.txt" | "/sitemap.xml" => testing::Response::new(404),
         "/ext" => {
             assert!(request.header("authorization").is_none());
@@ -387,7 +387,7 @@ async fn scope_any_follows_external_hosts_without_leaking_credentials() {
     .await
     .expect("start external server");
     let ext_url = format!("http://localhost:{}/ext", external.addr().port());
-    let origin = testing::Server::http(move |request| match request.target.as_str() {
+    let origin = testing::Server::http(move |request| match request.target() {
         "/robots.txt" | "/sitemap.xml" => testing::Response::new(404),
         "/" => {
             assert_eq!(request.header("authorization"), Some("Bearer secret"));

@@ -24,8 +24,8 @@ async fn a_crawl_keeps_its_spacing_after_waiting_for_the_sessions_slot() {
     let server = testing::Server::http(move |request| {
         seen.lock()
             .unwrap()
-            .push((request.target.clone(), Instant::now()));
-        match request.target.as_str() {
+            .push((request.target().to_owned(), Instant::now()));
+        match request.target() {
             "/hold" => html("<p>hold</p>").delay(Duration::from_millis(600)),
             "/" => html(r#"<a href="/p1">1</a><a href="/p2">2</a>"#),
             _ => html("<p>page</p>"),
@@ -59,7 +59,7 @@ async fn a_crawl_keeps_its_spacing_after_waiting_for_the_sessions_slot() {
 async fn hosts_asking_to_retry_later_leave_room_for_other_hosts() {
     let mut busy = Vec::new();
     for _ in 0..20 {
-        let server = testing::Server::http(|request| match request.target.as_str() {
+        let server = testing::Server::http(|request| match request.target() {
             "/robots.txt" => testing::Response::new(404),
             _ => testing::Response::new(429).header("retry-after", "30"),
         })
@@ -71,7 +71,7 @@ async fn hosts_asking_to_retry_later_leave_room_for_other_hosts() {
         .iter()
         .map(|server| format!(r#"<a href="{}">S</a>"#, server.url("/slow")))
         .collect();
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/" => html(&format!(r#"{links}<a href="/next">N</a>"#)),
         "/next" => html(r#"<p>next</p><a href="/fast">F</a>"#).delay(Duration::from_millis(600)),
         _ => html("<p>fast</p>"),
@@ -93,7 +93,7 @@ async fn hosts_asking_to_retry_later_leave_room_for_other_hosts() {
 
 #[tokio::test]
 async fn an_ignore_robots_crawl_does_not_wait_out_a_robots_txt_pause() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/robots.txt" => testing::Response::new(503).header("retry-after", "3600"),
         "/" => html(r#"<a href="/a">A</a>"#),
         _ => html("<p>a</p>"),
@@ -115,7 +115,7 @@ async fn an_ignore_robots_crawl_does_not_wait_out_a_robots_txt_pause() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_shut_down_session_ends_a_crawl_waiting_on_a_paused_host() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/a">A</a><a href="/b">B</a>"#),
         "/a" | "/b" => testing::Response::new(429).header("retry-after", "3600"),
         _ => testing::Response::new(404),
@@ -160,8 +160,8 @@ async fn a_crawl_keeps_the_sessions_spacing_while_it_waits_for_its_own_slot() {
     let server = testing::Server::http(move |request| {
         seen.lock()
             .unwrap()
-            .push((request.target.clone(), Instant::now()));
-        match request.target.as_str() {
+            .push((request.target().to_owned(), Instant::now()));
+        match request.target() {
             "/" => html(r#"<a href="/hold">H</a><a href="/p1">1</a><a href="/p2">2</a>"#),
             "/hold" => html("<p>hold</p>").delay(Duration::from_millis(600)),
             _ => html("<p>page</p>"),
@@ -191,7 +191,7 @@ async fn a_crawl_keeps_a_sites_crawl_delay_while_it_visits_other_hosts() {
     let seen = stamps.clone();
     let mut others = Vec::new();
     for _ in 0..6 {
-        let other = testing::Server::http(|request| match request.target.as_str() {
+        let other = testing::Server::http(|request| match request.target() {
             "/robots.txt" => testing::Response::new(404),
             _ => html("<p>other</p>"),
         })
@@ -206,8 +206,8 @@ async fn a_crawl_keeps_a_sites_crawl_delay_while_it_visits_other_hosts() {
     let server = testing::Server::http(move |request| {
         seen.lock()
             .unwrap()
-            .push((request.target.clone(), Instant::now()));
-        match request.target.as_str() {
+            .push((request.target().to_owned(), Instant::now()));
+        match request.target() {
             "/robots.txt" => testing::Response::new(200).body("User-agent: *\nCrawl-delay: 0.6\n"),
             "/" => html(&format!(r#"{links}<a href="/a2">A</a>"#)),
             _ => html("<p>a</p>"),
@@ -225,7 +225,7 @@ async fn a_crawl_keeps_a_sites_crawl_delay_while_it_visits_other_hosts() {
 
 #[tokio::test]
 async fn a_crawl_retries_a_page_within_the_sessions_retry_budget() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/busy">B</a>"#),
         "/busy" => testing::Response::new(503),
         _ => testing::Response::new(404),
@@ -244,14 +244,14 @@ async fn a_crawl_retries_a_page_within_the_sessions_retry_budget() {
         .requests()
         .await
         .iter()
-        .filter(|request| request.target == "/busy")
+        .filter(|request| request.target() == "/busy")
         .count();
     assert_eq!(busy, 2);
 }
 
 #[tokio::test]
 async fn an_ignore_robots_crawl_never_asks_for_robots_txt() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/a">A</a>"#),
         _ => html("<p>a</p>"),
     })
@@ -269,7 +269,7 @@ async fn an_ignore_robots_crawl_never_asks_for_robots_txt() {
 
 #[tokio::test]
 async fn a_huge_retry_wait_skips_the_page_instead_of_crashing() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/busy">B</a>"#),
         "/busy" => testing::Response::new(503).header("retry-after", "18446744073709551615"),
         _ => testing::Response::new(404),
@@ -299,8 +299,8 @@ async fn a_custom_wait_header_pauses_the_host_for_the_crawl() {
     let server = testing::Server::http(move |request| {
         seen.lock()
             .unwrap()
-            .push((request.target.clone(), Instant::now()));
-        match request.target.as_str() {
+            .push((request.target().to_owned(), Instant::now()));
+        match request.target() {
             "/" => html(r#"<a href="/busy">B</a><a href="/other">O</a>"#),
             "/busy" => testing::Response::new(503).header("x-wait", "1"),
             _ => html("<p>page</p>"),
@@ -336,8 +336,8 @@ async fn a_default_crawl_pauses_a_host_that_answers_429() {
     let server = testing::Server::http(move |request| {
         seen.lock()
             .unwrap()
-            .push((request.target.clone(), Instant::now()));
-        match request.target.as_str() {
+            .push((request.target().to_owned(), Instant::now()));
+        match request.target() {
             "/robots.txt" => testing::Response::new(404),
             "/" => html(r#"<a href="/busy">B</a><a href="/other">O</a>"#),
             "/busy" => testing::Response::new(429).header("retry-after", "1"),
