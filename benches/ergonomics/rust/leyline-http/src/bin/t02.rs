@@ -10,7 +10,6 @@ async fn main() -> leyline::Result<()> {
         .post("http://127.0.0.1:18743/t02/users")
         .json(&body)
         .timeout(Duration::from_secs(5))
-        .send()
         .await?;
     let status = response.status().as_u16();
     let created: Value = response.json().await?;
@@ -19,7 +18,6 @@ async fn main() -> leyline::Result<()> {
         .post("http://127.0.0.1:18743/t02/slow")
         .json(&body)
         .timeout(Duration::from_millis(300))
-        .send()
         .await;
     match slow {
         Err(error) if error.is_timeout() => println!("timeout"),
