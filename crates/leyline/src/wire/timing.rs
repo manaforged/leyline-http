@@ -4,6 +4,7 @@ pub struct ResponseTiming {
     pub(crate) connect_ms: Option<u32>,
     pub(crate) send_ms: u32,
     pub(crate) total_ms: u32,
+    pub(crate) from_cache: bool,
 }
 
 impl ResponseTiming {
@@ -13,6 +14,7 @@ impl ResponseTiming {
             connect_ms: None,
             send_ms: 0,
             total_ms: 0,
+            from_cache: false,
         }
     }
 
@@ -23,6 +25,7 @@ impl ResponseTiming {
             connect_ms,
             send_ms: total_ms.saturating_sub(connect_ms.unwrap_or(0)),
             total_ms,
+            from_cache: false,
         }
     }
 
@@ -41,5 +44,6 @@ impl ResponseTiming {
             self.connect_ms = Some(self.connect_ms.unwrap_or(0).saturating_add(c));
         }
         self.reused &= leg.reused;
+        self.from_cache = leg.from_cache;
     }
 }

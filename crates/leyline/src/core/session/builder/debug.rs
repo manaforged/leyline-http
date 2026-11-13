@@ -25,6 +25,8 @@ impl fmt::Debug for SessionBuilder {
             .field("https_only", &self.https_only)
             .field("audit", &self.audit)
             .field("cookie_jar", &self.cookie_jar)
+            .field("stores_cookies", &self.stores_cookies)
+            .field("before_send", &self.before_send.is_some())
             .field("tcp_profile", &self.tcp_profile)
             .field("tls_trust", &self.tls_trust)
             .field(

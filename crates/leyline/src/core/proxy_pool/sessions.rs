@@ -37,7 +37,7 @@ impl IdentitySessions {
         let session = base
             .to_builder()
             .identity(identity)
-            .cookies(Jar::new())
+            .cookies(base.stores_cookies().then(Jar::new))
             .build()?
             .without_proxy_pool();
         Ok(self.insert(base, index, session))

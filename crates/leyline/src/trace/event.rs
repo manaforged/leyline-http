@@ -36,6 +36,8 @@ pub enum Event<'a> {
         port: u16,
         /// Whether the connection came from the pool.
         reused: bool,
+        /// The socket address the connection was opened to, which is the proxy's address when a proxy is used, or `None` when it is not known.
+        addr: Option<std::net::SocketAddr>,
         /// The time since the attempt started.
         elapsed: Duration,
     },
@@ -165,6 +167,7 @@ impl fmt::Debug for Event<'_> {
                 host,
                 port,
                 reused,
+                addr,
                 elapsed,
             } => f
                 .debug_struct("Connect")
@@ -172,6 +175,7 @@ impl fmt::Debug for Event<'_> {
                 .field("host", host)
                 .field("port", port)
                 .field("reused", reused)
+                .field("addr", addr)
                 .field("elapsed", elapsed)
                 .finish(),
             Self::Tls {

@@ -33,6 +33,11 @@ version and publish as separate crates.
 - `Events::last_event_id` resumes a server-sent event stream from a known event id.
 - `Crawl::filter` follows a link only when a closure accepts its URL; a rejected link counts under `SkipReason::Filter`.
 - `testing::Response::abort_after` drops the connection part-way through the body.
+- `RequestBuilder::protocol` forces the HTTP version for one request on the session's own connection pool; it travels through `build` and `request_from` as a `Protocol` extension.
+- `Response::remote_addr` returns the socket address the connection was opened to, and `trace::Event::Connect` carries it as `addr`.
+- `Response::from_cache` tells whether the body came from the session's HTTP cache.
+- `Proxy::custom` chooses the proxy for each request and redirect hop with a closure over the URL; `None` sends the request with no proxy.
+- `std::io::Error::from(leyline::Error)` keeps the `leyline::Error` inside, and `Error::find` recovers it, so a streamed `Body` fits `tokio_util::io::StreamReader`.
 - `Scope::Any` follows links and sitemaps across any host while keeping `Authorization` and default `Cookie` headers scoped to the seed origin.
 - `Crawl::redirect`, `Crawl::max_depth`, `Crawl::max_url_size`, `Crawl::max_sitemaps`, `Crawl::max_crawl_delay`, `Crawl::robots_max_age`, `Crawl::dedup`, and `Crawl::dedup_min_words` configure or lift each built-in crawl bound while keeping polite defaults out of the box, and `Crawl::limit` now accepts `None` to clear an earlier cap.
 
@@ -44,6 +49,10 @@ version and publish as separate crates.
 
 ### Changed
 
+- `SessionBuilder::basic_auth` has the same scope as `bearer_auth`: with a `base_url` the credentials go only to that origin.
+- `Session::save` records that cookie storage is off, and `Session::load` restores it. Files written by 0.2.0 load as before.
+- Sending a `Message::Ping` or `Message::Pong` with a payload over 125 bytes fails with `Kind::Request`.
+- On a reused HTTP/1.1 connection, `Response::peer_certificate`, `tls_version`, and `tls_cipher` report that connection's values, not those of the first connection to the host.
 - The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.
 
 ## 0.2.0 - 2026-11-08

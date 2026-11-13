@@ -30,7 +30,7 @@ use crate::core::into_url::IntoUrl;
 #[cfg(feature = "multipart")]
 use crate::core::multipart::Form;
 use crate::core::retry::Retry;
-use crate::core::session::Session;
+use crate::core::session::{Protocol, Session};
 use crate::deadline::Deadline;
 use crate::deadline::Timeout;
 use crate::error::{Error, Kind};
@@ -68,6 +68,7 @@ pub(crate) struct Carry {
     pub(crate) retry_policy: Retry,
     pub(crate) digest_auth: Option<DigestAuth>,
     pub(crate) proxy: Option<Proxy>,
+    pub(crate) protocol: Option<Protocol>,
     pub(crate) header_order: Option<Vec<String>>,
     pub(crate) redirect: Option<Redirect>,
     pub(crate) initiator: Option<url::Url>,
@@ -110,6 +111,7 @@ impl Draft {
                 retry_policy: session.default_retry().clone(),
                 digest_auth: None,
                 proxy: None,
+                protocol: None,
                 header_order: None,
                 redirect: None,
                 initiator: None,
@@ -227,6 +229,12 @@ impl RequestBuilder {
     /// Sets the timeouts for this request, overriding the session timeouts.
     pub fn timeout(mut self, config: impl Into<Timeout>) -> Self {
         self.draft.carry.timeouts = Some(config.into());
+        self
+    }
+
+    /// Sets the HTTP version policy for this request and the redirects it follows, overriding the session policy and still using the session's connection pool.
+    pub fn protocol(mut self, protocol: Protocol) -> Self {
+        self.draft.carry.protocol = Some(protocol);
         self
     }
 

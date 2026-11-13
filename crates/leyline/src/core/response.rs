@@ -94,6 +94,21 @@ impl Response {
         std::time::Duration::from_millis(u64::from(self.parts.timing.total_ms))
     }
 
+    /// Returns the socket address the connection for this response was opened to, which is the resolved server address when direct and the proxy's address through a proxy, or `None` when `from_cache` is true.
+    #[must_use]
+    pub fn remote_addr(&self) -> Option<std::net::SocketAddr> {
+        if self.parts.timing.from_cache {
+            return None;
+        }
+        self.parts.tls.as_ref().and_then(|tls| tls.remote_addr)
+    }
+
+    /// Returns whether the body came from the session's HTTP cache: a fresh stored response answered with no request, or a stale one was confirmed by a `304` and its stored body returned.
+    #[must_use]
+    pub fn from_cache(&self) -> bool {
+        self.parts.timing.from_cache
+    }
+
     /// Returns the number of attempts made, including retries.
     pub fn attempts(&self) -> u32 {
         self.parts.attempts

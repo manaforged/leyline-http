@@ -66,6 +66,8 @@ struct SavedFile {
     jar_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     jar: Option<Jar>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    stores_cookies: Option<bool>,
     #[serde(default)]
     state: ConnectionState,
     #[serde(default, skip_serializing)]
@@ -107,7 +109,8 @@ impl Serialize for Session {
             languages: None,
             env_proxy: false,
             jar_path: None,
-            jar: Some(self.cookies().snapshot()),
+            jar: self.stores_cookies().then(|| self.cookies().snapshot()),
+            stores_cookies: (!self.stores_cookies()).then_some(false),
             state: self.connection_state(),
             strict: false,
         }
@@ -135,9 +138,10 @@ impl SavedFile {
             .env(self.env_proxy);
         let identity = self.identity()?;
         let cookies = match (self.jar_path, self.jar) {
-            (Some(path), _) if path.exists() => Jar::load_from(&path)?,
-            (_, Some(jar)) => jar,
-            (_, None) => Jar::new(),
+            _ if self.stores_cookies == Some(false) => None,
+            (Some(path), _) if path.exists() => Some(Jar::load_from(&path)?),
+            (_, Some(jar)) => Some(jar),
+            (_, None) => Some(Jar::new()),
         };
         Ok(Session::builder()
             .identity(identity)

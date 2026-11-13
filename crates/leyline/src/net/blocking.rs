@@ -44,6 +44,10 @@ impl BlockingTcp {
         })
     }
 
+    pub(crate) fn peer_addr(&self) -> io::Result<std::net::SocketAddr> {
+        self.stream.peer_addr()
+    }
+
     fn until(&mut self) -> (Instant, Option<Instant>) {
         let now = Instant::now();
         self.used = now;

@@ -232,7 +232,8 @@ impl Session {
         site: &SiteContext<'_>,
         method: &Method,
     ) {
-        if self.inner.inputs.jar().is_empty()
+        if !self.stores_cookies()
+            || self.inner.inputs.jar().is_empty()
             || headers
                 .iter()
                 .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))

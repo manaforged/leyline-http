@@ -223,10 +223,10 @@ impl MuxClient for H3Client {
 }
 
 #[derive(Default)]
-pub(crate) struct H1Idle(std::sync::Mutex<VecDeque<(H1Slot, Instant)>>);
+pub(crate) struct H1Idle(std::sync::Mutex<VecDeque<(H1Slot, TlsInfo, Instant)>>);
 
 impl H1Idle {
-    pub(crate) fn queue(&mut self) -> &mut VecDeque<(H1Slot, Instant)> {
+    pub(crate) fn queue(&mut self) -> &mut VecDeque<(H1Slot, TlsInfo, Instant)> {
         self.0
             .get_mut()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -285,7 +285,6 @@ impl MuxEntry {
 pub(crate) struct H1Entry {
     pub(crate) idle: H1Idle,
     pub(crate) last_use: Instant,
-    pub(crate) tls: TlsInfo,
 }
 
 #[derive(Default)]

@@ -198,7 +198,7 @@ impl Exchange<'_> {
     ) -> Result<Sent<Reply<W>>, Error> {
         let leg = opened.leg();
         let count_install = leg == LegKind::Fresh && !(first && self.parked);
-        let replay = body.replay();
+        let replay = body.try_clone();
         let attempt = Attempt {
             leg,
             first,
@@ -254,7 +254,7 @@ impl Exchange<'_> {
         };
         let answer = deliver_head(self.pool, self.key, leg, req.response, req.body_limit).await?;
         let timing = ResponseTiming::leg(self.started, connect_ms);
-        Ok(Delivered::new(answer, req.scheme, tls, timing)?)
+        Ok(Delivered::new(answer, tls, timing)?)
     }
 }
 
@@ -277,12 +277,7 @@ enum Delivery {
 }
 
 impl Delivered {
-    fn new(
-        answer: Answer,
-        scheme: Scheme,
-        tls: TlsInfo,
-        timing: ResponseTiming,
-    ) -> Result<Self, Error> {
+    fn new(answer: Answer, tls: TlsInfo, timing: ResponseTiming) -> Result<Self, Error> {
         let Answer {
             status,
             headers,
@@ -304,7 +299,7 @@ impl Delivered {
             trailers,
             body,
         ));
-        response.tls = scheme.is_secure().then_some(tls);
+        response.tls = Some(tls);
         response.timing = timing;
         Ok(Self { response, pump })
     }

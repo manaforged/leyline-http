@@ -225,14 +225,20 @@ impl Error {
         self.headers().and_then(crate::util::wait::retry_after)
     }
 
-    /// Returns the first `Error` in the source chain of `error`, starting with `error` itself.
+    /// Returns the first `Error` in the source chain of `error`, starting with `error` itself and looking inside each `std::io::Error` in the chain.
     pub fn find<'a>(error: &'a (dyn StdError + 'static)) -> Option<&'a Error> {
         let mut current = Some(error);
         while let Some(err) = current {
             if let Some(found) = err.downcast_ref::<Error>() {
                 return Some(found);
             }
-            current = err.source();
+            current = match err.downcast_ref::<io::Error>().and_then(io::Error::get_ref) {
+                Some(inner) => {
+                    let inner: &(dyn StdError + 'static) = inner;
+                    Some(inner)
+                }
+                None => err.source(),
+            };
         }
         None
     }

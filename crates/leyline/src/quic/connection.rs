@@ -128,6 +128,7 @@ pub(crate) async fn connect_and_handshake(
         peer_cert_der: conn.peer_cert().map(Into::into),
         version: Some("TLSv1.3".into()),
         cipher: conn.cipher().map(Into::into),
+        remote_addr: Some(peer_addr),
     });
     Ok(EstablishedH3 {
         socket,

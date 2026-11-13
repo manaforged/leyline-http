@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Error as WireError;
 use tokio_tungstenite::tungstenite::Message as WireMessage;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame as WireClose, Role};
 
@@ -55,17 +56,50 @@ impl Message {
         }
     }
 
-    fn into_wire(self) -> WireMessage {
-        match self {
+    fn into_wire(self) -> Result<WireMessage> {
+        Ok(match self {
             Self::Text(s) => WireMessage::Text(s.into()),
             Self::Binary(b) => WireMessage::Binary(b.into()),
-            Self::Ping(b) => WireMessage::Ping(b.into()),
-            Self::Pong(b) => WireMessage::Pong(b.into()),
+            Self::Ping(b) => WireMessage::Ping(control_payload("ping", b)?.into()),
+            Self::Pong(b) => WireMessage::Pong(control_payload("pong", b)?.into()),
             Self::Close(frame) => WireMessage::Close(frame.map(|(code, reason)| WireClose {
                 code: code.into(),
                 reason: reason.into(),
             })),
-        }
+        })
+    }
+}
+
+const MAX_CONTROL_PAYLOAD: usize = 125;
+
+fn control_payload(frame: &str, payload: Vec<u8>) -> Result<Vec<u8>> {
+    if payload.len() > MAX_CONTROL_PAYLOAD {
+        return Err(Error::new(Kind::Request).with_message(format!(
+            "ws send: a {frame} payload of {} bytes passes the {MAX_CONTROL_PAYLOAD}-byte \
+             limit of a control frame",
+            payload.len()
+        )));
+    }
+    Ok(payload)
+}
+
+async fn send_on<S>(sink: &mut S, msg: Message) -> Result<()>
+where
+    S: Sink<WireMessage, Error = WireError> + Unpin,
+{
+    sink.send(msg.into_wire()?)
+        .await
+        .map_err(|e| wire_error("ws send", e))
+}
+
+async fn recv_on<S>(stream: &mut S) -> Result<Option<Message>>
+where
+    S: Stream<Item = std::result::Result<WireMessage, WireError>> + Unpin,
+{
+    match stream.next().await {
+        Some(Ok(msg)) => Ok(Some(Message::wire(msg))),
+        Some(Err(e)) => Err(wire_error("ws recv", e)),
+        None => Ok(None),
     }
 }
 
@@ -183,19 +217,12 @@ impl WebSocket {
 
     /// Sends one message.
     pub async fn send(&mut self, msg: Message) -> Result<()> {
-        self.inner
-            .send(msg.into_wire())
-            .await
-            .map_err(|e| wire_error("ws send", e))
+        send_on(&mut self.inner, msg).await
     }
 
     /// Receives the next message, or `None` once the connection has closed; a ping is returned as `Message::Ping` and answered with a pong on the next `recv` or `send`.
     pub async fn recv(&mut self) -> Result<Option<Message>> {
-        match self.inner.next().await {
-            Some(Ok(msg)) => Ok(Some(Message::wire(msg))),
-            Some(Err(e)) => Err(wire_error("ws recv", e)),
-            None => Ok(None),
-        }
+        recv_on(&mut self.inner).await
     }
 
     /// Sends a close frame with no status code; send `Message::Close(Some((code, reason)))` for a custom code and reason.

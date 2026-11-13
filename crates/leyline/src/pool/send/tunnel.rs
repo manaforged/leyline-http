@@ -118,7 +118,7 @@ async fn open_on(
                     &opened.conn,
                     h2_failure(&e),
                     attempt,
-                    body.replay(),
+                    body.try_clone(),
                     e,
                 )
                 .map(Sent::Retry)

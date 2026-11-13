@@ -109,6 +109,23 @@ impl Error {
                 || self.is_refused_stream())
     }
 
+    pub(super) fn io_kind(&self) -> io::ErrorKind {
+        let cause = self.io_cause().map(io::Error::kind);
+        if let Some(kind) = cause.filter(|kind| *kind != io::ErrorKind::Other) {
+            return kind;
+        }
+        match self.kind() {
+            Kind::Timeout => io::ErrorKind::TimedOut,
+            _ if self.is_connection_closed() => io::ErrorKind::ConnectionAborted,
+            Kind::Connect | Kind::Dns => io::ErrorKind::NotConnected,
+            Kind::Url | Kind::Config | Kind::Request => io::ErrorKind::InvalidInput,
+            Kind::Tls | Kind::Decode | Kind::Json | Kind::Http2 | Kind::Http3 => {
+                io::ErrorKind::InvalidData
+            }
+            _ => io::ErrorKind::Other,
+        }
+    }
+
     fn io_cause(&self) -> Option<&io::Error> {
         self.io()
             .or_else(|| self.facts().and_then(Cause::io_source))

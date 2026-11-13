@@ -174,7 +174,7 @@ async fn run_attempts(
         return (counted(route.send(attempt).await, 1), 1);
     }
     let retryable_method = retry_policy.allows(&attempt.method);
-    let replay = attempt.body.replay();
+    let replay = attempt.body.try_clone();
     let mut rewind = Rewind::wrap(&mut attempt.body);
     let base_headers = attempt.headers.clone();
 
@@ -213,7 +213,7 @@ async fn run_attempts(
         n += 1;
         attempt.body = replay
             .as_ref()
-            .and_then(Body::replay)
+            .and_then(Body::try_clone)
             .or_else(|| rewind.as_mut().and_then(Rewind::again))
             .unwrap_or_default();
     }

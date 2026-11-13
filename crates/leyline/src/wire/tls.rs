@@ -7,6 +7,8 @@ pub struct TlsFacts {
     pub peer_cert_der: Option<Vec<u8>>,
     pub version: Option<String>,
     pub cipher: Option<String>,
+    /// The socket address the connection was opened to: the server when direct, the proxy otherwise.
+    pub remote_addr: Option<std::net::SocketAddr>,
 }
 
 impl From<TlsFacts> for TlsInfo {

@@ -29,6 +29,7 @@ impl fmt::Debug for RequestBuilder {
             .field("timeouts", &self.draft.carry.timeouts)
             .field("retry_policy", &self.draft.carry.retry_policy)
             .field("proxy", &self.draft.carry.proxy)
+            .field("protocol", &self.draft.carry.protocol)
             .field("redirect", &self.draft.carry.redirect)
             .field(
                 "digest_auth",

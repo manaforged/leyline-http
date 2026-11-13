@@ -72,6 +72,7 @@ fn cfg_with_env_no_proxy(patterns: &str) -> Proxy {
         from_env: false,
         rejected: None,
         pool: None,
+        custom: None,
     }
 }
 
@@ -82,19 +83,26 @@ fn env_no_proxy_never_bypasses_explicit_proxies() {
         Proxy::from("http://req:1")
             .proxy_for(&url)
             .unwrap()
+            .as_deref()
             .map(ProxyUrl::as_str),
         Some("http://req:1"),
         "env NO_PROXY bypassed a per-request proxy override"
     );
     let sess = cfg_with_env_no_proxy("target.test").all("http://sess:1");
     assert_eq!(
-        sess.proxy_for(&url).unwrap().map(ProxyUrl::as_str),
+        sess.proxy_for(&url)
+            .unwrap()
+            .as_deref()
+            .map(ProxyUrl::as_str),
         Some("http://sess:1"),
         "env NO_PROXY bypassed an explicit session proxy"
     );
     let cfg = cfg_with_env_no_proxy("target.test").all("http://rule:1");
     assert_eq!(
-        cfg.proxy_for(&url).unwrap().map(ProxyUrl::as_str),
+        cfg.proxy_for(&url)
+            .unwrap()
+            .as_deref()
+            .map(ProxyUrl::as_str),
         Some("http://rule:1"),
         "env NO_PROXY bypassed an explicit proxy rule"
     );
@@ -106,10 +114,19 @@ fn env_no_proxy_bypasses_env_derived_proxy() {
         .all("http://env:1")
         .set_from_env();
     let url = url::Url::parse("https://target.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&url).unwrap().map(ProxyUrl::as_str), None);
+    assert_eq!(
+        cfg.proxy_for(&url)
+            .unwrap()
+            .as_deref()
+            .map(ProxyUrl::as_str),
+        None
+    );
     let other = url::Url::parse("https://other.test/x").unwrap();
     assert_eq!(
-        cfg.proxy_for(&other).unwrap().map(ProxyUrl::as_str),
+        cfg.proxy_for(&other)
+            .unwrap()
+            .as_deref()
+            .map(ProxyUrl::as_str),
         Some("http://env:1")
     );
 }
@@ -118,7 +135,13 @@ fn env_no_proxy_bypasses_env_derived_proxy() {
 fn explicit_no_proxy_bypasses_all_proxies() {
     let cfg = Proxy::new().no_proxy(["target.test"]);
     let url = url::Url::parse("https://target.test/x").unwrap();
-    assert_eq!(cfg.proxy_for(&url).unwrap().map(ProxyUrl::as_str), None);
+    assert_eq!(
+        cfg.proxy_for(&url)
+            .unwrap()
+            .as_deref()
+            .map(ProxyUrl::as_str),
+        None
+    );
     assert_eq!(
         cfg.clone().all("http://sess:1").proxy_for(&url).unwrap(),
         None
@@ -127,6 +150,7 @@ fn explicit_no_proxy_bypasses_all_proxies() {
         cfg.all("http://rule:1")
             .proxy_for(&url)
             .unwrap()
+            .as_deref()
             .map(ProxyUrl::as_str),
         None
     );

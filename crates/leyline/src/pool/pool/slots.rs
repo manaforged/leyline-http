@@ -89,10 +89,10 @@ impl Pool {
     pub(crate) fn checkout_h1(&self, key: &PoolKey, now: Instant) -> Option<(H1Slot, TlsInfo)> {
         let mut entries = write(&self.conns.shards.of(key).entries);
         let hit = entries.h1.get_mut(key).and_then(|entry| {
-            while let Some((slot, _returned_at)) = entry.idle.queue().pop_back() {
+            while let Some((slot, tls, _returned_at)) = entry.idle.queue().pop_back() {
                 if !self.past_lifetime(slot.opened_at, now) {
                     entry.last_use = now;
-                    return Some((slot, entry.tls.clone()));
+                    return Some((slot, tls));
                 }
             }
             None
@@ -121,7 +121,7 @@ impl Pool {
         let mut entries = write(&self.conns.shards.of(key).entries);
         if let Some(entry) = entries.h1.get_mut(key) {
             let now = Instant::now();
-            entry.idle.queue().push_back((slot, now));
+            entry.idle.queue().push_back((slot, tls, now));
             entry.last_use = now;
             return;
         }
@@ -130,13 +130,12 @@ impl Pool {
         }
         let evicted = self.evict_for_new_entry(&mut entries);
         let mut idle = H1Idle::default();
-        idle.queue().push_back((slot, Instant::now()));
+        idle.queue().push_back((slot, tls, Instant::now()));
         entries.h1.insert(
             key.clone(),
             H1Entry {
                 idle,
                 last_use: Instant::now(),
-                tls,
             },
         );
         drop(entries);

@@ -187,7 +187,7 @@ impl Session {
             &self.inner.h2_config,
             host,
             port,
-            proxy,
+            proxy.as_deref(),
         )
         .await
         .map(drop)
@@ -203,7 +203,7 @@ impl Session {
         self.request_from(req).send().await
     }
 
-    /// Returns a request builder for an `http::Request` with an absolute URL, applying a `RequestKind`, `Timeout`, `Retry`, `Redirect` or `Proxy` found in its extensions.
+    /// Returns a request builder for an `http::Request` with an absolute URL, applying a `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy` or `Protocol` found in its extensions and ignoring `http::Request::version`, whose default cannot be told from an explicit HTTP/1.1.
     pub fn request_from(&self, req: http::Request<Body>) -> RequestBuilder {
         RequestBuilder::from_http(self, req)
     }

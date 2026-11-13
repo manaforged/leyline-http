@@ -607,16 +607,6 @@ impl SessionBuilder {
         self.header(USER_AGENT, value.into())
     }
 
-    /// Sets the `Authorization` header to HTTP Basic credentials on every request, replacing a bearer token or default `Authorization` header set before it.
-    pub fn basic_auth(mut self, user: &str, password: &str) -> Self {
-        self.remove_default(AUTHORIZATION);
-        self.bearer = None;
-        self.header(
-            AUTHORIZATION,
-            crate::util::basic_credentials(user, password),
-        )
-    }
-
     /// Adds one default header sent on every request, and fails the build when the name or value is invalid.
     pub fn header(
         self,

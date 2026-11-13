@@ -101,13 +101,14 @@ pub(crate) fn dns(host: &str, port: u16, addrs: usize) {
     });
 }
 
-pub(crate) fn connect(host: &str, port: u16, reused: bool) {
+pub(crate) fn connect(host: &str, port: u16, reused: bool, addr: Option<std::net::SocketAddr>) {
     with(|ctx| {
         ctx.hook.event(&Event::Connect {
             id: ctx.id,
             host,
             port,
             reused,
+            addr,
             elapsed: ctx.start.elapsed(),
         });
     });
@@ -188,9 +189,10 @@ impl Trace for Log {
                 host,
                 port,
                 reused,
+                addr,
                 elapsed,
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, port, reused, elapsed_ms = ResponseTiming::span(elapsed), "connect");
+                tracing::debug!(target: "leyline::trace", id, host, port, reused, addr = ?addr, elapsed_ms = ResponseTiming::span(elapsed), "connect");
             }
             Event::Tls {
                 id,

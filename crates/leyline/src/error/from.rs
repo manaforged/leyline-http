@@ -40,6 +40,12 @@ impl From<io::Error> for Error {
     }
 }
 
+impl From<Error> for io::Error {
+    fn from(error: Error) -> Self {
+        io::Error::new(error.io_kind(), error)
+    }
+}
+
 impl From<http::Error> for Error {
     fn from(e: http::Error) -> Self {
         Error::new(Kind::Request).with_source(e)

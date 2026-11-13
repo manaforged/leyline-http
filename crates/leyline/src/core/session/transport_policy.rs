@@ -1,4 +1,4 @@
-use super::{Plan, Session};
+use super::{Plan, Protocol, Session};
 use crate::core::config::Proxy;
 use crate::error::{Error, Result};
 use crate::net::ProxyUrl;
@@ -43,7 +43,7 @@ impl Session {
         &'a self,
         url: &url::Url,
         request: Option<&'a Proxy>,
-    ) -> Result<Option<&'a ProxyUrl>> {
+    ) -> Result<Option<std::borrow::Cow<'a, ProxyUrl>>> {
         request
             .unwrap_or(&self.inner.inputs.proxy_config)
             .proxy_for(url)
@@ -61,6 +61,7 @@ impl Session {
     pub(crate) fn send_with_policy<'a>(
         &'a self,
         req: Prepared<'a>,
+        protocol: Protocol,
     ) -> impl Future<Output = Result<Box<TransportResponse>>> + 'a {
         if self.inner.inputs.https_only
             && crate::wire::Scheme::of(req.url) != Some(crate::wire::Scheme::Https)
@@ -70,13 +71,17 @@ impl Session {
             ))));
         }
         Either::Right(match &self.inner.cache {
-            Some(cache) => Either::Left(Box::pin(self.send_cached(req, cache))),
-            None => Either::Right(self.send_transport(req)),
+            Some(cache) => Either::Left(Box::pin(self.send_cached(req, cache, protocol))),
+            None => Either::Right(self.send_transport(req, protocol)),
         })
     }
 
-    pub(super) async fn send_transport(&self, req: Prepared<'_>) -> Result<Box<TransportResponse>> {
-        let (route, req) = match self.inner.inputs.protocol_policy.plan() {
+    pub(super) async fn send_transport(
+        &self,
+        req: Prepared<'_>,
+        protocol: Protocol,
+    ) -> Result<Box<TransportResponse>> {
+        let (route, req) = match protocol.plan() {
             Plan::Tcp(route) => (route, req),
             #[cfg(feature = "http3")]
             Plan::H3Only => return self.send_h3_only(req).await,

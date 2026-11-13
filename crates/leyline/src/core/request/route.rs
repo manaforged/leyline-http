@@ -79,10 +79,7 @@ impl<'a> Route<'a> {
     }
 
     fn used_proxy(&self, proxy: Option<&Proxy>) -> Option<String> {
-        let used = match proxy {
-            Some(proxy) => proxy.proxy_for(&self.url).ok().flatten(),
-            None => self.session.proxy_for(&self.url, None).ok().flatten(),
-        };
+        let used = self.session.proxy_for(&self.url, proxy).ok().flatten();
         used.map(|proxy| proxy.as_str().to_owned())
     }
 }

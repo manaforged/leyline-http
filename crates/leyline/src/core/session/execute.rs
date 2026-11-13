@@ -42,6 +42,10 @@ impl Session {
             .as_ref()
             .unwrap_or(&self.inner.inputs.redirect_policy);
         let request_proxy = attempt.carry.proxy.as_ref();
+        let protocol = attempt
+            .carry
+            .protocol
+            .unwrap_or(self.inner.inputs.protocol_policy);
         let header_order = attempt.carry.header_order.as_deref();
 
         let mut digest = attempt.carry.digest_auth.map(DigestLeg::new);
@@ -59,24 +63,25 @@ impl Session {
             let audit_headers = self.audit_copy(&headers);
 
             let step_body = std::mem::take(&mut journey.body);
-            let replay_body = step_body.replay();
+            let replay_body = step_body.try_clone();
 
             let proxy = self
                 .proxy_for(&journey.url, request_proxy)
                 .map_err(leg_error(answered))?;
             let leg = {
-                let send = std::pin::pin!(self.send_with_policy(Prepared {
+                let prepared = Prepared {
                     method: &journey.method,
                     url: &journey.url,
                     headers,
                     body: step_body,
-                    proxy,
+                    proxy: proxy.as_deref(),
                     response,
                     body_limit: crate::error::BodyLimit::session(
-                        attempt.carry.body_rules.max_body_size
+                        attempt.carry.body_rules.max_body_size,
                     ),
                     stale_resend: !attempt.carry.retrying,
-                }));
+                };
+                let send = std::pin::pin!(self.send_with_policy(prepared, protocol));
                 attempt.deadline.response_header(send).await
             }
             .map_err(leg_error(answered))?;

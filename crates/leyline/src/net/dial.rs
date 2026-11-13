@@ -76,7 +76,7 @@ impl Dialer {
         let race = self.socket.happy_eyeballs.unwrap_or_default();
         let turn = self.turn.fetch_add(1, Ordering::Relaxed);
         let order = self.outliers.order(interleave_by_family(addrs, turn));
-        let (tcp_stream, _addr) = happy_eyeballs_connect(order, race, |peer| {
+        let (tcp_stream, addr) = happy_eyeballs_connect(order, race, |peer| {
             let tcp = self.tcp.clone();
             let socket = self.socket.clone();
             let watch = Watch::new(Arc::clone(&self.outliers), peer, race.resolve_delay);
@@ -84,7 +84,7 @@ impl Dialer {
         })
         .await
         .map_err(NetError::TcpConnect)?;
-        trace::connect(host, port, false);
+        trace::connect(host, port, false, Some(addr));
         Ok(tcp_stream)
     }
 }

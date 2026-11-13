@@ -64,7 +64,7 @@ async fn send_h2_or_fall_back(
     req: Prepared<'_>,
     opened: Opened<H2Client>,
 ) -> Result<Box<TransportResponse>> {
-    let retry = req.body.replay().map(|body| req.again(body));
+    let retry = req.body.try_clone().map(|body| req.again(body));
     match send_request(pool, connector, h2_config, req, Some(opened)).await? {
         H2Outcome::Response(response) => Ok(response),
         H2Outcome::Http1(not_h2) => {

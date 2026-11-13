@@ -194,12 +194,16 @@ impl Body {
 
     /// Returns a copy of a body held in memory without copying its bytes, or `None` for a streamed body.
     pub fn try_clone(&self) -> Option<Self> {
-        self.replay()
+        match &self.0 {
+            BodyKind::Empty => Some(Body::default()),
+            BodyKind::Bytes(b) => Some(Body::bytes(b.clone())),
+            BodyKind::Stream { .. } => None,
+        }
     }
 
     /// Returns the next chunk of the body, an error that ends it, or `None` after the last chunk.
     pub async fn next(&mut self) -> Option<crate::error::Result<Bytes>> {
-        std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
+        futures_util::StreamExt::next(self).await
     }
 
     pub(crate) fn shared<S>(stream: S) -> Self
@@ -230,14 +234,6 @@ impl Body {
             BodyKind::Empty => (None, None),
             BodyKind::Bytes(b) => (Some(b), None),
             BodyKind::Stream { stream, .. } => (None, Some(stream)),
-        }
-    }
-
-    pub(crate) fn replay(&self) -> Option<Body> {
-        match &self.0 {
-            BodyKind::Empty => Some(Body::default()),
-            BodyKind::Bytes(b) => Some(Body::bytes(b.clone())),
-            BodyKind::Stream { .. } => None,
         }
     }
 }

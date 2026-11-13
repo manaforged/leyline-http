@@ -7,13 +7,13 @@ use http_cache_semantics::{AfterResponse, BeforeRequest, CacheOptions, CachePoli
 use lru::LruCache;
 use sha2::{Digest, Sha256};
 
-use super::Session;
 use super::header_merge::apply_extra_headers;
+use super::{Protocol, Session};
 use crate::core::headers::HeaderList;
 use crate::error::{Error, Kind, Result};
 use crate::pool::Prepared;
 use crate::util::lock;
-use crate::wire::{ResponseMode, TransportBody, TransportResponse};
+use crate::wire::{ResponseMode, ResponseTiming, TransportBody, TransportResponse};
 
 pub(super) struct Cache {
     capacity: usize,
@@ -151,6 +151,7 @@ impl Session {
         &self,
         mut req: Prepared<'_>,
         cache: &Cache,
+        protocol: Protocol,
     ) -> Result<Box<TransportResponse>> {
         let request = request(&req)?;
         let key = Key::of(&req);
@@ -158,7 +159,7 @@ impl Session {
             if only_cached(&request) {
                 return Ok(cache_miss());
             }
-            let response = self.send_transport(req).await?;
+            let response = self.send_transport(req, protocol).await?;
             self.invalidate(cache, &request, &response);
             return Ok(response);
         }
@@ -183,7 +184,7 @@ impl Session {
         if only_cached(&request) {
             return Ok(cache_miss());
         }
-        let response = self.send_transport(req).await?;
+        let response = self.send_transport(req, protocol).await?;
         lookup.entry = stale;
         finish(cache, key, &request, response, lookup)
     }
@@ -283,7 +284,10 @@ fn finish(
                 let actual = std::mem::take(&mut response.headers);
                 let timing = response.timing;
                 response = old.response(parts);
-                response.timing = timing;
+                response.timing = ResponseTiming {
+                    from_cache: true,
+                    ..timing
+                };
                 let mut headers = std::mem::take(&mut response.headers).into_map();
                 for name in VOLATILE {
                     for value in actual.map().get_all(&name) {
@@ -365,7 +369,10 @@ impl Entry {
             body: TransportBody::Buffered(self.body.clone()),
             version: self.version,
             tls: self.tls.clone(),
-            timing: Default::default(),
+            timing: ResponseTiming {
+                from_cache: true,
+                ..Default::default()
+            },
         })
     }
 }

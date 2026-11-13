@@ -137,9 +137,9 @@ pub(crate) struct LegTrace<'a> {
 }
 
 impl LegTrace<'_> {
-    fn start(&self, leg: LegKind) {
+    fn start(&self, leg: LegKind, addr: Option<std::net::SocketAddr>) {
         match leg {
-            LegKind::Pooled => trace::connect(self.host, self.port, true),
+            LegKind::Pooled => trace::connect(self.host, self.port, true, addr),
             LegKind::Fresh => {
                 tracing::Span::current().record("pool.hit", false);
             }
@@ -180,7 +180,7 @@ where
             ControlFlow::Break(done) => return Ok(done),
         };
         let leg = opened.leg();
-        trace.start(leg);
+        trace.start(leg, opened.tls.remote_addr);
         match send(opened, body, first).await? {
             Sent::Done(done) => {
                 LegTrace::answered(leg);
@@ -309,7 +309,7 @@ async fn send_on(
     first: bool,
 ) -> Result<Sent<H2Outcome>, Error> {
     let leg = opened.leg();
-    let replay = body.replay();
+    let replay = body.try_clone();
     let mut send_started = match leg {
         LegKind::Pooled => ctx.now,
         LegKind::Fresh => Instant::now(),
@@ -368,6 +368,7 @@ pub(super) fn answered(
         connect_ms,
         send_ms: ResponseTiming::span(waited),
         total_ms: ResponseTiming::span(answered.saturating_duration_since(started)),
+        from_cache: false,
     };
     resp
 }

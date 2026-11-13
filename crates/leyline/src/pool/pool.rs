@@ -118,7 +118,7 @@ impl Conns {
             entries.h1.retain(|_, entry| {
                 let idle = entry.idle.queue();
                 let before = idle.len();
-                idle.retain(|(_, returned_at)| now.duration_since(*returned_at) < idle_timeout);
+                idle.retain(|(_, _, returned_at)| now.duration_since(*returned_at) < idle_timeout);
                 idle_evicted += (before - idle.len()) as u64;
                 !idle.is_empty() || now.duration_since(entry.last_use) < idle_timeout
             });

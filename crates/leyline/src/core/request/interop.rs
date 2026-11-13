@@ -7,7 +7,7 @@ use crate::core::Redirect;
 use crate::core::config::Proxy;
 use crate::core::headers::HeaderList;
 use crate::core::retry::Retry;
-use crate::core::session::{BeforeSend, Session};
+use crate::core::session::{BeforeSend, Protocol, Session};
 use crate::deadline::Timeout;
 use crate::error::{Error, Result};
 use crate::profile::{HeaderPosition, RequestKind};
@@ -45,6 +45,9 @@ impl Draft {
         }
         if let Some(proxy) = carry.proxy.take() {
             options.insert(proxy);
+        }
+        if let Some(protocol) = carry.protocol.take() {
+            options.insert(protocol);
         }
         if !anchors.is_empty() {
             options.insert(anchors);
@@ -109,6 +112,9 @@ impl RequestBuilder {
         }
         if let Some(proxy) = options.remove::<Proxy>() {
             builder = builder.proxy(proxy);
+        }
+        if let Some(protocol) = options.remove::<Protocol>() {
+            builder = builder.protocol(protocol);
         }
         builder
     }

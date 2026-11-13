@@ -10,7 +10,7 @@ use crate::h2::client::H2Client;
 use crate::quic::{H3Client, H3Config, open_fresh_h3};
 #[cfg(feature = "http3")]
 use crate::tls::trust::Tls;
-use crate::tls::{FingerprintConnector, TlsStream};
+use crate::tls::{FingerprintConnector, TlsIo, TlsStream};
 use crate::trace;
 use crate::util::coalesce::Coalesce;
 use crate::wire::Scheme;
@@ -181,7 +181,17 @@ pub(crate) fn tls_info(tls_stream: &TlsStream) -> TlsInfo {
         peer_cert_der: tls_stream.peer_cert_der.clone(),
         version: tls_stream.tls_version.clone(),
         cipher: tls_stream.tls_cipher.clone(),
+        remote_addr: remote_addr(&tls_stream.stream),
     })
+}
+
+pub(crate) fn remote_addr(io: &TlsIo) -> Option<std::net::SocketAddr> {
+    match io {
+        TlsIo::Boring(stream) => stream.get_ref().peer_addr().ok(),
+        TlsIo::Records(stream) => stream.get_ref().peer_addr().ok(),
+        TlsIo::Blocking(stream) => stream.get_ref().peer_addr().ok(),
+        TlsIo::Nested(stream) => remote_addr(stream.get_ref()),
+    }
 }
 
 fn park_h1(pool: &Pool, key: PoolKey, tls_stream: TlsStream, tls: TlsInfo) -> std::io::Result<()> {
@@ -439,7 +449,7 @@ async fn open_fresh_h3_installed(
         key.proxy.as_ref(),
     )
     .await?;
-    trace::connect(&key.host, key.port, false);
+    trace::connect(&key.host, key.port, false, tls.remote_addr);
     if trace::on() {
         trace::tls(
             &key.host,

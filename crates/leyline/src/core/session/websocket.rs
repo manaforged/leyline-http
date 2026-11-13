@@ -21,7 +21,9 @@ impl Session {
             let conn = self
                 .websocket_with_options(&http_url, headers, carry)
                 .await?;
-            self.store_cookies(&conn.header_map(), &http_url);
+            if self.stores_cookies() {
+                self.store_cookies(&conn.header_map(), &http_url);
+            }
             Ok::<_, Error>(conn)
         };
         self.unless_shut_down(self.deadline(carry.timeouts.as_ref()).total(handshake))
@@ -45,7 +47,7 @@ impl Session {
             .or_else(|| self.session_header_order());
         let handshake = Handshake {
             url: http_url,
-            proxy,
+            proxy: proxy.as_deref(),
             user_agent: &self.inner.user_agent,
             origin: &origin,
             extra_headers: &extra_headers,

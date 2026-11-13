@@ -148,7 +148,7 @@ impl Events {
     }
     /// Returns the next event, a terminal error, or `None` after the stream stops.
     pub async fn next(&mut self) -> Option<Result<Event>> {
-        std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
+        futures_util::StreamExt::next(self).await
     }
 }
 

@@ -296,3 +296,164 @@ fn a_blocking_session_reaches_a_mock_server_started_on_its_own_runtime() -> Chec
     assert_eq!(text, "ping");
     Ok(())
 }
+
+#[tokio::test]
+async fn a_cookie_free_session_stays_cookie_free_after_a_manual_insert_and_a_reload() -> Check {
+    let server =
+        testing::Server::http(|_| ok("hi").header("set-cookie", "sid=abc; Path=/")).await?;
+    let origin = Url::parse(&server.url("/"))?;
+    let path = std::env::temp_dir().join(format!("leyline-no-cookies-{}.json", std::process::id()));
+    let session = Session::builder().cookies(None).build()?;
+    session
+        .cookies()
+        .insert(&origin, Cookie::new("manual", "1"));
+
+    session.get(server.url("/first")).await?;
+    session.save(&path)?;
+    let reloaded = Session::load(&path).and_then(leyline::SessionBuilder::build);
+    std::fs::remove_file(&path)?;
+    let reloaded = reloaded?;
+    reloaded.get(server.url("/second")).await?;
+    reloaded.get(server.url("/third")).await?;
+
+    let seen = server.requests().await;
+    let cookies: Vec<Option<&str>> = seen
+        .iter()
+        .map(|request| request.header("cookie"))
+        .collect();
+    assert_eq!(cookies, [None, None, None]);
+    assert!(reloaded.cookies().all().is_empty());
+    Ok(())
+}
+
+#[tokio::test]
+async fn basic_credentials_go_only_to_the_base_url_origin() -> Check {
+    let home = testing::Server::http(|_| ok("home")).await?;
+    let other = testing::Server::http(|_| ok("other")).await?;
+    let session = Session::builder()
+        .base_url(home.url("/"))
+        .basic_auth("ada", "pw")
+        .build()?;
+
+    session.get("/inside").await?;
+    session.get(other.url("/outside")).await?;
+
+    assert_eq!(
+        home.requests().await[0].header("authorization"),
+        Some("Basic YWRhOnB3")
+    );
+    assert_eq!(other.requests().await[0].header("authorization"), None);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_proxy_closure_routes_one_path_through_a_proxy_and_the_rest_direct() -> Check {
+    let direct = testing::Server::http(|_| ok("direct")).await?;
+    let proxy = testing::Server::http(|_| ok("proxied")).await?;
+    let through = proxy.url("/");
+    let session = Session::builder()
+        .proxy(leyline::Proxy::custom(move |url| {
+            url.path()
+                .starts_with("/via")
+                .then(|| leyline::Proxy::from(through.as_str()))
+        }))
+        .build()?;
+
+    let via = session.get(direct.url("/via/a")).await?;
+    let straight = session.get(direct.url("/plain")).await?;
+
+    assert!(via.proxy().is_some());
+    assert_eq!(straight.proxy(), None);
+    assert_eq!(via.text().await?, "proxied");
+    assert_eq!(straight.text().await?, "direct");
+    let proxied = proxy.requests().await;
+    assert_eq!(proxied.len(), 1);
+    assert_eq!(proxied[0].target, direct.url("/via/a"));
+    let reached: Vec<String> = direct
+        .requests()
+        .await
+        .into_iter()
+        .map(|request| request.target)
+        .collect();
+    assert_eq!(reached, ["/plain"]);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_response_names_the_address_it_came_from() -> Check {
+    let server = testing::Server::http(|_| ok("hi")).await?;
+    let session = Session::new();
+
+    let first = session.get(server.url("/a")).await?;
+    let second = session.get(server.url("/b")).await?;
+
+    assert_eq!(first.remote_addr(), Some(server.addr()));
+    assert!(second.reused());
+    assert_eq!(second.remote_addr(), Some(server.addr()));
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_cached_response_says_it_came_from_the_cache() -> Check {
+    let server =
+        testing::Server::http(|_| ok("fresh").header("cache-control", "max-age=60")).await?;
+    let session = Session::builder().cache(1 << 20).build()?;
+
+    let first = session.get(server.url("/doc")).await?;
+    let second = session.get(server.url("/doc")).await?;
+
+    assert!(!first.from_cache());
+    assert!(second.from_cache());
+    assert_eq!(second.remote_addr(), None);
+    assert_eq!(second.text().await?, "fresh");
+    assert_eq!(server.requests().await.len(), 1);
+    Ok(())
+}
+
+#[tokio::test]
+async fn a_timeout_converts_to_a_timed_out_io_error_that_keeps_its_source() -> Check {
+    let server =
+        testing::Server::http(|_| ok("late").delay(std::time::Duration::from_secs(5))).await?;
+    let session = Session::builder().retry(0).build()?;
+
+    let failed = session
+        .get(server.url("/slow"))
+        .timeout(std::time::Duration::from_millis(50))
+        .await;
+
+    let error = failed.err().ok_or("the request must time out")?;
+    let io = std::io::Error::from(error);
+    assert_eq!(io.kind(), std::io::ErrorKind::TimedOut);
+    let source = leyline::Error::find(&io).ok_or("the leyline error stays reachable")?;
+    assert_eq!(source.kind(), Kind::Timeout);
+    Ok(())
+}
+
+#[tokio::test]
+async fn one_request_can_force_its_protocol_and_keep_it_through_build() -> Check {
+    let server = testing::Server::http(|_| ok("hi")).await?;
+    let session = Session::new();
+
+    let request = session
+        .get(server.url("/h1"))
+        .protocol(leyline::Protocol::Http1)
+        .build()?;
+    assert_eq!(
+        request.extensions().get::<leyline::Protocol>(),
+        Some(&leyline::Protocol::Http1)
+    );
+    let forced = session.request_from(request).await?;
+    let refused = session
+        .get(server.url("/h3"))
+        .protocol(leyline::Protocol::Http3)
+        .timeout(std::time::Duration::from_millis(500))
+        .await;
+
+    assert_eq!(forced.version(), leyline::http::Version::HTTP_11);
+    assert!(
+        refused.is_err(),
+        "a plain HTTP/1.1 server cannot answer a forced HTTP/3 request"
+    );
+    assert_eq!(server.requests().await.len(), 1);
+    Ok(())
+}

@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+use std::sync::Arc;
 use std::time::Duration;
 
 use crate::core::proxy_pool::ProxyPool;
@@ -11,6 +13,8 @@ use crate::wire::Scheme;
 use super::host::pattern_matches;
 use crate::net::normalize_host;
 
+type Choose = Arc<dyn Fn(&url::Url) -> Option<Proxy> + Send + Sync>;
+
 #[doc = include_str!("../../../docs/proxy.md")]
 #[derive(Clone)]
 #[non_exhaustive]
@@ -23,6 +27,7 @@ pub struct Proxy {
     pub(super) from_env: bool,
     pub(super) rejected: Option<RejectedProxy>,
     pub(crate) pool: Option<ProxyPool>,
+    pub(super) custom: Option<Choose>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,6 +56,7 @@ impl std::fmt::Debug for Proxy {
             .field("from_env", &self.from_env)
             .field("rejected", &self.rejected)
             .field("pool", &self.pool)
+            .field("custom", &self.custom.is_some())
             .finish()
     }
 }
@@ -65,6 +71,7 @@ impl Default for Proxy {
             from_env: false,
             rejected: None,
             pool: None,
+            custom: None,
         }
     }
 }
@@ -142,6 +149,17 @@ impl Proxy {
         self.map_pool(|pool| pool.ban_for(duration))
     }
 
+    /// Calls `choose` with the URL of each request and each redirect hop: `None` sends it with no proxy, and `Some` must hold one proxy, so a `Proxy::list`, `Proxy::identified` or `Proxy::custom` fails the request with `Kind::Config`.
+    pub fn custom<F>(choose: F) -> Self
+    where
+        F: Fn(&url::Url) -> Option<Proxy> + Send + Sync + 'static,
+    {
+        Self {
+            custom: Some(Arc::new(choose)),
+            ..Self::new()
+        }
+    }
+
     fn pooled(pool: ProxyPool) -> Self {
         Self {
             pool: Some(pool),
@@ -207,10 +225,29 @@ impl Proxy {
     }
 
     pub(crate) fn uses_env(&self) -> bool {
-        self.use_env
+        self.use_env && self.custom.is_none()
     }
 
-    pub(crate) fn proxy_for(&self, url: &url::Url) -> crate::error::Result<Option<&ProxyUrl>> {
+    pub(crate) fn proxy_for(
+        &self,
+        url: &url::Url,
+    ) -> crate::error::Result<Option<Cow<'_, ProxyUrl>>> {
+        let Some(choose) = &self.custom else {
+            return Ok(self.rule_for(url)?.map(Cow::Borrowed));
+        };
+        let Some(chosen) = choose(url) else {
+            return Ok(None);
+        };
+        if chosen.custom.is_some() || chosen.pool.is_some() {
+            return Err(Error::config(
+                "a Proxy::custom closure must return one proxy, not a Proxy::list, \
+                 Proxy::identified or Proxy::custom",
+            ));
+        }
+        Ok(chosen.rule_for(url)?.cloned().map(Cow::Owned))
+    }
+
+    fn rule_for(&self, url: &url::Url) -> crate::error::Result<Option<&ProxyUrl>> {
         if let Some(rejected) = self.rejected {
             return Err(rejected.error(Kind::Proxy));
         }
