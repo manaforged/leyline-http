@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures_util::{Stream, TryFutureExt};
+use futures_util::Stream;
 
 use crate::wire::{Body, BodyKind};
 
@@ -60,19 +60,15 @@ impl Part {
 
     /// Creates a part that streams the file at `path`, using its file name, or `file` when it has none.
     pub fn file(path: impl AsRef<Path>) -> crate::Result<Self> {
-        let path = path.as_ref().to_path_buf();
-        let metadata = std::fs::metadata(&path)?;
+        let path = path.as_ref();
         let filename = path
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("file")
             .to_string();
-        let stream = tokio::fs::File::open(path)
-            .map_ok(tokio_util::io::ReaderStream::new)
-            .try_flatten_stream();
         Ok(Self {
             name: String::new(),
-            body: Body::stream(stream, Some(metadata.len())),
+            body: Body::file(path)?,
             filename: Some(filename),
             mime: None,
             extra_headers: Vec::new(),

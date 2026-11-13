@@ -10,6 +10,7 @@ mod visit;
 use std::collections::{HashMap, VecDeque};
 use std::future::{Future, poll_fn};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::stream::{FuturesUnordered, Stream};
@@ -210,6 +211,15 @@ impl Crawl {
         self
     }
 
+    /// Follows a discovered link, sitemap URL or redirect target only when `keep` returns true for it, on top of the scope and never for a seed; a checkpoint does not save the filter, so call this again after `Crawl::load`.
+    pub fn filter<F>(mut self, keep: F) -> Self
+    where
+        F: Fn(&Url) -> bool + Send + Sync + 'static,
+    {
+        self.frontier.filter = Some(Arc::new(keep));
+        self
+    }
+
     /// Stops the crawl after it yields `pages` pages, or removes the cap when `None`.
     pub fn limit(mut self, pages: impl Into<Option<usize>>) -> Self {
         self.settings.max_pages = pages.into();
@@ -377,7 +387,7 @@ impl Crawl {
             match seed {
                 Ok(url) => {
                     self.trusted.get_or_insert_with(|| url.clone());
-                    self.frontier.add(Queued::seed(url));
+                    self.frontier.add(Queued::seed(url), &mut self.stats);
                 }
                 Err(err) => self.ready.push_back(Err(err)),
             }
@@ -443,24 +453,21 @@ impl Crawl {
         let widen =
             queued.seed && same_site(&queued.url, &to) && self.frontier.in_scope(&queued.url);
         let seed = queued.seed && (queued.hops == 0 || widen || self.frontier.in_scope(&to));
-        let seen = self.frontier.has_seen(&to);
         queued.chain.push(from);
         queued.previous.push(hop);
-        let admitted = self.frontier.add_redirect(Queued {
-            url: to,
-            depth: queued.depth,
-            hops: queued.hops + 1,
-            seed,
-            widen,
-            attempts: 0,
-            chain: queued.chain,
-            previous: queued.previous,
-        });
-        match (admitted, seen) {
-            (false, true) => self.stats.skip(SkipReason::Duplicate),
-            (false, false) => self.stats.skip(SkipReason::Scope),
-            (true, _) => {}
-        }
+        self.frontier.add_redirect(
+            Queued {
+                url: to,
+                depth: queued.depth,
+                hops: queued.hops + 1,
+                seed,
+                widen,
+                attempts: 0,
+                chain: queued.chain,
+                previous: queued.previous,
+            },
+            &mut self.stats,
+        );
     }
 
     fn handle(&mut self, event: Event) {

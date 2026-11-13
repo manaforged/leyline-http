@@ -28,7 +28,7 @@ async fn a_session_saves_loads_and_autosaves_its_cookies() {
     let session = Session::new();
     session
         .cookies()
-        .store("session-token=a; Path=/; Max-Age=3600", &url());
+        .store(&url(), "session-token=a; Path=/; Max-Age=3600");
     session.save(&path).unwrap();
     assert_eq!(token(&path).as_deref(), Some("a"));
 
@@ -36,7 +36,7 @@ async fn a_session_saves_loads_and_autosaves_its_cookies() {
     reopened.autosave(&path, Duration::from_secs(3600));
     reopened
         .cookies()
-        .store("session-token=b; Path=/; Max-Age=3600", &url());
+        .store(&url(), "session-token=b; Path=/; Max-Age=3600");
     reopened.shutdown().await;
     let deadline = Instant::now() + Duration::from_secs(5);
     while token(&path).as_deref() != Some("b") && Instant::now() < deadline {

@@ -3,18 +3,15 @@ use std::future::Future;
 use http::Method;
 
 use crate::cookie::Jar;
-use crate::profile::{Browser, RequestKind};
+use crate::profile::Browser;
 
 use super::{Session, SessionBuilder};
 use crate::core::Redirect;
 use crate::core::config::HostPass;
-use crate::core::config::Proxy;
 use crate::core::into_url::IntoUrl;
 use crate::core::request::RequestBuilder;
 use crate::core::response::Response;
-use crate::core::retry::Retry;
-use crate::deadline::Timeout;
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::net::ProxyUrl;
 use crate::wire::Body;
 
@@ -203,40 +200,20 @@ impl Session {
 
     /// Sends an `http::Request` and applies the request options found in its extensions.
     pub async fn execute(&self, req: http::Request<Body>) -> Result<Response> {
-        self.http_request(req).send().await
+        self.request_from(req).send().await
     }
 
-    pub(crate) fn http_request(&self, req: http::Request<Body>) -> RequestBuilder {
-        let (mut parts, body) = req.into_parts();
-        let url = url::Url::parse(&parts.uri.to_string());
-        let mut builder = RequestBuilder::new(
-            self,
-            parts.method,
-            url.as_ref().ok().cloned().map(std::sync::Arc::new),
-        );
-        if let Err(err) = url {
-            builder.fail(Error::from(err));
-        }
-        for (name, value) in &parts.headers {
-            builder = builder.header(name.clone(), value.clone());
-        }
-        builder = builder.body(body);
-        if let Some(preset) = parts.extensions.remove::<RequestKind>() {
-            builder = builder.kind(preset);
-        }
-        if let Some(timeouts) = parts.extensions.remove::<Timeout>() {
-            builder = builder.timeout(timeouts);
-        }
-        if let Some(policy) = parts.extensions.remove::<Retry>() {
-            builder = builder.retry(policy);
-        }
-        if let Some(policy) = parts.extensions.remove::<Redirect>() {
-            builder = builder.redirect(policy);
-        }
-        if let Some(proxy) = parts.extensions.remove::<Proxy>() {
-            builder = builder.proxy(proxy);
-        }
-        builder
+    /// Returns a request builder for an `http::Request` with an absolute URL, applying a `RequestKind`, `Timeout`, `Retry`, `Redirect` or `Proxy` found in its extensions.
+    pub fn request_from(&self, req: http::Request<Body>) -> RequestBuilder {
+        RequestBuilder::from_http(self, req)
+    }
+
+    pub(crate) fn stores_cookies(&self) -> bool {
+        self.inner.inputs.stores_cookies
+    }
+
+    pub(crate) fn before_send(&self) -> Option<&super::BeforeSend> {
+        self.inner.inputs.before_send.as_ref()
     }
 
     /// Returns a `GET` request builder for `url`.

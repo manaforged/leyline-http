@@ -40,8 +40,13 @@ impl Request {
             .collect()
     }
 
-    /// Returns the request line and headers as text, with invalid UTF-8 replaced.
+    /// Returns the request body as text, with invalid UTF-8 replaced.
     pub fn text(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.body)
+    }
+
+    /// Returns the request line and headers as text without the body, with invalid UTF-8 replaced.
+    pub fn head(&self) -> Cow<'_, str> {
         String::from_utf8_lossy(&self.raw)
     }
 }
@@ -55,6 +60,7 @@ pub struct Response {
     pub(super) body: Vec<u8>,
     pub(super) delay: Duration,
     pub(super) chunks: Option<ChunkedBody>,
+    pub(super) abort_after: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -78,16 +84,17 @@ impl Response {
             body: Vec::new(),
             delay: Duration::ZERO,
             chunks: None,
+            abort_after: None,
         }
     }
 
-    /// Waits this long before sending the response.
+    /// Waits this long after the handler returns before sending the status line.
     pub fn delay(mut self, delay: Duration) -> Self {
         self.delay = delay;
         self
     }
 
-    /// Sends a chunked body with `pause` between parts, in place of `body`.
+    /// Sends `parts` as a chunked body in place of `body`, one chunk per part, waiting `pause` before each part after the first.
     pub fn chunks<I, B>(mut self, parts: I, pause: Duration) -> Self
     where
         I: IntoIterator<Item = B>,
@@ -104,7 +111,7 @@ impl Response {
         self
     }
 
-    /// Adds `connection: close`, so the server closes the connection after this response.
+    /// Adds `connection: close`, so the server closes the connection after it sends the whole response; `abort_after` cuts the body.
     pub fn close(self) -> Self {
         self.header(CONNECTION, CLOSE)
     }
@@ -120,11 +127,25 @@ impl Response {
         self.body = body.into();
         self
     }
+
+    /// Sends the head and the first `bytes` bytes of the body, then drops the connection; a body no longer than `bytes` is sent whole.
+    pub fn abort_after(mut self, bytes: usize) -> Self {
+        self.abort_after = Some(bytes);
+        self
+    }
+
+    pub(super) fn cut(&self) -> Option<usize> {
+        let length = match &self.chunks {
+            Some(chunked) => chunked.parts.iter().map(Vec::len).sum(),
+            None => self.body.len(),
+        };
+        self.abort_after.filter(|bytes| *bytes < length)
+    }
 }
 
 pub(crate) type Handler = Arc<dyn Fn(&Request) -> Response + Send + Sync>;
 
-/// Returns a handler that answers each request with the next response from `responses`, then 503.
+/// Returns a handler that answers each request with the next response from `responses`, and with an empty 503 once they run out.
 pub fn queue(
     responses: impl IntoIterator<Item = Response>,
 ) -> impl Fn(&Request) -> Response + Send + Sync + 'static {

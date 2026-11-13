@@ -219,8 +219,6 @@ async fn live_h3_concurrent_cold_requests_single_flight() {
 #[tokio::test]
 #[ignore = "live: needs network"]
 async fn live_h3_response_streaming_is_incremental() {
-    use futures_util::StreamExt;
-
     let session = leyline::Session::builder()
         .browser(Browser::Chrome147)
         .protocol(leyline::Protocol::Http3)

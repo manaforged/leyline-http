@@ -282,7 +282,7 @@ async fn redirect_cross_origin_strips_authorization_after_first_step() {
     assert!(
         second.header_values("authorization").is_empty(),
         "{}",
-        second.text()
+        second.head()
     );
     redirector.shutdown().await;
     target.shutdown().await;
@@ -378,7 +378,7 @@ async fn anchored_headers_interleave_at_preset_slots() {
     let req = server.next_request().await.unwrap();
 
     let names: Vec<String> = req.headers.iter().map(|(k, _)| k.clone()).collect();
-    let wire = req.text();
+    let wire = req.head();
     let pos = |n: &str| {
         names
             .iter()

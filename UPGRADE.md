@@ -12,6 +12,15 @@ This guide maps the 0.1.6 Rust API to 0.2.0. The API changes are breaking. There
 
 For new code, start with the [five main types](AGENTS.md#the-five-types). The [user guide](https://manaforged.github.io/leyline-http/) covers current workflows.
 
+## Breaking changes after 0.2.0
+
+| 0.2.0 | Now |
+| --- | --- |
+| `jar.store(set_cookie, &url)` | `jar.store(&url, set_cookie)` |
+| `Tls::pin_sha256(digest)` | `Tls::pin_cert_sha256(digest)` |
+| `Message::Ping`, `Message::Pong` | `Message::Ping(payload)`, `Message::Pong(payload)`; pass `Vec::new()` for an empty payload and match with `Message::Ping(_)` |
+| `testing::Request::text()` for the request line and headers | `testing::Request::head()`; `text()` now returns the body |
+
 ## Breaking changes in 0.2.0
 
 Search for the old type or method name. A row marked removed has no direct replacement; follow the alternative in that row.

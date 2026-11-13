@@ -19,9 +19,9 @@ fn cookie_ordering_chrome_style() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/app/page").unwrap();
 
-    jar.store("a=1; Path=/", &url);
-    jar.store("b=2; Path=/app", &url);
-    jar.store("c=3; Path=/app/page", &url);
+    jar.store(&url, "a=1; Path=/");
+    jar.store(&url, "b=2; Path=/app");
+    jar.store(&url, "c=3; Path=/app/page");
 
     let header = jar.header_for(&url).unwrap();
     assert!(
@@ -41,9 +41,9 @@ fn creation_time_ordering() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
 
-    jar.store("first=1; Path=/", &url);
+    jar.store(&url, "first=1; Path=/");
     std::thread::sleep(std::time::Duration::from_millis(10));
-    jar.store("second=2; Path=/", &url);
+    jar.store(&url, "second=2; Path=/");
 
     let header = jar.header_for(&url).unwrap();
     assert!(
@@ -109,11 +109,11 @@ fn same_path_cookies_keep_creation_order() {
 fn replacement_preserves_original_creation_order() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
-    jar.store("first=old; Path=/", &url);
+    jar.store(&url, "first=old; Path=/");
     std::thread::sleep(std::time::Duration::from_millis(10));
-    jar.store("second=2; Path=/", &url);
+    jar.store(&url, "second=2; Path=/");
     std::thread::sleep(std::time::Duration::from_millis(10));
-    jar.store("first=new; Path=/", &url);
+    jar.store(&url, "first=new; Path=/");
 
     let header = jar.header_for(&url).unwrap();
     assert_eq!(header, "first=new; second=2");
@@ -139,7 +139,7 @@ fn expired_cookies_not_returned() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
 
-    jar.store("gone=bye; Max-Age=0", &url);
+    jar.store(&url, "gone=bye; Max-Age=0");
     assert_eq!(
         jar.get(&url::Url::parse("https://example.com").unwrap(), "gone"),
         None
@@ -152,7 +152,7 @@ fn per_domain_eviction() {
     let url = Url::parse("https://example.com/").unwrap();
 
     for i in 0..=180 {
-        jar.store(&format!("c{i}=v{i}; Path=/"), &url);
+        jar.store(&url, &format!("c{i}=v{i}; Path=/"));
     }
 
     assert_eq!(
@@ -171,13 +171,13 @@ fn samesite_none_requires_secure() {
     let jar = Jar::new();
     let url = Url::parse("https://example.com/").unwrap();
 
-    jar.store("bad=val; SameSite=None", &url);
+    jar.store(&url, "bad=val; SameSite=None");
     assert_eq!(
         jar.get(&url::Url::parse("https://example.com").unwrap(), "bad"),
         None
     );
 
-    jar.store("good=val; SameSite=None; Secure", &url);
+    jar.store(&url, "good=val; SameSite=None; Secure");
     assert_eq!(
         jar.get(&url::Url::parse("https://example.com").unwrap(), "good"),
         Some("val".into())
@@ -188,9 +188,9 @@ fn samesite_none_requires_secure() {
 fn samesite_enforced_on_cross_site_requests() {
     let jar = Jar::new();
     let set = Url::parse("https://example.com/").unwrap();
-    jar.store("strict=1; SameSite=Strict", &set);
-    jar.store("lax=1; SameSite=Lax", &set);
-    jar.store("none=1; SameSite=None; Secure", &set);
+    jar.store(&set, "strict=1; SameSite=Strict");
+    jar.store(&set, "lax=1; SameSite=Lax");
+    jar.store(&set, "none=1; SameSite=None; Secure");
 
     let req = Url::parse("https://example.com/page").unwrap();
 
@@ -212,27 +212,27 @@ fn insecure_origin_cannot_overwrite_secure_cookie() {
     let https = Url::parse("https://example.com/").unwrap();
     let http = Url::parse("http://example.com/").unwrap();
 
-    jar.store("session=good; Secure; Path=/", &https);
-    jar.store("session=evil; Path=/", &http);
+    jar.store(&https, "session=good; Secure; Path=/");
+    jar.store(&http, "session=evil; Path=/");
     assert_eq!(
         jar.get(&url::Url::parse("https://example.com/").unwrap(), "session"),
         Some("good".into()),
         "plaintext overwrite of a Secure cookie must be refused"
     );
 
-    jar.store("session=; Path=/; Max-Age=0", &http);
+    jar.store(&http, "session=; Path=/; Max-Age=0");
     assert_eq!(
         jar.get(&url::Url::parse("https://example.com/").unwrap(), "session"),
         Some("good".into()),
         "plaintext deletion of a Secure cookie must be refused"
     );
 
-    jar.store("session=rotated; Secure; Path=/", &https);
+    jar.store(&https, "session=rotated; Secure; Path=/");
     assert_eq!(
         jar.get(&url::Url::parse("https://example.com/").unwrap(), "session"),
         Some("rotated".into())
     );
-    jar.store("session=; Path=/; Max-Age=0", &https);
+    jar.store(&https, "session=; Path=/; Max-Age=0");
     assert_eq!(
         jar.get(&url::Url::parse("https://example.com/").unwrap(), "session"),
         None
@@ -243,7 +243,7 @@ fn insecure_origin_cannot_overwrite_secure_cookie() {
 fn secure_cookie_not_sent_over_http() {
     let jar = Jar::new();
     let https = Url::parse("https://example.com/").unwrap();
-    jar.store("tok=secret; Secure; SameSite=None", &https);
+    jar.store(&https, "tok=secret; Secure; SameSite=None");
 
     assert!(
         jar.get(&url::Url::parse("https://example.com").unwrap(), "tok")
@@ -270,16 +270,16 @@ fn remove_everywhere_removes_every_match() {
 fn serde_round_trip_preserves_cross_subdomain_attribution() {
     let jar = Jar::new();
     jar.store(
-        "auth=secret; Path=/; Secure",
         &Url::parse("https://api.example.com").unwrap(),
+        "auth=secret; Path=/; Secure",
     );
     jar.store(
+        &Url::parse("https://www.example.com").unwrap(),
         "shared=value; Domain=example.com; Path=/; Secure",
-        &Url::parse("https://www.example.com").unwrap(),
     );
     jar.store(
-        "wwwonly=val; Path=/",
         &Url::parse("https://www.example.com").unwrap(),
+        "wwwonly=val; Path=/",
     );
     assert_eq!(jar.all().len(), 3);
 
@@ -336,10 +336,10 @@ fn serialize_order_is_stable_across_runs() {
     let u1 = Url::parse("https://www.example.com/").unwrap();
     let u2 = Url::parse("https://api.example.com/").unwrap();
     let u3 = Url::parse("https://api.example.com/").unwrap();
-    jar.store("z=last; Path=/", &u1);
-    jar.store("a=first; Path=/", &u2);
-    jar.store("m=mid; Path=/account", &u3);
-    jar.store("m=mid; Path=/", &u3);
+    jar.store(&u1, "z=last; Path=/");
+    jar.store(&u2, "a=first; Path=/");
+    jar.store(&u3, "m=mid; Path=/account");
+    jar.store(&u3, "m=mid; Path=/");
 
     let s1 = serde_json::to_string(&jar).unwrap();
     let s2 = serde_json::to_string(&jar).unwrap();
@@ -353,9 +353,9 @@ fn churn_across_hosts_leaves_no_empty_domain_buckets() {
     let jar = Jar::new();
     let host = |i: usize| url::Url::parse(&format!("https://h{i}.example/")).unwrap();
     for i in 0..3400 {
-        jar.store("a=1", &host(i));
+        jar.store(&host(i), "a=1");
     }
-    jar.store("a=1; Max-Age=0", &host(3399));
+    jar.store(&host(3399), "a=1; Max-Age=0");
 
     let live = jar.all().len();
     assert_eq!(
@@ -369,9 +369,9 @@ fn deleting_a_cookie_leaves_other_sites_alone() {
     let bank = url::Url::parse("https://bank.test/").unwrap();
     let evil = url::Url::parse("http://evil.test/").unwrap();
     let jar = Jar::new();
-    jar.store("sid=keep; Path=/; Secure", &bank);
-    jar.store("sid=1; Path=/", &evil);
-    jar.store("sid=; Path=/; Max-Age=0", &evil);
+    jar.store(&bank, "sid=keep; Path=/; Secure");
+    jar.store(&evil, "sid=1; Path=/");
+    jar.store(&evil, "sid=; Path=/; Max-Age=0");
 
     assert_eq!(jar.get(&bank, "sid"), Some("keep".into()));
     assert_eq!(jar.get(&evil, "sid"), None);

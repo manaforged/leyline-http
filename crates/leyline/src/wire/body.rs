@@ -1,11 +1,12 @@
 use std::fmt;
 use std::io;
+use std::path::Path;
 use std::pin::Pin;
 use std::sync::{Mutex, PoisonError};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures_util::Stream;
+use futures_util::{Stream, TryFutureExt};
 
 pub(crate) type BoxedStream =
     Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + Sync + 'static>>;
@@ -151,7 +152,7 @@ impl Body {
         Body(BodyKind::Bytes(bytes))
     }
 
-    /// Wraps a byte stream as a body, and fails the stream when it sends more or fewer bytes than a given `length`.
+    /// Wraps a byte stream as a body; `length` is the `content-length` in bytes, which the stream must send exactly or fail, and `None` sends the body chunked with no declared length.
     pub fn stream<S>(stream: S, length: Option<u64>) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
@@ -170,6 +171,35 @@ impl Body {
             stream,
             length_hint: length.and_then(Length::new),
         })
+    }
+
+    /// Streams the file at `path` as a body whose `content-length` is the file size read now, and fails when the file cannot be inspected.
+    pub fn file(path: impl AsRef<Path>) -> crate::error::Result<Self> {
+        let path = path.as_ref().to_path_buf();
+        let length = std::fs::metadata(&path)?.len();
+        let stream = tokio::fs::File::open(path)
+            .map_ok(tokio_util::io::ReaderStream::new)
+            .try_flatten_stream();
+        Ok(Self::stream(stream, Some(length)))
+    }
+
+    /// Returns the bytes of a body held in memory, empty for an empty body, or `None` for a streamed body.
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match &self.0 {
+            BodyKind::Empty => Some(&[]),
+            BodyKind::Bytes(bytes) => Some(&bytes[..]),
+            BodyKind::Stream { .. } => None,
+        }
+    }
+
+    /// Returns a copy of a body held in memory without copying its bytes, or `None` for a streamed body.
+    pub fn try_clone(&self) -> Option<Self> {
+        self.replay()
+    }
+
+    /// Returns the next chunk of the body, an error that ends it, or `None` after the last chunk.
+    pub async fn next(&mut self) -> Option<crate::error::Result<Bytes>> {
+        std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
     }
 
     pub(crate) fn shared<S>(stream: S) -> Self

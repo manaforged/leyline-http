@@ -110,6 +110,8 @@ pub enum SkipReason {
     Redirects,
     /// The URL is outside the crawl scope.
     Scope,
+    /// The crawl's `filter` rejected the URL.
+    Filter,
 }
 
 impl SkipReason {
@@ -127,6 +129,7 @@ impl SkipReason {
             SkipReason::Duplicate => "duplicate",
             SkipReason::Redirects => "redirects",
             SkipReason::Scope => "scope",
+            SkipReason::Filter => "filter",
         }
     }
 }

@@ -43,7 +43,7 @@ one config. A file or certificate that cannot be parsed fails with
 
 ## Pin a certificate
 
-`pin_sha256` takes the SHA-256 digest of the server's leaf
+`pin_cert_sha256` takes the SHA-256 digest of the server's leaf
 certificate in DER form. The handshake succeeds only when the chain verifies
 and the leaf matches a pin. A pin adds no root.
 
@@ -52,7 +52,7 @@ and the leaf matches a pin. A pin adds no root.
 let pin: [u8; 32] = [0; 32];
 let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
-    .tls(leyline::Tls::new().pin_sha256(pin))
+    .tls(leyline::Tls::new().pin_cert_sha256(pin))
     .build()?;
 # let _ = session;
 # Ok(())

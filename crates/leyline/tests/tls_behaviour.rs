@@ -89,14 +89,14 @@ async fn a_pinned_leaf_connects_only_when_the_pin_matches() {
 
     assert_eq!(
         fetch(
-            bare_trust().ca_der(der.clone()).pin_sha256(pin),
+            bare_trust().ca_der(der.clone()).pin_cert_sha256(pin),
             url.clone()
         )
         .await
         .unwrap(),
         "ok"
     );
-    fetch(bare_trust().ca_der(der).pin_sha256([7; 32]), url)
+    fetch(bare_trust().ca_der(der).pin_cert_sha256([7; 32]), url)
         .await
         .expect_err("expected Err");
 }
@@ -212,7 +212,11 @@ async fn a_saved_tls_session_resumes_only_under_the_trust_that_made_it() {
     assert_eq!(first.text().await.unwrap(), "ok");
     let state = leyline::internals::connection_state(&unpinned);
 
-    let pinned = http1_session(bare_trust().ca_der(server.der.clone()).pin_sha256([7; 32]));
+    let pinned = http1_session(
+        bare_trust()
+            .ca_der(server.der.clone())
+            .pin_cert_sha256([7; 32]),
+    );
     leyline::internals::restore(&pinned, &state);
     let refused = pinned.get(server.url.clone()).send().await.unwrap_err();
     assert!(
@@ -390,15 +394,10 @@ async fn the_server_receives_the_client_leaf_and_its_chain_in_order() {
         .unwrap()
         .replace("CERTIFICATE-----", "TRUSTED CERTIFICATE-----");
     pem.push_str(&String::from_utf8(intermediate.to_pem().unwrap()).unwrap());
-    let chain = scratch_file("ordered-client-chain.pem", pem.as_bytes());
-    let private = scratch_file(
-        "ordered-client-key.pem",
-        &leaf_key.private_key_to_pem_pkcs8().unwrap(),
-    );
     let session = http1_session(
         bare_trust()
             .ca_der(server_der)
-            .client_cert(&chain, &private),
+            .client_cert_pem(pem, leaf_key.private_key_to_pem_pkcs8().unwrap()),
     );
     let response = session
         .get(format!("https://127.0.0.1:{port}/"))
@@ -426,7 +425,7 @@ async fn restored_tickets_for_other_trust_are_not_kept() {
     let saved = serde_json::to_value(&state).unwrap();
     assert!(!saved["tls_sessions"].as_array().unwrap().is_empty());
 
-    let pinned = http1_session(bare_trust().ca_der(server.der).pin_sha256([7; 32]));
+    let pinned = http1_session(bare_trust().ca_der(server.der).pin_cert_sha256([7; 32]));
     leyline::internals::restore(&pinned, &state);
     let kept = serde_json::to_value(leyline::internals::connection_state(&pinned)).unwrap();
     assert_eq!(kept["tls_sessions"].as_array().map(Vec::len), Some(0));

@@ -37,6 +37,9 @@ impl<'a> Route<'a> {
     }
 
     pub(super) async fn send(&mut self, mut this: Box<Draft>) -> Result<Response> {
+        if let Some(hook) = self.session.before_send() {
+            this.hooked(hook)?;
+        }
         let lease = self.lease(&mut this);
         let used = self.used_proxy(this.carry.proxy.as_ref());
         crate::trace::note_proxy(used.as_deref());

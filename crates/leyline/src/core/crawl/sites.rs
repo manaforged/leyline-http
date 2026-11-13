@@ -146,7 +146,7 @@ impl Crawl {
         let upgraded = self.session.upgraded(&queued.url);
         if upgraded != queued.url {
             self.forward(page_key(&queued.url), page_key(&upgraded));
-            self.frontier.rekey(queued, upgraded);
+            self.frontier.rekey(queued, upgraded, &mut self.stats);
             return;
         }
         match self.take_verdict(&origin, &queued.url) {
@@ -387,7 +387,7 @@ impl Crawl {
             if found.index {
                 self.queue_sitemap(loc, Some(url.clone()));
             } else {
-                self.frontier.add(Queued::link(loc, 0));
+                self.frontier.add(Queued::link(loc, 0), &mut self.stats);
             }
         }
     }

@@ -35,7 +35,7 @@ impl Session {
             attempt.carry.initiator,
             self.session_referer(),
         )
-        .trusting(attempt.trusted_origin);
+        .trusting(attempt.carry.trusted_origin);
         let redirect_policy = attempt
             .carry
             .redirect
@@ -84,7 +84,7 @@ impl Session {
             journey.timing.add_leg(&leg.timing);
 
             let seen = leg.headers.seen();
-            if seen.cookies {
+            if seen.cookies && self.stores_cookies() {
                 self.store_cookies(leg.headers.map(), &journey.url);
             }
             if seen.hsts {

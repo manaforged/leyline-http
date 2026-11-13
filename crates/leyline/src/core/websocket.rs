@@ -33,10 +33,10 @@ pub enum Message {
     Text(String),
     /// A binary message.
     Binary(Vec<u8>),
-    /// A ping control frame.
-    Ping,
-    /// A pong control frame.
-    Pong,
+    /// A ping control frame and its payload, which the protocol limits to 125 bytes.
+    Ping(Vec<u8>),
+    /// A pong control frame and its payload, which echoes the ping it answers.
+    Pong(Vec<u8>),
     /// A close frame with an optional status code and reason.
     Close(Option<(u16, String)>),
 }
@@ -46,8 +46,8 @@ impl Message {
         match msg {
             WireMessage::Text(s) => Self::Text(s.as_str().to_owned()),
             WireMessage::Binary(b) => Self::Binary(b.to_vec()),
-            WireMessage::Ping(_) => Self::Ping,
-            WireMessage::Pong(_) => Self::Pong,
+            WireMessage::Ping(b) => Self::Ping(b.to_vec()),
+            WireMessage::Pong(b) => Self::Pong(b.to_vec()),
             WireMessage::Close(frame) => {
                 Self::Close(frame.map(|f| (f.code.into(), f.reason.as_str().to_owned())))
             }
@@ -59,8 +59,8 @@ impl Message {
         match self {
             Self::Text(s) => WireMessage::Text(s.into()),
             Self::Binary(b) => WireMessage::Binary(b.into()),
-            Self::Ping => WireMessage::Ping(Vec::new().into()),
-            Self::Pong => WireMessage::Pong(Vec::new().into()),
+            Self::Ping(b) => WireMessage::Ping(b.into()),
+            Self::Pong(b) => WireMessage::Pong(b.into()),
             Self::Close(frame) => WireMessage::Close(frame.map(|(code, reason)| WireClose {
                 code: code.into(),
                 reason: reason.into(),
@@ -189,7 +189,7 @@ impl WebSocket {
             .map_err(|e| wire_error("ws send", e))
     }
 
-    /// Receives the next message, or returns `None` once the connection has ended.
+    /// Receives the next message, or `None` once the connection has closed; a ping is returned as `Message::Ping` and answered with a pong on the next `recv` or `send`.
     pub async fn recv(&mut self) -> Result<Option<Message>> {
         match self.inner.next().await {
             Some(Ok(msg)) => Ok(Some(Message::wire(msg))),
@@ -198,7 +198,7 @@ impl WebSocket {
         }
     }
 
-    /// Sends a close frame and closes the connection.
+    /// Sends a close frame with no status code; send `Message::Close(Some((code, reason)))` for a custom code and reason.
     pub async fn close(&mut self) -> Result<()> {
         self.inner
             .close(None)
@@ -206,7 +206,7 @@ impl WebSocket {
             .map_err(|e| wire_error("ws close", e))
     }
 
-    /// Returns the subprotocol that the server selected.
+    /// Returns the subprotocol the server selected from the request's `sec-websocket-protocol` header, or `None` when none was offered.
     pub fn protocol(&self) -> Option<&str> {
         self.protocol.as_deref()
     }

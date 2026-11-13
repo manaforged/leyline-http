@@ -113,7 +113,7 @@ async fn digest_sends_no_credentials_outside_the_protection_space() {
         outside.header_values("authorization").len(),
         0,
         "{}",
-        outside.text()
+        outside.head()
     );
     server.shutdown().await;
 }
@@ -161,7 +161,7 @@ async fn digest_sends_no_credentials_after_a_cross_origin_bounce() {
         back.header_values("authorization").len(),
         0,
         "{}",
-        back.text()
+        back.head()
     );
     server.shutdown().await;
 }

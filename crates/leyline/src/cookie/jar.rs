@@ -89,18 +89,27 @@ impl Jar {
     }
 
     /// Parses a `Set-Cookie` header value received from `url` and stores the cookie.
-    pub fn store(&self, set_cookie: &str, url: &Url) {
-        if self.apply(set_cookie, url) {
+    pub fn store(&self, url: &Url, set_cookie: &str) {
+        self.put(url, parse::parse_set_cookie(set_cookie, url));
+    }
+
+    /// Stores `cookie` as if a response from `url` had set it, with the host of `url` as its domain when `cookie.domain` is empty, and ignores a cookie that `url` may not set.
+    pub fn insert(&self, url: &Url, cookie: Cookie) {
+        if plain_token(&cookie.name) && !cookie.name.contains('=') && plain_token(&cookie.value) {
+            self.put(url, parse::admit_cookie(&cookie, url));
+        }
+    }
+
+    fn put(&self, url: &Url, cookie: Option<Cookie>) {
+        if cookie.is_some_and(|cookie| self.apply(cookie, url)) {
             self.changed();
         }
     }
 
-    fn apply(&self, set_cookie: &str, url: &Url) -> bool {
-        let Some(mut cookie) =
-            parse::parse_set_cookie(set_cookie, url).filter(Cookie::within_limits)
-        else {
+    fn apply(&self, mut cookie: Cookie, url: &Url) -> bool {
+        if !cookie.within_limits() {
             return false;
-        };
+        }
         if !cookie.secure
             && !parse::secure_origin(url)
             && lock(&self.inner)
@@ -112,22 +121,11 @@ impl Jar {
             return false;
         }
 
-        if cookie.is_expired() {
-            let mut jar = lock(&self.inner);
-            let domain = cookie.domain.to_lowercase();
-            if let Some(entries) = jar.cookies.get_mut(&domain)
-                && let Some(pos) = entries.iter().position(|c| c.same_slot(&cookie))
-            {
-                if entries[pos].secure && !parse::secure_origin(url) {
-                    return false;
-                }
-                return jar.remove_in(&domain, |c| c.same_slot(&cookie)) > 0;
-            }
-            return false;
-        }
-
         let mut jar = lock(&self.inner);
         let domain = cookie.domain.to_lowercase();
+        if cookie.is_expired() {
+            return jar.expire(&domain, &cookie, parse::secure_origin(url));
+        }
 
         let entries = jar.cookies.entry(domain.clone()).or_default();
 
@@ -148,7 +146,7 @@ impl Jar {
 
     pub(crate) fn store_response_cookies(&self, headers: &[&str], url: &Url) {
         for header in headers {
-            self.store(header, url);
+            self.store(url, header);
         }
     }
 
@@ -264,9 +262,7 @@ impl Jar {
 
     /// Stores a cookie with path `/` for `url`, and ignores names or values that contain `;` or control characters.
     pub fn set(&self, url: &Url, name: &str, value: &str) {
-        if plain_token(name) && !name.contains('=') && plain_token(value) {
-            self.store(&format!("{name}={value}; Path=/"), url);
-        }
+        self.insert(url, Cookie::new(name, value));
     }
 
     /// Removes every cookie from the jar.

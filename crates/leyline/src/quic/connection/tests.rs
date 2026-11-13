@@ -64,7 +64,7 @@ fn quic_verifier_checks_host_ca_and_pin() {
             trust = trust.ca_der(der.clone());
         }
         if let Some(pin) = pinned {
-            trust = trust.pin_sha256(pin);
+            trust = trust.pin_cert_sha256(pin);
         }
         let mut client = H3Config::from_profile(&profile)
             .unwrap()

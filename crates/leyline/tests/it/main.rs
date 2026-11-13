@@ -133,6 +133,7 @@ mod pool_h1_injection;
 mod pool_h1_keepalive;
 #[cfg(feature = "bench-internals")]
 mod pool_reconnect_storm;
+mod power_surface;
 mod pq_key_shares;
 #[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
 mod profile_and_builder_checks;

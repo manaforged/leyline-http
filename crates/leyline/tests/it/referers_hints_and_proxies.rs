@@ -66,7 +66,7 @@ async fn link_navigation_differs_from_a_typed_url() {
             .position(|h| h.eq_ignore_ascii_case(n))
             .unwrap()
     };
-    assert_eq!(at("referer"), at("sec-fetch-dest") + 1, "{}", link.text());
+    assert_eq!(at("referer"), at("sec-fetch-dest") + 1, "{}", link.head());
 
     let typed = server.next_request().await.unwrap();
     assert_eq!(typed.header_values("sec-fetch-site"), ["none"]);

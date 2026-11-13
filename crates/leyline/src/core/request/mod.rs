@@ -6,6 +6,7 @@ mod download;
 mod encode;
 mod events;
 pub use events::{Event, Events};
+mod interop;
 mod pages;
 mod route;
 mod send;
@@ -51,7 +52,6 @@ pub(crate) struct Draft {
     query_params: Vec<(String, String)>,
     builder_error: Option<Error>,
     compress: Option<Encoding>,
-    pub(crate) trusted_origin: Option<url::Url>,
     pub(crate) deadline: Deadline,
     pub(crate) response: ResponseMode,
     download: Option<Box<download::Download>>,
@@ -71,6 +71,7 @@ pub(crate) struct Carry {
     pub(crate) header_order: Option<Vec<String>>,
     pub(crate) redirect: Option<Redirect>,
     pub(crate) initiator: Option<url::Url>,
+    pub(crate) trusted_origin: Option<url::Url>,
     pub(crate) label: Option<String>,
     pub(crate) status_errors: bool,
     pub(crate) body_rules: BodyRules,
@@ -97,7 +98,6 @@ impl Draft {
             query_params: Vec::new(),
             builder_error: None,
             compress: None,
-            trusted_origin: None,
             deadline: Deadline::default(),
             response: ResponseMode::Buffered,
             download: None,
@@ -113,6 +113,7 @@ impl Draft {
                 header_order: None,
                 redirect: None,
                 initiator: None,
+                trusted_origin: None,
                 label: None,
                 status_errors: false,
                 body_rules: session.body_rules(),
@@ -129,7 +130,6 @@ impl Draft {
             query_params: Vec::new(),
             builder_error: None,
             compress: None,
-            trusted_origin: self.trusted_origin.clone(),
             deadline: self.deadline,
             response: self.response,
             download: None,
@@ -163,7 +163,7 @@ impl RequestBuilder {
     }
 
     pub(crate) fn trusting(mut self, origin: Option<url::Url>) -> Self {
-        self.draft.trusted_origin = origin;
+        self.draft.carry.trusted_origin = origin;
         self
     }
 
@@ -182,6 +182,28 @@ impl RequestBuilder {
         if self.draft.builder_error.is_none() {
             self.draft.builder_error = Some(err);
         }
+    }
+
+    /// Returns a copy of this request with every option, or `None` when the body is a stream or a setter recorded an error.
+    pub fn try_clone(&self) -> Option<Self> {
+        let draft = &self.draft;
+        if draft.builder_error.is_some() {
+            return None;
+        }
+        let mut copy = draft.again(draft.body.try_clone()?, draft.headers.clone());
+        copy.query_params.clone_from(&draft.query_params);
+        copy.compress = draft.compress;
+        copy.download.clone_from(&draft.download);
+        Some(Self {
+            session: self.session.clone(),
+            draft: copy,
+        })
+    }
+
+    /// Converts this request into an `http::Request` with its absolute URL, the headers set on it and its options in the extensions, or returns the error a setter recorded; `Session::request_from` converts it back.
+    pub fn build(mut self) -> crate::error::Result<http::Request<Body>> {
+        self.prepare_in_place()?;
+        self.draft.into_http()
     }
 
     fn infer_from_content_type(&mut self) {
@@ -273,7 +295,7 @@ impl RequestBuilder {
         self
     }
 
-    /// Returns the response as soon as the headers arrive and leaves the body to stream.
+    /// Returns the response as soon as the headers arrive and leaves the body to stream; without it `send` reads the whole body into memory, up to `max_body_size`, before it returns.
     pub fn stream(mut self) -> Self {
         self.draft.carry.stream_response = true;
         self

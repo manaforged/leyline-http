@@ -150,7 +150,6 @@ async fn not_gzip<S: AsyncRead + AsyncWrite + Unpin>(mut stream: S, resets: Arc<
 
 #[tokio::test]
 async fn a_failed_decoded_h2_stream_that_is_kept_releases_its_stream_and_host_slot() {
-    use futures_util::StreamExt;
     let resets = Arc::new(AtomicUsize::new(0));
     let counter = Arc::clone(&resets);
     let (cert, key) = tls_support::self_signed();

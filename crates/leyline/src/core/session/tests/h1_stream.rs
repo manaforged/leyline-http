@@ -18,7 +18,6 @@ async fn read_request_head(sock: &mut tokio::net::TcpStream) -> bool {
 
 #[tokio::test]
 async fn streamed_chunked_response_reassembles() {
-    use futures_util::StreamExt;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -50,7 +49,6 @@ async fn streamed_chunked_response_reassembles() {
 
 #[tokio::test]
 async fn streamed_fixed_length_response_reassembles() {
-    use futures_util::StreamExt;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let payload = b"the quick brown fox ".repeat(500);
@@ -83,7 +81,6 @@ async fn streamed_fixed_length_response_reassembles() {
 
 #[tokio::test]
 async fn streamed_connection_is_reused_after_full_drain() {
-    use futures_util::StreamExt;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
@@ -124,7 +121,6 @@ async fn streamed_connection_is_reused_after_full_drain() {
 
 #[tokio::test]
 async fn streamed_read_timeout_fires_on_stall() {
-    use futures_util::StreamExt;
     use std::time::Duration;
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -157,7 +153,6 @@ async fn streamed_read_timeout_fires_on_stall() {
 
 #[tokio::test]
 async fn streamed_connection_dropped_when_consumer_drops_early() {
-    use futures_util::StreamExt;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 

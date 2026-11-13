@@ -5,7 +5,7 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 use http::{Method, StatusCode, header};
 
 use super::{Draft, RequestBuilder};
@@ -136,6 +136,14 @@ impl Events {
     /// Caps the bytes held for one event; the default is one MiB.
     pub fn max_event_size(self, bytes: usize) -> Self {
         crate::util::lock(&self.settings).max = bytes;
+        self
+    }
+    /// Sets the id of the last event already received, sent as `Last-Event-ID` on the first connection and replaced by each newer event id on reconnection.
+    pub fn last_event_id(mut self, id: impl Into<String>) -> Self {
+        let state = self.state.get_mut().unwrap_or_else(PoisonError::into_inner);
+        if let State::Ready(source) = state {
+            source.parser = Parser::new(id.into(), source.parser.max, source.parser.wait);
+        }
         self
     }
     /// Returns the next event, a terminal error, or `None` after the stream stops.

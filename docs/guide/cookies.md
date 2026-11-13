@@ -25,7 +25,7 @@ if let Some(header) = jar.header_for(&url) {
     println!("cookie: {header}");
 }
 
-jar.store("token=abc; Domain=.example.com; Path=/; Secure", &url);
+jar.store(&url, "token=abc; Domain=.example.com; Path=/; Secure");
 assert_eq!(jar.remove(&url, "token"), 1);
 # Ok(())
 # }

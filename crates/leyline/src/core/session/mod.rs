@@ -14,6 +14,7 @@ mod websocket;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use builder::BeforeSend;
 pub use builder::SessionBuilder;
 pub(crate) use identity::Identity;
 

@@ -26,8 +26,12 @@ use super::identity::Source;
 use super::proxy::InvalidEnvProxy;
 use super::{Identity, Protocol, Session};
 use crate::error::{Error, Kind, Result};
+use crate::wire::Body;
 
 const AUTHORIZATION: &str = "authorization";
+const USER_AGENT: &str = "user-agent";
+
+pub(crate) type BeforeSend = Arc<dyn Fn(&mut http::Request<Body>) -> Result<()> + Send + Sync>;
 
 mod assemble;
 mod bearer;
@@ -63,6 +67,8 @@ pub struct SessionBuilder {
     pub(in crate::core::session) https_only: bool,
     audit: bool,
     cookie_jar: Option<Jar>,
+    pub(in crate::core::session) stores_cookies: bool,
+    pub(in crate::core::session) before_send: Option<BeforeSend>,
     tcp_profile: Option<TcpProfile>,
     pub(in crate::core::session) protocol_policy: Protocol,
     #[cfg(feature = "http3")]
@@ -106,6 +112,8 @@ impl SessionBuilder {
             https_only: false,
             audit: false,
             cookie_jar: None,
+            stores_cookies: true,
+            before_send: None,
             tcp_profile: None,
             protocol_policy: Protocol::Auto,
             #[cfg(feature = "http3")]
@@ -406,9 +414,10 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the cookie jar the session reads and stores cookies in.
-    pub fn cookies(mut self, jar: Jar) -> Self {
-        self.cookie_jar = Some(jar);
+    /// Sets the cookie jar the session reads and stores cookies in; `None` turns cookie storage off, so `Set-Cookie` is ignored.
+    pub fn cookies(mut self, jar: impl Into<Option<Jar>>) -> Self {
+        self.cookie_jar = jar.into();
+        self.stores_cookies = self.cookie_jar.is_some();
         self
     }
 
@@ -574,6 +583,47 @@ impl SessionBuilder {
             }
         }
         self
+    }
+
+    /// Runs `hook` on every request before each attempt, after any hook already set: it reads the method, URL, request headers and body, its header and body changes are sent, and its error fails the request.
+    pub fn before_send<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&mut http::Request<Body>) -> Result<()> + Send + Sync + 'static,
+    {
+        let hook: BeforeSend = match self.before_send.take() {
+            Some(first) => Arc::new(move |request: &mut http::Request<Body>| {
+                first(request)?;
+                hook(request)
+            }),
+            None => Arc::new(hook),
+        };
+        self.before_send = Some(hook);
+        self
+    }
+
+    /// Sets the `User-Agent` header sent on every request, replacing the browser profile's value.
+    pub fn user_agent(mut self, value: impl Into<String>) -> Self {
+        self.remove_default(USER_AGENT);
+        self.header(USER_AGENT, value.into())
+    }
+
+    /// Sets the `Authorization` header to HTTP Basic credentials on every request, replacing a bearer token or default `Authorization` header set before it.
+    pub fn basic_auth(mut self, user: &str, password: &str) -> Self {
+        self.remove_default(AUTHORIZATION);
+        self.bearer = None;
+        self.header(
+            AUTHORIZATION,
+            crate::util::basic_credentials(user, password),
+        )
+    }
+
+    /// Adds one default header sent on every request, and fails the build when the name or value is invalid.
+    pub fn header(
+        self,
+        name: impl TryInto<http::HeaderName>,
+        value: impl TryInto<http::HeaderValue>,
+    ) -> Self {
+        self.headers([(name, value)])
     }
 
     /// Adds default headers sent on every request.

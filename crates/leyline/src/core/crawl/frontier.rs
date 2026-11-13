@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
 use url::{Host, Url};
 
+use super::page::{CrawlStats, SkipReason};
 use crate::core::config::Origin;
 use crate::core::robots::normalize;
 use crate::net::normalize_host;
@@ -12,6 +14,8 @@ mod queues;
 
 const DEFAULT_MAX_URL_BYTES: usize = 2048;
 const DEFAULT_MAX_DEPTH: usize = 64;
+
+type Filter = dyn Fn(&Url) -> bool + Send + Sync;
 
 fn default_max_url_size() -> Option<usize> {
     Some(DEFAULT_MAX_URL_BYTES)
@@ -30,7 +34,7 @@ pub enum Scope {
     Host,
     /// Follows URLs on the seed's registrable domain and its subdomains, or the exact host for an IP address.
     Domain,
-    /// Follows URLs on the seed's host under the seed's directory path.
+    /// Follows URLs on the seed's host whose path starts with the seed's directory: the seed path up to its last `/` when the last segment has a file extension containing a letter (`/docs/a.html` gives `/docs/`), otherwise the whole seed path as a directory (`/docs/a` gives `/docs/a/`).
     Prefix,
     /// Follows URLs on any host.
     Any,
@@ -143,6 +147,8 @@ pub(super) struct Frontier {
     seen: HashSet<String>,
     redirected: HashSet<String>,
     bounds: Vec<Bound>,
+    #[serde(skip)]
+    pub(super) filter: Option<Arc<Filter>>,
     pub(super) scope: Scope,
     #[serde(default = "default_max_depth")]
     pub(super) max_depth: Option<usize>,
@@ -158,6 +164,7 @@ impl Default for Frontier {
             seen: HashSet::new(),
             redirected: HashSet::new(),
             bounds: Vec::new(),
+            filter: None,
             scope: Scope::default(),
             max_depth: default_max_depth(),
             max_url_size: default_max_url_size(),
@@ -192,23 +199,36 @@ pub(super) fn page_key(url: &Url) -> String {
 }
 
 impl Frontier {
-    pub(super) fn add(&mut self, queued: Queued) -> bool {
-        self.admit(queued, false)
+    pub(super) fn add(&mut self, queued: Queued, stats: &mut CrawlStats) {
+        self.admit(queued, false, stats);
     }
 
-    pub(super) fn add_redirect(&mut self, queued: Queued) -> bool {
-        self.admit(queued, true)
+    pub(super) fn add_redirect(&mut self, queued: Queued, stats: &mut CrawlStats) {
+        self.admit(queued, true, stats);
     }
 
-    fn admit(&mut self, mut queued: Queued, redirect: bool) -> bool {
-        queued.url.set_fragment(None);
+    fn usable(&self, queued: &Queued) -> bool {
         let within_size = self
             .max_url_size
             .is_none_or(|max| queued.url.as_str().len() <= max);
         let within_depth = self.max_depth.is_none_or(|max| queued.depth <= max);
-        let usable = Scheme::of(&queued.url).is_some() && within_size && within_depth;
-        if !usable {
-            return false;
+        Scheme::of(&queued.url).is_some() && within_size && within_depth
+    }
+
+    fn admit(&mut self, mut queued: Queued, redirect: bool, stats: &mut CrawlStats) {
+        queued.url.set_fragment(None);
+        let key = page_key(&queued.url);
+        let known = self.seen.contains(&key);
+        let lost = if known {
+            SkipReason::Duplicate
+        } else {
+            SkipReason::Scope
+        };
+        if !self.usable(&queued) {
+            if redirect {
+                stats.skip(lost);
+            }
+            return;
         }
         if queued.widen
             && let Some(bound) = Bound::of(self.scope, &queued.url)
@@ -216,21 +236,30 @@ impl Frontier {
             self.bounds.push(bound);
         }
         if !queued.seed && !self.in_scope(&queued.url) {
-            return false;
+            return stats.skip(if redirect { lost } else { SkipReason::Scope });
         }
-        let key = page_key(&queued.url);
         let again = redirect && self.redirected.remove(&key);
-        if !self.seen.insert(key) && !again {
-            return false;
+        if known && !again {
+            if redirect {
+                stats.skip(SkipReason::Duplicate);
+            }
+            return;
         }
+        if !queued.seed && !known && !self.keeps(&queued.url) {
+            return stats.skip(SkipReason::Filter);
+        }
+        self.seen.insert(key);
         self.push_back(queued);
-        true
     }
 
-    pub(super) fn rekey(&mut self, mut queued: Queued, to: Url) {
+    pub(super) fn rekey(&mut self, mut queued: Queued, to: Url, stats: &mut CrawlStats) {
         self.seen.remove(&page_key(&queued.url));
         queued.url = to;
-        self.add(queued);
+        self.add(queued, stats);
+    }
+
+    pub(super) fn keeps(&self, url: &Url) -> bool {
+        self.filter.as_ref().is_none_or(|keep| keep(url))
     }
 
     pub(super) fn has_seen(&self, url: &Url) -> bool {

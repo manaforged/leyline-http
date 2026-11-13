@@ -1,6 +1,5 @@
 use std::time::{Duration, Instant};
 
-use futures_util::StreamExt;
 use leyline::http::Method;
 use leyline::{Protocol, Proxy, Session, Timeout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};

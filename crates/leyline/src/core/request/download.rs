@@ -1,11 +1,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use futures_util::{FutureExt, StreamExt};
+use futures_util::FutureExt;
 use http::{Method, StatusCode, header};
 use sha2::{Digest, Sha256};
 
-use super::{Draft, RequestBuilder};
+use super::RequestBuilder;
 use crate::core::atomic;
 use crate::core::response::Response;
 use crate::core::retry::RetryPlan;
@@ -43,7 +43,7 @@ impl RequestBuilder {
         self.draft.download.get_or_insert_default().checksum = Some(checksum);
         self
     }
-    /// Reports bytes written and the optional complete length during a download.
+    /// Calls `progress` during a download with the bytes written to the file so far and the complete length in bytes, which is `None` when the server does not declare it.
     pub fn progress(mut self, progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static) -> Self {
         self.draft.download.get_or_insert_default().progress = Some(Arc::new(progress));
         self
@@ -78,23 +78,11 @@ impl RequestBuilder {
     }
 
     fn next_transfer(&self) -> Self {
-        let draft = &self.draft;
         Self {
             session: self.session.clone(),
-            draft: Box::new(Draft {
-                method: draft.method.clone(),
-                url: draft.url.clone(),
-                body: crate::wire::Body::default(),
-                headers: draft.headers.clone(),
-                query_params: Vec::new(),
-                builder_error: None,
-                compress: None,
-                trusted_origin: draft.trusted_origin.clone(),
-                deadline: draft.deadline,
-                response: draft.response,
-                download: None,
-                carry: draft.carry.clone(),
-            }),
+            draft: self
+                .draft
+                .again(crate::wire::Body::default(), self.draft.headers.clone()),
         }
     }
 

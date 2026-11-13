@@ -20,7 +20,7 @@ fn assert_capped(expires: Option<SystemTime>) {
 
 fn stored(set_cookie: &str) -> Cookie {
     let jar = Jar::new();
-    jar.store(set_cookie, &Url::parse("https://example.com/").unwrap());
+    jar.store(&Url::parse("https://example.com/").unwrap(), set_cookie);
     jar.all().pop().unwrap()
 }
 
@@ -69,7 +69,7 @@ fn a_saved_jar_drops_records_over_the_size_limits() {
 fn a_cookie_keeps_a_default_path_longer_than_1024_octets() {
     let jar = Jar::new();
     let long = format!("https://example.com/{}/page", "d".repeat(1500));
-    jar.store("sid=1", &Url::parse(&long).unwrap());
+    jar.store(&Url::parse(&long).unwrap(), "sid=1");
     let cookie = jar.all().pop().expect("the cookie is stored");
     assert!(cookie.path.len() > 1024, "{}", cookie.path.len());
 }

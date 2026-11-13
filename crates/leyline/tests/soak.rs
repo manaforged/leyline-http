@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use futures_util::StreamExt;
 use leyline::testing;
 use leyline::{Body, HostLimits, Kind, Session, Timeout};
 

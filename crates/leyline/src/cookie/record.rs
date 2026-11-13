@@ -8,6 +8,7 @@ use crate::util::epoch_plus;
 const MAX_LIFETIME: Duration = Duration::from_secs(400 * 24 * 60 * 60);
 pub(crate) const MAX_NAME_VALUE_OCTETS: usize = 4096;
 pub(crate) const MAX_ATTRIBUTE_OCTETS: usize = 1024;
+pub(crate) const DEFAULT_SAME_SITE: SameSite = SameSite::Lax;
 
 /// The `SameSite` attribute of a cookie.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +69,24 @@ impl std::fmt::Debug for Cookie {
 }
 
 impl Cookie {
+    /// Creates a session cookie for `Jar::insert`: path `/`, no expiry, host-only, not secure, not HTTP-only, `SameSite::Lax`, with an empty domain that `insert` fills from its URL.
+    pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
+        let now = SystemTime::now();
+        Self {
+            name: name.into(),
+            value: value.into(),
+            domain: String::new(),
+            path: "/".to_owned(),
+            secure: false,
+            http_only: false,
+            same_site: DEFAULT_SAME_SITE,
+            expires: None,
+            creation_time: now,
+            last_access: now,
+            host_only: true,
+        }
+    }
+
     pub(crate) fn within_limits(&self) -> bool {
         self.name.len() + self.value.len() <= MAX_NAME_VALUE_OCTETS
             && self.domain.len() <= MAX_ATTRIBUTE_OCTETS

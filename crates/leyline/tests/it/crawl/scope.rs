@@ -254,3 +254,38 @@ async fn a_domain_crawl_keeps_other_hosts_of_its_site_and_its_credentials_on_the
     let home = sent.iter().find(|request| request.target == "/").unwrap();
     assert_eq!(home.header("authorization"), Some("Bearer secret-token"));
 }
+
+#[tokio::test]
+async fn a_crawl_filter_keeps_a_path_prefix_and_drops_paged_urls() {
+    fn page(links: &[&str]) -> testing::Response {
+        let anchors: String = links
+            .iter()
+            .map(|link| format!("<a href=\"{link}\">l</a>"))
+            .collect();
+        html(&format!("<p>page with {} links</p>{anchors}", links.len()))
+    }
+    let server = testing::Server::http(|request| match request.target.as_str() {
+        "/docs/a" => page(&["/docs/a?page=2", "/docs/deep/1", "/blog/x"]),
+        "/docs/deep/1" => page(&["/docs/deep/2"]),
+        "/docs/deep/2" | "/docs/a?page=2" | "/blog/x" => page(&[]),
+        _ => testing::Response::new(404),
+    })
+    .await
+    .unwrap();
+
+    let mut crawl = Session::new()
+        .crawl(server.url("/docs/a"))
+        .scope(leyline::Scope::Host)
+        .host_limits(unpaced())
+        .dedup(false)
+        .filter(|url| url.path().starts_with("/docs/") && url.query().is_none());
+    let mut visited = BTreeSet::new();
+    while let Some(page) = crawl.next().await {
+        visited.insert(page.unwrap().url().path().to_owned());
+    }
+
+    let kept = BTreeSet::from(["/docs/a", "/docs/deep/1", "/docs/deep/2"].map(str::to_owned));
+    assert_eq!(visited, kept);
+    assert_eq!(page_targets(&server).await, kept);
+    assert_eq!(crawl.skipped(leyline::SkipReason::Filter), 2);
+}

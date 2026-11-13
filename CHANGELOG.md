@@ -10,13 +10,36 @@ version and publish as separate crates.
 
 ## Unreleased
 
+### Breaking changes
+
+[UPGRADE.md](UPGRADE.md#breaking-changes-after-020) maps each old call to the new one.
+
+- `cookie::Jar::store` takes the URL first, like every other `Jar` method.
+- `Tls::pin_sha256` is renamed `Tls::pin_cert_sha256`; it pins the whole leaf certificate, not its public key.
+- `Message::Ping` and `Message::Pong` carry their payload as `Vec<u8>`.
+- `testing::Request::text` returns the request body; `testing::Request::head` returns the request line and headers.
+
 ### Added
 
+- `SessionBuilder::before_send` runs a hook on every request before each attempt; the hook reads the method, URL, headers and body, and its header and body changes are sent.
+- `RequestBuilder::build` converts a request into an `http::Request`, and `Session::request_from` converts one back into a `RequestBuilder`, so a request can be read, changed, streamed, or sent from a `tower` service of your own.
+- `RequestBuilder::try_clone` copies a request with a buffered body so it can be sent more than once.
+- `Response::into_http` converts a response into an `http::Response` that streams the body.
+- `Body::file`, `Body::as_bytes`, `Body::try_clone`, and `Body::next`. `Body::next` reads a streamed body without `futures_util::StreamExt`.
+- `SessionBuilder::user_agent`, `SessionBuilder::header`, and `SessionBuilder::basic_auth` set one default for every request.
+- `SessionBuilder::cookies(None)` turns cookie storage off.
+- `cookie::Cookie::new` and `cookie::Jar::insert` build a cookie from its fields and store it.
+- `Tls::client_cert_pem` takes the client certificate chain and key as PEM bytes in memory.
+- `Events::last_event_id` resumes a server-sent event stream from a known event id.
+- `Crawl::filter` follows a link only when a closure accepts its URL; a rejected link counts under `SkipReason::Filter`.
+- `testing::Response::abort_after` drops the connection part-way through the body.
 - `Scope::Any` follows links and sitemaps across any host while keeping `Authorization` and default `Cookie` headers scoped to the seed origin.
 - `Crawl::redirect`, `Crawl::max_depth`, `Crawl::max_url_size`, `Crawl::max_sitemaps`, `Crawl::max_crawl_delay`, `Crawl::robots_max_age`, `Crawl::dedup`, and `Crawl::dedup_min_words` configure or lift each built-in crawl bound while keeping polite defaults out of the box, and `Crawl::limit` now accepts `None` to clear an earlier cap.
 
 ### Fixed
 
+- A link that `Crawl` drops because it is out of scope now counts under `SkipReason::Scope`.
+- A `leyline::blocking::Session` can reach a `testing::Server` started from the same thread; the server no longer needs the caller to drive its runtime, and `testing::Server::http_on` works from synchronous code.
 - `Crawl` and `Session::robots` now honor an explicit `SessionBuilder::retry(0)`, `SessionBuilder::redirect`, `SessionBuilder::max_body_size`, and `HostLimits` concurrency above 16 requests instead of clamping or overriding them with internal defaults, and untyped HTML pages enforce `max_body_size` instead of a fixed 10 MiB cap.
 
 ### Changed

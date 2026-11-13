@@ -151,7 +151,7 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     use crate::cookie::Jar;
     let jar = Jar::new();
     let a = url::Url::parse("https://1.2.3.4/").unwrap();
-    jar.store("k=v; Domain=3.4; Path=/", &a);
+    jar.store(&a, "k=v; Domain=3.4; Path=/");
     assert_eq!(
         jar.get(&url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
         None

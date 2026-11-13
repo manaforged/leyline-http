@@ -9,6 +9,15 @@ use crate::error::Result;
 
 const SKIP_AFTER_PENDING: u8 = 16;
 
+thread_local! {
+    static ACTIVE: Cell<bool> = const { Cell::new(false) };
+}
+
+#[cfg(feature = "test-util")]
+pub(crate) fn active() -> bool {
+    ACTIVE.get()
+}
+
 /// A session whose calls block the calling thread until they finish.
 pub struct Session {
     session: crate::core::session::Session,
@@ -35,6 +44,13 @@ impl Session {
 
     /// Runs `future` to completion on the calling thread and returns its output.
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        let outer = ACTIVE.replace(true);
+        let output = self.run(future);
+        ACTIVE.set(outer);
+        output
+    }
+
+    fn run<F: Future>(&self, future: F) -> F::Output {
         let mut future = std::pin::pin!(future);
         let skips = self.skips.get();
         if skips > 0 {

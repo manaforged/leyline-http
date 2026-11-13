@@ -66,7 +66,7 @@ impl Crawl {
         let text = html::text(&loaded.html);
         let canonical = html::canonical(&loaded.html)
             .and_then(|href| base.join(&href).ok())
-            .filter(|link| self.frontier.in_scope(link));
+            .filter(|link| self.frontier.in_scope(link) && self.frontier.keeps(link));
         let own = page_key(&loaded.url);
         let claimed = canonical.as_ref().map(page_key);
         let print = self
@@ -86,7 +86,8 @@ impl Crawl {
             && !self.dedup.kept.contains(&key)
             && !self.dedup.settled.contains(&key)
         {
-            self.frontier.add(Queued::link(link, depth));
+            self.frontier
+                .add(Queued::link(link, depth), &mut self.stats);
             self.dedup.waiting_on.insert(held.own.clone(), key.clone());
             self.dedup.held.entry(key).or_default().push(held);
             return;
@@ -185,7 +186,7 @@ impl Crawl {
                         .any(|token| token.eq_ignore_ascii_case(NOFOLLOW))
                 });
             if let (false, Ok(url)) = (nofollow, base.join(anchor.href())) {
-                self.frontier.add(Queued::link(url, depth));
+                self.frontier.add(Queued::link(url, depth), &mut self.stats);
             }
         }
     }

@@ -41,6 +41,21 @@ impl JarInner {
         removed
     }
 
+    pub(super) fn expire(&mut self, domain: &str, cookie: &Cookie, secure_origin: bool) -> bool {
+        let stored_secure = self.cookies.get(domain).and_then(|entries| {
+            entries
+                .iter()
+                .find(|c| c.same_slot(cookie))
+                .map(|c| c.secure)
+        });
+        match stored_secure {
+            Some(secure) if !secure || secure_origin => {
+                self.remove_in(domain, |c| c.same_slot(cookie)) > 0
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn insert_loaded(&mut self, cookie: Cookie) {
         if !cookie.within_limits() {
             return;

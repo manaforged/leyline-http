@@ -80,21 +80,30 @@ impl Tls {
         self
     }
 
-    /// Adds a SHA-256 pin for the server's leaf certificate.
-    pub fn pin_sha256(mut self, sha256: [u8; 32]) -> Self {
+    /// Adds a pin: the SHA-256 digest of the server's whole DER-encoded leaf certificate, not of its public key.
+    pub fn pin_cert_sha256(mut self, sha256: [u8; 32]) -> Self {
         self.pinned_leaf_sha256.push(sha256);
         self
     }
 
-    /// Sets the client certificate chain file and private key file.
+    /// Sets the client certificate from two PEM files: the certificate chain with the leaf first, then its unencrypted private key.
     pub fn client_cert(
         mut self,
         certificate_chain_file: impl Into<PathBuf>,
         private_key_file: impl Into<PathBuf>,
     ) -> Self {
         self.client_identity = Some(ClientIdentity {
-            certificate_chain_file: certificate_chain_file.into(),
-            private_key_file: private_key_file.into(),
+            certificate_chain: Pem::File(certificate_chain_file.into()),
+            private_key: Pem::File(private_key_file.into()),
+        });
+        self
+    }
+
+    /// Sets the client certificate from PEM bytes in memory: the certificate chain with the leaf first, then its unencrypted private key, replacing any `client_cert` files.
+    pub fn client_cert_pem(mut self, cert: impl Into<Vec<u8>>, key: impl Into<Vec<u8>>) -> Self {
+        self.client_identity = Some(ClientIdentity {
+            certificate_chain: Pem::Bytes(cert.into()),
+            private_key: Pem::Bytes(key.into()),
         });
         self
     }
@@ -140,6 +149,21 @@ impl Tls {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ClientIdentity {
-    pub(crate) certificate_chain_file: PathBuf,
-    pub(crate) private_key_file: PathBuf,
+    pub(super) certificate_chain: Pem,
+    pub(super) private_key: Pem,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub(super) enum Pem {
+    File(PathBuf),
+    Bytes(Vec<u8>),
+}
+
+impl std::fmt::Debug for Pem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::File(path) => f.debug_tuple("File").field(path).finish(),
+            Self::Bytes(_) => f.write_str("Bytes(***)"),
+        }
+    }
 }
