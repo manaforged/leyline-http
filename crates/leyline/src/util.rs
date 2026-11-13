@@ -243,6 +243,10 @@ pub(crate) fn cross_origin_header(name: &str) -> bool {
             .any(|s| name.eq_ignore_ascii_case(s))
 }
 
+pub(crate) fn bearer_credentials(token: &str) -> String {
+    format!("Bearer {token}")
+}
+
 pub(crate) fn basic_credentials(username: &str, password: &str) -> String {
     format!("Basic {}", base64_encode(&format!("{username}:{password}")))
 }

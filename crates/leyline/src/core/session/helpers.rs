@@ -282,15 +282,7 @@ impl std::fmt::Debug for Session {
                     .map(|b| b.branded(self.inner.inputs.brand)),
             )
             .field("platform", &self.inner.platform)
-            .field(
-                "proxy",
-                &self
-                    .inner
-                    .inputs
-                    .proxy_config
-                    .primary()
-                    .map(crate::util::redact),
-            )
+            .field("proxy", &self.inner.inputs.proxy_config.shown())
             .field("timeout", &self.inner.inputs.timeouts.total_limit())
             .field("protocol_policy", &self.inner.inputs.protocol_policy);
         if let Some(audit) = &self.inner.audit_tls {

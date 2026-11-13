@@ -76,6 +76,8 @@ impl<C> Opened<C> {
     }
 }
 
+pub(crate) const H1_ONLY_LANE: u8 = u8::MAX;
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct PoolKey {
     pub(crate) host: String,
@@ -89,11 +91,12 @@ pub(crate) struct PoolKey {
 
 impl PoolKey {
     pub(crate) fn host_key(&self) -> Cow<'_, PoolKey> {
-        if self.partition.is_none() {
+        if self.partition.is_none() && self.lane == 0 {
             Cow::Borrowed(self)
         } else {
             Cow::Owned(PoolKey {
                 partition: None,
+                lane: 0,
                 ..self.clone()
             })
         }

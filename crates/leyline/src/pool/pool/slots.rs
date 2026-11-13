@@ -105,28 +105,28 @@ impl Pool {
         if !self.config.keepalive {
             return false;
         }
-        self.park_h1(key, slot, tls);
-        true
+        self.park_h1(key, slot, tls)
     }
 
-    pub(crate) fn park_h1(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) {
+    pub(crate) fn park_h1(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) -> bool {
         if self.past_lifetime(slot.opened_at, Instant::now()) {
-            return;
+            return false;
         }
-        self.park_h1_locked(key, slot, tls);
+        let parked = self.park_h1_locked(key, slot, tls);
         self.watch_idle();
+        parked
     }
 
-    fn park_h1_locked(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) {
+    fn park_h1_locked(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) -> bool {
         let mut entries = write(&self.conns.shards.of(key).entries);
         if let Some(entry) = entries.h1.get_mut(key) {
             let now = Instant::now();
             entry.idle.queue().push_back((slot, tls, now));
             entry.last_use = now;
-            return;
+            return true;
         }
         if entries.mux.contains_key(key) {
-            return;
+            return false;
         }
         let evicted = self.evict_for_new_entry(&mut entries);
         let mut idle = H1Idle::default();
@@ -140,6 +140,7 @@ impl Pool {
         );
         drop(entries);
         drop(evicted);
+        true
     }
 
     fn past_lifetime(&self, opened: Instant, now: Instant) -> bool {

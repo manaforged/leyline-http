@@ -205,6 +205,14 @@ impl Proxy {
         self.primary_rule().map(ProxyRule::url)
     }
 
+    pub(crate) fn shown(&self) -> Option<String> {
+        self.primary().map(crate::util::redact)
+    }
+
+    pub(crate) fn is_pool(&self) -> bool {
+        self.pool.is_some()
+    }
+
     pub(crate) fn primary_url(&self) -> Option<&ProxyUrl> {
         self.primary_rule()
             .and_then(|rule| rule.parsed.as_ref().ok())
@@ -248,7 +256,7 @@ impl Proxy {
         let Some(chosen) = choose(url) else {
             return Ok(None);
         };
-        if chosen.custom.is_some() || chosen.pool.is_some() {
+        if chosen.is_custom() || chosen.is_pool() {
             return Err(Error::config(
                 "a Proxy::custom closure must return one proxy, not a Proxy::list, \
                  Proxy::identified or Proxy::custom",

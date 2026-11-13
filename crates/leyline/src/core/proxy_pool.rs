@@ -135,10 +135,7 @@ impl ProxyPool {
 }
 
 fn entry(config: Proxy, identity: Option<Identity>) -> Entry {
-    let label = config
-        .primary()
-        .map(crate::util::redact)
-        .unwrap_or_default();
+    let label = config.shown().unwrap_or_default();
     Entry {
         config,
         label,

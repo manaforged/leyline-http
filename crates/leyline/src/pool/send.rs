@@ -363,13 +363,11 @@ pub(super) fn answered(
     let waited = answered.saturating_duration_since(send_started);
     trace::head(host, resp.status.as_u16(), resp.version, &resp.headers);
     resp.tls = Some(tls);
-    resp.timing = ResponseTiming {
-        reused: connect_ms.is_none(),
+    resp.timing = ResponseTiming::measured(
         connect_ms,
-        send_ms: ResponseTiming::span(waited),
-        total_ms: ResponseTiming::span(answered.saturating_duration_since(started)),
-        from_cache: false,
-    };
+        ResponseTiming::span(waited),
+        ResponseTiming::span(answered.saturating_duration_since(started)),
+    );
     resp
 }
 

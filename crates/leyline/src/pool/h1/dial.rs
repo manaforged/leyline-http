@@ -81,13 +81,14 @@ pub(super) async fn dial_plain(
         .with_timeout(proxy::open(connector, host, port, proxy, Route::Forward))
         .await
         .map_err(TlsError::into_proxy)?;
-    let addr = match &tunnel {
-        Tunnel::Plain(tcp) => tcp.peer_addr().ok(),
-        Tunnel::Tls(io) => remote_addr(io),
-    };
-    let io: Box<dyn H1Io> = match tunnel {
-        Tunnel::Plain(tcp) => Box::new(tcp),
-        Tunnel::Tls(io) => Box::new(io),
-    };
-    Ok((io, addr))
+    Ok(match tunnel {
+        Tunnel::Plain(tcp) => {
+            let addr = tcp.peer_addr().ok();
+            (Box::new(tcp), addr)
+        }
+        Tunnel::Tls(io) => {
+            let addr = remote_addr(&io);
+            (Box::new(io), addr)
+        }
+    })
 }

@@ -19,7 +19,7 @@ use crate::profile::{Browser, BrowserProfile, ChromiumBrand, FingerprintSpec, Pl
 use crate::tls::trust::Tls;
 use crate::trace::Trace;
 
-pub(crate) use self::bearer::BearerToken;
+pub(crate) use self::bearer::Credential;
 use self::derive::{IdentityInputs, IdentitySource, derive_identity};
 use self::inherit::Parent;
 use super::identity::Source;
@@ -75,7 +75,7 @@ pub struct SessionBuilder {
     protocol_explicit: bool,
     config_error: Option<Arc<Error>>,
     default_headers: Vec<(String, String)>,
-    pub(in crate::core::session) bearer: Option<BearerToken>,
+    pub(in crate::core::session) credential: Option<Credential>,
     refresh_token: Option<bearer::Callback>,
     cache: usize,
     http_identity: Option<Browser>,
@@ -120,7 +120,7 @@ impl SessionBuilder {
             protocol_explicit: false,
             config_error: None,
             default_headers: Vec::new(),
-            bearer: None,
+            credential: None,
             refresh_token: None,
             cache: 0,
             http_identity: None,

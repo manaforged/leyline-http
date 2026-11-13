@@ -17,8 +17,8 @@ impl SessionBuilder {
         let impersonates = self.impersonates();
         let pool = Arc::new(self.pool_inputs().pool(impersonates));
         self.cookie_jar.get_or_insert_default();
-        self.bearer = self
-            .bearer
+        self.credential = self
+            .credential
             .take()
             .map(|token| token.refreshing(self.refresh_token.clone()));
         self.layered = false;
@@ -52,7 +52,7 @@ impl SessionBuilder {
                 })
                 .collect(),
             cache: (self.cache > 0).then(|| Arc::new(Cache::new(self.cache))),
-            proxy_shown: self.proxy_config.primary().map(crate::util::redact),
+            proxy_shown: self.proxy_config.shown(),
             connector,
             h2_config: derived.h2_config,
             pool,

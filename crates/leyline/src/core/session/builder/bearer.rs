@@ -17,12 +17,12 @@ enum Token {
 }
 
 #[derive(Clone)]
-pub(crate) struct BearerToken {
+pub(crate) struct Credential {
     value: Token,
     pub(crate) slot: usize,
 }
 
-impl BearerToken {
+impl Credential {
     pub(in crate::core::session) fn value(&self) -> HeaderStr {
         match &self.value {
             Token::Fixed(value) | Token::Basic(value) => HeaderStr::from(value.as_str()),
@@ -63,7 +63,7 @@ impl BearerToken {
 impl SessionBuilder {
     /// Sets the `Authorization: Bearer` header, sent to every origin, or only to the `base_url` origin when one is set, and never across a cross-origin redirect.
     pub fn bearer_auth(self, token: &str) -> Self {
-        self.credential(Token::Fixed(format!("Bearer {token}")))
+        self.credential(Token::Fixed(crate::util::bearer_credentials(token)))
     }
 
     /// Sets the `Authorization` header to HTTP Basic credentials with the same origin scope as `bearer_auth`, replacing a bearer token or default `Authorization` header set before it.
@@ -72,12 +72,12 @@ impl SessionBuilder {
     }
 
     fn credential(mut self, value: Token) -> Self {
-        let token = BearerToken { value, slot: 0 };
+        let token = Credential { value, slot: 0 };
         if crate::core::headers::value(token.value().as_str()).is_err() {
             self.invalid_header(AUTHORIZATION);
         }
         self.remove_default(AUTHORIZATION);
-        self.bearer = Some(BearerToken {
+        self.credential = Some(Credential {
             slot: self.default_headers.len(),
             ..token
         });
@@ -95,7 +95,7 @@ impl SessionBuilder {
     }
 
     pub(super) fn remove_default(&mut self, name: &str) {
-        if let Some(bearer) = self.bearer.as_mut() {
+        if let Some(bearer) = self.credential.as_mut() {
             let removed = self.default_headers[..bearer.slot]
                 .iter()
                 .filter(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -108,7 +108,7 @@ impl SessionBuilder {
 
     pub(super) fn push_default(&mut self, name: String, value: String) {
         match self
-            .bearer
+            .credential
             .take_if(|_| name.eq_ignore_ascii_case(AUTHORIZATION))
         {
             Some(bearer) => self.default_headers.insert(bearer.slot, (name, value)),

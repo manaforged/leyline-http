@@ -28,8 +28,8 @@ use crate::wire::{TransportBody, TransportResponse};
 use crate::pool::send::{
     Attempt, LegTrace, Reopened, Sent, not_resendable, note_stale, resend, resending,
 };
-use crate::pool::types::PoolKey;
 use crate::pool::types::{Counter, LegKind, Opened};
+use crate::pool::types::{H1_ONLY_LANE, PoolKey};
 use crate::pool::{H1Slot, Pool};
 use crate::profile::Carrier;
 use crate::wire::HeaderPair;
@@ -264,7 +264,10 @@ pub(super) async fn send_h1<W: Copy + Send>(
         None => &req.headers,
     };
     validate(req.method, checked)?;
-    let key = pool.key(req.scheme, req.host, req.port, req.proxy, Carrier::Tcp);
+    let mut key = pool.key(req.scheme, req.host, req.port, req.proxy, Carrier::Tcp);
+    if offer.is_none() && req.scheme.is_secure() {
+        key.lane = H1_ONLY_LANE;
+    }
     let permit = pool.acquire_h1_permit(&key).await?;
     let now = Instant::now();
     pool.evict_idle(now);

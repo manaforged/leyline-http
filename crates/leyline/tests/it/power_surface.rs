@@ -422,6 +422,7 @@ async fn a_timeout_converts_to_a_timed_out_io_error_that_keeps_its_source() -> C
         .await;
 
     let error = failed.err().ok_or("the request must time out")?;
+    let attempts = error.attempts();
     let io = std::io::Error::from(error);
     assert_eq!(io.kind(), std::io::ErrorKind::TimedOut);
     let source = leyline::Error::find(&io).ok_or("the leyline error stays reachable")?;
@@ -430,6 +431,8 @@ async fn a_timeout_converts_to_a_timed_out_io_error_that_keeps_its_source() -> C
     let back = leyline::Error::from(io);
     assert_eq!(back.kind(), Kind::Timeout);
     assert_eq!(back.to_string(), shown);
+    assert_eq!(back.attempts(), attempts);
+    assert!(std::error::Error::source(&back).is_none_or(|source| !source.is::<std::io::Error>()));
     Ok(())
 }
 
@@ -533,5 +536,22 @@ async fn a_forced_protocol_skips_the_cache() -> Check {
 
     assert!(!forced.from_cache());
     assert_eq!(server.requests().await.len(), 2);
+    Ok(())
+}
+
+#[cfg(feature = "http3")]
+#[tokio::test]
+async fn one_request_forces_http3_on_a_session_that_defaults_to_tcp() -> Check {
+    use crate::h3_support::{Limits, Reply, h3_server};
+    let server = h3_server(vec![Reply::Body(4096)], Limits::default()).await;
+    let session = server.session().protocol(leyline::Protocol::Auto).build()?;
+
+    let response = session
+        .get(server.url())
+        .protocol(leyline::Protocol::Http3)
+        .await?;
+
+    assert_eq!(response.version(), leyline::http::Version::HTTP_3);
+    assert_eq!(response.bytes().await?.len(), 4096);
     Ok(())
 }

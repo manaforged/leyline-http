@@ -113,7 +113,7 @@ impl Session {
                 let token = self
                     .inner
                     .inputs
-                    .bearer
+                    .credential
                     .as_ref()
                     .expect("invariant: refresh version requires bearer auth");
                 drop(leg);

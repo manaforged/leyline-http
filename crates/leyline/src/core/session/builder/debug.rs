@@ -37,7 +37,7 @@ impl fmt::Debug for SessionBuilder {
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
             )
-            .field("bearer", &self.bearer.is_some())
+            .field("credential", &self.credential.is_some())
             .field(
                 "base_url",
                 &self

@@ -11,9 +11,9 @@ impl SessionBuilder {
     pub(super) fn validate(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
         self.check_config()?;
         let bearer = self
-            .bearer
+            .credential
             .as_ref()
-            .is_some_and(super::BearerToken::refreshable);
+            .is_some_and(super::Credential::refreshable);
         if self.refresh_token.is_some() && !(bearer && self.base_url.is_some()) {
             return Err(Error::config(
                 "refresh_token requires bearer_auth and base_url",
@@ -43,7 +43,7 @@ impl SessionBuilder {
             .proxy_pool
             .iter()
             .flat_map(ProxyPool::configs)
-            .any(|config| config.pool.is_some())
+            .any(crate::core::config::Proxy::is_pool)
         {
             return Err(Error::config(
                 "a Proxy::list or Proxy::identified entry must be one proxy, not another \

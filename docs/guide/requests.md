@@ -324,8 +324,9 @@ is session-wide, because connections are pooled. See
 server cannot speak fails the request: a forced HTTP/2 request to an
 HTTP/1.1 server fails with `Kind::Http2`. A request with a forced version
 does not read or fill the session's HTTP cache, and a WebSocket handshake
-follows it too. While the session holds an HTTP/2 connection to a host, each
-request forced to HTTP/1.1 for that host opens a new connection.
+follows it too. Requests forced to HTTP/1.1 keep and reuse their own
+connections to an `https` host, apart from the session's HTTP/2 connection
+to it.
 
 ```rust,no_run
 use std::time::Duration;

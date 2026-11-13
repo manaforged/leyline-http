@@ -284,10 +284,7 @@ fn finish(
                 let actual = std::mem::take(&mut response.headers);
                 let timing = response.timing;
                 response = old.response(parts);
-                response.timing = ResponseTiming {
-                    from_cache: true,
-                    ..timing
-                };
+                response.timing = timing.cached();
                 let mut headers = std::mem::take(&mut response.headers).into_map();
                 for name in VOLATILE {
                     for value in actual.map().get_all(&name) {
@@ -369,10 +366,7 @@ impl Entry {
             body: TransportBody::Buffered(self.body.clone()),
             version: self.version,
             tls: self.tls.clone(),
-            timing: ResponseTiming {
-                from_cache: true,
-                ..Default::default()
-            },
+            timing: ResponseTiming::default().cached(),
         })
     }
 }

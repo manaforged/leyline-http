@@ -380,14 +380,17 @@ impl RequestBuilder {
 
     /// Sets the `authorization` header to a bearer token.
     pub fn bearer_auth(mut self, token: &str) -> Self {
-        self.put("authorization", format!("Bearer {token}"));
+        self.put(
+            http::header::AUTHORIZATION,
+            crate::util::bearer_credentials(token),
+        );
         self
     }
 
     /// Sets the `authorization` header to HTTP Basic credentials.
     pub fn basic_auth(mut self, username: &str, password: &str) -> Self {
         self.put(
-            "authorization",
+            http::header::AUTHORIZATION,
             crate::util::basic_credentials(username, password),
         );
         self
@@ -422,7 +425,7 @@ impl RequestBuilder {
     /// Sends this request through the given proxy, and fails at send when the proxy is a pool.
     pub fn proxy(mut self, config: impl Into<Proxy>) -> Self {
         let config = config.into();
-        if config.pool.is_some() {
+        if config.is_pool() {
             self.fail(Error::config(
                 "a request takes one proxy; set a proxy list on the session",
             ));

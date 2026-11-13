@@ -88,7 +88,7 @@ impl DigestLeg {
                 )
             })?;
         let mut headers = journey.extra.clone().unwrap_or_default();
-        headers.set("authorization", header)?;
+        headers.set(http::header::AUTHORIZATION, header)?;
         Ok(headers)
     }
 }
@@ -102,13 +102,13 @@ impl super::Session {
         if digest.is_some() {
             return None;
         }
-        let version = self.inner.inputs.bearer.as_ref()?.version()?;
+        let version = self.inner.inputs.credential.as_ref()?.version()?;
         if journey.tainted
             || !self.bearer_in_scope(&journey.url)
             || journey
                 .extra
                 .as_ref()
-                .is_some_and(|headers| headers.get("authorization").is_some())
+                .is_some_and(|headers| headers.get(http::header::AUTHORIZATION.as_str()).is_some())
         {
             return None;
         }

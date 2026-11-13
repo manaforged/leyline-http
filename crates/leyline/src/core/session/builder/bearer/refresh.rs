@@ -56,7 +56,7 @@ impl Refresh {
             }
         }
         let result = (self.callback)().await.and_then(|token| {
-            let value = format!("Bearer {token}");
+            let value = crate::util::bearer_credentials(&token);
             headers::value(value.as_str())?;
             Ok(HeaderStr::from(value))
         });

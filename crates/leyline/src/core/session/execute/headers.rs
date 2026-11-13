@@ -162,7 +162,7 @@ impl Session {
     fn caches_headers(&self, journey: &Journey) -> bool {
         !journey.initiated
             && matches!(journey.body.0, BodyKind::Empty)
-            && self.inner.inputs.bearer.is_none()
+            && self.inner.inputs.credential.is_none()
             && self.inner.inputs.jar().is_empty()
     }
 
@@ -201,7 +201,7 @@ impl Session {
         let bearer = self
             .inner
             .inputs
-            .bearer
+            .credential
             .as_ref()
             .filter(|_| self.bearer_in_scope(target));
         let defaults = &self.inner.default_headers;

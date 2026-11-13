@@ -104,3 +104,76 @@ async fn an_http1_fallback_that_reaches_h2_sends_on_h2() {
     assert_eq!(resp.bytes().await.unwrap(), "5");
     assert_eq!(connections.load(Ordering::SeqCst), 3);
 }
+
+async fn serve_h1(mut stream: SslStream<TcpStream>) {
+    use tokio::io::AsyncReadExt;
+    let mut seen = Vec::new();
+    let mut chunk = [0; 1024];
+    loop {
+        let Ok(read) = stream.read(&mut chunk).await else {
+            return;
+        };
+        if read == 0 {
+            return;
+        }
+        seen.extend_from_slice(&chunk[..read]);
+        if seen.ends_with(b"\r\n\r\n") {
+            seen.clear();
+            let reply = b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\nhi";
+            stream.write_all(reply).await.unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+async fn forced_http1_requests_keep_their_connection_beside_an_h2_one() {
+    let (cert, key) = tls_support::self_signed();
+    let der = cert.to_der().unwrap();
+    let connections = Arc::new(AtomicUsize::new(0));
+    let alpn = |index: usize| {
+        if index == 0 {
+            tls_support::H2
+        } else {
+            tls_support::HTTP11
+        }
+    };
+    let port = tls_support::tls_server_per_connection(
+        cert,
+        key,
+        Arc::clone(&connections),
+        alpn,
+        |index, stream| async move {
+            match index {
+                0 => serve_h2(stream, None).await,
+                _ => serve_h1(stream).await,
+            }
+        },
+    )
+    .await;
+    let session = Session::builder()
+        .tls(Tls::new().env_roots(false).system_roots(false).ca_der(der))
+        .retry(0)
+        .build()
+        .unwrap();
+    let url = format!("https://127.0.0.1:{port}/");
+    let mut seen = Vec::new();
+    for (path, forced) in [("a", false), ("b", true), ("c", true), ("d", false)] {
+        let mut request = session.get(format!("{url}{path}"));
+        if forced {
+            request = request.protocol(leyline::Protocol::Http1);
+        }
+        let response = request.send().await.unwrap();
+        seen.push((response.version(), response.reused()));
+        response.bytes().await.unwrap();
+    }
+    assert_eq!(
+        seen,
+        [
+            (http::Version::HTTP_2, false),
+            (http::Version::HTTP_11, false),
+            (http::Version::HTTP_11, true),
+            (http::Version::HTTP_2, true),
+        ]
+    );
+    assert_eq!(connections.load(Ordering::SeqCst), 2);
+}
