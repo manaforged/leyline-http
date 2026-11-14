@@ -70,6 +70,8 @@ impl Error {
             out.inner.source = Some(Source::Cause(copy));
         } else if let Some(io) = self.io() {
             out = out.with_source(std::io::Error::new(io.kind(), io.to_string()));
+        } else if let Some(source) = self.source() {
+            out = out.with_source(source.to_string());
         } else {
             sourced = false;
         }
@@ -112,6 +114,12 @@ impl Error {
 
     pub(crate) fn config(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(Kind::Config).with_message(message)
+    }
+
+    /// Creates a `Kind::Request` error from a caller-supplied cause, such as a `before_send` or `refresh_token` failure.
+    #[must_use]
+    pub fn request(source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+        Self::new(Kind::Request).with_source(source)
     }
 
     pub(crate) fn with_source(mut self, source: impl Into<Boxed>) -> Self {

@@ -21,16 +21,19 @@ impl Pem {
     }
 }
 
-pub(super) fn add_root_file(
+pub(super) fn add_root(
     builder: &mut SslContextBuilder,
-    path: &Path,
+    root: &Pem,
     loaded: &mut TrustKey,
 ) -> Result<usize, TlsError> {
-    let pem = read(path)?;
-    let added = builder
-        .cert_store_mut()
-        .add_pem(&pem)
-        .map_err(TlsError::from_stack)?;
+    let pem = root.load()?;
+    let added = builder.cert_store_mut().add_pem(&pem).map_err(|stack| {
+        if stack.errors().is_empty() {
+            TlsError::TrustStore("PEM contained no certificates".into())
+        } else {
+            TlsError::from_stack(stack)
+        }
+    })?;
     loaded.root_bytes(&pem);
     Ok(added)
 }

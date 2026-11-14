@@ -192,6 +192,12 @@ impl Body {
         }
     }
 
+    /// Returns the known byte length of the body (`0` when empty, the buffer length in memory, or the declared stream or file length), or `None` for an unsized stream.
+    #[must_use]
+    pub fn content_length(&self) -> Option<u64> {
+        self.len_hint()
+    }
+
     /// Returns a copy of a body held in memory without copying its bytes, or `None` for a streamed body.
     pub fn try_clone(&self) -> Option<Self> {
         match &self.0 {

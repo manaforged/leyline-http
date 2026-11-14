@@ -1,7 +1,8 @@
 use leyline_bssl::ssl::SslContextBuilder;
 
 use super::TrustKey;
-use super::files::add_root_file;
+use super::config::Pem;
+use super::files::add_root;
 
 pub(super) fn env_roots_set() -> bool {
     ["SSL_CERT_FILE", "SSL_CERT_DIR"]
@@ -14,7 +15,7 @@ pub(super) fn wire_env_trust(builder: &mut SslContextBuilder, trust: &mut TrustK
     if let Ok(file) = std::env::var("SSL_CERT_FILE") {
         let file = file.trim();
         if !file.is_empty() {
-            match add_root_file(builder, std::path::Path::new(file), trust) {
+            match add_root(builder, &Pem::File(file.into()), trust) {
                 Ok(_) => {
                     loaded_any = true;
                     tracing::warn!(
@@ -43,7 +44,7 @@ pub(super) fn wire_env_trust(builder: &mut SslContextBuilder, trust: &mut TrustK
                 if !candidates.is_empty() || dir_path.exists() {
                     let mut loaded = 0usize;
                     for p in &candidates {
-                        match add_root_file(builder, p, trust) {
+                        match add_root(builder, &Pem::File(p.clone()), trust) {
                             Ok(_) => loaded += 1,
                             Err(e) => {
                                 tracing::debug!(

@@ -26,7 +26,7 @@ impl Error {
     }
 
     pub(super) fn is_socket_unreachable(&self) -> bool {
-        self.io().is_some_and(|e| {
+        self.transport_io().is_some_and(|e| {
             matches!(
                 e.kind(),
                 io::ErrorKind::ConnectionRefused
@@ -60,7 +60,7 @@ impl Error {
     }
 
     pub(crate) fn is_connection_closed(&self) -> bool {
-        if self.io().is_some_and(|e| {
+        if self.transport_io().is_some_and(|e| {
             matches!(
                 e.kind(),
                 io::ErrorKind::UnexpectedEof
@@ -88,7 +88,7 @@ impl Error {
     pub(crate) fn body_limit(&self) -> Option<BodyLimit> {
         self.source_as::<BodyLimit>()
             .copied()
-            .or_else(|| self.io().and_then(BodyLimit::of_io))
+            .or_else(|| self.transport_io().and_then(BodyLimit::of_io))
     }
 
     /// Returns true when the proxy itself failed.
@@ -133,8 +133,15 @@ impl Error {
     }
 
     fn io_cause(&self) -> Option<&io::Error> {
-        self.io()
+        self.transport_io()
             .or_else(|| self.facts().and_then(Cause::io_source))
+    }
+
+    fn transport_io(&self) -> Option<&io::Error> {
+        if matches!(self.inner.kind, Kind::Request | Kind::Config | Kind::Url) {
+            return None;
+        }
+        self.io()
     }
 }
 

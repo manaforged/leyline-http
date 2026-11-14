@@ -47,6 +47,14 @@ version and publish as separate crates.
 - `std::io::Error::from(leyline::Error)` keeps the `leyline::Error` inside, and `Error::find` recovers it, so a streamed `Body` fits `tokio_util::io::StreamReader`.
 - `Scope::Any` follows links and sitemaps across any host while keeping `Authorization` and default `Cookie` headers scoped to the seed origin.
 - `Crawl::redirect`, `Crawl::max_depth`, `Crawl::max_url_size`, `Crawl::max_sitemaps`, `Crawl::max_crawl_delay`, `Crawl::robots_max_age`, `Crawl::dedup`, and `Crawl::dedup_min_words` configure or lift each built-in crawl bound while keeping polite defaults out of the box, and `Crawl::limit` now accepts `None` to clear an earlier cap.
+- `Error::request` builds a non-retryable `Kind::Request` error from a caller cause for `before_send` and `refresh_token` callbacks without misclassifying wrapped `std::io::Error` causes as transport timeouts or connection drops.
+- `TcpProfile` implements `Serialize`, `FromStr` (from TOML), `TcpProfile::new`, and `TcpProfile::ja4t`, and `SessionBuilder::ja4t` layers a JA4T TCP fingerprint string over the platform or `tcp_profile` settings.
+- `Tls::ca_pem` trusts PEM-encoded CA certificates held in memory alongside `Tls::ca_der` and `Tls::ca_file`.
+- `Body::content_length` reports the known byte length of empty, buffered, file, and declared-length streamed bodies.
+- `WebSocket::version` and `WebSocket::headers` expose the negotiated handshake HTTP version and full `HeaderMap`.
+- `Page::headers` and `Page::header` expose the non-sensitive response headers of each crawled page and preserve them across `Crawl::save` and `Crawl::load`.
+- `Session::base_url`, `cookie::Cookie::parse`, and `cookie::Jar::{len, is_empty, cookies_for}` expose the session base URL, standalone `Set-Cookie` parsing, and RFC 6265 send-order cookie matching.
+- `testing::Server::https_on` starts a local HTTPS test server on a pre-bound `std::net::TcpListener` without an active Tokio runtime on the calling thread.
 
 ### Fixed
 

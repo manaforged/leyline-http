@@ -167,6 +167,7 @@ mod sessions_and_devices;
 mod smoke;
 mod state_files;
 mod status_and_retry;
+mod surface_unlocks;
 mod timeouts;
 #[cfg(feature = "bench-internals")]
 mod tls_client_hello_order;

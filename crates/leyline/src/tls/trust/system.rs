@@ -10,7 +10,7 @@ pub(super) fn wire_system_trust(
     config: &super::Tls,
     env_roots_loaded: bool,
 ) -> Result<(), TlsError> {
-    if !env_roots_loaded && config.ca_files.is_empty() && config.ca_der.is_empty() {
+    if !env_roots_loaded && config.ca_roots.is_empty() && config.ca_der.is_empty() {
         builder.set_cert_store_ref(cached_windows_system_store()?);
         return Ok(());
     }

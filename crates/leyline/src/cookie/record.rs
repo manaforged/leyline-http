@@ -135,6 +135,12 @@ impl Cookie {
         }
     }
 
+    /// Parses a `Set-Cookie` header value as if received from `url` without storing it, or returns `None` when `url` or `set_cookie` is invalid or rejected for `url`.
+    #[must_use]
+    pub fn parse(url: impl crate::IntoUrl, set_cookie: &str) -> Option<Self> {
+        crate::cookie::parse::parse_set_cookie(set_cookie, &url.into_url().ok()?)
+    }
+
     /// Returns the cookie name.
     #[must_use]
     pub fn name(&self) -> &str {

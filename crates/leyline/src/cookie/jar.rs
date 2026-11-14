@@ -140,8 +140,35 @@ impl Jar {
         self.cookie_header_for(&url.into_url().ok()?, false, true)
     }
 
-    pub(crate) fn is_empty(&self) -> bool {
-        lock(&self.inner).total == 0
+    /// Returns the number of stored cookies in the jar, matching `all().len()`.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        lock(&self.inner).total
+    }
+
+    /// Returns `true` when the jar holds no stored cookies.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// Returns every unexpired cookie that matches `url`'s host, path and scheme, in RFC 6265 send order, or an empty `Vec` when `url` does not parse.
+    #[must_use]
+    pub fn cookies_for(&self, url: impl IntoUrl) -> Vec<Cookie> {
+        let Ok(url) = url.into_url() else {
+            return Vec::new();
+        };
+        let sent = sent_to(&url);
+        let jar = lock(&self.inner);
+        let mut out: Vec<Cookie> = jar
+            .cookies
+            .values()
+            .flatten()
+            .filter(|c| sent(c))
+            .cloned()
+            .collect();
+        out.sort_by(send_order);
+        out
     }
 
     pub(crate) fn cookie_header_for(
@@ -180,12 +207,7 @@ impl Jar {
             return None;
         }
 
-        matching.sort_by(|a, b| {
-            b.path
-                .len()
-                .cmp(&a.path.len())
-                .then(a.creation_time.cmp(&b.creation_time))
-        });
+        matching.sort_by(|a, b| send_order(a, b));
 
         let header = matching
             .iter()
@@ -270,6 +292,13 @@ impl std::fmt::Debug for Jar {
             .field("total", &jar.total)
             .finish()
     }
+}
+
+fn send_order(a: &Cookie, b: &Cookie) -> std::cmp::Ordering {
+    b.path
+        .len()
+        .cmp(&a.path.len())
+        .then(a.creation_time.cmp(&b.creation_time))
 }
 
 fn sent_to(url: &Url) -> impl Fn(&Cookie) -> bool {

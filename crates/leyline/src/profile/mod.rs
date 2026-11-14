@@ -54,6 +54,7 @@ pub(crate) use platform::Platform;
 pub use preset::HeaderStyle;
 pub(crate) use preset::RequestKind;
 pub use registry::ProfileRegistry;
+pub(crate) use tcp::Ja4t;
 pub use tcp::TcpProfile;
 pub(crate) use types::CertCompression;
 pub use types::TlsMinVersion;

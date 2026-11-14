@@ -14,6 +14,7 @@ use crate::deadline::Timeout;
 use crate::net::{DnsConfig, Resolver, SocketOptions};
 use crate::pool::PoolConfig;
 use crate::profile::Encoding;
+use crate::profile::Ja4t;
 use crate::profile::TcpProfile;
 use crate::profile::{Browser, BrowserProfile, ChromiumBrand, FingerprintSpec, Platform};
 use crate::tls::trust::Tls;
@@ -70,6 +71,7 @@ pub struct SessionBuilder {
     pub(in crate::core::session) stores_cookies: bool,
     pub(in crate::core::session) before_send: Option<BeforeSend>,
     tcp_profile: Option<TcpProfile>,
+    ja4t: Option<Ja4t>,
     pub(in crate::core::session) protocol_policy: Protocol,
     #[cfg(feature = "http3")]
     protocol_explicit: bool,
@@ -115,6 +117,7 @@ impl SessionBuilder {
             stores_cookies: true,
             before_send: None,
             tcp_profile: None,
+            ja4t: None,
             protocol_policy: Protocol::Auto,
             #[cfg(feature = "http3")]
             protocol_explicit: false,
@@ -321,6 +324,15 @@ impl SessionBuilder {
         self.fingerprint(|spec| spec.akamai(raw))
     }
 
+    /// Sets the TCP fingerprint from a JA4T string (`window_options_mss_scale`), layered over the platform or `tcp_profile` settings.
+    pub fn ja4t(mut self, raw: impl AsRef<str>) -> Self {
+        match Ja4t::parse(raw.as_ref()) {
+            Ok(ja4t) => self.ja4t = Some(ja4t),
+            Err(error) => self.reject(error),
+        }
+        self
+    }
+
     /// Sets the order of request header names, layered over the current profile.
     pub fn header_order<I, S>(self, order: I) -> Self
     where
@@ -424,6 +436,7 @@ impl SessionBuilder {
     /// Sets the TCP fingerprint used for new connections.
     pub fn tcp_profile(mut self, profile: TcpProfile) -> Self {
         self.tcp_profile = Some(profile);
+        self.ja4t = None;
         self
     }
 

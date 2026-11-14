@@ -183,8 +183,8 @@ pub(crate) fn wire_configured_trust(
         }
     }
 
-    for path in &config.ca_files {
-        files::add_root_file(builder, path, &mut key)?;
+    for root in &config.ca_roots {
+        files::add_root(builder, root, &mut key)?;
     }
 
     if !config.ca_der.is_empty() {

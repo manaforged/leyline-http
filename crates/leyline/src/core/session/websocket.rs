@@ -21,7 +21,7 @@ impl Session {
             let conn = self
                 .websocket_with_options(&http_url, headers, carry)
                 .await?;
-            self.store_cookies(&conn.header_map(), &http_url);
+            self.store_cookies(conn.headers(), &http_url);
             Ok::<_, Error>(conn)
         };
         self.unless_shut_down(self.deadline(carry.timeouts.as_ref()).total(handshake))

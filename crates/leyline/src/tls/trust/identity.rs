@@ -38,6 +38,11 @@ impl TrustKey {
             roots: Vec::new(),
             identity: Vec::new(),
         };
+        for root in &config.ca_roots {
+            if let super::config::Pem::Bytes(pem) = root {
+                key.root_bytes(pem);
+            }
+        }
         for der in &config.ca_der {
             key.root_bytes(der);
         }

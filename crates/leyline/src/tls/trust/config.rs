@@ -10,7 +10,7 @@ use crate::profile::TlsMinVersion;
 pub struct Tls {
     pub(crate) use_env_roots: bool,
     pub(crate) use_system_roots: bool,
-    pub(crate) ca_files: Vec<PathBuf>,
+    pub(super) ca_roots: Vec<Pem>,
     pub(crate) ca_der: Vec<Vec<u8>>,
     pub(crate) client_identity: Option<ClientIdentity>,
     pub(crate) pinned_leaf_sha256: Vec<[u8; 32]>,
@@ -25,7 +25,7 @@ impl std::fmt::Debug for Tls {
         f.debug_struct("Tls")
             .field("use_env_roots", &self.use_env_roots)
             .field("use_system_roots", &self.use_system_roots)
-            .field("ca_files", &self.ca_files)
+            .field("ca_roots", &self.ca_roots)
             .field("ca_der_lengths", &ca_der)
             .field("client_identity", &self.client_identity)
             .field("pinned_leaf_sha256", &pins)
@@ -40,7 +40,7 @@ impl Default for Tls {
         Self {
             use_env_roots: true,
             use_system_roots: true,
-            ca_files: Vec::new(),
+            ca_roots: Vec::new(),
             ca_der: Vec::new(),
             client_identity: None,
             pinned_leaf_sha256: Vec::new(),
@@ -70,7 +70,13 @@ impl Tls {
 
     /// Adds a CA certificate file to trust.
     pub fn ca_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.ca_files.push(path.into());
+        self.ca_roots.push(Pem::File(path.into()));
+        self
+    }
+
+    /// Adds one or more PEM-encoded CA certificates in memory to trust.
+    pub fn ca_pem(mut self, pem: impl Into<Vec<u8>>) -> Self {
+        self.ca_roots.push(Pem::Bytes(pem.into()));
         self
     }
 
@@ -127,8 +133,12 @@ impl Tls {
     }
 
     pub(crate) fn shared_key(&self) -> Option<TrustKey> {
+        let has_ca_file = self
+            .ca_roots
+            .iter()
+            .any(|root| matches!(root, Pem::File(_)));
         let shareable = self.client_identity.is_none()
-            && self.ca_files.is_empty()
+            && !has_ca_file
             && !(self.use_env_roots && super::env_roots_set())
             && !crate::tls::keylog::requested();
         shareable.then(|| TrustKey::of(self))

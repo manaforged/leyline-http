@@ -54,6 +54,7 @@ impl Crawl {
                 loaded.url,
                 depth,
                 loaded.status,
+                loaded.headers,
                 loaded.html,
                 text,
             )));
@@ -78,7 +79,14 @@ impl Crawl {
             own,
             claimed,
             print,
-            page: Page::new(loaded.url, depth, loaded.status, loaded.html, text),
+            page: Page::new(
+                loaded.url,
+                depth,
+                loaded.status,
+                loaded.headers,
+                loaded.html,
+                text,
+            ),
         };
         if let (Some(key), Some(link)) = (held.claimed.clone(), canonical)
             && may_follow

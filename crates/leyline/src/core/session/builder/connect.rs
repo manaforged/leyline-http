@@ -6,6 +6,7 @@ use crate::net::{Dialer, DnsConfig, SocketOptions};
 use crate::pool::Io;
 use crate::pool::{Pool, PoolConfig};
 use crate::profile::BrowserProfile;
+use crate::profile::Ja4t;
 use crate::profile::TcpProfile;
 use crate::tls::FingerprintConnector;
 use crate::tls::trust::Tls;
@@ -22,6 +23,7 @@ pub(super) struct PoolInputs<'a> {
     dns: &'a DnsConfig,
     socket: &'a SocketOptions,
     tcp: Option<&'a TcpProfile>,
+    ja4t: Option<&'a Ja4t>,
     protocol: Protocol,
 }
 
@@ -63,12 +65,13 @@ impl SessionBuilder {
             dns: &self.dns_config,
             socket: &self.socket_config,
             tcp: self.tcp_profile.as_ref(),
+            ja4t: self.ja4t.as_ref(),
             protocol: self.protocol_policy,
         }
     }
 
     pub(super) fn resolve_tcp_profile(&self) -> TcpProfile {
-        self.tcp_profile.clone().unwrap_or_else(|| {
+        let mut tcp = self.tcp_profile.clone().unwrap_or_else(|| {
             let mut tcp = self.platform.tcp_profile();
             if !self.impersonates() {
                 tcp.mss = 0;
@@ -76,6 +79,10 @@ impl SessionBuilder {
                 tcp.window_scale = 0;
             }
             tcp
-        })
+        });
+        if let Some(ja4t) = &self.ja4t {
+            ja4t.apply(&mut tcp);
+        }
+        tcp
     }
 }

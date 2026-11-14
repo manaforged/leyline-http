@@ -247,11 +247,7 @@ impl Response {
 
     /// Returns the named header value as text, or `None` when it is absent or not visible ASCII.
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.parts
-            .headers
-            .map()
-            .get(name)
-            .and_then(|v| v.to_str().ok())
+        crate::util::header_str(self.parts.headers.map(), name)
     }
 }
 

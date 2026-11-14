@@ -110,7 +110,7 @@ pub struct WebSocket {
     inner: WebSocketStream<WsIo>,
     version: http::Version,
     protocol: Option<String>,
-    headers: Vec<(String, String)>,
+    headers: http::HeaderMap,
 }
 
 impl WebSocket {
@@ -130,11 +130,10 @@ impl WebSocket {
 
         let ((status, headers, _), leftover) =
             crate::pool::upgrade_on_stream(&mut stream, handshake.url, &request).await?;
-        let headers = crate::wire::string_pairs(&headers);
-        check_upgrade_response(status, &headers, &sec_key, handshake.extra_headers)?;
+        let pairs = crate::wire::string_pairs(&headers);
+        check_upgrade_response(status, &pairs, &sec_key, handshake.extra_headers)?;
 
-        let protocol =
-            crate::util::header_first(&headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::to_owned);
+        let protocol = crate::util::header_str(&headers, SEC_WEBSOCKET_PROTOCOL).map(str::to_owned);
         let ws_stream = WebSocketStream::from_partially_read(
             Box::new(stream) as WsIo,
             leftover,
@@ -184,10 +183,8 @@ impl WebSocket {
 
         check_subprotocol(stream.response_headers(), handshake.extra_headers)?;
 
-        let protocol =
-            crate::util::header_first(stream.response_headers(), SEC_WEBSOCKET_PROTOCOL.as_str())
-                .map(str::to_owned);
-        let headers = stream.response_headers().to_vec();
+        let headers = header_map_from_pairs(stream.response_headers());
+        let protocol = crate::util::header_str(&headers, SEC_WEBSOCKET_PROTOCOL).map(str::to_owned);
 
         let ws_stream = WebSocketStream::from_raw_socket(
             Box::new(stream) as WsIo,
@@ -201,18 +198,6 @@ impl WebSocket {
             protocol,
             headers,
         }))
-    }
-
-    pub(crate) fn header_map(&self) -> http::HeaderMap {
-        self.headers
-            .iter()
-            .filter_map(|(name, value)| {
-                Some((
-                    http::HeaderName::from_bytes(name.as_bytes()).ok()?,
-                    http::HeaderValue::from_str(value).ok()?,
-                ))
-            })
-            .collect()
     }
 
     /// Sends one message.
@@ -233,14 +218,28 @@ impl WebSocket {
             .map_err(|e| wire_error("ws close", e))
     }
 
+    /// Returns the HTTP version (`HTTP_11` or `HTTP_2`) negotiated for the WebSocket handshake.
+    #[must_use]
+    pub fn version(&self) -> http::Version {
+        self.version
+    }
+
     /// Returns the subprotocol the server selected from the request's `sec-websocket-protocol` header, or `None` when none was offered.
+    #[must_use]
     pub fn protocol(&self) -> Option<&str> {
         self.protocol.as_deref()
     }
 
-    /// Returns the first handshake response header with the given name.
+    /// Returns the handshake response headers.
+    #[must_use]
+    pub fn headers(&self) -> &http::HeaderMap {
+        &self.headers
+    }
+
+    /// Returns the first handshake response header with the given name as text, or `None` when it is absent or not visible ASCII.
+    #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
-        crate::util::header_first(&self.headers, name)
+        crate::util::header_str(&self.headers, name)
     }
 
     /// Splits the connection into a message sink and a message stream.
@@ -279,6 +278,19 @@ impl WebSocket {
             },
         )
     }
+}
+
+fn header_map_from_pairs(pairs: &[(String, String)]) -> http::HeaderMap {
+    let mut map = http::HeaderMap::with_capacity(pairs.len());
+    for (name, value) in pairs {
+        if let (Ok(name), Ok(value)) = (
+            http::HeaderName::from_bytes(name.as_bytes()),
+            http::HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+            map.append(name, value);
+        }
+    }
+    map
 }
 
 fn connect_pseudo(url: &url::Url, host: &str, port: u16) -> PseudoHeaders {

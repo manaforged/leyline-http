@@ -55,7 +55,7 @@ let again = Session::load("session.json")?.build()?;
 - Send JSON with `.json(&value)` and read it with `resp.json::<T>().await?`; `serde_json::Value` works as `T`.
 - Call `request.pages()` to follow `Link: rel="next"` headers as a stream of responses, or read `resp.links()` yourself.
 - For code with no async runtime, call `Session::builder().build_blocking()?` and run each request with `session.block_on(session.get(url).text())?`.
-- Call `Session::builder().before_send(|request| { ..; Ok(()) })` to add a request id or a signature: the hook runs before every attempt, retries included, and its changes to the method, URL, headers and body are sent.
+- Call `Session::builder().before_send(|request| { ..; Ok(()) })` to add a request id or a signature: the hook runs before every attempt, retries included, and its changes to the method, URL, headers and body are sent; read `request.body().content_length()` for buffered, file, or sized-stream lengths, and return `Err(leyline::Error::request(cause))` to abort without retrying.
 - Without `.stream()`, `send` reads the whole body into memory, up to `max_body_size`, before it returns. For a large body, call `.stream()` on the request, then read chunks with `resp.bytes_stream()?` and `body.next().await`.
 - A body over `max_body_size` (100 MiB by default) fails with `Kind::BodyLimit`. Pass `None` to remove the cap on the session or on one request; `cache(None)` turns the cache off.
 - Call `request.build()?` to read a request as an `http::Request<Body>`, `session.request_from(request)` to turn one back into a builder, `request.try_clone()` to send a buffered request twice, and `response.into_http()?` to hand a response to code that uses the `http` crate.
@@ -73,8 +73,9 @@ let again = Session::load("session.json")?.build()?;
 - Pair `bearer_auth` and `base_url` with `refresh_token` to share an asynchronous token refresh after a 401.
 - Use `crawl.save(path).await?` and `Crawl::load(&session, path)?` to resume pending pages and duplicate history.
 - Call `crawl.filter(|url| url.path().starts_with("/docs/"))` to follow only the links a closure accepts. A checkpoint does not save the filter, so set it again after `Crawl::load`.
-- Seed a cookie with `session.cookies().set("https://example.com/", name, value)`, or build one with `Cookie::builder(name, value).path("/app").secure(true).build()` from `leyline::cookie` and pass it to `session.cookies().insert(url, cookie)`. `Session::builder().cookies(None)` turns cookie storage off.
-- For mutual TLS with a certificate held in memory, pass `Tls::new().client_cert_pem(chain_pem, key_pem)` to `SessionBuilder::tls`.
+- Seed a cookie with `session.cookies().set("https://example.com/", name, value)`, parse a raw header with `Cookie::parse(url, set_cookie)`, or build one with `Cookie::builder(name, value).path("/app").secure(true).build()` from `leyline::cookie` and pass it to `session.cookies().insert(url, cookie)`; `cookies_for(url)` returns matching cookies in send order, and `Session::builder().cookies(None)` turns cookie storage off.
+- For mutual TLS or custom roots held in memory, pass `Tls::new().ca_pem(ca_pem).client_cert_pem(chain_pem, key_pem)` to `SessionBuilder::tls`.
+- Layer a custom TCP fingerprint with `Session::builder().ja4t("64240_2-4-8-1-3_1380_10")`, or parse a full `TcpProfile` from TOML (`"ttl = 64\nmss = 1380".parse()?`) for `SessionBuilder::tcp_profile`.
 - Pass `Proxy::custom(|url| ..)` to `proxy` to choose the proxy for each request from its URL; return `None` to send it direct.
 - Test against `leyline::testing::Server` (enable it with `features = ["test-util"]` under `[dev-dependencies]`): `Server::http(|request| testing::Response::new(200).body("hi")).await?` starts one, and `server.url("/path")` is its absolute URL.
 - In a handler, `request.method()`, `request.target()` (path and query), `request.header(name)` (any case) and `request.text()` (the body) describe the request; `request.head()` is the request line and headers as sent.

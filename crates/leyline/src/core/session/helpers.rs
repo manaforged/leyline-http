@@ -50,7 +50,9 @@ impl Session {
         self.inner.inputs.proxy_config.summary(self.proxy_pool())
     }
 
-    pub(crate) fn base_url(&self) -> Option<&url::Url> {
+    /// Returns the base URL that relative request URLs resolve against, when set.
+    #[must_use]
+    pub fn base_url(&self) -> Option<&url::Url> {
         self.inner.inputs.base_url.as_ref()
     }
 

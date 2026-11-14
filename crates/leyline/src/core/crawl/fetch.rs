@@ -9,8 +9,7 @@ use crate::core::retry::Retry;
 use crate::core::robots::Reply;
 use crate::core::session::Session;
 use crate::error::Result;
-use crate::html::X_ROBOTS_TAG;
-use crate::util::{is_redirect_status, redirect_location};
+use crate::util::{is_redirect_status, redirect_location, sensitive_header};
 
 const HTML_TYPES: [&str; 2] = ["text/html", "application/xhtml+xml"];
 const HTML_SIGNATURES: [&[u8]; 17] = [
@@ -37,7 +36,6 @@ const COMMENT: &[u8] = b"<!--";
 const TAG_ENDS: [u8; 6] = [b'\t', b'\n', 0x0c, b'\r', b' ', b'>'];
 const SNIFF_BYTES: usize = 512;
 pub(super) const CONTENT_USAGE: HeaderName = HeaderName::from_static("content-usage");
-const KEPT_HEADERS: [HeaderName; 2] = [X_ROBOTS_TAG, CONTENT_USAGE];
 
 pub(super) enum Fetched {
     Redirect {
@@ -76,10 +74,10 @@ fn sniffs_html(body: &[u8]) -> bool {
     })
 }
 
-fn kept_headers(all: &HeaderMap) -> HeaderMap {
-    let mut kept = HeaderMap::new();
-    for name in KEPT_HEADERS {
-        for value in all.get_all(&name) {
+fn page_headers(all: &HeaderMap) -> HeaderMap {
+    let mut kept = HeaderMap::with_capacity(all.len());
+    for (name, value) in all.iter() {
+        if !sensitive_header(name.as_str()) {
             kept.append(name.clone(), value.clone());
         }
     }
@@ -125,7 +123,7 @@ async fn read(response: Response, url: &Url) -> Result<Fetched> {
         return Ok(Fetched::Skip(SkipReason::NotHtml));
     }
     let url = response.url().clone();
-    let headers = kept_headers(response.headers());
+    let headers = page_headers(response.headers());
     let Some(html) = body(response, declared).await? else {
         return Ok(Fetched::Skip(SkipReason::NotHtml));
     };

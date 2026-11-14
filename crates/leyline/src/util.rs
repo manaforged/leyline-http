@@ -88,6 +88,13 @@ pub(crate) fn header_first<'a, K: AsRef<str>, V: AsRef<[u8]>>(
     std::str::from_utf8(value.as_ref()).ok()
 }
 
+pub(crate) fn header_str(
+    headers: &http::HeaderMap,
+    name: impl http::header::AsHeaderName,
+) -> Option<&str> {
+    headers.get(name).and_then(|v| v.to_str().ok())
+}
+
 pub(crate) fn header_position<K: AsRef<str>, V>(headers: &[(K, V)], name: &str) -> Option<usize> {
     headers
         .iter()
