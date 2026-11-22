@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -26,10 +26,10 @@ struct SessionTarget {
 
 impl Session {
     /// Saves the session to `path` in the background once every `every` interval, and once more on `shutdown`.
-    pub fn autosave(&self, path: impl Into<PathBuf>, every: Duration) {
+    pub fn autosave(&self, path: impl AsRef<Path>, every: Duration) {
         let target = SessionTarget {
             session: self.downgrade(),
-            path: Arc::from(path.into()),
+            path: Arc::from(path.as_ref()),
             write: write_private,
             writing: None,
             saved_state: None,

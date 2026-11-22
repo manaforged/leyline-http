@@ -153,10 +153,11 @@ impl Body {
     }
 
     /// Wraps a byte stream as a body; `length` is the `content-length` in bytes, which the stream must send exactly or fail, and `None` sends the body chunked with no declared length.
-    pub fn stream<S>(stream: S, length: Option<u64>) -> Self
+    pub fn stream<S>(stream: S, length: impl Into<Option<u64>>) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
+        let length = length.into();
         let stream = Box::pin(stream);
         let stream = match length {
             Some(declared) => exclusive(Declared {

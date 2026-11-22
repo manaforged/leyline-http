@@ -48,7 +48,7 @@ pub(crate) fn summary(finish: &Finish<'_>, out: Result<Answer<'_>, &Error>) {
             outcome,
             streamed: finish.streamed,
             label: notes.label.as_deref(),
-            proxy: notes.proxy,
+            proxy: notes.proxy.as_deref(),
             browser: notes.browser,
         });
     });
@@ -79,7 +79,7 @@ pub(super) fn render(event: &Event<'_>) {
     let version = version.map(tracing::field::debug);
     let elapsed_ms = ResponseTiming::span(*elapsed);
     let label = *label;
-    let proxy = proxy.as_deref();
+    let proxy = *proxy;
     let browser = browser.map(tracing::field::debug);
     match outcome {
         Ok(()) => {

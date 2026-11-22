@@ -18,7 +18,7 @@ use crate::wire::Body;
 impl Response {
     /// Reads the body as text in the charset from `content-type`, defaulting to UTF-8.
     #[cfg(feature = "charset")]
-    pub fn text(self) -> impl Future<Output = Result<String>> {
+    pub fn text(self) -> impl Future<Output = Result<String>> + Send {
         self.text_with_charset("utf-8")
     }
 

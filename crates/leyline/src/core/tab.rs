@@ -45,8 +45,8 @@ impl Tab {
     }
 
     /// Sets the page URL the tab treats as open, or clears it with `None`.
-    pub fn set_current(&self, page: Option<Url>) {
-        *crate::util::lock(&self.page) = page;
+    pub fn set_current(&self, page: impl Into<Option<Url>>) {
+        *crate::util::lock(&self.page) = page.into();
     }
 
     pub(crate) fn request(

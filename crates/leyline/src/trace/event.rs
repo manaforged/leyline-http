@@ -69,7 +69,7 @@ pub enum Event<'a> {
         /// The request target, with its query string unredacted.
         path: &'a str,
         /// The HTTP version the request used.
-        protocol: http::Version,
+        version: http::Version,
         /// The time since the attempt started.
         elapsed: Duration,
     },
@@ -81,9 +81,9 @@ pub enum Event<'a> {
         /// The host that answered.
         host: &'a str,
         /// The response status code.
-        status: u16,
+        status: StatusCode,
         /// The HTTP version of the response.
-        protocol: http::Version,
+        version: http::Version,
         /// The time since the attempt started.
         elapsed: Duration,
         /// The response headers, unredacted.
@@ -127,7 +127,7 @@ pub enum Event<'a> {
         /// The label the caller set on the request, if any.
         label: Option<&'a str>,
         /// The proxy the request went through, if any.
-        proxy: Option<String>,
+        proxy: Option<&'a str>,
         /// The browser profile the request used, if any.
         browser: Option<Browser>,
     },
@@ -199,7 +199,7 @@ impl fmt::Debug for Event<'_> {
                 host,
                 method,
                 path,
-                protocol,
+                version,
                 elapsed,
             } => f
                 .debug_struct("Sent")
@@ -207,14 +207,14 @@ impl fmt::Debug for Event<'_> {
                 .field("host", host)
                 .field("method", method)
                 .field("path", &crate::util::mask_query(path))
-                .field("protocol", protocol)
+                .field("version", version)
                 .field("elapsed", elapsed)
                 .finish(),
             Self::Head {
                 id,
                 host,
                 status,
-                protocol,
+                version,
                 elapsed,
                 headers,
             } => f
@@ -222,7 +222,7 @@ impl fmt::Debug for Event<'_> {
                 .field("id", id)
                 .field("host", host)
                 .field("status", status)
-                .field("protocol", protocol)
+                .field("version", version)
                 .field("elapsed", elapsed)
                 .field(
                     "headers",

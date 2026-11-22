@@ -220,10 +220,11 @@ impl Trace for Labels {
             ..
         } = event
         {
-            self.0
-                .lock()
-                .unwrap()
-                .push((label.map(str::to_owned), proxy.clone(), *attempts));
+            self.0.lock().unwrap().push((
+                label.map(str::to_owned),
+                proxy.map(str::to_owned),
+                *attempts,
+            ));
         }
     }
 }

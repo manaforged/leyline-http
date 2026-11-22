@@ -22,6 +22,8 @@ version and publish as separate crates.
 - A `cookie::Jar` method given `&text.parse().unwrap()` no longer infers the URL type; pass the string itself.
 - A second `SessionBuilder::header` call with the same name adds a value where it replaced the first; `user_agent`, `bearer_auth`, and `basic_auth` still replace.
 - A request that sets `user-agent` no longer sends the browser profile's `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform` headers unless the request sets them.
+- `trace::Event::Head` carries `status: http::StatusCode` and `version: http::Version` (replacing `status: u16` and `protocol`), `trace::Event::Sent` renames `protocol` to `version`, and `trace::Event::Summary` carries `proxy: Option<&str>` instead of `Option<String>`.
+- `HeaderPosition` renames `BeforeCchUa`, `AfterCchUa`, `AfterCchUaMobile`, `AfterCchUaPlatform`, and `AfterFetchDest` to `BeforeSecChUa`, `AfterSecChUa`, `AfterSecChUaMobile`, `AfterSecChUaPlatform`, and `AfterSecFetchDest`.
 
 ### Added
 

@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::identity::TrustKey;
 use crate::profile::TlsMinVersion;
@@ -69,8 +69,8 @@ impl Tls {
     }
 
     /// Adds a CA certificate file to trust.
-    pub fn ca_file(mut self, path: impl Into<PathBuf>) -> Self {
-        self.ca_roots.push(Pem::File(path.into()));
+    pub fn ca_file(mut self, path: impl AsRef<Path>) -> Self {
+        self.ca_roots.push(Pem::File(path.as_ref().to_path_buf()));
         self
     }
 
@@ -95,12 +95,12 @@ impl Tls {
     /// Sets the client certificate from two PEM files: the certificate chain with the leaf first, then its unencrypted private key.
     pub fn client_cert(
         mut self,
-        certificate_chain_file: impl Into<PathBuf>,
-        private_key_file: impl Into<PathBuf>,
+        certificate_chain_file: impl AsRef<Path>,
+        private_key_file: impl AsRef<Path>,
     ) -> Self {
         self.client_identity = Some(ClientIdentity {
-            certificate_chain: Pem::File(certificate_chain_file.into()),
-            private_key: Pem::File(private_key_file.into()),
+            certificate_chain: Pem::File(certificate_chain_file.as_ref().to_path_buf()),
+            private_key: Pem::File(private_key_file.as_ref().to_path_buf()),
         });
         self
     }

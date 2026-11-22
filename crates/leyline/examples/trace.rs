@@ -39,17 +39,17 @@ impl Trace for Printer {
             ),
             Event::Sent {
                 id,
-                protocol,
+                version,
                 elapsed,
                 ..
-            } => println!("[{id}] sent     {protocol:?} in {elapsed:?}"),
+            } => println!("[{id}] sent     {version:?} in {elapsed:?}"),
             Event::Head {
                 id,
                 status,
-                protocol,
+                version,
                 elapsed,
                 ..
-            } => println!("[{id}] head     {status} {protocol:?} in {elapsed:?}"),
+            } => println!("[{id}] head     {status} {version:?} in {elapsed:?}"),
             Event::Done {
                 id,
                 elapsed,

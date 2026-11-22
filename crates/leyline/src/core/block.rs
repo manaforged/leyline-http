@@ -27,9 +27,20 @@ pub enum Block {
 
 impl Block {
     /// Returns the name of the vendor that served the block.
+    #[must_use]
     pub fn vendor(&self) -> &str {
         match self {
             Block::Challenge(vendor) | Block::Captcha(vendor) | Block::Denied(vendor) => vendor,
+        }
+    }
+}
+
+impl std::fmt::Display for Block {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Block::Challenge(vendor) => write!(f, "challenge ({vendor})"),
+            Block::Captcha(vendor) => write!(f, "captcha ({vendor})"),
+            Block::Denied(vendor) => write!(f, "denied ({vendor})"),
         }
     }
 }

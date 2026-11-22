@@ -27,7 +27,7 @@ use http::header::SEC_WEBSOCKET_PROTOCOL;
 use split::{WsSink, WsStream};
 
 /// A WebSocket message that a connection sends or receives.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Message {
     /// A UTF-8 text message.
@@ -246,22 +246,28 @@ impl WebSocket {
     pub fn split(
         self,
     ) -> (
-        impl futures_util::Sink<Message, Error = Error> + Send,
-        impl futures_util::Stream<Item = Result<Message>> + Send,
+        impl futures_util::Sink<Message, Error = Error> + Send + Unpin,
+        impl futures_util::Stream<Item = Result<Message>> + Send + Unpin,
     ) {
         let (sink, stream) = self.halves();
-        let sink = futures_util::sink::unfold(sink, |mut sink, msg: Message| async move {
-            sink.send(msg).await?;
-            Ok::<_, Error>(sink)
-        });
-        let stream = futures_util::stream::unfold(Some(stream), |state| async move {
-            let mut stream = state?;
-            match stream.recv().await {
-                Ok(Some(msg)) => Some((Ok(msg), Some(stream))),
-                Ok(None) => None,
-                Err(e) => Some((Err(e), None)),
-            }
-        });
+        let sink = Box::pin(futures_util::sink::unfold(
+            sink,
+            |mut sink, msg: Message| async move {
+                sink.send(msg).await?;
+                Ok::<_, Error>(sink)
+            },
+        ));
+        let stream = Box::pin(futures_util::stream::unfold(
+            Some(stream),
+            |state| async move {
+                let mut stream = state?;
+                match stream.recv().await {
+                    Ok(Some(msg)) => Some((Ok(msg), Some(stream))),
+                    Ok(None) => None,
+                    Err(e) => Some((Err(e), None)),
+                }
+            },
+        ));
         (sink, stream)
     }
 

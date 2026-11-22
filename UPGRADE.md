@@ -26,6 +26,8 @@ For new code, start with the [five main types](AGENTS.md#the-five-types). The [u
 | `let mut c = Cookie::new(n, v); c.path = p; c.secure = true;` | `Cookie::builder(n, v).path(p).secure(true).build()`; `.domain(d)` makes the cookie match subdomains of `d`, and `host_only` has no setter |
 | `jar.set(&"https://example.com/".parse().unwrap(), n, v)` | `jar.set("https://example.com/", n, v)`; every `Jar` method takes a string or a `Url` |
 | `.header("x-tag", "a").header("x-tag", "b")` on `SessionBuilder` to replace `a` | call `header` once per name; both values are now sent |
+| `trace::Event::Sent { protocol, .. }`, `Event::Head { status: u16, protocol, .. }`, `Event::Summary { proxy: Option<String>, .. }` | `version` on `Sent` and `Head`, `status: http::StatusCode` on `Head`, and `proxy: Option<&str>` on `Summary` |
+| `HeaderPosition::{BeforeCchUa, AfterCchUa, AfterCchUaMobile, AfterCchUaPlatform, AfterFetchDest}` | `HeaderPosition::{BeforeSecChUa, AfterSecChUa, AfterSecChUaMobile, AfterSecChUaPlatform, AfterSecFetchDest}` |
 
 ## Breaking changes in 0.2.0
 

@@ -95,8 +95,17 @@ fn parse_capped(bytes: &[u8], cap: usize, agent: &str) -> Robots {
 
 impl Session {
     /// Fetches and parses the site's robots.txt for `agent`, using the session's policies or 3 retries and up to 5 redirects.
-    pub fn robots(&self, url: impl IntoUrl, agent: &str) -> impl Future<Output = Result<Robots>> {
-        self.robots_with(url, agent, self.default_retry().for_robots(), None)
+    pub fn robots(
+        &self,
+        url: impl IntoUrl,
+        agent: &str,
+    ) -> impl Future<Output = Result<Robots>> + Send {
+        let parsed = url.into_url_with_base(self.base_url());
+        let retry = self.default_retry().for_robots();
+        async move {
+            let url = parsed?;
+            self.robots_with(url, agent, retry, None).await
+        }
     }
 
     pub(crate) async fn robots_with(

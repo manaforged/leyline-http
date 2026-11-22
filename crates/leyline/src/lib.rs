@@ -222,6 +222,7 @@ pub(crate) mod quic;
 pub mod testing;
 mod util;
 
+pub use bytes::Bytes;
 pub use http;
 pub use url::Url;
 

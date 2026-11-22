@@ -31,6 +31,9 @@ const DEFAULT_CRAWL_ROBOTS_MAX_BACKOFF: Duration = Duration::from_secs(8);
 
 type RetryPredicate = dyn Fn(&Attempt<'_>) -> bool + Send + Sync;
 
+impl std::panic::UnwindSafe for Retry {}
+impl std::panic::RefUnwindSafe for Retry {}
+
 #[doc = include_str!("../../docs/retry.md")]
 #[derive(Clone)]
 #[must_use]

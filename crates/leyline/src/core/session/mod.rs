@@ -28,10 +28,11 @@ use crate::profile::{Browser, Platform};
 use crate::tls::FingerprintConnector;
 
 /// The HTTP version policy a session uses to send requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Protocol {
     /// Negotiates HTTP/2 or HTTP/1.1 through ALPN.
+    #[default]
     Auto,
     /// Sends every request over HTTP/1.1.
     Http1,

@@ -11,19 +11,20 @@ pub(crate) const MAX_ATTRIBUTE_OCTETS: usize = 1024;
 pub(crate) const DEFAULT_SAME_SITE: SameSite = SameSite::Lax;
 
 /// The `SameSite` attribute of a cookie.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum SameSite {
     /// Sends the cookie only on same-site requests.
     Strict,
     /// Sends the cookie on same-site requests and top-level cross-site navigations.
+    #[default]
     Lax,
     /// Sends the cookie on all requests, including cross-site ones.
     None,
 }
 
 /// A stored cookie and its attributes.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Cookie {
     pub(crate) name: String,

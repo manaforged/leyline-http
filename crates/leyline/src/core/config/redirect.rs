@@ -18,6 +18,9 @@ pub struct Redirect {
 
 type RedirectFn = Arc<dyn Fn(&Attempt<'_>) -> bool + Send + Sync>;
 
+impl std::panic::UnwindSafe for Redirect {}
+impl std::panic::RefUnwindSafe for Redirect {}
+
 #[derive(Clone)]
 enum RedirectKind {
     Limited(usize),
