@@ -250,13 +250,6 @@ impl WebSocket {
         impl futures_util::Stream<Item = Result<Message>> + Send + Unpin,
     ) {
         let (sink, stream) = self.halves();
-        let sink = Box::pin(futures_util::sink::unfold(
-            sink,
-            |mut sink, msg: Message| async move {
-                sink.send(msg).await?;
-                Ok::<_, Error>(sink)
-            },
-        ));
         let stream = Box::pin(futures_util::stream::unfold(
             Some(stream),
             |state| async move {

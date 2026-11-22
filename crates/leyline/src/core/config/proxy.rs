@@ -145,32 +145,12 @@ impl Proxy {
         V: TryInto<http::HeaderValue>,
     {
         for (name, value) in headers {
-            let name = crate::core::headers::name(name);
-            let value = crate::core::headers::value(value);
-            match (name, value) {
-                (Ok(name), Ok(value)) => {
-                    let key = name.as_str();
-                    if FORBIDDEN_PROXY_HEADERS.contains(&key) {
-                        self.record_header_error(format!(
-                            "proxy header `{key}` cannot be overridden"
-                        ));
-                        continue;
-                    }
-                    let Ok(val) = std::str::from_utf8(value.as_bytes()) else {
-                        self.record_header_error(format!(
-                            "invalid proxy header `{}`",
-                            key.escape_debug()
-                        ));
-                        continue;
-                    };
-                    let (k, v) = (key.to_owned(), val.to_owned());
-                    self.push_validated_headers(std::slice::from_ref(&(k, v)));
+            match crate::core::headers::utf8_pair(name, value, "proxy header") {
+                Ok((key, _)) if FORBIDDEN_PROXY_HEADERS.contains(&key.as_str()) => {
+                    self.record_header_error(format!("proxy header `{key}` cannot be overridden"));
                 }
-                (Ok(name), Err(_)) => self.record_header_error(format!(
-                    "invalid proxy header `{}`",
-                    name.as_str().escape_debug()
-                )),
-                (Err(err), _) => self.record_header_error(err.to_string()),
+                Ok(pair) => self.push_validated_headers(std::slice::from_ref(&pair)),
+                Err(msg) => self.record_header_error(msg),
             }
         }
         self
@@ -206,6 +186,7 @@ impl Proxy {
     pub(crate) fn same_for_doh(&self, other: &Self) -> bool {
         self.use_env == other.use_env
             && self.no_proxy_explicit == other.no_proxy_explicit
+            && self.no_proxy == other.no_proxy
             && self.headers == other.headers
             && self.rules.len() == other.rules.len()
             && self
@@ -226,9 +207,16 @@ impl Proxy {
         I: IntoIterator<Item = S>,
         S: Into<String>,
     {
-        self.no_proxy = NoProxy::new(patterns);
-        self.no_proxy_explicit = true;
+        self.set_no_proxy(NoProxy::new(patterns));
         self
+    }
+
+    pub(crate) fn set_no_proxy(&mut self, no_proxy: NoProxy) {
+        if let Some(pool) = self.pool.take() {
+            self.pool = Some(pool.with_no_proxy(&no_proxy));
+        }
+        self.no_proxy = no_proxy;
+        self.no_proxy_explicit = true;
     }
 
     /// Sets whether proxies from environment variables apply, on by default.
@@ -374,6 +362,7 @@ impl Proxy {
         &self,
         url: &url::Url,
     ) -> crate::error::Result<Option<Cow<'_, ProxyUrl>>> {
+        self.check_headers()?;
         let Some(choose) = &self.custom else {
             return Ok(self.rule_for(url)?.map(Cow::Borrowed));
         };

@@ -42,8 +42,12 @@ impl Draft {
         let mut request = self.as_http()?;
         let carry = &mut self.carry;
         let options = request.extensions_mut();
-        if let Some(kind) = carry.preset.take() {
+        if carry.preset_user
+            && let Some(kind) = carry.preset.take()
+        {
             options.insert(kind);
+        } else {
+            carry.preset = None;
         }
         carry.preset_user = false;
         let mut retry = None;

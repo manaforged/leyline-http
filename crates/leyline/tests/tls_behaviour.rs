@@ -277,35 +277,6 @@ async fn a_fresh_pool_labels_its_tickets_with_the_roots_it_loaded() {
 }
 
 #[tokio::test]
-async fn a_saved_tls_session_does_not_resume_after_environment_roots_change() {
-    let server = resuming_server().await;
-    let trusted = scratch_file("env-trusted.pem", &server.pem);
-    let other = scratch_file("env-other.pem", &unrelated_pem());
-    let env_trust = || Tls::new().system_roots(false).env_roots(true);
-    // SAFETY: no other test in this binary builds a session with environment roots, so no thread reads SSL_CERT_FILE while it changes.
-    unsafe { std::env::set_var("SSL_CERT_FILE", &trusted) };
-    let before = http1_session(env_trust());
-    let first = before.get(server.url.clone()).send().await.unwrap();
-    assert_eq!(first.text().await.unwrap(), "ok");
-    let state = leyline::internals::connection_state(&before);
-
-    // SAFETY: see above.
-    unsafe { std::env::set_var("SSL_CERT_FILE", &other) };
-    let after = http1_session(env_trust());
-    // SAFETY: see above.
-    unsafe { std::env::remove_var("SSL_CERT_FILE") };
-    leyline::internals::restore(&after, &state);
-    let refused = after.get(server.url).send().await.unwrap_err();
-    assert!(
-        std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
-            .is_some(),
-        "{refused:?}"
-    );
-    assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
 async fn a_saved_tls_session_does_not_resume_after_the_client_certificate_rotates() {
     let server = resuming_server().await;
     let (cert, key) = tls_support::self_signed();

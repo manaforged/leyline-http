@@ -89,7 +89,7 @@ custom proxy headers.
 ### Changed
 
 - `SessionBuilder::basic_auth` has the same scope as `bearer_auth`: with a `base_url` the credentials go only to that origin.
-- `Session::save` records that cookie storage is off, and `Session::load` restores it. Files written by 0.2.0 load as before.
+- `Session::save` records that cookie storage is off, and `Session::load` restores it. The saved-file format stays compatible with 0.2.0; browser sessions saved under 0.2.0 have updated `profile_id` digests because bundled brand tables changed.
 - Sending a `Message::Ping` or `Message::Pong` with a payload over 125 bytes fails with `Kind::Request`.
 - On a reused HTTP/1.1 connection, `Response::peer_certificate`, `tls_version`, and `tls_cipher` report that connection's values, not those of the first connection to the host.
 - The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.

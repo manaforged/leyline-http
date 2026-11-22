@@ -84,14 +84,16 @@ async fn a_warm_http1_request_stays_within_its_allocation_budget() {
     for _ in 0..MEASURED {
         fetch().await;
     }
-    let per_request = (ALLOCS.load(Ordering::Relaxed) - before) / MEASURED;
-    let bytes_per_request = (BYTES.load(Ordering::Relaxed) - bytes_before) / MEASURED;
+    let total_allocs = ALLOCS.load(Ordering::Relaxed) - before;
+    let total_bytes = BYTES.load(Ordering::Relaxed) - bytes_before;
     assert!(
-        per_request <= ALLOCS_PER_REQUEST,
-        "{per_request} allocations per request"
+        total_allocs <= ALLOCS_PER_REQUEST * MEASURED,
+        "{total_allocs} allocations across {MEASURED} requests ({:.2}/req > {ALLOCS_PER_REQUEST})",
+        total_allocs as f64 / MEASURED as f64
     );
     assert!(
-        bytes_per_request <= BYTES_PER_REQUEST,
-        "{bytes_per_request} bytes allocated per request"
+        total_bytes <= BYTES_PER_REQUEST * MEASURED,
+        "{total_bytes} bytes allocated across {MEASURED} requests ({:.1} B/req > {BYTES_PER_REQUEST})",
+        total_bytes as f64 / MEASURED as f64
     );
 }

@@ -20,6 +20,7 @@ impl SessionBuilder {
             ));
         }
         self.check_proxy_pool()?;
+        self.check_interface()?;
         #[cfg(unix)]
         self.check_unix_socket()?;
         self.resolve_platform();
@@ -28,6 +29,16 @@ impl SessionBuilder {
         self.resolve_proxies(on_invalid)?;
         #[cfg(feature = "http3")]
         self.check_h3_proxy()?;
+        Ok(())
+    }
+
+    fn check_interface(&self) -> Result<()> {
+        let Some(name) = self.socket_config.interface.as_deref() else {
+            return Ok(());
+        };
+        if name.is_empty() || name.contains('\0') {
+            return Err(Error::config("invalid network interface name"));
+        }
         Ok(())
     }
 

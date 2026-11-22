@@ -128,13 +128,10 @@ impl FingerprintConnector {
             Ok(stream) => stream,
             Err(e) => {
                 let verify_error = e.ssl().and_then(|ssl| ssl.verify_result().err());
-                let retry_configs = e
-                    .ssl_error()
-                    .is_some_and(is_ech_rejected)
-                    .then(|| e.ssl().and_then(|ssl| ssl.ech_retry_configs()))
-                    .flatten()
-                    .filter(|bytes| !bytes.is_empty())
-                    .map(<[u8]>::to_vec);
+                let retry_configs = crate::tls::ech_retry_configs(
+                    e.ssl(),
+                    e.ssl_error().is_some_and(is_ech_rejected),
+                );
                 let error = classify_handshake(verification_failure.as_ref(), verify_error, e);
                 return Err(match retry_configs {
                     Some(retry_configs) => HandshakeFailure::EchRetry {
@@ -208,8 +205,7 @@ impl FingerprintConnector {
             EchMode::Disabled => None,
         };
         if let Some(ech) = ech {
-            ssl.set_enable_ech_grease(false);
-            ssl.set_ech_config_list(ech).map_err(TlsError::from_stack)?;
+            crate::tls::apply_ech(&mut ssl, ech).map_err(TlsError::from_stack)?;
         }
         ssl.shed_handshake_config();
         Ok((ssl, verification_failure))

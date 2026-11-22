@@ -480,6 +480,9 @@ impl RequestBuilder {
     /// Sends this request through the given proxy, and fails at send when the proxy is a pool.
     pub fn proxy(mut self, config: impl Into<Proxy>) -> Self {
         let config = config.into();
+        if let Err(err) = config.check_headers() {
+            self.fail(err);
+        }
         if config.is_pool() {
             self.fail(Error::config(
                 "a request takes one proxy; set a proxy list on the session",

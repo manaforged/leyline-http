@@ -68,7 +68,14 @@ fn verify_callback(
         } else {
             pins.as_slice()
         };
-        verify(ssl, hostname, active_pins, system_roots, check_hostname).map_err(|reason| {
+        verify(
+            ssl,
+            hostname,
+            active_pins,
+            system_roots,
+            check_hostname || ech_override.is_some(),
+        )
+        .map_err(|reason| {
             tracing::debug!(target: "leyline::tls::trust", ?reason, "peer certificate rejected");
             *crate::util::lock(&slot) = Some(reason);
             SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)

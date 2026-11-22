@@ -228,15 +228,17 @@ fn ja4_r_layering_accepts_padding_and_clears_pre_shared_key() {
         .ja4_r(ja4_r)
         .build()
         .unwrap();
+    let profile = session.profile().unwrap();
+    assert!(
+        profile.contains("[[fingerprint]]") && profile.contains(ja4_r),
+        "expected ja4_r overlay in exported profile TOML: {profile}"
+    );
     #[cfg(feature = "bench-internals")]
     {
-        let parsed =
-            leyline::internals::BrowserProfile::from_toml(session.profile().unwrap()).unwrap();
+        let parsed = leyline::internals::BrowserProfile::from_toml(profile).unwrap();
         assert!(parsed.tls.padding);
         assert!(!parsed.tls.pre_shared_key);
     }
-    #[cfg(not(feature = "bench-internals"))]
-    assert!(session.profile().is_some());
 }
 
 #[test]
@@ -317,14 +319,28 @@ async fn h1_non_ascii_framing_and_multi_connection_close_and_chunked_excess() {
     let session = Session::builder().build().unwrap();
 
     let (url, h) = serve_raw(b"HTTP/1.1 200 OK\r\nContent-Length: 5\x80\r\n\r\nhello").await;
-    session.get(&url).send().await.unwrap_err();
+    let err = session.get(&url).send().await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Io);
+    assert!(!err.is_retryable());
+    h.abort();
+
+    let (url, h) = serve_raw(b"HTTP/1.1 200 OK\r\nContent-Length: \x0b5\r\n\r\nhello").await;
+    let err = session.get(&url).send().await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Io);
+    h.abort();
+
+    let (url, h) = serve_raw(b"HTTP/1.1 200 OK\r\nContent-Length: \xc2\xa05\r\n\r\nhello").await;
+    let err = session.get(&url).send().await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Io);
     h.abort();
 
     let (url, h) = serve_raw(
         b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\x80\r\n\r\nhello",
     )
     .await;
-    session.get(&url).send().await.unwrap_err();
+    let err = session.get(&url).send().await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Io);
+    assert!(!err.is_retryable());
     h.abort();
 
     let (url, h) = serve_raw(
@@ -352,4 +368,219 @@ fn html_canonical_skips_hrefless_link() {
         leyline::html::canonical(doc).as_deref(),
         Some("https://example.com/ok")
     );
+}
+
+#[cfg(feature = "html")]
+#[tokio::test]
+async fn crawl_load_honors_post_load_redirect_setter() {
+    use leyline::Redirect;
+
+    let server = Server::http(|req| match req.target() {
+        "/robots.txt" => Response::new(404),
+        "/seed" => Response::new(200)
+            .header("content-type", "text/html")
+            .body(r#"<a href="/bounce">next</a>"#),
+        "/bounce" => Response::new(302).header("location", "/dest"),
+        "/dest" => Response::new(200)
+            .header("content-type", "text/html")
+            .body("<p>arrived</p>"),
+        _ => Response::new(404),
+    })
+    .await
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("leyline-crawl-load-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let checkpoint = dir.join("crawl.json");
+
+    let session = Session::builder().build().unwrap();
+    let mut crawl = session.crawl(server.url("/seed")).respect(None);
+    let first = crawl.next().await.unwrap().unwrap();
+    assert_eq!(first.url().path(), "/seed");
+    crawl.save(&checkpoint).await.unwrap();
+
+    let mut resumed = leyline::Crawl::load(&session, &checkpoint)
+        .unwrap()
+        .redirect(Redirect::none());
+    assert!(
+        resumed.next().await.is_none(),
+        "post-load Redirect::none() must block following /bounce -> /dest"
+    );
+    assert_eq!(resumed.skipped(leyline::SkipReason::Redirects), 1);
+    drop(std::fs::remove_dir_all(&dir));
+}
+
+#[tokio::test]
+async fn request_from_does_not_pin_inferred_navigate_preset() {
+    let server = Server::http(|_| Response::new(200).body("ok"))
+        .await
+        .unwrap();
+    let session = Session::builder()
+        .browser(Browser::Chrome154)
+        .build()
+        .unwrap();
+    let mut req = session.get(server.url("/api")).build().unwrap();
+    *req.method_mut() = http::Method::POST;
+    req.headers_mut().insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("application/json"),
+    );
+    *req.body_mut() = leyline::Body::from(r#"{"a":1}"#);
+    let resp = session.request_from(req).send().await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let seen = server.requests().await;
+    assert_ne!(
+        seen[0].header("sec-fetch-mode"),
+        Some("navigate"),
+        "mutated POST JSON request must not stay pinned to navigate"
+    );
+}
+
+#[cfg(feature = "websocket")]
+#[tokio::test]
+async fn websocket_protocol_enforces_http2_and_rejects_http3() {
+    let server = Server::https(|_| Response::new(200).body("h1-only"))
+        .await
+        .unwrap();
+    let session = Session::builder().tls(server.tls()).build().unwrap();
+    let ws_url = server.url("/ws").replacen("https://", "wss://", 1);
+    let h2_err = session
+        .get(&ws_url)
+        .protocol(leyline::Protocol::Http2)
+        .websocket()
+        .await
+        .unwrap_err();
+    assert_eq!(
+        h2_err.kind(),
+        Kind::Http2,
+        "protocol(Http2) must not silently fall back to HTTP/1.1 upgrade: {h2_err:?}"
+    );
+    #[cfg(feature = "http3")]
+    {
+        let h3_err = session
+            .get("wss://127.0.0.1:443/ws")
+            .protocol(leyline::Protocol::Http3)
+            .websocket()
+            .await
+            .unwrap_err();
+        assert_eq!(h3_err.kind(), Kind::Config);
+    }
+}
+
+#[tokio::test]
+async fn proxy_list_no_proxy_and_custom_proxy_across_redirects() {
+    let dest = Server::http(|_| Response::new(200).body("direct-dest"))
+        .await
+        .unwrap();
+    let dest_url = dest.url("/final");
+    let hop1 = Server::http(move |_| Response::new(302).header("location", dest_url.clone()))
+        .await
+        .unwrap();
+
+    let list_session = Session::builder()
+        .proxy(leyline::Proxy::list(["http://127.0.0.1:1"]).no_proxy(["127.0.0.1"]))
+        .build()
+        .unwrap();
+    assert_eq!(
+        list_session.get(dest.url("/bypass")).text().await.unwrap(),
+        "direct-dest"
+    );
+
+    let seen_hops: std::sync::Arc<std::sync::Mutex<Vec<String>>> = std::sync::Arc::default();
+    let seen_slot = std::sync::Arc::clone(&seen_hops);
+    let dest_port = dest.addr().port();
+    let custom_session = Session::builder()
+        .proxy(leyline::Proxy::custom(move |url| {
+            seen_slot.lock().unwrap().push(url.path().to_owned());
+            if url.port() == Some(dest_port) {
+                Some(leyline::Proxy::from("http://127.0.0.1:1"))
+            } else {
+                None
+            }
+        }))
+        .build()
+        .unwrap();
+    let hop2_err = custom_session
+        .get(hop1.url("/start"))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(hop2_err.kind(), Kind::Proxy);
+    assert_eq!(
+        seen_hops.lock().unwrap().as_slice(),
+        &["/start".to_owned(), "/final".to_owned()],
+        "Proxy::custom must be re-evaluated on redirect hops"
+    );
+
+    let bad_req_proxy = Session::builder()
+        .build()
+        .unwrap()
+        .get(dest.url("/"))
+        .proxy(leyline::Proxy::from("http://127.0.0.1:1").header("host", "evil.test"))
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(bad_req_proxy.kind(), Kind::Config);
+}
+
+#[tokio::test]
+async fn before_send_empty_body_strips_content_length_and_shutdown_short_circuits() {
+    let server = Server::http(|_| Response::new(200).body("ok"))
+        .await
+        .unwrap();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let calls_hook = std::sync::Arc::clone(&calls);
+    let session = Session::builder()
+        .before_send(move |req| {
+            calls_hook.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            *req.body_mut() = leyline::Body::default();
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    let resp = session
+        .post(server.url("/cleared"))
+        .header("content-length", "50")
+        .body("hello")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(resp.text().await.unwrap(), "ok");
+    let seen = server.requests().await;
+    assert_eq!(
+        seen[0].header("content-length"),
+        Some("0"),
+        "stale content-length: 50 must be replaced with 0 when POST body is cleared"
+    );
+
+    session.shutdown().await;
+    let before = calls.load(std::sync::atomic::Ordering::SeqCst);
+    let err = session.get(server.url("/after")).send().await.unwrap_err();
+    assert!(err.is_shut_down(), "expected shut_down error, got {err:?}");
+    assert_eq!(
+        calls.load(std::sync::atomic::Ordering::SeqCst),
+        before,
+        "before_send must not run after shutdown"
+    );
+}
+
+#[test]
+fn tcp_profile_window_bounds_and_empty_interface_rejected_at_build() {
+    let err = "window_size = 70000"
+        .parse::<leyline::TcpProfile>()
+        .unwrap_err();
+    assert_eq!(err.kind(), Kind::Config);
+    let ok = "window_size = 65535"
+        .parse::<leyline::TcpProfile>()
+        .unwrap();
+    assert_eq!(ok.window_size(), 65535);
+    let err = Session::builder().interface("").build().unwrap_err();
+    assert_eq!(err.kind(), Kind::Config);
+    let err = Session::builder()
+        .interface("eth\x000")
+        .build()
+        .unwrap_err();
+    assert_eq!(err.kind(), Kind::Config);
+    let err = leyline::Body::file(std::env::temp_dir()).unwrap_err();
+    assert_eq!(err.kind(), Kind::Io);
 }

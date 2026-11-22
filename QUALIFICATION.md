@@ -14,7 +14,7 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 
 ## Proved
 
-`scripts/verify.sh --only kani` runs 28 harnesses (with a 30 s per-harness timeout). String, UTF-8, and 17-byte chunk-overflow invariants run as bounded exhaustive unit tests in the library test suite.
+`scripts/verify.sh --only kani` runs 27 symbolic harnesses (with a 30 s per-harness timeout). String, UTF-8, `Transfer-Encoding` token-list, and 17-byte chunk-overflow invariants run as bounded exhaustive unit tests in the library test suite.
 
 | Harness | Property |
 | --- | --- |
@@ -25,7 +25,6 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 | `a_body_limit_room_is_exactly_what_is_left` | The room a body limit reports is the exact remainder |
 | `non_ascii_content_length_is_always_rejected` | Non-ASCII bytes in `Content-Length` are always rejected |
 | `dual_content_length_and_transfer_encoding_is_always_rejected` | Responses with both `Content-Length` and `Transfer-Encoding` are always rejected |
-| `transfer_encoding_requires_chunked_once_and_final` | `Transfer-Encoding` is accepted iff `chunked` appears once and is the final coding |
 | `response_state_rejects_101_and_caps_informational_responses` | Response state machine rejects `101`, caps 1xx responses, and preserves state on error |
 | `response_state_data_trailers_and_finish_enforce_lifecycle` | Response `data`, `trailers`, and `finish` transitions follow the HTTP/2 and HTTP/3 lifecycle |
 | `has_ascii_uppercase_swar_matches_byte_scan` | SWAR `has_ascii_uppercase` matches byte-by-byte scan for all byte slices up to 16 bytes |
@@ -91,7 +90,7 @@ One Ryzen 9 9950X3D. Client and origin run on separate L3 caches, each scenario 
 | 10,000 slow readers on large bodies | 0 failures, 295 KiB per reader |
 | 1 GiB download and upload | 316 KiB RSS growth |
 | Graceful shutdown under 2,000 streams | Quiet in 2 ms, 0 wrong digests |
-| Fuzzing | 676 million executions across 11 targets, 0 crashes |
+| Fuzzing | 676 million executions across the 11 pre-0.3.0 targets, 0 crashes (`dns_wire` and `pkcs12` targets compile and await their first soak) |
 | Parser differential | 0 of 61 RFC cases read wrongly |
 
 ## Not claimed

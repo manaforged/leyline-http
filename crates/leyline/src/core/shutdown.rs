@@ -160,6 +160,7 @@ impl Drop for TickerGuard {
     fn drop(&mut self) {
         if let Some(shutdown) = self.0.as_ref().and_then(Weak::upgrade) {
             shutdown.ticker.store(TICKER_IDLE, Ordering::Release);
+            shutdown.wake_all();
         }
     }
 }

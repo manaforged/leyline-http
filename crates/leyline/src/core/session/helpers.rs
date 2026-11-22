@@ -31,7 +31,7 @@ impl Session {
         crate::core::Tab::new(self.clone())
     }
 
-    /// Returns the session cookie jar.
+    /// Returns the session cookie jar (ignored by requests and `save` when `SessionBuilder::cookies(None)` was set).
     pub fn cookies(&self) -> &Jar {
         self.inner.inputs.jar()
     }
@@ -84,8 +84,20 @@ impl Session {
 
     pub(crate) fn per_core(&self) -> Self {
         let mut session = self.clone();
-        std::sync::Arc::make_mut(&mut session.inner).pool =
-            std::sync::Arc::new(self.inner.pool.sibling());
+        let inner = std::sync::Arc::make_mut(&mut session.inner);
+        inner.pool = std::sync::Arc::new(self.inner.pool.sibling());
+        inner.shutdown = std::sync::Arc::default();
+        inner.doh = self
+            .inner
+            .doh
+            .as_ref()
+            .map(|doh| std::sync::Arc::new(doh.per_core()));
+        let base = inner
+            .doh
+            .as_ref()
+            .map(|doh| std::sync::Arc::clone(doh) as std::sync::Arc<dyn crate::net::Resolver>);
+        let resolver = inner.inputs.dns_config.clone().into_resolver_with(base);
+        inner.connector = inner.connector.clone().with_resolver(resolver);
         session
     }
 

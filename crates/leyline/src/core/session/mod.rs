@@ -114,6 +114,7 @@ pub(crate) struct SessionInner {
     cache: Option<Arc<cache::Cache>>,
     proxy_shown: Option<String>,
     connector: FingerprintConnector,
+    doh: Option<Arc<crate::core::doh::DohResolver>>,
     h2_config: H2Config,
     pool: Arc<Pool>,
     hsts: Arc<std::sync::Mutex<crate::core::hsts::HstsStore>>,

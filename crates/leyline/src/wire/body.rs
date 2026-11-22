@@ -6,7 +6,7 @@ use std::sync::{Mutex, PoisonError};
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
-use futures_util::{Stream, TryFutureExt};
+use futures_util::Stream;
 
 pub(crate) type BoxedStream =
     Pin<Box<dyn Stream<Item = io::Result<Bytes>> + Send + Sync + 'static>>;
@@ -39,7 +39,10 @@ pub(crate) struct Length(std::num::NonZeroU64);
 
 impl Length {
     fn new(bytes: u64) -> Option<Self> {
-        std::num::NonZeroU64::new(bytes.wrapping_add(1)).map(Self)
+        bytes
+            .checked_add(1)
+            .and_then(std::num::NonZeroU64::new)
+            .map(Self)
     }
 
     pub(crate) fn get(self) -> u64 {
@@ -157,12 +160,12 @@ impl Body {
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
-        let length = length.into();
+        let length_hint = length.into().and_then(Length::new);
         let stream = Box::pin(stream);
-        let stream = match length {
+        let stream = match length_hint {
             Some(declared) => exclusive(Declared {
                 inner: stream,
-                declared,
+                declared: declared.get(),
                 sent: 0,
                 done: false,
             }),
@@ -170,21 +173,26 @@ impl Body {
         };
         Body(BodyKind::Stream {
             stream,
-            length_hint: length.and_then(Length::new),
+            length_hint,
         })
     }
 
-    /// Streams the file at `path` as a body whose `content-length` is the file size read now, and fails when the file cannot be inspected.
+    /// Streams the file at `path` as a body whose `content-length` is the file size read now, and fails when the file cannot be opened or is not a regular file.
     pub fn file(path: impl AsRef<Path>) -> crate::error::Result<Self> {
-        let path = path.as_ref().to_path_buf();
-        let length = std::fs::metadata(&path)?.len();
-        let stream = tokio::fs::File::open(path)
-            .map_ok(tokio_util::io::ReaderStream::new)
-            .try_flatten_stream();
+        let file = std::fs::File::open(path.as_ref())?;
+        let meta = file.metadata()?;
+        if !meta.is_file() {
+            return Err(
+                io::Error::new(io::ErrorKind::InvalidInput, "body path is not a file").into(),
+            );
+        }
+        let length = meta.len();
+        let stream = tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
         Ok(Self::stream(stream, Some(length)))
     }
 
     /// Returns the bytes of a body held in memory, empty for an empty body, or `None` for a streamed body.
+    #[must_use]
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match &self.0 {
             BodyKind::Empty => Some(&[]),
@@ -200,6 +208,7 @@ impl Body {
     }
 
     /// Returns a copy of a body held in memory without copying its bytes, or `None` for a streamed body.
+    #[must_use]
     pub fn try_clone(&self) -> Option<Self> {
         match &self.0 {
             BodyKind::Empty => Some(Body::default()),

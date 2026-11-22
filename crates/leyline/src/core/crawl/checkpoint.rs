@@ -204,10 +204,11 @@ impl Checkpoint {
             })
             .collect::<Result<_>>()?;
         crawl.sitemaps.files = self.sitemap_files;
-        crawl.start();
-        for (origin, at) in self.pauses {
-            crawl.pace.pause_until(origin, monotonic(at)?);
-        }
+        crawl.restored_pauses = self
+            .pauses
+            .into_iter()
+            .map(|(origin, at)| Ok((origin, monotonic(at)?)))
+            .collect::<Result<_>>()?;
         Ok(crawl)
     }
 }

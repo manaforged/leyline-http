@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use super::{BodyHeaders, is_single_final_chunked};
+use super::BodyHeaders;
 
 #[kani::proof]
 #[kani::unwind(5)]
@@ -28,17 +28,4 @@ fn dual_content_length_and_transfer_encoding_is_always_rejected() {
         coding: Some(Cow::Borrowed(&te)),
     };
     assert!(headers.check_framing().is_err());
-}
-
-#[kani::proof]
-fn transfer_encoding_requires_chunked_once_and_final() {
-    assert!(is_single_final_chunked(b"chunked"));
-    assert!(is_single_final_chunked(b"Chunked"));
-    assert!(is_single_final_chunked(b"gzip, chunked"));
-    assert!(!is_single_final_chunked(b"gzip"));
-    assert!(!is_single_final_chunked(b"chunked, gzip"));
-    assert!(!is_single_final_chunked(b"chunked, chunked"));
-    assert!(!is_single_final_chunked(b"chunked, Chunked"));
-    assert!(!is_single_final_chunked(b""));
-    assert!(!is_single_final_chunked(b","));
 }

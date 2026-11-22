@@ -18,18 +18,20 @@ fn skip_name_terminates_and_stays_in_bounds() {
 #[kani::proof]
 #[kani::unwind(14)]
 fn skip_name_enforces_max_jumps_bound() {
-    let mut packet = [0u8; 20];
+    let hops: usize = kani::any_where(|&n| (1..=MAX_JUMPS + 2).contains(&n));
+    let mut packet = [0u8; 24];
     packet[0] = 0;
-    for hop in 0..=MAX_JUMPS {
+    let mut hop = 0;
+    while hop < hops {
         let at = 2 + hop * 2;
         let prev = if hop == 0 { 0 } else { at - 2 };
         packet[at] = 0xC0 | ((prev >> 8) as u8);
         packet[at + 1] = (prev & 0xFF) as u8;
+        hop += 1;
     }
-    let at_limit = 2 + (MAX_JUMPS - 1) * 2;
-    assert_eq!(skip_name(&packet, at_limit), Some(at_limit + 2));
-    let over_limit = 2 + MAX_JUMPS * 2;
-    assert_eq!(skip_name(&packet, over_limit), None);
+    let start = 2 + (hops - 1) * 2;
+    let expected = (hops <= MAX_JUMPS).then_some(start + 2);
+    assert_eq!(skip_name(&packet, start), expected);
 }
 
 #[kani::proof]
@@ -59,13 +61,20 @@ fn parse_answer_rr_never_panics() {
 }
 
 #[kani::proof]
-#[kani::unwind(4)]
+#[kani::unwind(6)]
 fn parse_records_question_never_panics() {
-    let mut packet: [u8; 15] = kani::any();
+    let mut packet: [u8; 18] = kani::any();
+    packet[0] = 0;
+    packet[1] = 0;
+    packet[2] = 0;
     packet[4] = 0;
     packet[5] = kani::any_where(|&n| n <= 1);
     packet[6] = 0;
     packet[7] = 0;
+    packet[8] = 0;
+    packet[9] = 0;
+    packet[10] = 0;
+    packet[11] = 0;
     let len: usize = kani::any_where(|n| *n <= packet.len());
     let slice = &packet[..len];
     let res = parse_records(slice, |_, _, _, _| {

@@ -30,8 +30,10 @@ These changes clean up `0.2` API rough edges while keeping the same five core ty
 | `.header("user-agent", ua)` keeping browser `sec-ch-ua*` headers | setting `user-agent` drops the profile's `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform` unless the request sets them |
 | `trace::Event::Sent { protocol, .. }`, `Event::Head { status: u16, protocol, .. }`, `Event::Summary { proxy: Option<String>, .. }` | `version` on `Sent` and `Head`, `status: http::StatusCode` on `Head`, and `proxy: Option<&str>` on `Summary` |
 | `HeaderPosition::{BeforeCchUa, AfterCchUa, AfterCchUaMobile, AfterCchUaPlatform, AfterFetchDest}` | `HeaderPosition::{BeforeSecChUa, AfterSecChUa, AfterSecChUaMobile, AfterSecChUaPlatform, AfterSecFetchDest}` |
-| `TcpProfile` deserializing unknown fields or out-of-range `ttl`/`mss`/`window_scale` | deserialization now rejects unknown fields and out-of-range values |
+| `TcpProfile` deserializing unknown fields or out-of-range `ttl`/`mss`/`window_size`/`window_scale` | deserialization now rejects unknown fields and out-of-range values |
 | `WebSocket::header` returning lossy UTF-8 for non-ASCII header bytes | returns `None` for non-ASCII header values (matching `Response::header` and `Page::header`) |
+| `Session::builder().retry(0)` / `.redirect(..)` / `.max_body_size(..)` ignored by `Crawl` and `Session::robots` | explicit session limits now carry into `Crawl` and `Session::robots` instead of being overridden by internal defaults |
+| `Session::load` on a 0.2.0 browser-profile `session.json` | saved JSON format is unchanged, but bundled browser `profile_id` digests updated with new brand entries (re-save browser sessions or strip `profile_id` to migrate) |
 
 ## Breaking changes in 0.2.0
 

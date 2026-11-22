@@ -102,6 +102,20 @@ impl ProxyPool {
         self
     }
 
+    pub(crate) fn with_no_proxy(mut self, no_proxy: &crate::core::config::NoProxy) -> Self {
+        let entries: Arc<[Entry]> = self
+            .entries
+            .iter()
+            .cloned()
+            .map(|mut entry| {
+                entry.config.set_no_proxy(no_proxy.clone());
+                entry
+            })
+            .collect();
+        self.entries = entries;
+        self
+    }
+
     pub(crate) fn for_doh(&self) -> Self {
         let entries: Arc<[Entry]> = self
             .entries

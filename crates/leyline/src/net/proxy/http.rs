@@ -62,8 +62,12 @@ where
         if response_buf.len() > MAX_H1_HEADER_BYTES {
             return Err(NetError::proxy("proxy CONNECT response too large"));
         }
-        if let Some(i) = h1::find_header_end(&response_buf) {
-            break i + 4;
+        match h1::scan_header_end(&response_buf) {
+            h1::HeaderEnd::Found(i) => break i + 4,
+            h1::HeaderEnd::BareLf => {
+                return Err(NetError::proxy("proxy CONNECT response has a bare LF"));
+            }
+            h1::HeaderEnd::Incomplete => {}
         }
     };
 

@@ -110,6 +110,7 @@ pub struct Crawl {
     redirect_override: Option<Redirect>,
     redirect_policy: Redirect,
     pace: HostGates,
+    restored_pauses: Vec<(Origin, tokio::time::Instant)>,
     seeds: Vec<Result<Url>>,
     settings: Settings,
     started: bool,
@@ -170,6 +171,7 @@ impl Crawl {
             redirect_override: None,
             redirect_policy: session.redirect_policy().for_robots(),
             pace: HostGates::new(HostLimits::new()),
+            restored_pauses: Vec::new(),
             seeds,
             settings: Settings {
                 respect: Some(Respect::Robots),
@@ -240,7 +242,7 @@ impl Crawl {
         self
     }
 
-    /// Replaces the redirect policy for this crawl; 5 hops by default when neither crawl nor session sets one.
+    /// Replaces the redirect policy for this crawl (5 hops by default when neither crawl nor session sets one); a checkpoint does not save a `Redirect::custom` closure, so call this again after `Crawl::load`.
     pub fn redirect(mut self, policy: impl Into<Redirect>) -> Self {
         let policy = policy.into();
         self.settings.redirect_hops = Some(policy.hop_limit());
@@ -414,6 +416,9 @@ impl Crawl {
         self.page_retry = self.session.default_retry().for_crawl_page();
         self.clock.stopped = Some(self.session.stopped());
         self.pace = pace;
+        for (origin, at) in std::mem::take(&mut self.restored_pauses) {
+            self.pace.pause_until(origin, at);
+        }
         for seed in std::mem::take(&mut self.seeds) {
             match seed {
                 Ok(url) => {

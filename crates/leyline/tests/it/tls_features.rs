@@ -424,9 +424,12 @@ async fn https_proxy_does_not_receive_origin_ech_config() {
     proxy_ctx.set_certificate(&proxy_cert).unwrap();
     proxy_ctx.set_private_key(&proxy_key).unwrap();
     let proxy_ctx = Arc::new(proxy_ctx.build());
+    let proxy_seen_sni: Arc<std::sync::Mutex<Option<String>>> = Arc::default();
+    let proxy_sni_slot = Arc::clone(&proxy_seen_sni);
     tokio::spawn(async move {
         while let Ok((tcp, _)) = proxy_listener.accept().await {
             let ctx = Arc::clone(&proxy_ctx);
+            let sni_slot = Arc::clone(&proxy_sni_slot);
             tokio::spawn(async move {
                 let ssl = Ssl::new(&ctx).unwrap();
                 let Ok(mut client) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
@@ -435,10 +438,10 @@ async fn https_proxy_does_not_receive_origin_ech_config() {
                 else {
                     return;
                 };
-                assert!(
-                    !client.ssl().ech_accepted(),
-                    "https proxy must not receive origin ECH"
-                );
+                *sni_slot.lock().unwrap() = client
+                    .ssl()
+                    .servername(leyline_bssl::ssl::NameType::HOST_NAME)
+                    .map(str::to_owned);
                 let mut buf = Vec::new();
                 let mut tmp = [0u8; 512];
                 loop {
@@ -484,6 +487,11 @@ async fn https_proxy_does_not_receive_origin_ech_config() {
         .unwrap();
     assert!(resp.ech_accepted());
     assert_eq!(resp.text().await.unwrap(), "proxied-ech=true");
+    assert_eq!(
+        proxy_seen_sni.lock().unwrap().as_deref(),
+        Some("proxy.local"),
+        "https proxy must receive its own plain SNI, never origin ECH outer SNI"
+    );
 }
 
 #[cfg(feature = "http3")]

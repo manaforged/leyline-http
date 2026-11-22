@@ -151,13 +151,13 @@ impl Tls {
         self
     }
 
-    /// Sets a raw RFC 9460 `ECHConfigList` to encrypt the ClientHello SNI on TLS 1.3 connections.
+    /// Sets a raw RFC 9460 `ECHConfigList` to encrypt the ClientHello SNI on TLS 1.3 connections, taking precedence over `ech(true)`.
     pub fn ech_config_list(mut self, config_list: impl Into<Vec<u8>>) -> Self {
         self.ech_config_list = Some(config_list.into());
         self
     }
 
-    /// Sets whether to query the session's resolver for HTTPS/SVCB ECH records before TLS handshakes, off by default.
+    /// Sets whether to query the session's resolver (`SessionBuilder::doh` or a custom `Resolver::resolve_ech`) for HTTPS/SVCB ECH records before TLS handshakes, off by default.
     pub fn ech(mut self, enable: bool) -> Self {
         self.auto_ech = enable;
         self

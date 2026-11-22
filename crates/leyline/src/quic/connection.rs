@@ -213,9 +213,7 @@ async fn open(
         .apply(conn.ssl_mut(), true)
         .map_err(|e| QuicError::Config(format!("quic hello: {e}")))?;
     if let Some(ech) = ech {
-        conn.ssl_mut().set_enable_ech_grease(false);
-        conn.ssl_mut()
-            .set_ech_config_list(ech)
+        crate::tls::apply_ech(conn.ssl_mut(), ech)
             .map_err(|e| QuicError::Config(format!("quic ech: {e}")))?;
     }
     Ok(Opening {
@@ -280,15 +278,11 @@ async fn handshake(
                     Ok(_) => {}
                     Err(quiche::Error::TlsFail) => {
                         let stack = leyline_bssl::error::ErrorStack::get();
-                        let retry_configs = leyline_bssl::ssl::is_ech_rejected(&stack)
-                            .then(|| conn.ssl_mut().ech_retry_configs())
-                            .flatten()
-                            .filter(|bytes| !bytes.is_empty())
-                            .map(<[u8]>::to_vec);
-                        return Err((
-                            QuicError::Protocol("quic recv: TlsFail".into()),
-                            retry_configs,
-                        ));
+                        let retry_configs = crate::tls::ech_retry_configs(
+                            Some(conn.ssl_mut()),
+                            leyline_bssl::ssl::is_ech_rejected(&stack),
+                        );
+                        return Err((QuicError::Tls(format!("quic tls: {stack}")), retry_configs));
                     }
                     Err(e) => return Err((QuicError::Protocol(format!("quic recv: {e}")), None)),
                 }
@@ -313,6 +307,10 @@ pub(crate) async fn flush_egress(
                     .map_err(|e| QuicError::Socket(format!("udp send: {e}")))?;
             }
             Err(quiche::Error::Done) => return Ok(()),
+            Err(quiche::Error::TlsFail) => {
+                let stack = leyline_bssl::error::ErrorStack::get();
+                return Err(QuicError::Tls(format!("quic tls: {stack}")));
+            }
             Err(e) => return Err(QuicError::Protocol(format!("quic send: {e}"))),
         }
     }

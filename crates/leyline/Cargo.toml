@@ -184,6 +184,10 @@ required-features = ["bench-internals"]
 name = "tls_behaviour"
 required-features = ["bench-internals"]
 
+[[test]]
+name = "env_roots_resumption"
+required-features = ["bench-internals"]
+
 [build-dependencies]
 serde = { workspace = true }
 toml = { workspace = true }

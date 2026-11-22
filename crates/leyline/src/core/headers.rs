@@ -22,6 +22,20 @@ pub(crate) fn value(v: impl TryInto<HeaderValue>) -> Result<HeaderValue> {
         .map_err(|_| Error::new(Kind::Request).with_message("invalid header value"))
 }
 
+pub(crate) fn utf8_pair(
+    n: impl TryInto<HeaderName>,
+    v: impl TryInto<HeaderValue>,
+    label: &str,
+) -> std::result::Result<(String, String), String> {
+    let name = name(n).map_err(|err| err.to_string())?;
+    let key = name.as_str();
+    let val = value(v)
+        .ok()
+        .and_then(|v| std::str::from_utf8(v.as_bytes()).ok().map(str::to_owned))
+        .ok_or_else(|| format!("invalid {label} `{}`", key.escape_debug()))?;
+    Ok((key.to_owned(), val))
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HeaderEntry {
     pub name: HeaderName,

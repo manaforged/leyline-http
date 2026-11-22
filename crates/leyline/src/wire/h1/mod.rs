@@ -129,14 +129,6 @@ pub(crate) fn trim_start(mut bytes: &[u8]) -> &[u8] {
     while let Some(&b) = bytes.first() {
         if b == b' ' || b == b'\t' {
             bytes = &bytes[1..];
-        } else if b < 0x80 {
-            if char::from(b).is_whitespace() {
-                bytes = &bytes[1..];
-            } else {
-                break;
-            }
-        } else if let Some(n) = non_ascii_space(bytes, true) {
-            bytes = &bytes[n..];
         } else {
             break;
         }
@@ -149,39 +141,11 @@ pub(crate) fn trim_end(mut bytes: &[u8]) -> &[u8] {
     while let Some(&b) = bytes.last() {
         if b == b' ' || b == b'\t' {
             bytes = &bytes[..bytes.len() - 1];
-        } else if b < 0x80 {
-            if char::from(b).is_whitespace() {
-                bytes = &bytes[..bytes.len() - 1];
-            } else {
-                break;
-            }
-        } else if let Some(n) = non_ascii_space(bytes, false) {
-            bytes = &bytes[..bytes.len() - n];
         } else {
             break;
         }
     }
     bytes
-}
-
-#[cold]
-fn non_ascii_space(bytes: &[u8], front: bool) -> Option<usize> {
-    let part = |n: usize| {
-        let range = if front {
-            0..n
-        } else {
-            bytes.len() - n..bytes.len()
-        };
-        std::str::from_utf8(&bytes[range]).ok()
-    };
-    let n = (1..=bytes.len().min(4)).find(|&n| part(n).is_some())?;
-    let text = part(n)?;
-    let ch = if front {
-        text.chars().next()
-    } else {
-        text.chars().next_back()
-    };
-    ch.filter(|c| c.is_whitespace()).map(|_| n)
 }
 
 #[inline]

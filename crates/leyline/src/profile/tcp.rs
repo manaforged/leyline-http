@@ -9,12 +9,22 @@ const MAX_MSS: u32 = u16::MAX as u32;
 const MAX_WINDOW_SIZE: u32 = u16::MAX as u32;
 const MAX_WINDOW_SCALE: u32 = 14;
 
-fn validate_tcp_bounds(ttl: u32, mss: u32, window_scale: u32) -> std::result::Result<(), String> {
+fn validate_tcp_bounds(
+    ttl: u32,
+    mss: u32,
+    window_size: u32,
+    window_scale: u32,
+) -> std::result::Result<(), String> {
     if ttl > MAX_TTL {
         return Err(format!("ttl {ttl} exceeds {MAX_TTL}"));
     }
     if mss > MAX_MSS {
         return Err(format!("mss {mss} exceeds {MAX_MSS}"));
+    }
+    if window_size > MAX_WINDOW_SIZE {
+        return Err(format!(
+            "window_size {window_size} exceeds {MAX_WINDOW_SIZE}"
+        ));
     }
     if window_scale > MAX_WINDOW_SCALE {
         return Err(format!(
@@ -54,7 +64,7 @@ impl TryFrom<RawTcpProfile> for TcpProfile {
     type Error = String;
 
     fn try_from(raw: RawTcpProfile) -> std::result::Result<Self, Self::Error> {
-        validate_tcp_bounds(raw.ttl, raw.mss, raw.window_scale)?;
+        validate_tcp_bounds(raw.ttl, raw.mss, raw.window_size, raw.window_scale)?;
         Ok(Self {
             ttl: raw.ttl,
             mss: raw.mss,
@@ -152,15 +162,10 @@ impl Ja4t {
             return Err(ja4t_error("expected 4 underscore-separated fields"));
         };
         let window_size = parse_ja4t_u32("window_size", window)?;
-        if window_size > MAX_WINDOW_SIZE {
-            return Err(ja4t_error(format!(
-                "window_size {window_size} exceeds {MAX_WINDOW_SIZE}"
-            )));
-        }
         let options = parse_ja4t_options(options)?;
         let mss = parse_ja4t_u32("mss", mss)?;
         let window_scale = parse_ja4t_u32("window_scale", scale)?;
-        validate_tcp_bounds(0, mss, window_scale).map_err(ja4t_error)?;
+        validate_tcp_bounds(0, mss, window_size, window_scale).map_err(ja4t_error)?;
         Ok(Self {
             window_size,
             options,

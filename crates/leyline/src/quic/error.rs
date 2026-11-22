@@ -14,6 +14,8 @@ pub(crate) enum QuicError {
     Proxy(String),
     /// The UDP socket failed.
     Socket(String),
+    /// The TLS handshake or certificate check failed.
+    Tls(String),
     /// The QUIC or HTTP/3 handshake failed.
     Protocol(String),
 }
@@ -25,6 +27,7 @@ impl QuicError {
             Self::Dns(_) => Kind::Dns,
             Self::Proxy(_) => Kind::Proxy,
             Self::Socket(_) => Kind::Connect,
+            Self::Tls(_) => Kind::Tls,
             Self::Protocol(_) => Kind::Http3,
         }
     }
@@ -35,6 +38,7 @@ impl QuicError {
             | Self::Dns(m)
             | Self::Proxy(m)
             | Self::Socket(m)
+            | Self::Tls(m)
             | Self::Protocol(m) => m,
         }
     }

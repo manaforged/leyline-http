@@ -37,10 +37,7 @@ pub struct FingerprintConnector {
     connect_timeout: Option<Duration>,
 }
 
-const SHARED_CONTEXTS: NonZeroUsize = match NonZeroUsize::new(8) {
-    Some(n) => n,
-    None => NonZeroUsize::MIN,
-};
+const SHARED_CONTEXTS: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
 static PLAIN_CONTEXTS: LazyLock<Mutex<LruCache<TrustKey, Context>>> =
     LazyLock::new(|| Mutex::new(LruCache::new(SHARED_CONTEXTS)));
@@ -138,7 +135,6 @@ impl FingerprintConnector {
         !self.trust.pinned_leaf_sha256().is_empty() || self.trust.has_client_identity()
     }
 
-    #[cfg(feature = "bench-internals")]
     pub fn with_resolver(mut self, resolver: std::sync::Arc<dyn crate::net::Resolver>) -> Self {
         self.dialer = self.dialer.with_resolver(resolver);
         self

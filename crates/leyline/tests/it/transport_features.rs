@@ -439,10 +439,15 @@ async fn proxy_connect_response_with_bare_lf_does_not_hang() {
         .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
-    let result = tokio::time::timeout(Duration::from_secs(2), session.get(origin.url("/")).send())
+    let err = tokio::time::timeout(Duration::from_secs(2), session.get(origin.url("/")).send())
         .await
-        .expect("bare LF proxy CONNECT must not hang until connect timeout");
-    assert!(result.is_ok() || result.as_ref().unwrap_err().kind() == Kind::Proxy);
+        .expect("bare LF proxy CONNECT must not hang until connect timeout")
+        .unwrap_err();
+    assert_eq!(
+        err.kind(),
+        Kind::Proxy,
+        "bare LF proxy CONNECT must fail with Kind::Proxy, got {err:?}"
+    );
 }
 
 #[test]
@@ -555,7 +560,7 @@ fn coalesced_dns_recovers_after_unpolled_runtime_drop() {
     let session = Session::builder()
         .retry(0)
         .timeout(Duration::from_secs(5))
-        .dns_resolver(resolver)
+        .dns_resolver(Arc::clone(&resolver) as Arc<dyn leyline::Resolver>)
         .build()
         .unwrap();
 
@@ -572,6 +577,11 @@ fn coalesced_dns_recovers_after_unpolled_runtime_drop() {
         }
     });
     drop(rt1);
+    assert_eq!(
+        resolver.calls.load(Ordering::SeqCst),
+        0,
+        "unpolled rt1 task must be dropped before running resolver"
+    );
 
     let rt2 = tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -585,6 +595,10 @@ fn coalesced_dns_recovers_after_unpolled_runtime_drop() {
             .expect("host must not stay poisoned after unpolled DNS runtime drop");
         assert_eq!(body, "dns-ok");
     });
+    assert!(
+        resolver.calls.load(Ordering::SeqCst) >= 1,
+        "rt2 must invoke resolver after rt1 unpolled drop"
+    );
     drop(_server_guard);
     drop(rt_server);
 }

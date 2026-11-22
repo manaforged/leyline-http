@@ -312,9 +312,9 @@ fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
 }
 
 fn set_content_length(headers: &mut Vec<HeaderPair>, body: &Body) {
-    if let Some(len) = body.len_hint()
-        && (!matches!(body.0, BodyKind::Empty) || len > 0)
-    {
+    if matches!(body.0, BodyKind::Empty) {
+        headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+    } else if let Some(len) = body.len_hint() {
         headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
         headers.insert(
             0,

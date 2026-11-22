@@ -48,7 +48,7 @@ impl SessionBuilder {
         })
     }
 
-    /// Binds new sockets to the named network interface, such as `"eth0"` or `"lo0"`.
+    /// Binds new sockets to the named network interface (Linux, Android, Fuchsia, and Apple platforms), such as `"eth0"` or `"lo0"`.
     pub fn interface(self, name: impl Into<String>) -> Self {
         let name = name.into();
         self.update_socket(|s| s.interface = Some(name))

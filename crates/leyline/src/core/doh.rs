@@ -1,13 +1,14 @@
 use std::io;
 use std::net::{IpAddr, SocketAddr};
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use lru::LruCache;
 use url::Url;
 
 use crate::core::Session;
+use crate::error::{Error, Kind};
 use crate::net::dns_wire::{
     DnsAnswer, TYPE_A, TYPE_AAAA, TYPE_HTTPS, WireError, encode_query, parse_response,
 };
@@ -15,10 +16,8 @@ use crate::net::{EchFuture, ResolveFuture, Resolver, normalize_host};
 use crate::util::lock;
 
 const DNS_MESSAGE: &str = "application/dns-message";
-const CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(256) {
-    Some(n) => n,
-    None => NonZeroUsize::MIN,
-};
+const CACHE_CAPACITY: NonZeroUsize = NonZeroUsize::new(256).unwrap();
+pub(crate) const MAX_DOH_RESPONSE_BYTES: usize = 65_535;
 const MIN_TTL: Duration = Duration::from_secs(1);
 const MAX_TTL: Duration = Duration::from_secs(3600);
 const DEFAULT_TTL: Duration = Duration::from_secs(60);
@@ -37,8 +36,8 @@ struct CachedEch {
 pub(crate) struct DohResolver {
     endpoint: Url,
     client: Session,
-    ip_cache: Mutex<LruCache<String, CachedIps>>,
-    ech_cache: Mutex<LruCache<(String, u16), CachedEch>>,
+    ip_cache: Arc<Mutex<LruCache<String, CachedIps>>>,
+    ech_cache: Arc<Mutex<LruCache<(String, u16), CachedEch>>>,
 }
 
 impl DohResolver {
@@ -46,8 +45,17 @@ impl DohResolver {
         Self {
             endpoint,
             client,
-            ip_cache: Mutex::new(LruCache::new(CACHE_CAPACITY)),
-            ech_cache: Mutex::new(LruCache::new(CACHE_CAPACITY)),
+            ip_cache: Arc::new(Mutex::new(LruCache::new(CACHE_CAPACITY))),
+            ech_cache: Arc::new(Mutex::new(LruCache::new(CACHE_CAPACITY))),
+        }
+    }
+
+    pub(crate) fn per_core(&self) -> Self {
+        Self {
+            endpoint: self.endpoint.clone(),
+            client: self.client.per_core(),
+            ip_cache: Arc::clone(&self.ip_cache),
+            ech_cache: Arc::clone(&self.ech_cache),
         }
     }
 
@@ -63,7 +71,7 @@ impl DohResolver {
             .body(wire)
             .send()
             .await
-            .map_err(|e| io::Error::other(format!("doh request failed: {e}")))?;
+            .map_err(|e| doh_io_error("doh request failed", &e))?;
         let status = resp.status();
         if !status.is_success() {
             return Err(io::Error::other(format!("doh server returned {status}")));
@@ -71,7 +79,7 @@ impl DohResolver {
         let body = resp
             .bytes()
             .await
-            .map_err(|e| io::Error::other(format!("doh response read failed: {e}")))?;
+            .map_err(|e| doh_io_error("doh response read failed", &e))?;
         parse_response(&body).map_err(wire_to_io)
     }
 
@@ -115,6 +123,17 @@ impl DohResolver {
         let expires = Instant::now() + clamp_ttl(ttl, fallback);
         lock(&self.ech_cache).put(key, CachedEch { config, expires });
     }
+}
+
+fn doh_io_error(context: &str, err: &Error) -> io::Error {
+    let kind = if err.is_timeout() {
+        io::ErrorKind::TimedOut
+    } else if err.kind() == Kind::Config {
+        io::ErrorKind::InvalidInput
+    } else {
+        io::ErrorKind::Other
+    };
+    io::Error::new(kind, format!("{context}: {err}"))
 }
 
 fn clamp_ttl(ttl: Option<u32>, fallback: Duration) -> Duration {

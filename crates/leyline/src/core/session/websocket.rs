@@ -37,6 +37,12 @@ impl Session {
     ) -> Result<WebSocket> {
         let config = self.inner.inputs.websocket_config;
         let protocol = carry.protocol.unwrap_or(self.inner.inputs.protocol_policy);
+        #[cfg(feature = "http3")]
+        if matches!(protocol, super::Protocol::Http3) {
+            return Err(Error::config(
+                "WebSocket handshakes are not supported over HTTP/3",
+            ));
+        }
         let proxy = self.proxy_for(http_url, carry.proxy())?;
         let extra_headers = self.websocket_headers(http_url, extra_headers);
         let origin = Origin::ascii(http_url);
@@ -54,7 +60,9 @@ impl Session {
             options: &config,
         };
 
-        if config.prefer_http2 && protocol.tcp_offers_h2() {
+        let try_h2 = matches!(protocol, super::Protocol::Http2)
+            || (config.prefer_http2 && protocol.tcp_offers_h2());
+        if try_h2 {
             if let Some(conn) = WebSocket::connect_h2(
                 &self.inner.pool,
                 &self.inner.connector,

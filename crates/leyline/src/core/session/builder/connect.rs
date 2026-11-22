@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::core::doh::DohResolver;
+use crate::core::doh::{DohResolver, MAX_DOH_RESPONSE_BYTES};
 use crate::core::proxy_pool::ProxyPool;
 use crate::core::{Protocol, Proxy, Redirect, Session};
 use crate::error::{Error, Result};
@@ -55,7 +55,7 @@ impl PartialEq for PoolInputs<'_> {
 }
 
 impl PoolInputs<'_> {
-    fn build_doh(&self, endpoint: &url::Url) -> Result<Arc<dyn Resolver>> {
+    fn build_doh(&self, endpoint: &url::Url) -> Result<Arc<DohResolver>> {
         let mut trust = self.tls.clone();
         trust.clear_origin_identity();
         let proxy = match self.proxy_pool {
@@ -67,6 +67,7 @@ impl PoolInputs<'_> {
             .proxy(proxy)
             .cookies(None)
             .cache(None)
+            .max_body_size(MAX_DOH_RESPONSE_BYTES)
             .redirect(Redirect::none());
         let mut socket = self.socket.clone();
         #[cfg(unix)]
@@ -90,7 +91,7 @@ impl PoolInputs<'_> {
         &self,
         profile: &BrowserProfile,
         tcp_profile: &TcpProfile,
-    ) -> Result<FingerprintConnector> {
+    ) -> Result<(FingerprintConnector, Option<Arc<DohResolver>>)> {
         let tls_trust = if self.tls.accepts_invalid_certs() {
             self.tls.clone().system_roots(false)
         } else {
@@ -100,15 +101,16 @@ impl PoolInputs<'_> {
             Some(endpoint) => Some(self.build_doh(endpoint)?),
             None => None,
         };
+        let base = doh.as_ref().map(|d| Arc::clone(d) as Arc<dyn Resolver>);
         let dialer = Dialer::new(tcp_profile.clone())
-            .with_resolver(self.dns.clone().into_resolver_with(doh))
+            .with_resolver(self.dns.clone().into_resolver_with(base))
             .with_socket(self.socket.clone());
         let mut fp =
             FingerprintConnector::with_dialer(profile, dialer, &tls_trust).map_err(Error::from)?;
         if let Some(connect_timeout) = self.connect_timeout {
             fp = fp.with_connect_timeout(connect_timeout);
         }
-        Ok(fp)
+        Ok((fp, doh))
     }
 
     pub(super) fn pool(&self, impersonates: bool) -> Pool {

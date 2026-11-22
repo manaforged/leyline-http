@@ -58,7 +58,7 @@ pub struct SessionBuilder {
     platform_pinned: bool,
     pub(in crate::core::session) brand: ChromiumBrand,
     pub(in crate::core::session) proxy_config: Proxy,
-    dns_config: DnsConfig,
+    pub(in crate::core::session) dns_config: DnsConfig,
     doh_endpoint: Option<url::Url>,
     pub(in crate::core::session) timeouts: Timeout,
     pub(in crate::core::session) pool_config: PoolConfig,
@@ -438,7 +438,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the TCP fingerprint used for new connections.
+    /// Sets the TCP fingerprint used for new connections, replacing any earlier `ja4t`.
     pub fn tcp_profile(mut self, profile: TcpProfile) -> Self {
         self.tcp_profile = Some(profile);
         self.ja4t = None;
@@ -619,7 +619,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Runs `hook` on every request before each attempt, after any hook already set: it may change the method, URL, headers and body, the URL it leaves must be an absolute `http` or `https` URL, and its error fails the request.
+    /// Runs `hook` on every HTTP request before each attempt (not on redirect hops or WebSocket handshakes) before session defaults, cookies, and browser headers are applied: edits to method, URL, headers and body are sent while edits to extensions and HTTP version are ignored, and returning an error fails the request.
     pub fn before_send<F>(mut self, hook: F) -> Self
     where
         F: Fn(&mut http::Request<Body>) -> Result<()> + Send + Sync + 'static,
@@ -658,15 +658,9 @@ impl SessionBuilder {
         V: TryInto<http::HeaderValue>,
     {
         for (name, value) in headers {
-            let name = crate::core::headers::name(name);
-            let value = crate::core::headers::value(value);
-            match (name, value) {
-                (Ok(name), Ok(value)) => match std::str::from_utf8(value.as_bytes()) {
-                    Ok(value) => self.push_default(name.as_str().to_owned(), value.to_owned()),
-                    Err(_) => self.invalid_header(name.as_str()),
-                },
-                (Ok(name), Err(_)) => self.invalid_header(name.as_str()),
-                (Err(error), _) => self.reject(error),
+            match crate::core::headers::utf8_pair(name, value, "header") {
+                Ok((name, value)) => self.push_default(name, value),
+                Err(msg) => self.reject(Error::config(msg)),
             }
         }
         self
@@ -677,7 +671,7 @@ impl SessionBuilder {
         self
     }
 
-    fn invalid_header(&mut self, name: &str) {
+    pub(super) fn invalid_header(&mut self, name: &str) {
         self.reject(Error::config(format!(
             "invalid header `{}`",
             name.escape_debug()
@@ -709,13 +703,13 @@ impl SessionBuilder {
             .as_ref()
             .and_then(|parent| parent.shared_connector(&self));
         let shares = shared.is_some();
-        let connector = match shared {
-            Some(connector) => connector,
+        let (connector, doh) = match shared {
+            Some(pair) => pair,
             None => self
                 .pool_inputs()
                 .connector(&derived.profile, &tcp_profile)?,
         };
-        let mut session = self.into_session(derived, connector);
+        let mut session = self.into_session(derived, connector, doh);
         if let Some(parent) = parent {
             parent.share_with(&mut session, shares.then_some(tcp_profile))?;
         }

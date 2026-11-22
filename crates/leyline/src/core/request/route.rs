@@ -33,6 +33,9 @@ impl<'a> Route<'a> {
     }
 
     pub(super) async fn send(&mut self, mut this: Box<Draft>) -> Result<Response> {
+        if self.session.is_shut_down() {
+            return Err(crate::error::Error::shut_down());
+        }
         if let Some(hook) = self.session.before_send() {
             this.hooked(hook)?;
         }

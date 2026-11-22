@@ -13,6 +13,7 @@ impl SessionBuilder {
         mut self,
         derived: DerivedIdentity,
         connector: FingerprintConnector,
+        doh: Option<Arc<crate::core::doh::DohResolver>>,
     ) -> Session {
         let impersonates = self.impersonates();
         let pool = Arc::new(self.pool_inputs().pool(impersonates));
@@ -54,6 +55,7 @@ impl SessionBuilder {
             cache: (self.cache > 0).then(|| Arc::new(Cache::new(self.cache))),
             proxy_shown: self.proxy_config.shown(),
             connector,
+            doh,
             h2_config: derived.h2_config,
             pool,
             hsts: Arc::default(),
