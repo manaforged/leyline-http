@@ -1,6 +1,7 @@
 mod blocking;
 mod dial;
 mod dns;
+pub(crate) mod dns_wire;
 mod error;
 mod happy_eyeballs;
 mod outlier;
@@ -17,6 +18,7 @@ pub use proxy::ProxyUrl;
 pub use resolver::Resolver;
 #[cfg(all(test, feature = "http3"))]
 pub(crate) use resolver::SystemResolver;
+pub(crate) use resolver::{EchFuture, ResolveFuture};
 pub(crate) use socket::SocketOptions;
 #[cfg(feature = "http3")]
 pub(crate) use socket::bind_udp;

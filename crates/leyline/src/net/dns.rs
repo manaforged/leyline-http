@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use super::resolver::{Coalesced, ResolveFuture, Resolver, SystemResolver};
+use super::resolver::{Coalesced, EchFuture, ResolveFuture, Resolver, SystemResolver};
 
 #[derive(Clone)]
 pub(crate) struct DnsConfig {
@@ -54,8 +54,12 @@ impl DnsConfig {
         self
     }
 
-    pub(crate) fn into_resolver(self) -> Arc<dyn Resolver> {
-        let resolver = Arc::new(Coalesced::new(self.resolver));
+    pub(crate) fn overrides(&self) -> &HashMap<String, Vec<SocketAddr>> {
+        &self.overrides
+    }
+
+    pub(crate) fn into_resolver_with(self, base: Option<Arc<dyn Resolver>>) -> Arc<dyn Resolver> {
+        let resolver = Arc::new(Coalesced::new(base.unwrap_or(self.resolver)));
         if self.overrides.is_empty() {
             resolver
         } else {
@@ -83,6 +87,10 @@ impl Resolver for LayeredResolver {
             return Box::pin(async move { Ok(addrs) });
         }
         self.resolver.resolve(host, port)
+    }
+
+    fn resolve_ech<'a>(&'a self, host: &'a str) -> EchFuture<'a> {
+        self.resolver.resolve_ech(host)
     }
 }
 

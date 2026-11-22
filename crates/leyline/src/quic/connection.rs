@@ -193,7 +193,12 @@ async fn open(
     hello
         .apply(conn.ssl_mut(), true)
         .map_err(|e| QuicError::Config(format!("quic hello: {e}")))?;
-    if let Some(ech) = trust.ech_config() {
+    let resolved_ech = if trust.ech_config().is_none() && trust.auto_ech() {
+        connector.dialer().resolver().resolve_ech(host).await
+    } else {
+        None
+    };
+    if let Some(ech) = trust.ech_config().or(resolved_ech.as_deref()) {
         conn.ssl_mut().set_enable_ech_grease(false);
         conn.ssl_mut()
             .set_ech_config_list(ech)

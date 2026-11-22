@@ -3,31 +3,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use leyline::{Kind, Session, Tls};
-use leyline_bssl::hpke::HpkeKey;
-use leyline_bssl::ssl::{
-    NameType, Ssl, SslContextBuilder, SslEchKeys, SslMethod, SslVerifyMode, SslVersion,
-    marshal_ech_config,
-};
+use leyline_bssl::ssl::{NameType, Ssl, SslContextBuilder, SslMethod, SslVerifyMode, SslVersion};
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
 use super::tls_support::{
-    HTTP11, self_signed_dns, self_signed_dns_names, tls_server_per_connection,
+    HTTP11, build_ech_config_list, self_signed_dns, self_signed_dns_names, serve_h1_ok,
+    tls_server_per_connection,
 };
-
-async fn serve_h1_ok(mut stream: leyline_bssl_tokio::SslStream<tokio::net::TcpStream>, body: &str) {
-    let mut buf = [0u8; 2048];
-    if stream.read(&mut buf).await.is_err() {
-        return;
-    }
-    let resp = format!(
-        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    drop(stream.write_all(resp.as_bytes()).await);
-    drop(stream.shutdown().await);
-}
 
 #[tokio::test]
 async fn danger_accept_invalid_hostnames_preserves_ca_and_pin_checks() {
@@ -225,16 +208,6 @@ async fn client_cert_pkcs12_authenticates_mtls_and_masks_debug() {
     let body = authed.get(&url).text().await.unwrap();
     assert_eq!(body, "mtls-ok");
     assert_eq!(seen_client_certs.load(Ordering::SeqCst), 1);
-}
-
-fn build_ech_config_list(config_id: u8, public_name: &str) -> (HpkeKey, Vec<u8>, SslEchKeys) {
-    let key = HpkeKey::generate_x25519().unwrap();
-    let single = marshal_ech_config(config_id, &key, public_name, 64).unwrap();
-    let mut builder = SslEchKeys::builder().unwrap();
-    builder.add(true, &single, &key).unwrap();
-    let keys = builder.build();
-    let list = keys.marshal_retry_configs().unwrap();
-    (key, list, keys)
 }
 
 #[tokio::test]

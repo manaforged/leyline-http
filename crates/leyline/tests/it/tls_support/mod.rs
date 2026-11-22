@@ -68,6 +68,37 @@ fn self_signed_for(subjects: &[&str], is_ip: bool) -> (X509, PKey<Private>) {
     (cert.build(), key)
 }
 
+pub fn build_ech_config_list(
+    config_id: u8,
+    public_name: &str,
+) -> (
+    leyline_bssl::hpke::HpkeKey,
+    Vec<u8>,
+    leyline_bssl::ssl::SslEchKeys,
+) {
+    let key = leyline_bssl::hpke::HpkeKey::generate_x25519().unwrap();
+    let single = leyline_bssl::ssl::marshal_ech_config(config_id, &key, public_name, 64).unwrap();
+    let mut builder = leyline_bssl::ssl::SslEchKeys::builder().unwrap();
+    builder.add(true, &single, &key).unwrap();
+    let keys = builder.build();
+    let list = keys.marshal_retry_configs().unwrap();
+    (key, list, keys)
+}
+
+pub async fn serve_h1_ok(mut stream: SslStream<TcpStream>, body: &str) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut buf = [0u8; 2048];
+    if stream.read(&mut buf).await.is_err() {
+        return;
+    }
+    let resp = format!(
+        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    drop(stream.write_all(resp.as_bytes()).await);
+    drop(stream.shutdown().await);
+}
+
 pub async fn tls_server<F, Fut>(
     cert: X509,
     key: PKey<Private>,

@@ -15,6 +15,13 @@ impl fmt::Debug for SessionBuilder {
             .field("protocol_policy", &self.protocol_policy)
             .field("proxy", &self.proxy_config)
             .field("dns", &self.dns_config)
+            .field(
+                "doh_endpoint",
+                &self
+                    .doh_endpoint
+                    .as_ref()
+                    .map(|url| crate::util::redact(url.as_str())),
+            )
             .field("timeouts", &self.timeouts)
             .field("pool", &self.pool_config)
             .field("socket", &self.socket_config)

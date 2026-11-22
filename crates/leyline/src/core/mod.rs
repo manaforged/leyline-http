@@ -8,6 +8,7 @@ mod config;
 mod crawl;
 mod decompress;
 mod digest;
+pub(crate) mod doh;
 
 mod fetch_site;
 mod headers;

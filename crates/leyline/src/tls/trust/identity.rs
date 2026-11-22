@@ -16,7 +16,7 @@ impl TrustIdentity {
 /// Everything that decides which peers a TLS context trusts and how it presents itself.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TrustKey {
-    flags: [u8; 5],
+    flags: [u8; 6],
     pins: Vec<[u8; 32]>,
     roots: Vec<[u8; 32]>,
     identity: Vec<[u8; 32]>,
@@ -34,6 +34,7 @@ impl TrustKey {
                 u8::from(config.use_env_roots),
                 u8::from(config.accept_invalid_certs),
                 u8::from(config.accept_invalid_hostnames),
+                u8::from(config.auto_ech),
                 config.min_tls_version as u8,
             ],
             pins,

@@ -165,6 +165,13 @@ impl FingerprintConnector {
         }
     }
 
+    async fn resolve_initial_ech(&self, host: &str) -> Option<Vec<u8>> {
+        if self.trust.ech_config().is_some() || !self.trust.auto_ech() {
+            return None;
+        }
+        self.dialer.resolver().resolve_ech(host).await
+    }
+
     async fn connect_via_proxy(
         &self,
         host: &str,
@@ -174,7 +181,7 @@ impl FingerprintConnector {
     ) -> Result<TlsStream, TlsError> {
         let started = Instant::now();
         let session_key = SessionCache::key(host, port, Some(proxy.url()));
-        let mut ech_override: Option<Vec<u8>> = None;
+        let mut ech_override = self.resolve_initial_ech(host).await;
         let mut retried_ech = false;
         loop {
             let remaining = self
@@ -236,7 +243,7 @@ impl FingerprintConnector {
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
         let session_key = SessionCache::key(host, port, None);
-        let mut ech_override: Option<Vec<u8>> = None;
+        let mut ech_override = self.resolve_initial_ech(host).await;
         let mut retried_ech = false;
         loop {
             let ech = ech_override.as_deref();

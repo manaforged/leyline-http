@@ -1,8 +1,10 @@
+use std::sync::Arc;
 use std::time::Duration;
 
-use crate::core::Protocol;
+use crate::core::doh::DohResolver;
+use crate::core::{Protocol, Proxy, Redirect, Session};
 use crate::error::{Error, Result};
-use crate::net::{Dialer, DnsConfig, SocketOptions};
+use crate::net::{Dialer, DnsConfig, Resolver, SocketOptions};
 use crate::pool::Io;
 use crate::pool::{Pool, PoolConfig};
 use crate::profile::BrowserProfile;
@@ -21,6 +23,7 @@ pub(super) struct PoolInputs<'a> {
     connect_timeout: Option<Duration>,
     tls: &'a Tls,
     dns: &'a DnsConfig,
+    doh: Option<&'a url::Url>,
     socket: &'a SocketOptions,
     tcp: Option<&'a TcpProfile>,
     ja4t: Option<&'a Ja4t>,
@@ -28,6 +31,26 @@ pub(super) struct PoolInputs<'a> {
 }
 
 impl PoolInputs<'_> {
+    fn build_doh(&self, endpoint: &url::Url) -> Result<Arc<dyn Resolver>> {
+        let mut trust = self.tls.clone();
+        trust.ech_config_list = None;
+        trust.auto_ech = false;
+        let mut builder = Session::builder()
+            .tls(trust)
+            .proxy(Proxy::new().env(false))
+            .cookies(None)
+            .cache(None)
+            .redirect(Redirect::none());
+        if let Some(timeout) = self.connect_timeout {
+            builder = builder.timeout(crate::deadline::Timeout::new().connect(timeout));
+        }
+        for (host, addrs) in self.dns.overrides() {
+            builder = builder.resolve(host, addrs.iter().copied());
+        }
+        let client = builder.build()?;
+        Ok(Arc::new(DohResolver::new(endpoint.clone(), client)))
+    }
+
     pub(super) fn connector(
         &self,
         profile: &BrowserProfile,
@@ -38,8 +61,12 @@ impl PoolInputs<'_> {
         } else {
             self.tls.clone()
         };
+        let doh = match self.doh {
+            Some(endpoint) => Some(self.build_doh(endpoint)?),
+            None => None,
+        };
         let dialer = Dialer::new(tcp_profile.clone())
-            .with_resolver(self.dns.clone().into_resolver())
+            .with_resolver(self.dns.clone().into_resolver_with(doh))
             .with_socket(self.socket.clone());
         let mut fp =
             FingerprintConnector::with_dialer(profile, dialer, &tls_trust).map_err(Error::from)?;
@@ -63,6 +90,7 @@ impl SessionBuilder {
             connect_timeout: self.timeouts.connect_limit(),
             tls: &self.tls_trust,
             dns: &self.dns_config,
+            doh: self.doh_endpoint.as_ref(),
             socket: &self.socket_config,
             tcp: self.tcp_profile.as_ref(),
             ja4t: self.ja4t.as_ref(),

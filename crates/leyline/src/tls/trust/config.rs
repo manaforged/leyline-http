@@ -17,6 +17,7 @@ pub struct Tls {
     pub(crate) accept_invalid_certs: bool,
     pub(crate) accept_invalid_hostnames: bool,
     pub(crate) ech_config_list: Option<Vec<u8>>,
+    pub(crate) auto_ech: bool,
     pub(crate) min_tls_version: TlsMinVersion,
 }
 
@@ -37,6 +38,7 @@ impl std::fmt::Debug for Tls {
                 "ech_config_list_len",
                 &self.ech_config_list.as_ref().map(Vec::len),
             )
+            .field("auto_ech", &self.auto_ech)
             .field("min_tls_version", &self.min_tls_version)
             .finish()
     }
@@ -54,6 +56,7 @@ impl Default for Tls {
             accept_invalid_certs: false,
             accept_invalid_hostnames: false,
             ech_config_list: None,
+            auto_ech: false,
             min_tls_version: TlsMinVersion::Tls10,
         }
     }
@@ -154,6 +157,12 @@ impl Tls {
         self
     }
 
+    /// Sets whether to query the session's resolver for HTTPS/SVCB ECH records before TLS handshakes, off by default.
+    pub fn ech(mut self, enable: bool) -> Self {
+        self.auto_ech = enable;
+        self
+    }
+
     /// Raises the minimum TLS version to 1.2 unless it is already higher.
     pub fn tls12_min(mut self) -> Self {
         self.min_tls_version = self.min_tls_version.max(TlsMinVersion::Tls12);
@@ -188,6 +197,10 @@ impl Tls {
 
     pub(crate) fn ech_config(&self) -> Option<&[u8]> {
         self.ech_config_list.as_deref()
+    }
+
+    pub(crate) fn auto_ech(&self) -> bool {
+        self.auto_ech
     }
 
     pub(crate) fn has_client_identity(&self) -> bool {

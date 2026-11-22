@@ -59,6 +59,7 @@ pub struct SessionBuilder {
     pub(in crate::core::session) brand: ChromiumBrand,
     pub(in crate::core::session) proxy_config: Proxy,
     dns_config: DnsConfig,
+    doh_endpoint: Option<url::Url>,
     pub(in crate::core::session) timeouts: Timeout,
     pub(in crate::core::session) pool_config: PoolConfig,
     socket_config: SocketOptions,
@@ -105,6 +106,7 @@ impl SessionBuilder {
             brand: ChromiumBrand::default(),
             proxy_config: Proxy::default(),
             dns_config: DnsConfig::default(),
+            doh_endpoint: None,
             timeouts: Timeout::default(),
             pool_config: PoolConfig::default(),
             socket_config: SocketOptions::default(),
@@ -442,7 +444,22 @@ impl SessionBuilder {
 
     /// Sets the DNS resolver used for new connections.
     pub fn dns_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
+        self.doh_endpoint = None;
         self.dns_config = std::mem::take(&mut self.dns_config).resolver(resolver);
+        self
+    }
+
+    /// Resolves hostnames and HTTPS/ECH records over an RFC 8484 DNS-over-HTTPS `https://` endpoint.
+    pub fn doh(mut self, endpoint: impl IntoUrl) -> Self {
+        match endpoint.into_url() {
+            Ok(url) if url.scheme() == "https" && url.host_str().is_some() => {
+                self.doh_endpoint = Some(url);
+            }
+            Ok(_) => self.reject(Error::config(
+                "doh endpoint must be an https:// URL with a host",
+            )),
+            Err(err) => self.reject(err),
+        }
         self
     }
 

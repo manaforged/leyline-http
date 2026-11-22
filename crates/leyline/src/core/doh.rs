@@ -1,0 +1,189 @@
+use std::io;
+use std::net::{IpAddr, SocketAddr};
+use std::num::NonZeroUsize;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
+
+use lru::LruCache;
+use url::Url;
+
+use crate::core::Session;
+use crate::net::dns_wire::{
+    DnsAnswer, TYPE_A, TYPE_AAAA, TYPE_HTTPS, WireError, encode_query, parse_response,
+};
+use crate::net::{EchFuture, ResolveFuture, Resolver, normalize_host};
+use crate::util::lock;
+
+const DNS_MESSAGE: &str = "application/dns-message";
+const CACHE_CAPACITY: NonZeroUsize = match NonZeroUsize::new(256) {
+    Some(n) => n,
+    None => NonZeroUsize::MIN,
+};
+const MIN_TTL: Duration = Duration::from_secs(1);
+const MAX_TTL: Duration = Duration::from_secs(3600);
+const DEFAULT_TTL: Duration = Duration::from_secs(60);
+const NEGATIVE_ECH_TTL: Duration = Duration::from_secs(60);
+
+struct CachedIps {
+    addrs: Vec<IpAddr>,
+    expires: Instant,
+}
+
+struct CachedEch {
+    config: Option<Vec<u8>>,
+    expires: Instant,
+}
+
+pub(crate) struct DohResolver {
+    endpoint: Url,
+    client: Session,
+    ip_cache: Mutex<LruCache<String, CachedIps>>,
+    ech_cache: Mutex<LruCache<String, CachedEch>>,
+}
+
+impl DohResolver {
+    pub(crate) fn new(endpoint: Url, client: Session) -> Self {
+        Self {
+            endpoint,
+            client,
+            ip_cache: Mutex::new(LruCache::new(CACHE_CAPACITY)),
+            ech_cache: Mutex::new(LruCache::new(CACHE_CAPACITY)),
+        }
+    }
+
+    async fn query(&self, host: &str, qtype: u16) -> Result<DnsAnswer, io::Error> {
+        let wire = encode_query(host, qtype).map_err(|e| {
+            io::Error::new(io::ErrorKind::InvalidInput, format!("dns query: {e:?}"))
+        })?;
+        let resp = self
+            .client
+            .post(self.endpoint.as_str())
+            .header("content-type", DNS_MESSAGE)
+            .header("accept", DNS_MESSAGE)
+            .body(wire)
+            .send()
+            .await
+            .map_err(|e| io::Error::other(format!("doh request failed: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            return Err(io::Error::other(format!("doh server returned {status}")));
+        }
+        let body = resp
+            .bytes()
+            .await
+            .map_err(|e| io::Error::other(format!("doh response read failed: {e}")))?;
+        parse_response(&body).map_err(wire_to_io)
+    }
+
+    fn cached_ips(&self, key: &str, port: u16) -> Option<Vec<SocketAddr>> {
+        let mut cache = lock(&self.ip_cache);
+        let entry = cache.get(key)?;
+        if Instant::now() < entry.expires {
+            return Some(
+                entry
+                    .addrs
+                    .iter()
+                    .map(|&ip| SocketAddr::new(ip, port))
+                    .collect(),
+            );
+        }
+        cache.pop(key);
+        None
+    }
+
+    fn store_ips(&self, key: String, addrs: Vec<IpAddr>, ttl: Option<u32>) {
+        let expires = Instant::now() + clamp_ttl(ttl, DEFAULT_TTL);
+        lock(&self.ip_cache).put(key, CachedIps { addrs, expires });
+    }
+
+    fn cached_ech(&self, key: &str) -> Option<Option<Vec<u8>>> {
+        let mut cache = lock(&self.ech_cache);
+        let entry = cache.get(key)?;
+        if Instant::now() < entry.expires {
+            return Some(entry.config.clone());
+        }
+        cache.pop(key);
+        None
+    }
+
+    fn store_ech(&self, key: String, config: Option<Vec<u8>>, ttl: Option<u32>) {
+        let fallback = if config.is_some() {
+            DEFAULT_TTL
+        } else {
+            NEGATIVE_ECH_TTL
+        };
+        let expires = Instant::now() + clamp_ttl(ttl, fallback);
+        lock(&self.ech_cache).put(key, CachedEch { config, expires });
+    }
+}
+
+fn clamp_ttl(ttl: Option<u32>, fallback: Duration) -> Duration {
+    ttl.map(|secs| Duration::from_secs(u64::from(secs)))
+        .unwrap_or(fallback)
+        .clamp(MIN_TTL, MAX_TTL)
+}
+
+fn wire_to_io(err: WireError) -> io::Error {
+    match err {
+        WireError::NxDomain => io::Error::new(io::ErrorKind::NotFound, "dns NXDOMAIN"),
+        other => io::Error::new(io::ErrorKind::InvalidData, format!("dns wire: {other:?}")),
+    }
+}
+
+impl Resolver for DohResolver {
+    fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Box::pin(async move { Ok(vec![SocketAddr::new(ip, port)]) });
+        }
+        let key = normalize_host(host);
+        Box::pin(async move {
+            if let Some(addrs) = self.cached_ips(&key, port) {
+                return Ok(addrs);
+            }
+            let (v4, v6) = tokio::join!(self.query(&key, TYPE_A), self.query(&key, TYPE_AAAA));
+            let mut addrs = Vec::new();
+            let mut min_ttl: Option<u32> = None;
+            let mut last_err: Option<io::Error> = None;
+            for result in [v4, v6] {
+                match result {
+                    Ok(answer) => {
+                        addrs.extend(answer.addrs);
+                        if let Some(ttl) = answer.min_ttl {
+                            min_ttl = Some(min_ttl.map_or(ttl, |cur| cur.min(ttl)));
+                        }
+                    }
+                    Err(err) => last_err = Some(err),
+                }
+            }
+            if addrs.is_empty() {
+                return Err(last_err.unwrap_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, format!("no DNS records for {key}"))
+                }));
+            }
+            let out = addrs
+                .iter()
+                .map(|&ip| SocketAddr::new(ip, port))
+                .collect::<Vec<_>>();
+            self.store_ips(key, addrs, min_ttl);
+            Ok(out)
+        })
+    }
+
+    fn resolve_ech<'a>(&'a self, host: &'a str) -> EchFuture<'a> {
+        if host.parse::<IpAddr>().is_ok() {
+            return Box::pin(async { None });
+        }
+        let key = normalize_host(host);
+        Box::pin(async move {
+            if let Some(cached) = self.cached_ech(&key) {
+                return cached;
+            }
+            let (config, ttl) = match self.query(&key, TYPE_HTTPS).await {
+                Ok(answer) => (answer.ech_config_list, answer.min_ttl),
+                Err(_) => (None, None),
+            };
+            self.store_ech(key, config.clone(), ttl);
+            config
+        })
+    }
+}
