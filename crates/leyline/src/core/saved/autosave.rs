@@ -207,9 +207,10 @@ fn stopped() -> Error {
 }
 
 async fn run(mut guard: Guard, every: Duration) {
+    let every = every.max(Duration::from_millis(1));
     let mut watching = true;
     let mut due: Option<Instant> = None;
-    let mut ticker = tokio::time::interval_at(Instant::now() + every, every);
+    let mut ticker = tokio::time::interval_at(after(every), every);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         tokio::select! {
@@ -217,7 +218,7 @@ async fn run(mut guard: Guard, every: Duration) {
                 watching = changed.is_ok();
                 if watching {
                     guard.dirty = true;
-                    due.get_or_insert_with(|| Instant::now() + every);
+                    due.get_or_insert_with(|| after(every));
                 }
             }
             () = deadline(due) => {
@@ -240,6 +241,13 @@ async fn run(mut guard: Guard, every: Duration) {
             }
         }
     }
+}
+
+fn after(every: Duration) -> Instant {
+    Instant::from_std(crate::util::saturating_after(
+        std::time::Instant::now(),
+        every,
+    ))
 }
 
 async fn deadline(due: Option<Instant>) {

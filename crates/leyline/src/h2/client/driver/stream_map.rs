@@ -91,6 +91,7 @@ impl StreamMap {
             let Some(ResponseSink::StreamingEx { body_tx, .. }) = actor.response_tx.as_ref() else {
                 continue;
             };
+            let mut closed = false;
             while let Some(chunk) = actor.stalled.pop_front() {
                 self.stalled -= 1;
                 match body_tx.try_send(Ok(chunk)) {
@@ -100,10 +101,15 @@ impl StreamMap {
                         self.stalled += 1;
                         break;
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        self.stalled -= actor.stalled.len();
+                        actor.stalled.clear();
+                        closed = true;
+                        break;
+                    }
                 }
             }
-            if actor.stalled.is_empty() {
+            if !closed && actor.stalled.is_empty() {
                 drained.push((sid, actor.remote_done));
             }
         }

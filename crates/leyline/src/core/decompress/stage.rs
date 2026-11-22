@@ -220,9 +220,10 @@ impl Stage {
             _ => match *self {},
             #[cfg(feature = "compression-gzip")]
             Self::Gzip(d) => {
-                d.try_finish()
-                    .map_err(|e| decode_error(Encoding::Gzip.name(), e))?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let done = d
+                    .try_finish()
+                    .map_err(|e| decode_error(Encoding::Gzip.name(), e));
+                settle(done, d.get_mut())
             }
             #[cfg(feature = "compression-deflate")]
             Self::DeflatePending { cap, head } => {
@@ -231,29 +232,33 @@ impl Stage {
             }
             #[cfg(feature = "compression-deflate")]
             Self::Zlib(d) => {
-                d.try_finish()
-                    .map_err(|e| decode_error(Encoding::Deflate.name(), e))?;
-                require_end(&mut **d, Encoding::Deflate.name())?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let done = d
+                    .try_finish()
+                    .map_err(|e| decode_error(Encoding::Deflate.name(), e))
+                    .and_then(|()| require_end(&mut **d, Encoding::Deflate.name()));
+                settle(done, d.get_mut())
             }
             #[cfg(feature = "compression-deflate")]
             Self::RawDeflate(d) => {
-                d.try_finish()
-                    .map_err(|e| decode_error(Encoding::Deflate.name(), e))?;
-                require_end(&mut **d, Encoding::Deflate.name())?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let done = d
+                    .try_finish()
+                    .map_err(|e| decode_error(Encoding::Deflate.name(), e))
+                    .and_then(|()| require_end(&mut **d, Encoding::Deflate.name()));
+                settle(done, d.get_mut())
             }
             #[cfg(feature = "compression-brotli")]
             Self::Brotli(d) => {
-                d.close()
-                    .map_err(|e| decode_error(Encoding::Brotli.name(), e))?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+                let done = d
+                    .close()
+                    .map_err(|e| decode_error(Encoding::Brotli.name(), e));
+                settle(done, d.get_mut())
             }
             #[cfg(feature = "compression-zstd")]
             Self::Zstd(d) => {
-                d.finish()
-                    .map_err(|e| decode_error(Encoding::Zstd.name(), e))?;
-                Ok(std::mem::take(&mut d.writer_mut().buf))
+                let done = d
+                    .finish()
+                    .map_err(|e| decode_error(Encoding::Zstd.name(), e));
+                settle(done, d.writer_mut())
             }
         }
     }

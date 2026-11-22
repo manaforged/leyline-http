@@ -161,9 +161,15 @@ impl TlsProfile {
         self.ciphers = self.iana_names(&ja3.ciphers, cipher_name, "cipher")?;
         self.curves = self.iana_names(&ja3.curves, curve_name, "curve")?;
         if let Some(shares) = self.key_shares.as_mut() {
-            shares.retain(|share| self.curves.contains(share));
+            let kept = std::mem::take(shares);
+            *shares = self
+                .curves
+                .iter()
+                .filter(|curve| kept.contains(curve))
+                .cloned()
+                .collect();
         }
-        let order = self.apply_extensions(&ja3.extensions)?;
+        let order = self.apply_extensions(&ja3.extensions, true)?;
         self.extension_permutation = Some(order);
         self.permute_extensions = false;
         Ok(())
@@ -173,7 +179,7 @@ impl TlsProfile {
         let ja4 = Ja4::parse(raw)?;
         self.ciphers = self.iana_names(&ja4.ciphers, cipher_name, "cipher")?;
         self.sigalgs = self.iana_names(&ja4.sigalgs, sigalg_name, "signature algorithm")?;
-        self.apply_extensions(&ja4.extensions)?;
+        self.apply_extensions(&ja4.extensions, false)?;
         self.extension_permutation = None;
         Ok(())
     }

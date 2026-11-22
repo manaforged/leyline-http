@@ -53,6 +53,12 @@ impl Shards {
         self.total.fetch_sub(count, Ordering::Relaxed);
     }
 
+    pub(super) fn over_limit(&self) -> usize {
+        self.total
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.limit)
+    }
+
     pub(super) fn over_limit_with_one_more(&self) -> usize {
         (self.total.load(Ordering::Relaxed) + 1).saturating_sub(self.limit)
     }

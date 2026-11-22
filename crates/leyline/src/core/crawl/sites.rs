@@ -118,7 +118,8 @@ impl Crawl {
                 pace.max_in_flight_for(origin),
                 own.max_in_flight_for(origin),
             )
-            .unwrap_or(fallback);
+            .unwrap_or(fallback)
+            .max(1);
             !(obey && matches!(sites.get(origin), Some(Site::Pending)))
                 && busy.get(origin).copied().unwrap_or(0) < cap
                 && pace.ready(origin)

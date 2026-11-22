@@ -87,11 +87,7 @@ impl Resolver for LayeredResolver {
 }
 
 pub(crate) fn normalize_host(host: &str) -> String {
-    let stripped = host.trim().trim_end_matches('.');
-    let stripped = stripped
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or(stripped);
+    let stripped = crate::util::bare_host(host.trim().trim_end_matches('.'));
     let lowered = stripped.to_ascii_lowercase();
     match url::Host::parse(&lowered) {
         Ok(url::Host::Domain(d)) => d,

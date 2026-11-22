@@ -64,22 +64,30 @@ impl Session {
         }
     }
 
+    pub(super) fn check_https_only(&self, url: &url::Url) -> Result<()> {
+        if self.inner.inputs.https_only
+            && crate::wire::Scheme::of(url) != Some(crate::wire::Scheme::Https)
+        {
+            return Err(Error::config("https_only session rejected non-HTTPS URL"));
+        }
+        Ok(())
+    }
+
     pub(crate) fn send_with_policy<'a>(
         &'a self,
         req: Prepared<'a>,
         protocol: Protocol,
     ) -> impl Future<Output = Result<Box<TransportResponse>>> + 'a {
-        if self.inner.inputs.https_only
-            && crate::wire::Scheme::of(req.url) != Some(crate::wire::Scheme::Https)
-        {
-            return Either::Left(std::future::ready(Err(Error::config(
-                "https_only session rejected non-HTTPS URL",
-            ))));
+        if let Err(err) = self.check_https_only(req.url) {
+            return Either::Left(std::future::ready(Err(err)));
         }
         Either::Right(match &self.inner.cache {
-            Some(cache) if protocol == self.inner.inputs.protocol_policy => {
-                Either::Left(Box::pin(self.send_cached(req, cache, protocol)))
-            }
+            Some(cache) if protocol == self.inner.inputs.protocol_policy => Either::Left(
+                Either::Left(Box::pin(self.send_cached(req, cache, protocol))),
+            ),
+            Some(cache) if !crate::wire::is_safe(req.method) => Either::Left(Either::Right(
+                Box::pin(self.send_invalidating(req, cache, protocol)),
+            )),
             _ => Either::Right(self.send_transport(req, protocol)),
         })
     }

@@ -49,14 +49,29 @@ where
         let cleanup = key.clone();
         let open = open();
         let handle = tokio::spawn(async move {
-            let value = open.await;
-            lock(&registry).remove(&cleanup);
-            value
+            let _guard = RemoveOnDrop {
+                registry,
+                key: Some(cleanup),
+            };
+            open.await
         });
         let shared = async move { handle.await.unwrap_or_else(panicked) }
             .boxed()
             .shared();
         map.insert(key.clone(), shared.clone());
         shared
+    }
+}
+
+struct RemoveOnDrop<K: Hash + Eq, V> {
+    registry: Arc<Mutex<HashMap<K, Joined<V>>>>,
+    key: Option<K>,
+}
+
+impl<K: Hash + Eq, V> Drop for RemoveOnDrop<K, V> {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            lock(&self.registry).remove(&key);
+        }
     }
 }

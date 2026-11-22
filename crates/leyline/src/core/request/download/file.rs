@@ -52,12 +52,13 @@ pub(super) struct Partial {
     pub(super) target: PathBuf,
     data_path: PathBuf,
     metadata_path: PathBuf,
-    _lock: File,
+    lock_path: PathBuf,
     data: Mutex<Data>,
 }
 
 struct Data {
     file: File,
+    lock: Option<File>,
     metadata: Option<Metadata>,
     written: u64,
     checkpointed: Instant,
@@ -67,7 +68,8 @@ impl Partial {
     pub(super) fn open(target: PathBuf, request: [u8; 32], resume: bool) -> Result<Self> {
         let data_path = sidecar(&target, ".leyline.part")?;
         let metadata_path = sidecar(&target, ".leyline.part.json")?;
-        let locked = open(&sidecar(&target, ".leyline.lock")?)?;
+        let lock_path = sidecar(&target, ".leyline.lock")?;
+        let locked = open(&lock_path)?;
         locked.try_lock().map_err(|error| {
             Error::new(Kind::Io)
                 .with_message("download target is locked")
@@ -93,9 +95,10 @@ impl Partial {
             target,
             data_path,
             metadata_path,
-            _lock: locked,
+            lock_path,
             data: Mutex::new(Data {
                 file,
+                lock: Some(locked),
                 metadata,
                 written,
                 checkpointed: Instant::now(),
@@ -177,12 +180,15 @@ impl Partial {
         self.checkpoint_locked(&mut data)?;
         waiting.check()?;
         atomic::commit(&self.data_path, &self.target)?;
-        match std::fs::remove_file(&self.metadata_path) {
+        let result = match std::fs::remove_file(&self.metadata_path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(Error::from(error)
                 .with_message("download committed but removing its metadata failed")),
-        }
+        };
+        drop(data.lock.take());
+        drop(std::fs::remove_file(&self.lock_path));
+        result
     }
 }
 

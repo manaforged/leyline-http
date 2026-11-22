@@ -111,6 +111,10 @@ impl Retry {
         }
     }
 
+    pub(crate) fn is_configured(&self) -> bool {
+        self.configured
+    }
+
     pub(crate) fn for_robots(&self) -> Self {
         if self.configured {
             self.clone()

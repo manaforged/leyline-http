@@ -87,7 +87,7 @@ fn empty_source(status: StatusCode) -> Option<RobotsSource> {
 fn parse_capped(bytes: &[u8], cap: usize, agent: &str) -> Robots {
     let body = String::from_utf8_lossy(bytes);
     let whole = match bytes.len() >= cap {
-        true => body.rfind('\n').map_or("", |end| &body[..end]),
+        true => body.rfind(['\n', '\r']).map_or("", |end| &body[..end]),
         false => &body,
     };
     Robots::parse(whole, agent)

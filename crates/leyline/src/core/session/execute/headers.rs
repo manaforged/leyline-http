@@ -353,6 +353,5 @@ fn sends_origin(method: &Method, headers: &[HeaderPair]) -> bool {
 const CLIENT_HINT: &str = "sec-ch-ua";
 
 fn client_hint(name: &str) -> bool {
-    name.get(..CLIENT_HINT.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CLIENT_HINT))
+    crate::util::starts_with_ignore_ascii_case(name, CLIENT_HINT)
 }

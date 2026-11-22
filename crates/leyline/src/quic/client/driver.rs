@@ -250,7 +250,15 @@ pub(super) fn fail_all(
         pending.push_back(cmd);
     }
     for (_, mut stream) in streams.drain() {
-        stream.deliver_error(H3SendError::Closed, reason.clone());
+        if stream.head_sent && stream.peer_finished && stream.stalled.is_none() {
+            if stream.length_mismatch() {
+                stream.deliver_terminal(std::io::Error::other(LENGTH_MISMATCH));
+            }
+            stream.stream_tx = None;
+            stream.terminal = None;
+        } else {
+            stream.deliver_error(H3SendError::Closed, reason.clone());
+        }
     }
     for cmd in pending.drain(..) {
         reject_unsent(cmd, reason.clone());

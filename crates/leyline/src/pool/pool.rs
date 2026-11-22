@@ -79,7 +79,7 @@ impl Drop for Reaping {
     }
 }
 
-async fn reap(conns: Weak<Conns>, idle_timeout: Duration) {
+async fn reap(conns: Weak<Conns>, idle_timeout: Duration, max_lifetime: Option<Duration>) {
     let mut reaping = Reaping {
         conns,
         retired: false,
@@ -90,7 +90,7 @@ async fn reap(conns: Weak<Conns>, idle_timeout: Duration) {
         let Some(conns) = reaping.conns.upgrade() else {
             return;
         };
-        if conns.evict(idle_timeout, Instant::now(), true) {
+        if conns.evict(idle_timeout, max_lifetime, Instant::now(), true) {
             reaping.retired = true;
             return;
         }
@@ -109,7 +109,16 @@ struct Conns {
 }
 
 impl Conns {
-    fn evict(&self, idle_timeout: Duration, now: Instant, retire_when_empty: bool) -> bool {
+    fn evict(
+        &self,
+        idle_timeout: Duration,
+        max_lifetime: Option<Duration>,
+        now: Instant,
+        retire_when_empty: bool,
+    ) -> bool {
+        let alive = |opened: Instant| {
+            max_lifetime.is_none_or(|lifetime| now.duration_since(opened) < lifetime)
+        };
         let mut idle_evicted = 0u64;
         let mut empty = true;
         for shard in self.shards.iter() {
@@ -118,13 +127,16 @@ impl Conns {
             entries.h1.retain(|_, entry| {
                 let idle = entry.idle.queue();
                 let before = idle.len();
-                idle.retain(|(_, _, returned_at)| now.duration_since(*returned_at) < idle_timeout);
+                idle.retain(|(slot, _, returned_at)| {
+                    now.duration_since(*returned_at) < idle_timeout && alive(slot.opened_at)
+                });
                 idle_evicted += (before - idle.len()) as u64;
                 !idle.is_empty() || now.duration_since(entry.last_use) < idle_timeout
             });
             entries.mux.retain(|_, entry| {
-                let keep =
-                    !entry.is_dead() && now.duration_since(entry.last_use.get()) < idle_timeout;
+                let keep = !entry.is_dead()
+                    && now.duration_since(entry.last_use.get()) < idle_timeout
+                    && alive(entry.opened);
                 if !keep {
                     idle_evicted += 1;
                 }
@@ -384,7 +396,12 @@ impl Pool {
             now_ms + POOL_REAP_INTERVAL.as_millis() as u64,
             Ordering::Relaxed,
         );
-        conns.evict(self.config.idle_timeout, now, false);
+        conns.evict(
+            self.config.idle_timeout,
+            self.config.max_lifetime,
+            now,
+            false,
+        );
     }
 
     pub(crate) fn watch_idle(&self) {
@@ -398,7 +415,12 @@ impl Pool {
             return;
         }
         let idle_timeout = self.config.idle_timeout;
-        runtime.spawn(reap(Arc::downgrade(&self.conns), idle_timeout));
+        let max_lifetime = self.config.max_lifetime;
+        runtime.spawn(reap(
+            Arc::downgrade(&self.conns),
+            idle_timeout,
+            max_lifetime,
+        ));
     }
 
     pub(crate) fn stale_hit(

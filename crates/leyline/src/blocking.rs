@@ -44,10 +44,14 @@ impl Session {
 
     /// Runs `future` to completion on the calling thread and returns its output.
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
-        let outer = ACTIVE.replace(true);
-        let output = self.run(future);
-        ACTIVE.set(outer);
-        output
+        struct ActiveGuard(bool);
+        impl Drop for ActiveGuard {
+            fn drop(&mut self) {
+                ACTIVE.set(self.0);
+            }
+        }
+        let _guard = ActiveGuard(ACTIVE.replace(true));
+        self.run(future)
     }
 
     fn run<F: Future>(&self, future: F) -> F::Output {

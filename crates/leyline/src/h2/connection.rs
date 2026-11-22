@@ -213,10 +213,9 @@ impl PseudoHeaders {
         let connect = self.method_is(&http::Method::CONNECT);
         let is_connect = connect && self.protocol.is_none();
         if connect && self.authority.is_empty() {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "CONNECT requires :authority".into(),
-            });
+            return Err(H2Error::InvalidRequest(
+                "CONNECT requires :authority".into(),
+            ));
         }
 
         let mut list = [("", ""); 5];

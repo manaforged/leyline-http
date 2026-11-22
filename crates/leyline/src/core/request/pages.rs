@@ -34,7 +34,8 @@ struct Template {
 
 impl RequestBuilder {
     /// Sends the request and follows each `Link: rel="next"` header, yielding one response per page.
-    pub fn pages(self) -> impl Stream<Item = Result<Response>> + Send + Unpin + use<> {
+    pub fn pages(mut self) -> impl Stream<Item = Result<Response>> + Send + Unpin + use<> {
+        drop(self.prepare_in_place());
         let template = Template::of(&self);
         let visited = template.first.iter().cloned().collect();
         Pages {
@@ -73,6 +74,9 @@ impl Template {
             next.draft.carry.preset = preset;
         }
         next.draft.headers = self.headers.clone();
+        next.draft
+            .headers
+            .remove_where(|name| crate::util::is_body_header(name.as_str()));
         if !self
             .first
             .as_ref()

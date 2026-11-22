@@ -107,9 +107,11 @@ impl Jar {
         if !cookie.within_limits() {
             return false;
         }
+        let secure_origin = parse::secure_origin(url);
+        let mut jar = lock(&self.inner);
         if !cookie.secure
-            && !parse::secure_origin(url)
-            && lock(&self.inner)
+            && !secure_origin
+            && jar
                 .cookies
                 .values()
                 .flatten()
@@ -117,15 +119,13 @@ impl Jar {
         {
             return false;
         }
-
-        let mut jar = lock(&self.inner);
         if cookie.is_expired() {
             let domain = cookie.domain.to_lowercase();
-            return jar.expire(&domain, &cookie, parse::secure_origin(url));
+            return jar.expire(&domain, &cookie, secure_origin);
         }
         jar.put(cookie, |held, new| {
             new.creation_time = held.creation_time;
-            new.secure || !held.secure
+            secure_origin || !held.secure
         })
     }
 
@@ -258,7 +258,8 @@ impl Jar {
         jar.cookies
             .values()
             .flatten()
-            .find(|c| c.name == name && sent(c))
+            .filter(|c| c.name == name && sent(c))
+            .min_by(|a, b| send_order(a, b))
             .map(|c| c.value.clone())
     }
 

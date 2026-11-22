@@ -80,9 +80,12 @@ impl BlockingTcp {
             .set_nonblocking(true)
             .and_then(|()| recv(&self.stream, buf));
         let restored = self.stream.set_nonblocking(false);
-        match read.and(restored) {
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Poll::Pending,
-            other => Poll::Ready(other),
+        match (read, restored) {
+            (Err(e), Ok(())) if e.kind() == io::ErrorKind::WouldBlock => Poll::Pending,
+            (Err(e), Err(restore_err)) if e.kind() == io::ErrorKind::WouldBlock => {
+                Poll::Ready(Err(restore_err))
+            }
+            (read, restored) => Poll::Ready(read.and(restored)),
         }
     }
 }

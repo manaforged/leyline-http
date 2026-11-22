@@ -82,7 +82,7 @@ impl Session {
         }
     }
 
-    pub(in crate::core::session) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
+    pub(crate) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
         if !crate::core::hsts::HstsStore::applies(url) {
             return Arc::clone(url);
         }

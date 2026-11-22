@@ -26,13 +26,13 @@ pub(crate) fn base(document: &str) -> Option<String> {
 pub fn canonical(document: &str) -> Option<String> {
     Scanner::new(document)
         .filter(|tag| !tag.closing && Element::of(&tag.name) == Element::Link)
-        .find(|tag| {
+        .filter(|tag| {
             tag.attr("rel").is_some_and(|rel| {
                 rel.split_ascii_whitespace()
                     .any(|token| token.eq_ignore_ascii_case(CANONICAL))
             })
         })
-        .and_then(|tag| tag.attr("href").map(|href| href.trim().to_owned()))
+        .find_map(|tag| tag.attr("href").map(|href| href.trim().to_owned()))
 }
 
 impl Tag<'_> {

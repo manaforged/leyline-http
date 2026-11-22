@@ -68,10 +68,13 @@ impl Seen {
         if !connection {
             return seen;
         }
-        seen.connection(
-            map.get(http::header::CONNECTION)
-                .and_then(|v| v.to_str().ok()),
-        )
+        for value in map.get_all(http::header::CONNECTION) {
+            if let Ok(v) = value.to_str() {
+                seen.close |= has_token(v, "close");
+                seen.keep_alive |= has_token(v, "keep-alive");
+            }
+        }
+        seen
     }
 
     pub(crate) fn connection(mut self, value: Option<&str>) -> Self {

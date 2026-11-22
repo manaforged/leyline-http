@@ -58,9 +58,14 @@ impl RequestBuilder {
         let key = self.prepare_download()?;
         let options = self.draft.download.take().unwrap_or_default();
         let target = path.as_ref().to_path_buf();
-        let retry = self.draft.carry.retry_policy.clone();
+        let retry = std::mem::replace(
+            &mut self.draft.carry.retry_policy,
+            crate::core::retry::Retry::unset(),
+        );
+        let deadline = self.session.deadline(self.draft.carry.timeouts.as_ref());
         let mut attempt = 0;
         loop {
+            deadline.check()?;
             let result = self
                 .next_transfer()
                 .transfer_to(target.clone(), key, options.clone())
@@ -70,7 +75,14 @@ impl RequestBuilder {
             };
             let failed = Err(error);
             match retry.plan(&failed, attempt) {
-                RetryPlan::Backoff(wait) => tokio::time::sleep(wait).await,
+                RetryPlan::Backoff(wait) if wait < deadline.remaining() => {
+                    self.session
+                        .unless_shut_down(async {
+                            deadline.sleep(wait).await;
+                            Ok(())
+                        })
+                        .await?;
+                }
                 _ => return failed.map(|_| 0),
             }
             attempt += 1;
@@ -325,6 +337,9 @@ fn complete_prefix<'a>(old: Option<&'a Metadata>, response: &Response) -> Option
         old.offset > 0
             && old.total.is_none()
             && old.url == response.url().as_str()
+            && response
+                .header(header::ETAG.as_str())
+                .is_none_or(|got| old.etag.as_deref() == Some(got))
             && unsatisfied_total(response) == Some(old.offset)
     })
 }
@@ -346,16 +361,10 @@ fn remainder(response: &Response, old: &Metadata) -> Result<u64> {
 fn range(value: &str, offset: u64) -> Option<u64> {
     let (span, total) = value.strip_prefix("bytes ")?.split_once('/')?;
     let (start, end) = span.split_once('-')?;
-    if [start, end, total]
-        .into_iter()
-        .any(|number| !number.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return None;
-    }
     let (start, end, total) = (
-        start.parse::<u64>().ok()?,
-        end.parse::<u64>().ok()?,
-        total.parse::<u64>().ok()?,
+        crate::util::parse_ascii_u64(start)?,
+        crate::util::parse_ascii_u64(end)?,
+        crate::util::parse_ascii_u64(total)?,
     );
     (start == offset && start <= end && end.checked_add(1)? == total).then_some(total)
 }
@@ -364,10 +373,7 @@ fn unsatisfied_total(response: &Response) -> Option<u64> {
     let total = response
         .header(header::CONTENT_RANGE.as_str())?
         .strip_prefix("bytes */")?;
-    if total.is_empty() || !total.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    total.parse().ok()
+    crate::util::parse_ascii_u64(total)
 }
 
 fn strong_etag(value: &str) -> bool {

@@ -114,8 +114,8 @@ impl Parser {
             }
             "event" => self.event = value.into(),
             "id" if !value.contains('\0') => self.id = value.into(),
-            "retry" if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) => {
-                if let Ok(ms) = value.parse::<u64>() {
+            "retry" => {
+                if let Some(ms) = crate::util::parse_ascii_u64(value) {
                     self.wait = Duration::from_millis(ms);
                 }
             }

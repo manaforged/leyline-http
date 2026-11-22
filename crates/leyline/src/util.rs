@@ -129,9 +129,13 @@ pub(crate) fn has_token(value: &str, token: &str) -> bool {
         .any(|part| part.trim().eq_ignore_ascii_case(token))
 }
 
+pub(crate) fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
+    s.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+}
+
 pub(crate) fn is_body_header(name: &str) -> bool {
-    name.get(..CONTENT_PREFIX.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CONTENT_PREFIX))
+    starts_with_ignore_ascii_case(name, CONTENT_PREFIX)
         || name.eq_ignore_ascii_case("transfer-encoding")
 }
 
@@ -171,6 +175,12 @@ pub(crate) fn request_target(url: &url::Url) -> &str {
 pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+pub(crate) fn get_mut<T>(mutex: &mut std::sync::Mutex<T>) -> &mut T {
+    mutex
+        .get_mut()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
@@ -332,6 +342,13 @@ pub(crate) fn percent_decode(s: &str) -> String {
     percent_encoding::percent_decode_str(s)
         .decode_utf8_lossy()
         .into_owned()
+}
+
+pub(crate) fn parse_ascii_u64(value: &str) -> Option<u64> {
+    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    value.parse().ok()
 }
 
 pub(crate) fn delta_seconds(value: &str) -> Option<u64> {

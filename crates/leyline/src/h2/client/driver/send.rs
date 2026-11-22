@@ -77,13 +77,15 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         _ => None,
                     });
 
-            let closed = self
-                .streams
-                .get(stream_id)
-                .is_some_and(|a| match &a.send_body_input {
-                    SendBodyInput::Streaming { closed, .. } => *closed,
-                    SendBodyInput::None => false,
-                });
+            let (closed, has_error) =
+                self.streams
+                    .get(stream_id)
+                    .map_or((false, false), |a| match &a.send_body_input {
+                        SendBodyInput::Streaming { closed, error, .. } => {
+                            (*closed, error.is_some())
+                        }
+                        SendBodyInput::None => (false, false),
+                    });
 
             let already_closed = self
                 .streams
@@ -97,12 +99,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             if next_chunk.is_none()
                 && let Some(cause) = self.take_body_error(stream_id)
             {
-                RstStreamFrame {
+                self.reset_stream(
                     stream_id,
-                    error_code: ErrorCode::InternalError,
-                }
-                .encode(self.writer.out());
-                self.fail_stream(stream_id, H2Error::RequestBody(cause));
+                    H2Error::RequestBody(cause),
+                    ErrorCode::InternalError,
+                )?;
                 return Ok(());
             }
 
@@ -112,7 +113,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         stream_id,
                         chunk,
                         DataEnd::Streaming {
-                            producer_closed: closed,
+                            producer_closed: closed && !has_error,
                         },
                     )?;
                 }

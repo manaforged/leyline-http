@@ -33,7 +33,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     })
                 });
         if size > limit {
-            return Err(H2Error::Hpack(format!(
+            return Err(H2Error::InvalidRequest(format!(
                 "request header list of {size} bytes exceeds the peer's header list limit ({limit})"
             )));
         }

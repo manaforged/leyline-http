@@ -134,9 +134,10 @@ impl<'a> Pick<'a> for Scanned<'a> {
                 Some(coding) => *coding = Cow::Owned([&**coding, b",", &*value].concat()),
                 None => self.body.coding = Some(value),
             },
-            Known::Connection => {
-                self.connection.get_or_insert(value);
-            }
+            Known::Connection => match &mut self.connection {
+                Some(conn) => *conn = Cow::Owned([&**conn, b",", &*value].concat()),
+                None => self.connection = Some(value),
+            },
             Known::Fact(fact) => self.seen.note(fact),
         }
     }
@@ -212,7 +213,12 @@ impl BodyHeaders<'_> {
                 "response has multiple Content-Length headers (RFC 9112 §6.1)",
             ));
         }
-        if let Some(v) = self.length() {
+        if self.length.is_some() {
+            let Some(v) = self.length() else {
+                return Err(malformed(
+                    "response Content-Length contains non-ASCII bytes (RFC 9112 §8.6)",
+                ));
+            };
             if v.contains(',') {
                 return Err(malformed(
                     "response Content-Length contains multiple values",
@@ -224,13 +230,17 @@ impl BodyHeaders<'_> {
                 )));
             }
         }
-        let te = self.coding();
-        if te.is_some() && self.lengths > 0 {
+        if self.coding.is_some() && self.lengths > 0 {
             return Err(malformed(
                 "response has both Content-Length and Transfer-Encoding (RFC 9112 §6.1)",
             ));
         }
-        if let Some(te) = te {
+        if self.coding.is_some() {
+            let Some(te) = self.coding() else {
+                return Err(malformed(
+                    "response Transfer-Encoding contains non-ASCII bytes",
+                ));
+            };
             let last = te
                 .split(',')
                 .map(|t| t.trim())

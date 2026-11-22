@@ -1,0 +1,355 @@
+use std::net::TcpListener;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+use futures_util::StreamExt;
+use leyline::cookie::{Cookie, Jar};
+use leyline::testing::{Response, Server};
+use leyline::{Browser, Kind, Protocol, Proxy, Retry, Session};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[tokio::test]
+async fn download_to_does_not_multiply_retries_and_cleans_lock_file() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&hits);
+    let server = Server::http(move |_| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        Response::new(503).body("busy")
+    })
+    .await
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("leyline-dl-retry-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let target = dir.join("fail.bin");
+
+    let session = Session::builder().build().unwrap();
+    let err = session
+        .get(server.url("/file"))
+        .retry(Retry::new(2).backoff(Duration::from_millis(1), Duration::from_millis(2)))
+        .download_to(&target)
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), Kind::Status);
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+
+    let ok_server = Server::http(|_| Response::new(200).body("hello"))
+        .await
+        .unwrap();
+    let ok_target = dir.join("ok.bin");
+    let written = session
+        .get(ok_server.url("/ok"))
+        .download_to(&ok_target)
+        .await
+        .unwrap();
+    assert_eq!(written, 5);
+    assert!(!dir.join("ok.bin.leyline.lock").exists());
+    drop(std::fs::remove_dir_all(&dir));
+}
+
+#[tokio::test]
+async fn events_does_not_multiply_retries() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&hits);
+    let server = Server::http(move |_| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        Response::new(503).body("busy")
+    })
+    .await
+    .unwrap();
+
+    let session = Session::builder()
+        .retry(Retry::new(2).backoff(Duration::from_millis(1), Duration::from_millis(2)))
+        .build()
+        .unwrap();
+    let mut events = session
+        .get(server.url("/sse"))
+        .events()
+        .unwrap()
+        .retry(Retry::new(2).backoff(Duration::from_millis(1), Duration::from_millis(2)));
+    let err = events.next().await.unwrap().unwrap_err();
+    assert_eq!(err.kind(), Kind::Status);
+    assert_eq!(hits.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn autosave_does_not_panic_on_zero_or_max_duration() {
+    let dir = std::env::temp_dir().join(format!("leyline-autosave-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let session = Session::builder().build().unwrap();
+    session.autosave(dir.join("zero.json"), Duration::ZERO);
+    session.autosave(dir.join("max.json"), Duration::MAX);
+    session.shutdown().await;
+    drop(std::fs::remove_dir_all(&dir));
+}
+
+#[tokio::test]
+async fn protocol_override_mutation_still_invalidates_http_cache() {
+    let gets = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&gets);
+    let server = Server::http(move |req| {
+        if req.method() == "POST" {
+            return Response::new(200).body("updated");
+        }
+        let n = count.fetch_add(1, Ordering::SeqCst) + 1;
+        Response::new(200)
+            .header("cache-control", "max-age=60")
+            .body(format!("v{n}"))
+    })
+    .await
+    .unwrap();
+
+    let session = Session::builder().cache(1024 * 1024).build().unwrap();
+    assert_eq!(session.get(server.url("/item")).text().await.unwrap(), "v1");
+    assert_eq!(session.get(server.url("/item")).text().await.unwrap(), "v1");
+    session
+        .post(server.url("/item"))
+        .protocol(Protocol::Http1)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(session.get(server.url("/item")).text().await.unwrap(), "v2");
+    assert_eq!(gets.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn before_send_method_change_updates_retry_idempotency() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&hits);
+    let server = Server::http(move |_| {
+        seen.fetch_add(1, Ordering::SeqCst);
+        Response::new(503).body("busy")
+    })
+    .await
+    .unwrap();
+
+    let session = Session::builder()
+        .retry(Retry::new(2).backoff(Duration::from_millis(1), Duration::from_millis(2)))
+        .before_send(|req| {
+            *req.method_mut() = http::Method::POST;
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    let resp = session.get(server.url("/mutate")).send().await.unwrap();
+    assert_eq!(resp.status(), 503);
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn request_from_preserves_target_session_retry_when_unset() {
+    let hits = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&hits);
+    let server = Server::http(move |_| {
+        let n = seen.fetch_add(1, Ordering::SeqCst);
+        if n == 0 {
+            Response::new(503).body("retry")
+        } else {
+            Response::new(200).body("ok")
+        }
+    })
+    .await
+    .unwrap();
+
+    let plain = Session::builder().build().unwrap();
+    let retrying = Session::builder()
+        .retry(Retry::new(2).backoff(Duration::from_millis(1), Duration::from_millis(2)))
+        .build()
+        .unwrap();
+    let built = plain.get(server.url("/interop")).build().unwrap();
+    let body = retrying.request_from(built).text().await.unwrap();
+    assert_eq!(body, "ok");
+    assert_eq!(hits.load(Ordering::SeqCst), 2);
+}
+
+#[tokio::test]
+async fn custom_proxy_invalid_return_is_invoked_only_once() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&calls);
+    let session = Session::builder()
+        .proxy(Proxy::custom(move |_| {
+            seen.fetch_add(1, Ordering::SeqCst);
+            Some(Proxy::from("not a valid proxy url"))
+        }))
+        .build()
+        .unwrap();
+    let err = session.get("http://127.0.0.1:1/").send().await.unwrap_err();
+    assert_eq!(err.kind(), Kind::Config);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[cfg(feature = "websocket")]
+#[tokio::test]
+async fn websocket_rejects_plaintext_ws_when_https_only() {
+    let session = Session::builder().https_only(true).build().unwrap();
+    let err = session
+        .get("ws://127.0.0.1:1/ws")
+        .websocket()
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), Kind::Request);
+}
+
+#[tokio::test]
+async fn pages_tracks_query_url_and_strips_post_body_headers() {
+    let server = Server::http(|req| {
+        if req.target() == "/items?page=1" {
+            Response::new(200)
+                .header("link", "</items>; rel=\"next\"")
+                .body("p1")
+        } else {
+            let ct = req.header("content-type").unwrap_or("none");
+            Response::new(200).body(format!("p2:{ct}"))
+        }
+    })
+    .await
+    .unwrap();
+
+    let session = Session::builder().build().unwrap();
+    let mut pages = session
+        .post(server.url("/items"))
+        .query([("page", "1")])
+        .header("content-type", "application/json")
+        .body("{}")
+        .pages();
+    let first = pages.next().await.unwrap().unwrap().text().await.unwrap();
+    let second = pages.next().await.unwrap().unwrap().text().await.unwrap();
+    assert_eq!(first, "p1");
+    assert_eq!(second, "p2:none");
+    assert!(pages.next().await.is_none());
+}
+
+#[test]
+fn ja4_r_layering_accepts_padding_and_clears_pre_shared_key() {
+    let ja4_r = "t13d1516h2_002f,0035,009c,009d,1301,1302,1303,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0015,0017,001b,0023,002b,002d,0033,ff01_0403,0804,0401,0503,0805,0501,0806,0601";
+    let session = Session::builder()
+        .browser(Browser::Chrome154)
+        .ja4_r(ja4_r)
+        .build()
+        .unwrap();
+    #[cfg(feature = "bench-internals")]
+    {
+        let parsed =
+            leyline::internals::BrowserProfile::from_toml(session.profile().unwrap()).unwrap();
+        assert!(parsed.tls.padding);
+        assert!(!parsed.tls.pre_shared_key);
+    }
+    #[cfg(not(feature = "bench-internals"))]
+    assert!(session.profile().is_some());
+}
+
+#[test]
+fn cookie_rfc6265_edge_cases() {
+    let expired = Cookie::parse("https://example.com/", "a=1; Max-Age=0").unwrap();
+    assert!(expired.is_expired());
+    let neg = Cookie::parse("https://example.com/", "a=1; Max-Age=-5").unwrap();
+    assert!(neg.is_expired());
+
+    let jar = Jar::new();
+    jar.set("https://example.com/", "a", "1");
+    jar.store("https://example.com/", "a=1; Max-Age=0");
+    assert_eq!(jar.get("https://example.com/", "a"), None);
+
+    assert!(Cookie::parse("http://127.0.0.1/", "a=1; Domain=evil.com").is_none());
+
+    let host_only = Cookie::parse("https://example.com/", "sid=1").unwrap();
+    let jar2 = Jar::new();
+    jar2.insert("https://sub.example.com/", host_only);
+    assert!(jar2.is_empty());
+
+    let jar3 = Jar::new();
+    jar3.store("https://example.com/", "s=1; Secure");
+    jar3.store("https://example.com/", "s=2");
+    assert_eq!(jar3.get("https://example.com/", "s").as_deref(), Some("2"));
+
+    let jar4 = Jar::new();
+    jar4.store("https://example.com/", "p=root; Path=/");
+    jar4.store("https://example.com/app", "p=app; Path=/app");
+    assert_eq!(
+        jar4.get("https://example.com/app/page", "p").as_deref(),
+        Some("app")
+    );
+
+    let jar5 = Jar::new();
+    jar5.store("https://example.com/", "slot=1");
+    jar5.store("https://example.com/", "slot=2; Domain=example.com");
+    assert_eq!(jar5.len(), 1);
+    assert_eq!(
+        jar5.get("https://example.com/", "slot").as_deref(),
+        Some("2")
+    );
+}
+
+#[tokio::test]
+async fn testing_https_on_ipv6_loopback_verifies_san() {
+    let Ok(listener) = TcpListener::bind("[::1]:0") else {
+        return;
+    };
+    let server = Server::https_on(listener, |_| Response::new(200).body("v6")).unwrap();
+    let session = Session::builder().tls(server.tls()).build().unwrap();
+    let text = session.get(server.url("/")).text().await.unwrap();
+    assert_eq!(text, "v6");
+}
+
+#[tokio::test]
+async fn h1_non_ascii_framing_and_multi_connection_close_and_chunked_excess() {
+    async fn serve_raw(payload: &'static [u8]) -> (String, tokio::task::JoinHandle<usize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            let mut accepts = 0usize;
+            while let Ok((mut sock, _)) = listener.accept().await {
+                accepts += 1;
+                let mut buf = [0u8; 1024];
+                drop(sock.read(&mut buf).await);
+                drop(sock.write_all(payload).await);
+                drop(sock.flush().await);
+                if accepts == 2 {
+                    break;
+                }
+            }
+            accepts
+        });
+        (format!("http://{addr}/"), handle)
+    }
+
+    let session = Session::builder().build().unwrap();
+
+    let (url, h) = serve_raw(b"HTTP/1.1 200 OK\r\nContent-Length: 5\x80\r\n\r\nhello").await;
+    session.get(&url).send().await.unwrap_err();
+    h.abort();
+
+    let (url, h) = serve_raw(
+        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nTransfer-Encoding: chunked\x80\r\n\r\nhello",
+    )
+    .await;
+    session.get(&url).send().await.unwrap_err();
+    h.abort();
+
+    let (url, h) = serve_raw(
+        b"HTTP/1.1 200 OK\r\nConnection: x-custom\r\nConnection: close\r\nContent-Length: 2\r\n\r\nok",
+    )
+    .await;
+    assert_eq!(session.get(&url).text().await.unwrap(), "ok");
+    assert_eq!(session.get(&url).text().await.unwrap(), "ok");
+    assert_eq!(h.await.unwrap(), 2);
+
+    let (url, h) = serve_raw(
+        b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\nok\r\n0\r\n\r\nSMUGGLED",
+    )
+    .await;
+    assert_eq!(session.get(&url).text().await.unwrap(), "ok");
+    assert_eq!(session.get(&url).text().await.unwrap(), "ok");
+    assert_eq!(h.await.unwrap(), 2);
+}
+
+#[cfg(feature = "html")]
+#[test]
+fn html_canonical_skips_hrefless_link() {
+    let doc = r#"<link rel="canonical"><link rel="canonical" href="https://example.com/ok">"#;
+    assert_eq!(
+        leyline::html::canonical(doc).as_deref(),
+        Some("https://example.com/ok")
+    );
+}

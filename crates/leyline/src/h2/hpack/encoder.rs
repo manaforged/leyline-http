@@ -10,7 +10,7 @@ use super::table::{self, DynamicTable};
 #[derive(Default)]
 pub struct Encoder {
     dynamic: DynamicTable,
-    pending_size_update: Option<usize>,
+    pending_size_update: Option<(usize, usize)>,
     entries: HashMap<u64, u64>,
     names: HashMap<u64, u64>,
     block: Vec<u8>,
@@ -30,7 +30,10 @@ impl Encoder {
 
     pub fn set_max_table_size(&mut self, size: usize) {
         self.dynamic.set_max_size(size);
-        self.pending_size_update = Some(size);
+        self.pending_size_update = Some(match self.pending_size_update {
+            Some((min, _)) => (min.min(size), size),
+            None => (size, size),
+        });
     }
 
     #[cfg(any(test, feature = "bench-internals"))]
@@ -42,8 +45,11 @@ impl Encoder {
         let mut dst = std::mem::take(&mut self.block);
         dst.clear();
 
-        if let Some(size) = self.pending_size_update.take() {
-            integer::encode(size, 5, 0x20, &mut dst);
+        if let Some((min, latest)) = self.pending_size_update.take() {
+            if min < latest {
+                integer::encode(min, 5, 0x20, &mut dst);
+            }
+            integer::encode(latest, 5, 0x20, &mut dst);
         }
 
         for (slot, (name, value)) in headers.enumerate() {

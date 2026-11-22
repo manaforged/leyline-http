@@ -189,14 +189,42 @@ impl Session {
         finish(cache, key, &request, response, lookup)
     }
 
+    pub(super) async fn send_invalidating(
+        &self,
+        req: Prepared<'_>,
+        cache: &Cache,
+        protocol: Protocol,
+    ) -> Result<Box<TransportResponse>> {
+        let method = req.method.clone();
+        let uri = req.url[..url::Position::AfterQuery].to_owned();
+        let response = self.send_transport(req, protocol).await?;
+        self.invalidate_target(cache, &method, &uri, &response);
+        Ok(response)
+    }
+
     fn invalidate(&self, cache: &Cache, request: &Request<()>, response: &TransportResponse) {
-        if crate::wire::is_safe(request.method())
+        self.invalidate_target(
+            cache,
+            request.method(),
+            &request.uri().to_string(),
+            response,
+        );
+    }
+
+    fn invalidate_target(
+        &self,
+        cache: &Cache,
+        method: &Method,
+        uri: &str,
+        response: &TransportResponse,
+    ) {
+        if crate::wire::is_safe(method)
             || !(response.status.is_success() || response.status.is_redirection())
         {
             return;
         }
-        cache.remove(&request.uri().to_string());
-        let Ok(base) = url::Url::parse(&request.uri().to_string()) else {
+        cache.remove(uri);
+        let Ok(base) = url::Url::parse(uri) else {
             return;
         };
         for name in [header::LOCATION, header::CONTENT_LOCATION] {
@@ -255,8 +283,7 @@ fn only_cached(request: &Request<()>) -> bool {
         .get_all(header::CACHE_CONTROL)
         .iter()
         .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(','))
-        .any(|value| value.trim().eq_ignore_ascii_case("only-if-cached"))
+        .any(|v| crate::util::has_token(v, "only-if-cached"))
 }
 
 fn finish(

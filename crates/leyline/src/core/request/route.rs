@@ -11,6 +11,7 @@ pub(super) struct Route<'a> {
     pool: Option<&'a ProxyPool>,
     policy: &'a Retry,
     last: Option<usize>,
+    last_method: Option<http::Method>,
 }
 
 impl<'a> Route<'a> {
@@ -23,16 +24,22 @@ impl<'a> Route<'a> {
             pool,
             policy,
             last: None,
+            last_method: None,
         }
+    }
+
+    pub(super) fn last_method(&self) -> Option<&http::Method> {
+        self.last_method.as_ref()
     }
 
     pub(super) async fn send(&mut self, mut this: Box<Draft>) -> Result<Response> {
         if let Some(hook) = self.session.before_send() {
             this.hooked(hook)?;
         }
+        self.last_method = Some(this.method.clone());
         let origin = self.pool.and(this.url()).and_then(Origin::of);
         let lease = self.lease(&mut this, origin.as_ref());
-        let used = self.used_proxy(&mut this);
+        let used = self.used_proxy(&mut this)?;
         crate::trace::note_proxy(used.as_deref());
         let leased = match &lease {
             Some(lease) => Some(lease.session(self.session)?),
@@ -69,18 +76,19 @@ impl<'a> Route<'a> {
             });
     }
 
-    fn used_proxy(&self, this: &mut Draft) -> Option<String> {
+    fn used_proxy(&self, this: &mut Draft) -> Result<Option<String>> {
+        let Some(url) = this.url.as_ref() else {
+            return Ok(None);
+        };
+        let upgraded = self.session.hsts_upgrade(url);
         let carry = &mut this.carry;
-        let chosen = self
-            .session
-            .proxy_for(this.url.as_deref()?, carry.proxy.as_ref());
-        let used = chosen.ok()?;
+        let used = self.session.proxy_for(&upgraded, carry.proxy.as_ref())?;
         let name = used.as_deref().map(|proxy| proxy.as_str().to_owned());
         if let Some(std::borrow::Cow::Owned(proxy)) = used {
             carry.first_hop = Some(Some(proxy));
         } else if name.is_none() && self.session.proxy_is_custom(carry.proxy.as_ref()) {
             carry.first_hop = Some(None);
         }
-        name
+        Ok(name)
     }
 }

@@ -103,8 +103,10 @@ impl Drain<'_> {
                 self.streams.remove(&id);
                 break;
             }
-            stream.body_bytes_seen += n;
-            stream.body.extend_from_slice(&self.scratch[..n]);
+            if crate::wire::has_body(stream.head_request, stream.status.as_u16()) {
+                stream.body_bytes_seen += n;
+                stream.body.extend_from_slice(&self.scratch[..n]);
+            }
         }
     }
 

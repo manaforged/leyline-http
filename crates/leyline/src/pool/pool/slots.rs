@@ -81,6 +81,7 @@ impl Pool {
         );
         drop(entries);
         drop(evicted);
+        self.evict_excess_across_shards();
         self.conns.counters.add(Counter::Installs, 1);
         self.watch_idle();
         out
@@ -140,7 +141,32 @@ impl Pool {
         );
         drop(entries);
         drop(evicted);
+        self.evict_excess_across_shards();
         true
+    }
+
+    fn evict_excess_across_shards(&self) {
+        let shards = &self.conns.shards;
+        if shards.over_limit() == 0 {
+            return;
+        }
+        let mut evicted = Vec::new();
+        for shard in shards.iter() {
+            let excess = shards.over_limit();
+            if excess == 0 {
+                break;
+            }
+            let mut entries = write(&shard.entries);
+            let removed = entries.evict_lru(excess);
+            if !removed.is_empty() {
+                shards.removed(removed.len());
+                self.conns
+                    .counters
+                    .add(Counter::EvictionsLru, removed.len() as u64);
+                evicted.extend(removed);
+            }
+        }
+        drop(evicted);
     }
 
     fn past_lifetime(&self, opened: Instant, now: Instant) -> bool {

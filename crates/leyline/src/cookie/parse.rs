@@ -65,6 +65,9 @@ fn compute_expiry(
     max_age: Option<Duration>,
     expires_after_epoch: Option<Duration>,
 ) -> Option<SystemTime> {
+    if max_age == Some(Duration::ZERO) {
+        return Some(SystemTime::UNIX_EPOCH);
+    }
     let requested = match max_age {
         Some(age) => now.checked_add(age),
         None => epoch_plus(expires_after_epoch?),
@@ -140,7 +143,11 @@ pub(crate) fn admit_cookie(cookie: &Cookie, request_url: &url::Url) -> Option<Co
     let own_host = request_url
         .host_str()
         .is_some_and(|host| host.eq_ignore_ascii_case(&cookie.domain));
-    if !(cookie.host_only && own_host) {
+    if cookie.host_only {
+        if !cookie.domain.is_empty() && !own_host {
+            return None;
+        }
+    } else {
         attrs.set("domain", Some(cookie.domain.as_str()));
     }
     let mut admitted = admit(name, value, attrs, request_url)?;
@@ -164,6 +171,13 @@ fn admit(
         request_url.host(),
         Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
     ) {
+        if let Some(d) = attrs.domain.as_deref()
+            && !request_url
+                .host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case(d))
+        {
+            return None;
+        }
         None
     } else {
         attrs.domain

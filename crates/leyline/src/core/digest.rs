@@ -107,10 +107,8 @@ const SCHEME: &str = "Digest ";
 
 pub(crate) fn parse_challenge(header: &str) -> Result<Challenge> {
     let trimmed = header.trim();
-    let body = trimmed
-        .get(..SCHEME.len())
-        .filter(|scheme| scheme.eq_ignore_ascii_case(SCHEME))
-        .map(|_| &trimmed[SCHEME.len()..])
+    let body = crate::util::starts_with_ignore_ascii_case(trimmed, SCHEME)
+        .then(|| &trimmed[SCHEME.len()..])
         .ok_or_else(|| Error::new(Kind::Request).with_message("digest: not a Digest challenge"))?;
 
     let mut ch = Challenge::default();
@@ -222,12 +220,7 @@ impl Challenge {
 }
 
 pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
-    for token in qop.split(',') {
-        if token.trim().eq_ignore_ascii_case("auth") {
-            return Some("auth");
-        }
-    }
-    None
+    crate::util::has_token(qop, "auth").then_some("auth")
 }
 
 pub(crate) const DIGEST_NONCE_CACHE_CAP: usize = 4096;

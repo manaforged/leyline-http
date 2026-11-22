@@ -135,14 +135,16 @@ fn secure_cookie_requires_secure_origin() {
 }
 
 #[test]
-fn ip_host_ignores_domain_attribute() {
+fn ip_host_rejects_mismatched_domain_and_keeps_exact_ip_host_only() {
     let url = test_url("https://1.2.3.4/");
-    let c = parse_set_cookie("k=v; Domain=3.4; Path=/", &url).expect("stored");
+    assert!(parse_set_cookie("k=v; Domain=3.4; Path=/", &url).is_none());
+    let c = parse_set_cookie("k=v; Domain=1.2.3.4; Path=/", &url).expect("stored");
     assert!(c.host_only, "IP-host cookie must be host-only");
     assert_eq!(c.domain, "1.2.3.4");
 
     let url6 = test_url("https://[2001:db8::1]/");
-    let c6 = parse_set_cookie("k=v; Domain=db8::1; Path=/", &url6).expect("stored");
+    assert!(parse_set_cookie("k=v; Domain=db8::1; Path=/", &url6).is_none());
+    let c6 = parse_set_cookie("k=v; Domain=[2001:db8::1]; Path=/", &url6).expect("stored");
     assert!(c6.host_only);
 }
 
@@ -158,7 +160,7 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     );
     assert_eq!(
         jar.get(url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
-        Some("v".into())
+        None
     );
 }
 

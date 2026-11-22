@@ -176,7 +176,6 @@ async fn run_attempts(
     if retry_policy.is_none() {
         return (counted(route.send(attempt).await, 1), 1);
     }
-    let retryable_method = retry_policy.allows(&attempt.method);
     let replay = attempt.body.try_clone();
     let mut rewind = Rewind::wrap(&mut attempt.body);
     let base_headers = attempt.headers.clone();
@@ -191,6 +190,7 @@ async fn run_attempts(
         this.carry.retrying = n > 0;
         let result = route.send(this).await;
 
+        let retryable_method = retry_policy.allows(route.last_method().unwrap_or(&attempt.method));
         let body_retryable = || replay.is_some() || rewind.as_mut().is_some_and(Rewind::reclaim);
         let sleep = match retry_policy.plan_resend(&result, n, retryable_method, body_retryable) {
             RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,

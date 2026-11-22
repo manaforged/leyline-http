@@ -49,7 +49,9 @@ impl Draft {
         if let Some(timeouts) = carry.timeouts.take() {
             options.insert(timeouts);
         }
-        options.insert(std::mem::take(&mut carry.retry_policy));
+        if carry.retry_policy.is_configured() {
+            options.insert(std::mem::replace(&mut carry.retry_policy, Retry::unset()));
+        }
         if let Some(redirect) = carry.redirect.take() {
             options.insert(redirect);
         }

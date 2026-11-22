@@ -104,7 +104,7 @@ impl Tab {
         let builder = self
             .request(Method::POST, url, RequestKind::FormNavigate)
             .form(fields);
-        self.navigate(builder).await
+        self.navigate(self.trusted(builder)).await
     }
 
     /// Submits a parsed HTML form with its method and encoding and navigates the tab to the response.

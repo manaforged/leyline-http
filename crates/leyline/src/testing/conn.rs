@@ -232,7 +232,8 @@ fn head(response: &Response) -> String {
         name.eq_ignore_ascii_case("content-length")
             || name.eq_ignore_ascii_case("transfer-encoding")
     });
-    if !framed {
+    let no_body = (100..200).contains(&response.status) || response.status == 204;
+    if !framed && !no_body {
         match response.chunks {
             Some(_) => head.push_str("transfer-encoding: chunked\r\n"),
             None => head.push_str(&format!("content-length: {}\r\n", response.body.len())),

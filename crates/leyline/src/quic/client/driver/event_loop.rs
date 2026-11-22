@@ -172,6 +172,9 @@ impl H3Loop {
 
     fn on_datagram(&mut self, recv: io::Result<usize>) -> Result<(), String> {
         let len = recv.map_err(|e| format!("udp recv: {e}"))?;
+        if len == 0 {
+            return Ok(());
+        }
         let recv_info = quiche::RecvInfo {
             from: self.peer_addr,
             to: self.local_addr,

@@ -72,6 +72,9 @@ pub enum H2Error {
 
     #[error("peer did not advertise SETTINGS_ENABLE_CONNECT_PROTOCOL=1")]
     NoExtendedConnect,
+
+    #[error("invalid request: {0}")]
+    InvalidRequest(String),
 }
 
 fn copy_io(io: &std::io::Error) -> std::io::Error {
@@ -99,6 +102,7 @@ impl H2Error {
             Self::RequestBody(io) => Self::RequestBody(copy_io(io)),
             Self::BodyLimit(limit) => Self::BodyLimit(*limit),
             Self::NoExtendedConnect => Self::NoExtendedConnect,
+            Self::InvalidRequest(message) => Self::InvalidRequest(message.clone()),
         }
     }
 

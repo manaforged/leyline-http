@@ -231,7 +231,7 @@ impl Cookie {
     }
 
     pub(crate) fn same_slot(&self, other: &Cookie) -> bool {
-        self.name == other.name && self.path == other.path && self.host_only == other.host_only
+        self.name == other.name && self.path == other.path
     }
 
     pub(crate) fn shadows_secure(&self, existing: &Cookie) -> bool {

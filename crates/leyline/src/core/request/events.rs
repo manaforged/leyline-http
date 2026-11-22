@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -140,7 +140,7 @@ impl Events {
     }
     /// Sets the id of the last event already received, sent as `Last-Event-ID` on the first connection and replaced by each newer event id on reconnection.
     pub fn last_event_id(mut self, id: impl Into<String>) -> Self {
-        let state = self.state.get_mut().unwrap_or_else(PoisonError::into_inner);
+        let state = crate::util::get_mut(&mut self.state);
         if let State::Ready(source) = state {
             source.parser = Parser::new(id.into(), source.parser.max, source.parser.wait);
         }
@@ -155,11 +155,7 @@ impl Events {
 impl Stream for Events {
     type Item = Result<Event>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let state = self
-            .get_mut()
-            .state
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
+        let state = crate::util::get_mut(&mut self.get_mut().state);
         let mut future = match std::mem::replace(state, State::Done) {
             State::Ready(source) => {
                 Box::pin(source.advance()) as Pin<Box<dyn Future<Output = Step> + Send>>
@@ -212,6 +208,7 @@ impl Source {
         let mut draft = self
             .request
             .again(Body::default(), self.request.headers.clone());
+        draft.carry.retry_policy = Retry::unset();
         if self.parser.last_id.is_empty() {
             draft.headers.remove_all("last-event-id");
         } else {

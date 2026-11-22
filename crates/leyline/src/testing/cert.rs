@@ -23,15 +23,15 @@ pub(super) struct TestTls {
     pub(super) ca_der: Vec<u8>,
 }
 
-pub(super) fn build() -> io::Result<TestTls> {
-    build_inner().map_err(io::Error::other)
+pub(super) fn build(extra_ip: Option<std::net::IpAddr>) -> io::Result<TestTls> {
+    build_inner(extra_ip).map_err(io::Error::other)
 }
 
-fn build_inner() -> Result<TestTls, ErrorStack> {
+fn build_inner(extra_ip: Option<std::net::IpAddr>) -> Result<TestTls, ErrorStack> {
     let ca_key = new_key()?;
     let ca = ca_cert(&ca_key)?;
     let leaf_key = new_key()?;
-    let leaf = leaf_cert(&ca, &ca_key, &leaf_key)?;
+    let leaf = leaf_cert(&ca, &ca_key, &leaf_key, extra_ip)?;
     let ca_der = ca.to_der()?;
     Ok(TestTls {
         acceptor: acceptor(&leaf_key, &leaf, ca)?,
@@ -52,6 +52,7 @@ fn leaf_cert(
     ca: &X509,
     ca_key: &PKey<Private>,
     leaf_key: &PKey<Private>,
+    extra_ip: Option<std::net::IpAddr>,
 ) -> Result<X509, ErrorStack> {
     let mut leaf = base_cert(&name(LEAF_COMMON_NAME)?, ca.subject_name(), leaf_key)?;
     let mut san = SubjectAlternativeName::new();
@@ -60,6 +61,12 @@ fn leaf_cert(
     }
     for ip in LEAF_IP_ADDRESSES {
         san.ip(ip);
+    }
+    if let Some(ip) = extra_ip {
+        let ip_str = ip.to_string();
+        if !LEAF_IP_ADDRESSES.contains(&ip_str.as_str()) {
+            san.ip(&ip_str);
+        }
     }
     let san = san.build(&leaf.x509v3_context(Some(ca), None))?;
     leaf.append_extension(&san)?;

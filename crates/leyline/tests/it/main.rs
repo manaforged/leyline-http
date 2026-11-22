@@ -14,6 +14,7 @@ mod http_support {
 mod tls_support;
 
 mod accounts_and_forms;
+mod audit_regressions;
 mod body_cap;
 mod cfnetwork_live;
 mod claim_guard;

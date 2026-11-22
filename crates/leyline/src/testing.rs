@@ -71,11 +71,7 @@ impl Server {
     where
         F: Fn(&Request) -> Response + Send + Sync + 'static,
     {
-        Self::start(
-            std::net::TcpListener::bind(BIND_ADDR)?,
-            Arc::new(handler),
-            Some(cert::build()?),
-        )
+        Self::https_on(std::net::TcpListener::bind(BIND_ADDR)?, handler)
     }
 
     /// Starts an HTTPS server with a fresh self-signed certificate on a listener the caller already bound; it needs no runtime, so synchronous code can call it.
@@ -83,7 +79,8 @@ impl Server {
     where
         F: Fn(&Request) -> Response + Send + Sync + 'static,
     {
-        Self::start(listener, Arc::new(handler), Some(cert::build()?))
+        let ip = listener.local_addr()?.ip();
+        Self::start(listener, Arc::new(handler), Some(cert::build(Some(ip))?))
     }
 
     fn start(

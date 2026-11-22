@@ -233,9 +233,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     fn settle_data(&mut self, stream_id: u32, end_stream: bool) -> Result<(), H2Error> {
         self.maybe_top_up_conn_window();
-        self.maybe_top_up_stream_window(stream_id);
         if end_stream {
             self.finish_remote(stream_id)?;
+        } else {
+            self.maybe_top_up_stream_window(stream_id);
         }
         Ok(())
     }

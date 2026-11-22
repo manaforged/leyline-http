@@ -177,7 +177,7 @@ pub(super) async fn stream_chunked_into(
                     return Ok(false);
                 }
             }
-            Step::Done => return Ok(true),
+            Step::Done => return Ok(buf.is_empty()),
         }
     }
 }

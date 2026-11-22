@@ -37,8 +37,11 @@ where
     };
     settings_frame.encode(writer.out());
 
-    if config.initial_connection_window_size > DEFAULT_WINDOW_SIZE {
-        let increment = config.initial_connection_window_size - DEFAULT_WINDOW_SIZE;
+    let initial_conn_window = config
+        .initial_connection_window_size
+        .clamp(DEFAULT_WINDOW_SIZE, i32::MAX as u32);
+    if initial_conn_window > DEFAULT_WINDOW_SIZE {
+        let increment = initial_conn_window - DEFAULT_WINDOW_SIZE;
         WindowUpdateFrame {
             stream_id: 0,
             increment,
@@ -78,7 +81,7 @@ where
         peer_greeted: false,
         local_settings_acked: false,
         conn_send_window: initial_send_window,
-        conn_recv_window: config.initial_connection_window_size as i64,
+        conn_recv_window: initial_conn_window as i64,
         streams: super::stream_map::StreamMap::new(Arc::clone(&streams)),
         next_stream_id: config.limits().first_stream_id,
         rst_flood: FloodGuard::new(
