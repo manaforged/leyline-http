@@ -14,7 +14,7 @@ For new code, start with the [five main types](AGENTS.md#the-five-types). The [u
 
 ## Breaking changes after 0.2.0
 
-These changes clean up early `0.2` API rough edges as Leyline moves toward a stable `1.0` surface — hiding raw struct fields behind getters/builders, aligning argument order across sibling methods, and fixing naming typos without adding new top-level types. Every changed call maps 1-to-1 below.
+These changes clean up early `0.2` API rough edges as Leyline moves toward a stable `1.0` surface — hiding raw struct fields behind getters/builders, aligning argument order across sibling methods, and fixing naming typos while keeping the same five core types (`Session`, `Tab`, `RequestBuilder`, `Response`, `Error`). Every changed call maps 1-to-1 below.
 
 | 0.2.0 | Now |
 | --- | --- |
@@ -27,9 +27,11 @@ These changes clean up early `0.2` API rough edges as Leyline moves toward a sta
 | `cookie.name`, `.value`, `.domain`, `.path`, `.secure`, `.http_only`, `.same_site`, `.expires`, `.creation_time`, `.host_only` | the getter of the same name, such as `cookie.name()` |
 | `let mut c = Cookie::new(n, v); c.path = p; c.secure = true;` | `Cookie::builder(n, v).path(p).secure(true).build()`; `.domain(d)` makes the cookie match subdomains of `d`, and `host_only` has no setter |
 | `jar.set(&"https://example.com/".parse().unwrap(), n, v)` | `jar.set("https://example.com/", n, v)`; every `Jar` method takes a string or a `Url` |
-| `.header("x-tag", "a").header("x-tag", "b")` on `SessionBuilder` to replace `a` | call `header` once per name; both values are now sent |
+| `.header("user-agent", ua)` keeping browser `sec-ch-ua*` headers | setting `user-agent` drops the profile's `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform` unless the request sets them |
 | `trace::Event::Sent { protocol, .. }`, `Event::Head { status: u16, protocol, .. }`, `Event::Summary { proxy: Option<String>, .. }` | `version` on `Sent` and `Head`, `status: http::StatusCode` on `Head`, and `proxy: Option<&str>` on `Summary` |
 | `HeaderPosition::{BeforeCchUa, AfterCchUa, AfterCchUaMobile, AfterCchUaPlatform, AfterFetchDest}` | `HeaderPosition::{BeforeSecChUa, AfterSecChUa, AfterSecChUaMobile, AfterSecChUaPlatform, AfterSecFetchDest}` |
+| `TcpProfile` deserializing unknown fields or out-of-range `ttl`/`mss`/`window_scale` | deserialization now rejects unknown fields and out-of-range values |
+| `WebSocket::header` returning lossy UTF-8 for non-ASCII header bytes | returns `None` for non-ASCII header values (matching `Response::header` and `Page::header`) |
 
 ## Breaking changes in 0.2.0
 

@@ -12,9 +12,10 @@ reference). The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
 ## Unreleased
 
 This release takes another step toward a stable `1.0` API surface (cleaning up
-early `0.2` ergonomic rough edges without adding new top-level types), speeds up
-hot-path HTTP/1.1 and HTTP/2 execution, and adds built-in DNS-over-HTTPS, TLS 1.3
-ECH, PKCS#12 mTLS, Unix sockets, interface binding, and custom proxy headers.
+early `0.2` ergonomic rough edges while keeping the same five core types),
+speeds up hot-path HTTP/1.1 and HTTP/2 execution, and adds built-in
+DNS-over-HTTPS, TLS 1.3 ECH, PKCS#12 mTLS, Unix sockets, interface binding, and
+custom proxy headers.
 
 ### Breaking changes
 
@@ -26,7 +27,6 @@ ECH, PKCS#12 mTLS, Unix sockets, interface binding, and custom proxy headers.
 - `testing::Request::text` returns the request body; `testing::Request::head` returns the request line and headers.
 - `cookie::Cookie`, `Link`, and `testing::Request` have private fields and a getter named for each field, such as `cookie.name()` and `request.target()`.
 - A `cookie::Jar` method given `&text.parse().unwrap()` no longer infers the URL type; pass the string itself.
-- A second `SessionBuilder::header` call with the same name adds a value where it replaced the first; `user_agent`, `bearer_auth`, and `basic_auth` still replace.
 - A request that sets `user-agent` no longer sends the browser profile's `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform` headers unless the request sets them.
 - `trace::Event::Head` carries `status: http::StatusCode` and `version: http::Version` (replacing `status: u16` and `protocol`), `trace::Event::Sent` renames `protocol` to `version`, and `trace::Event::Summary` carries `proxy: Option<&str>` instead of `Option<String>`.
 - `HeaderPosition` renames `BeforeCchUa`, `AfterCchUa`, `AfterCchUaMobile`, `AfterCchUaPlatform`, and `AfterFetchDest` to `BeforeSecChUa`, `AfterSecChUa`, `AfterSecChUaMobile`, `AfterSecChUaPlatform`, and `AfterSecFetchDest`.

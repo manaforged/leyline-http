@@ -6,10 +6,10 @@ covers reading and seeding the jar, sharing it, and saving it between runs.
 
 ## Read and seed the jar
 
-`Session::cookies()` borrows the jar. Every jar method that takes a URL takes
-a parsed `&Url` and returns no `Result`. `leyline::Url` is the `url` crate's
-`Url`, so parse once with `leyline::Url::parse(..)?` and pass the same value
-to each call.
+`Session::cookies()` borrows the jar. Every jar method that takes a URL accepts
+`impl IntoUrl` (a URL string such as `"https://www.example.com/"` or a parsed
+`&leyline::Url`) and returns no `Result`. Parse once with
+`leyline::Url::parse(..)?` if you reuse the same URL across many calls.
 
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
