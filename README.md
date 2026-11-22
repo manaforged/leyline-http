@@ -5,7 +5,7 @@
 [![CI](https://github.com/manaforged/leyline-http/actions/workflows/ci.yml/badge.svg)](https://github.com/manaforged/leyline-http/actions/workflows/ci.yml)
 [![MIT licensed](https://img.shields.io/crates/l/leyline-http.svg)](https://github.com/manaforged/leyline-http/blob/main/LICENSE)
 
-Leyline is a fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust, with batteries included for sessions, web crawling, proxies, resumable downloads, and browser TLS profiles.
+Leyline is a fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust. Sessions, cookies, proxies, crawling, resumable downloads, and browser TLS profiles all come built in.
 
 - HTTP/1.1, HTTP/2, and HTTP/3 over BoringSSL, with a thread-per-core mode (`run_per_core`)
 - Sessions with shared connections, cookies, caching, and optional blocking use
