@@ -38,15 +38,25 @@ fn log_race_proxy_fallback(cause: &'static str) {
     });
 }
 
+#[cfg(unix)]
+pub(crate) const UNIX_SOCKET_PROXY_ERR: &str = "unix_socket cannot be combined with a proxy";
+#[cfg(all(unix, feature = "http3"))]
+pub(crate) const UNIX_SOCKET_H3_ERR: &str = "unix_socket cannot be combined with Protocol::Http3";
+
 impl Session {
     pub(crate) fn proxy_for<'a>(
         &'a self,
         url: &url::Url,
         request: Option<&'a Proxy>,
     ) -> Result<Option<std::borrow::Cow<'a, ProxyUrl>>> {
-        request
+        let chosen = request
             .unwrap_or(&self.inner.inputs.proxy_config)
-            .proxy_for(url)
+            .proxy_for(url)?;
+        #[cfg(unix)]
+        if chosen.is_some() && self.inner.connector.dialer().unix_socket().is_some() {
+            return Err(Error::config(UNIX_SOCKET_PROXY_ERR));
+        }
+        Ok(chosen)
     }
 
     pub(crate) fn proxy_is_custom(&self, request: Option<&Proxy>) -> bool {
@@ -121,9 +131,7 @@ impl Session {
     async fn send_h3_only(&self, req: Prepared<'_>) -> Result<Box<TransportResponse>> {
         #[cfg(unix)]
         if self.inner.connector.dialer().unix_socket().is_some() {
-            return Err(Error::config(
-                "unix_socket cannot be combined with Protocol::Http3",
-            ));
+            return Err(Error::config(UNIX_SOCKET_H3_ERR));
         }
         if let Some(cause) = h3_proxy_blocker(req.proxy) {
             return Err(Error::config(cause));

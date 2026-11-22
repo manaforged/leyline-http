@@ -82,10 +82,12 @@ async fn interface_rejects_unknown_device() {
         .unwrap();
     let session = Session::builder()
         .interface("leyline-no-such-if-99")
+        .retry(2)
         .build()
         .unwrap();
     let err = session.get(server.url("/")).send().await.unwrap_err();
-    assert_eq!(err.kind(), Kind::Connect, "expected Connect, got {err:?}");
+    assert_eq!(err.kind(), Kind::Config, "expected Config, got {err:?}");
+    assert!(!err.is_retryable(), "invalid interface must not retry");
 }
 
 #[cfg(target_os = "macos")]
@@ -366,15 +368,72 @@ async fn unix_socket_rejects_proxy_and_http3() {
             .unwrap_err();
         assert_eq!(err.kind(), Kind::Config);
     }
+    let session = Session::builder()
+        .unix_socket("/tmp/nonexistent.sock")
+        .build()
+        .unwrap();
+    let err = session
+        .get("http://unix.local/")
+        .proxy("http://127.0.0.1:8080")
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind(), Kind::Config);
     let _ = Protocol::Http1;
 }
 
+#[tokio::test]
+async fn proxy_connect_response_with_bare_lf_does_not_hang() {
+    use std::time::Duration;
+
+    let origin = Server::https(|_| Response::new(200).body("through-bare-lf"))
+        .await
+        .unwrap();
+    let origin_addr = origin.addr();
+
+    let proxy = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut client, _) = proxy.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 256];
+        loop {
+            let n = client.read(&mut tmp).await.unwrap();
+            if n == 0 {
+                return;
+            }
+            buf.extend_from_slice(&tmp[..n]);
+            if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        let mut upstream = tokio::net::TcpStream::connect(origin_addr).await.unwrap();
+        client
+            .write_all(b"HTTP/1.1 200 Connection Established\nVia: bare-lf\r\n\r\n")
+            .await
+            .unwrap();
+        drop(tokio::io::copy_bidirectional(&mut client, &mut upstream).await);
+    });
+
+    let session = Session::builder()
+        .proxy(format!("http://{proxy_addr}"))
+        .tls(origin.tls())
+        .timeout(Duration::from_secs(3))
+        .build()
+        .unwrap();
+    let result = tokio::time::timeout(Duration::from_secs(2), session.get(origin.url("/")).send())
+        .await
+        .expect("bare LF proxy CONNECT must not hang until connect timeout");
+    assert!(result.is_ok() || result.as_ref().unwrap_err().kind() == Kind::Proxy);
+}
+
 #[test]
-fn coarse_timeout_recovers_after_owning_runtime_drops() {
+fn coarse_timeout_recovers_after_unpolled_runtime_drop() {
     use std::time::Duration;
 
     let session = Session::builder()
-        .timeout(Duration::from_secs(2))
+        .retry(0)
+        .timeout(Duration::from_secs(3))
         .build()
         .unwrap();
 
@@ -383,11 +442,13 @@ fn coarse_timeout_recovers_after_owning_runtime_drops() {
         .build()
         .unwrap();
     rt1.block_on(async {
-        let server = Server::http(|_| Response::new(200).body("fast"))
-            .await
-            .unwrap();
-        let body = session.get(server.url("/")).text().await.unwrap();
-        assert_eq!(body, "fast");
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::select! {
+            biased;
+            _ = session.get(format!("http://{addr}/cancel")).send() => {}
+            _ = std::future::ready(()) => {}
+        }
     });
     drop(rt1);
 
@@ -402,15 +463,98 @@ fn coarse_timeout_recovers_after_owning_runtime_drops() {
             let (_sock, _) = listener.accept().await.unwrap();
             tokio::time::sleep(Duration::from_secs(30)).await;
         });
-        let err = session
-            .get(format!("http://{addr}/hang"))
-            .send()
-            .await
-            .unwrap_err();
+        let err = tokio::time::timeout(
+            Duration::from_secs(6),
+            session.get(format!("http://{addr}/hang")).send(),
+        )
+        .await
+        .expect("3s coarse timeout must fire within 6s after unpolled rt1 drop")
+        .unwrap_err();
         assert_eq!(
             err.kind(),
             Kind::Timeout,
-            "coarse ticker must restart after the first runtime drops: {err:?}"
+            "coarse ticker must restart after unpolled runtime drop: {err:?}"
         );
     });
+}
+
+#[test]
+fn coalesced_dns_recovers_after_unpolled_runtime_drop() {
+    use std::net::SocketAddr;
+    use std::pin::Pin;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    struct CountingResolver {
+        target: SocketAddr,
+        calls: AtomicUsize,
+    }
+
+    impl leyline::Resolver for CountingResolver {
+        fn resolve<'a>(
+            &'a self,
+            _host: &'a str,
+            _port: u16,
+        ) -> Pin<Box<dyn std::future::Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + 'a>>
+        {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            let target = self.target;
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                Ok(vec![target])
+            })
+        }
+    }
+
+    let rt_server = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .unwrap();
+    let (addr, _server_guard) = rt_server.block_on(async {
+        let server = Server::http(|_| Response::new(200).body("dns-ok"))
+            .await
+            .unwrap();
+        (server.addr(), server)
+    });
+
+    let resolver = Arc::new(CountingResolver {
+        target: addr,
+        calls: AtomicUsize::new(0),
+    });
+    let session = Session::builder()
+        .retry(0)
+        .timeout(Duration::from_secs(5))
+        .dns_resolver(resolver)
+        .build()
+        .unwrap();
+
+    let url = format!("http://coalesce-drop.test:{}/ok", addr.port());
+    let rt1 = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt1.block_on(async {
+        tokio::select! {
+            biased;
+            _ = session.get(&url).send() => {}
+            _ = std::future::ready(()) => {}
+        }
+    });
+    drop(rt1);
+
+    let rt2 = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt2.block_on(async {
+        let body = session
+            .get(&url)
+            .text()
+            .await
+            .expect("host must not stay poisoned after unpolled DNS runtime drop");
+        assert_eq!(body, "dns-ok");
+    });
+    drop(_server_guard);
+    drop(rt_server);
 }

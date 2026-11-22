@@ -149,7 +149,7 @@ impl Resolver for DohResolver {
                     Ok(answer) => {
                         addrs.extend(answer.addrs);
                         if let Some(ttl) = answer.min_ttl {
-                            min_ttl = Some(min_ttl.map_or(ttl, |cur| cur.min(ttl)));
+                            crate::net::dns_wire::update_min_ttl(&mut min_ttl, ttl);
                         }
                     }
                     Err(err) => last_err = Some(err),

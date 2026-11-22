@@ -101,12 +101,11 @@ impl Shutdown {
             return;
         }
         let weak: Weak<Self> = Arc::downgrade(self);
+        let mut guard = TickerGuard(Some(weak.clone()));
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            self.ticker.store(TICKER_IDLE, Ordering::Release);
             return;
         };
         handle.spawn(async move {
-            let mut guard = TickerGuard(Some(weak.clone()));
             let mut idle_ticks = 0u8;
             loop {
                 tokio::time::sleep(COARSE_TICK).await;

@@ -595,3 +595,58 @@ async fn doh_routes_through_single_proxy_and_proxy_list() {
         );
     }
 }
+
+#[tokio::test]
+async fn doh_stalled_server_respects_connect_timeout_and_recovers() {
+    use std::sync::atomic::AtomicBool;
+    use std::time::Duration;
+
+    let origin = Server::http(|_| Response::new(200).body("doh-recovered"))
+        .await
+        .unwrap();
+    let origin_port = origin.addr().port();
+
+    let stall = Arc::new(AtomicBool::new(true));
+    let stall_bg = Arc::clone(&stall);
+    let doh_server = Server::https(move |req| {
+        if stall_bg.load(Ordering::SeqCst) {
+            return Response::new(200).delay(Duration::from_secs(30));
+        }
+        let Some((name, qtype)) = decode_qname_and_qtype(req.body()) else {
+            return Response::new(400);
+        };
+        let wire = if name == "stall.doh.test" && qtype == 1 {
+            dns_response(req.body(), 0, &[(1, 60, &[127, 0, 0, 1])])
+        } else {
+            dns_response(req.body(), 0, &[])
+        };
+        Response::new(200)
+            .header("content-type", "application/dns-message")
+            .body(wire)
+    })
+    .await
+    .unwrap();
+
+    let session = Session::builder()
+        .retry(0)
+        .doh(doh_server.url("/dns-query"))
+        .tls(doh_server.tls())
+        .timeout(leyline::Timeout::new().connect(Duration::from_millis(300)))
+        .build()
+        .unwrap();
+
+    let url = format!("http://stall.doh.test:{origin_port}/");
+    let err = tokio::time::timeout(Duration::from_secs(3), session.get(&url).send())
+        .await
+        .expect("stalled DoH server must fail within connect_timeout, not 300s")
+        .unwrap_err();
+    assert!(
+        matches!(err.kind(), Kind::Dns | Kind::Timeout | Kind::Connect),
+        "unexpected error for stalled DoH: {err:?}"
+    );
+
+    stall.store(false, Ordering::SeqCst);
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let body = session.get(&url).text().await.unwrap();
+    assert_eq!(body, "doh-recovered");
+}

@@ -16,6 +16,8 @@ use crate::tls::trust::Tls;
 
 use super::SessionBuilder;
 
+const DEFAULT_DOH_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Every builder setting the connection pool and its connector are built from.
 pub(super) struct PoolInputs<'a> {
     pool: PoolConfig,
@@ -74,9 +76,12 @@ impl PoolInputs<'_> {
             socket.unix_socket = None;
         }
         builder = builder.with_socket_options(socket);
-        if let Some(timeout) = self.connect_timeout {
-            builder = builder.timeout(crate::deadline::Timeout::new().connect(timeout));
-        }
+        let doh_timeout = self.connect_timeout.unwrap_or(DEFAULT_DOH_TIMEOUT);
+        builder = builder.timeout(
+            crate::deadline::Timeout::new()
+                .connect(doh_timeout)
+                .total(doh_timeout),
+        );
         for (host, addrs) in self.dns.overrides() {
             builder = builder.resolve(host, addrs.iter().copied());
         }

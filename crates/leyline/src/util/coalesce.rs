@@ -41,18 +41,18 @@ where
     where
         F: Future<Output = V> + Send + 'static,
     {
+        let mut guard = RemoveOnDrop {
+            registry: Arc::clone(&self.0),
+            key: Some(key.clone()),
+        };
         let mut map = lock(&self.0);
         if let Some(existing) = map.get(key) {
+            guard.key = None;
             return existing.clone();
         }
-        let registry = Arc::clone(&self.0);
-        let cleanup = key.clone();
         let open = open();
         let handle = tokio::spawn(async move {
-            let _guard = RemoveOnDrop {
-                registry,
-                key: Some(cleanup),
-            };
+            let _guard = guard;
             open.await
         });
         let shared = async move { handle.await.unwrap_or_else(panicked) }

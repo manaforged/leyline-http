@@ -154,7 +154,18 @@ pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::R
     if name.is_empty() || name.as_bytes().contains(&0) {
         return Err(invalid_interface_name(name));
     }
-    socket.bind_device(Some(name.as_bytes()))
+    socket.bind_device(Some(name.as_bytes())).map_err(|err| {
+        if err.raw_os_error() == Some(libc::ENODEV) {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("unknown network interface `{name}`"),
+            )
+        } else if err.raw_os_error() == Some(libc::EINVAL) {
+            invalid_interface_name(name)
+        } else {
+            err
+        }
+    })
 }
 
 #[cfg(any(

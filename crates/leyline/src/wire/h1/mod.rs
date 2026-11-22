@@ -411,10 +411,12 @@ pub(crate) fn scan_header_end(buf: &[u8]) -> HeaderEnd {
 }
 
 pub(crate) fn find_header_end(buf: &[u8]) -> Option<usize> {
-    match scan_header_end(buf) {
-        HeaderEnd::Found(pos) => Some(pos),
-        HeaderEnd::Incomplete | HeaderEnd::BareLf => None,
+    for i in memchr::memchr_iter(b'\n', buf) {
+        if i >= 3 && buf[i - 1] == b'\r' && buf[i - 2] == b'\n' && buf[i - 3] == b'\r' {
+            return Some(i - 3);
+        }
     }
+    None
 }
 
 pub(crate) fn put(req: &mut Vec<u8>, name: &str, value: &str) {

@@ -141,18 +141,25 @@ fn local_ip_for(peer: SocketAddr, options: &SocketOptions) -> Option<IpAddr> {
     }
 }
 
+pub(super) fn socket_domain(peer: SocketAddr) -> socket2::Domain {
+    if peer.is_ipv6() {
+        socket2::Domain::IPV6
+    } else {
+        socket2::Domain::IPV4
+    }
+}
+
 #[cfg(feature = "http3")]
 pub(crate) fn bind_udp(
     peer: SocketAddr,
     options: &SocketOptions,
 ) -> io::Result<tokio::net::UdpSocket> {
     let is_v6 = peer.is_ipv6();
-    let domain = if is_v6 {
-        socket2::Domain::IPV6
-    } else {
-        socket2::Domain::IPV4
-    };
-    let socket = Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
+    let socket = Socket::new(
+        socket_domain(peer),
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
     bind_interface(&socket, is_v6, options)?;
     let local = local_ip_for(peer, options).map_or_else(
         || crate::util::unspecified_for(peer),

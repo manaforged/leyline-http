@@ -254,6 +254,10 @@ pub(crate) fn parse_records<'a>(
     Ok(())
 }
 
+pub(crate) fn update_min_ttl(slot: &mut Option<u32>, ttl: u32) {
+    *slot = Some(slot.map_or(ttl, |cur| cur.min(ttl)));
+}
+
 pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
     let mut answer = DnsAnswer::default();
     let mut best_ech_priority: Option<u16> = None;
@@ -267,13 +271,13 @@ pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
                 answer.addrs.push(IpAddr::V4(Ipv4Addr::new(
                     rdata[0], rdata[1], rdata[2], rdata[3],
                 )));
-                answer.min_ttl = Some(answer.min_ttl.map_or(ttl, |cur| cur.min(ttl)));
+                update_min_ttl(&mut answer.min_ttl, ttl);
             }
             TYPE_AAAA if rdata.len() == 16 => {
                 let mut octets = [0u8; 16];
                 octets.copy_from_slice(rdata);
                 answer.addrs.push(IpAddr::V6(Ipv6Addr::from(octets)));
-                answer.min_ttl = Some(answer.min_ttl.map_or(ttl, |cur| cur.min(ttl)));
+                update_min_ttl(&mut answer.min_ttl, ttl);
             }
             TYPE_HTTPS | TYPE_SVCB => {
                 if let Some((priority, ech)) = extract_ech_from_svcb(rdata)
@@ -281,7 +285,7 @@ pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
                 {
                     best_ech_priority = Some(priority);
                     answer.ech_config_list = Some(ech.to_vec());
-                    answer.min_ttl = Some(answer.min_ttl.map_or(ttl, |cur| cur.min(ttl)));
+                    update_min_ttl(&mut answer.min_ttl, ttl);
                 }
             }
             _ => {}

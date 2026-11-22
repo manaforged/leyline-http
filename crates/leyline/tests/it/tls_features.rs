@@ -693,7 +693,7 @@ async fn h3_ech_config_list_encrypts_sni_and_recovers_from_stale_config() {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], server.port));
     let url = format!("https://inner.h3.test:{}/", server.port);
 
-    for (label, list) in [("live", live_list), ("stale-retry", stale_list)] {
+    for (label, list) in [("live", live_list.clone()), ("stale-retry", stale_list)] {
         let resp = Session::builder()
             .browser(Browser::Chrome154)
             .protocol(Protocol::Http3)
@@ -717,4 +717,26 @@ async fn h3_ech_config_list_encrypts_sni_and_recovers_from_stale_config() {
         );
         assert_eq!(resp.text().await.unwrap(), "xxx");
     }
+
+    let err = Session::builder()
+        .browser(Browser::Chrome154)
+        .protocol(Protocol::Http3)
+        .retry(0)
+        .resolve("inner.h3.test", [addr])
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ech_config_list(live_list),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err.kind(), Kind::Http3 | Kind::Tls),
+        "H3 ECH with untrusted CA must return error cleanly without aborting: {err:?}"
+    );
 }

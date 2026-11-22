@@ -40,13 +40,15 @@ impl SessionBuilder {
             || self.proxy_config.is_custom()
             || self.proxy_pool.is_some()
         {
-            return Err(Error::config("unix_socket cannot be combined with a proxy"));
+            return Err(Error::config(
+                super::super::transport_policy::UNIX_SOCKET_PROXY_ERR,
+            ));
         }
         self.proxy_config = std::mem::take(&mut self.proxy_config).env(false);
         #[cfg(feature = "http3")]
         if matches!(self.protocol_policy, Protocol::Http3) {
             return Err(Error::config(
-                "unix_socket cannot be combined with Protocol::Http3",
+                super::super::transport_policy::UNIX_SOCKET_H3_ERR,
             ));
         }
         Ok(())

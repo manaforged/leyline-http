@@ -102,7 +102,20 @@ impl Dialer {
             async move { watch.finish(connect_one(peer, &tcp, &socket).await) }
         })
         .await
-        .map_err(NetError::TcpConnect)?;
+        .map_err(|err| {
+            if self.socket.interface.is_some()
+                && matches!(
+                    err.kind(),
+                    io::ErrorKind::InvalidInput
+                        | io::ErrorKind::NotFound
+                        | io::ErrorKind::Unsupported
+                )
+            {
+                NetError::Config(err)
+            } else {
+                NetError::TcpConnect(err)
+            }
+        })?;
         trace::connect(host, port, false, Some(addr));
         Ok(tcp_stream)
     }
@@ -151,12 +164,11 @@ async fn connect_one(
     tcp: &TcpProfile,
     options: &SocketOptions,
 ) -> io::Result<TcpStream> {
-    let domain = if peer.is_ipv6() {
-        socket2::Domain::IPV6
-    } else {
-        socket2::Domain::IPV4
-    };
-    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
+    let socket = socket2::Socket::new(
+        super::socket::socket_domain(peer),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
     configure(&socket, peer, tcp, options)?;
     socket.set_nonblocking(true)?;
 

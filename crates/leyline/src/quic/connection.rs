@@ -116,26 +116,20 @@ pub(crate) async fn connect_and_handshake(
     proxy: Option<&crate::net::ProxyUrl>,
 ) -> Result<EstablishedH3, QuicError> {
     let host = crate::util::bare_host(host);
-    let mut ech_override = if trust.ech_config().is_none() && trust.auto_ech() {
-        connector.dialer().resolver().resolve_ech(host, port).await
-    } else {
-        None
-    };
+    let mut ech_override = connector.resolve_initial_ech(host, port).await;
     let mut retried_ech = false;
     let (opening, h3) = loop {
         let ech = ech_override.as_deref().or_else(|| trust.ech_config());
         let mut opening = open(h3_cfg, trust, connector, host, port, proxy, ech).await?;
         match handshake(h3_cfg, &mut opening).await {
             Ok(h3) => break (opening, h3),
-            Err(err) => {
-                let retry_configs = (!retried_ech && ech.is_some())
-                    .then(|| opening.conn.ssl_mut().ech_retry_configs())
-                    .flatten()
-                    .filter(|bytes| !bytes.is_empty())
-                    .map(<[u8]>::to_vec);
-                if let Some(retry_configs) = retry_configs {
-                    retried_ech = true;
-                    ech_override = Some(retry_configs);
+            Err((err, retry_configs)) => {
+                if let Some(next) = FingerprintConnector::ech_retry_override(
+                    &mut retried_ech,
+                    ech.is_some(),
+                    retry_configs.as_deref(),
+                ) {
+                    ech_override = Some(next);
                     continue;
                 }
                 return Err(err);
@@ -235,8 +229,8 @@ async fn open(
 async fn handshake(
     h3_cfg: &H3Config,
     opening: &mut Opening,
-) -> Result<quiche::h3::Connection, QuicError> {
-    let h3_config = h3_cfg.build_h3_config()?;
+) -> Result<quiche::h3::Connection, (QuicError, Option<Vec<u8>>)> {
+    let h3_config = h3_cfg.build_h3_config().map_err(|e| (e, None))?;
     let Opening {
         socket,
         conn,
@@ -249,24 +243,30 @@ async fn handshake(
     loop {
         iter += 1;
         if iter > 10_000 {
-            return Err(QuicError::Protocol(format!(
-                "h3 handshake: CPU-spin guard tripped at {iter} iters: closed={} established={} h3=false",
-                conn.is_closed(),
-                conn.is_established(),
-            )));
+            return Err((
+                QuicError::Protocol(format!(
+                    "h3 handshake: CPU-spin guard tripped at {iter} iters: closed={} established={} h3=false",
+                    conn.is_closed(),
+                    conn.is_established(),
+                )),
+                None,
+            ));
         }
-        flush_egress(socket, conn, &mut out).await?;
+        flush_egress(socket, conn, &mut out)
+            .await
+            .map_err(|e| (e, None))?;
         if conn.is_closed() {
-            return Err(QuicError::Protocol(close_reason(
-                "h3 handshake",
-                iter,
-                conn,
-            )));
+            return Err((
+                QuicError::Protocol(close_reason("h3 handshake", iter, conn)),
+                None,
+            ));
         }
         if conn.is_established() {
             let h3 = quiche::h3::Connection::with_transport(conn, &h3_config)
-                .map_err(|e| QuicError::Protocol(format!("h3 with_transport: {e}")))?;
-            flush_egress(socket, conn, &mut out).await?;
+                .map_err(|e| (QuicError::Protocol(format!("h3 with_transport: {e}")), None))?;
+            flush_egress(socket, conn, &mut out)
+                .await
+                .map_err(|e| (e, None))?;
             return Ok(h3);
         }
         let timeout = conn.timeout().unwrap_or(super::TIMER_FALLBACK);
@@ -276,10 +276,24 @@ async fn handshake(
                     from: *peer_addr,
                     to: *local_addr,
                 };
-                conn.recv(&mut buf[..len], recv_info)
-                    .map_err(|e| QuicError::Protocol(format!("quic recv: {e}")))?;
+                match conn.recv(&mut buf[..len], recv_info) {
+                    Ok(_) => {}
+                    Err(quiche::Error::TlsFail) => {
+                        let stack = leyline_bssl::error::ErrorStack::get();
+                        let retry_configs = leyline_bssl::ssl::is_ech_rejected(&stack)
+                            .then(|| conn.ssl_mut().ech_retry_configs())
+                            .flatten()
+                            .filter(|bytes| !bytes.is_empty())
+                            .map(<[u8]>::to_vec);
+                        return Err((
+                            QuicError::Protocol("quic recv: TlsFail".into()),
+                            retry_configs,
+                        ));
+                    }
+                    Err(e) => return Err((QuicError::Protocol(format!("quic recv: {e}")), None)),
+                }
             }
-            Ok(Err(e)) => return Err(QuicError::Socket(format!("udp recv: {e}"))),
+            Ok(Err(e)) => return Err((QuicError::Socket(format!("udp recv: {e}")), None)),
             Err(_) => conn.on_timeout(),
         }
     }

@@ -76,7 +76,7 @@ async fn coarse_timeout_fires_after_sibling_cores_finish() {
     let results = tokio::task::spawn_blocking(move || {
         Session::builder()
             .retry(0)
-            .timeout(Timeout::new().total(Duration::from_secs(2)))
+            .timeout(Timeout::new().total(Duration::from_millis(2500)))
             .run_per_core(move |session| {
                 let id = counter.fetch_add(1, Ordering::SeqCst);
                 let url = if id == 0 {

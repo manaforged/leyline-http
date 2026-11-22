@@ -165,11 +165,24 @@ impl FingerprintConnector {
         }
     }
 
-    async fn resolve_initial_ech(&self, host: &str, port: u16) -> Option<Vec<u8>> {
+    pub(crate) async fn resolve_initial_ech(&self, host: &str, port: u16) -> Option<Vec<u8>> {
         if self.trust.ech_config().is_some() || !self.trust.auto_ech() {
             return None;
         }
         self.dialer.resolver().resolve_ech(host, port).await
+    }
+
+    pub(crate) fn ech_retry_override(
+        retried: &mut bool,
+        had_ech: bool,
+        retry_configs: Option<&[u8]>,
+    ) -> Option<Vec<u8>> {
+        if *retried || !had_ech {
+            return None;
+        }
+        let bytes = retry_configs.filter(|b| !b.is_empty())?;
+        *retried = true;
+        Some(bytes.to_vec())
     }
 
     async fn connect_via_proxy(
@@ -301,11 +314,17 @@ impl FingerprintConnector {
             };
             match result {
                 Ok(stream) => return Ok(stream),
-                Err(handshake::HandshakeFailure::EchRetry { retry_configs, .. })
-                    if !retried_ech =>
-                {
-                    retried_ech = true;
-                    ech_override = Some(retry_configs);
+                Err(handshake::HandshakeFailure::EchRetry {
+                    retry_configs,
+                    error,
+                }) => {
+                    if let Some(next) =
+                        Self::ech_retry_override(&mut retried_ech, true, Some(&retry_configs))
+                    {
+                        ech_override = Some(next);
+                    } else {
+                        return Err(error);
+                    }
                 }
                 Err(other) => return Err(other.into_error()),
             }

@@ -20,6 +20,10 @@ pub enum NetError {
     #[error("tcp connect")]
     TcpConnect(#[source] io::Error),
 
+    /// A local network configuration option (such as an interface name) failed.
+    #[error("network configuration")]
+    Config(#[source] io::Error),
+
     /// Name resolution failed.
     #[error("dns resolution")]
     Dns(#[source] io::Error),
@@ -51,6 +55,7 @@ impl NetError {
         match self {
             Self::Dns(_) => Kind::Dns,
             Self::TcpConnect(_) => Kind::Connect,
+            Self::Config(_) => Kind::Config,
             Self::ProxyTargetUnreachable { .. } => Kind::ProxyTarget,
             Self::Proxy { .. } => Kind::Proxy,
         }
@@ -85,7 +90,7 @@ impl NetError {
 
     pub(crate) fn into_proxy(self) -> Self {
         match self {
-            Self::Proxy { .. } | Self::ProxyTargetUnreachable { .. } => self,
+            Self::Proxy { .. } | Self::ProxyTargetUnreachable { .. } | Self::Config(_) => self,
             Self::Dns(e) | Self::TcpConnect(e) => Self::proxy_io(e),
         }
     }
@@ -94,6 +99,7 @@ impl NetError {
         let io = |e: &io::Error| io::Error::new(e.kind(), e.to_string());
         match self {
             Self::TcpConnect(e) => Self::TcpConnect(io(e)),
+            Self::Config(e) => Self::Config(io(e)),
             Self::Dns(e) => Self::Dns(io(e)),
             Self::Proxy {
                 status,
@@ -151,7 +157,7 @@ impl Cause for NetError {
 
     fn io_source(&self) -> Option<&io::Error> {
         match self {
-            Self::TcpConnect(e) | Self::Dns(e) => Some(e),
+            Self::TcpConnect(e) | Self::Config(e) | Self::Dns(e) => Some(e),
             Self::Proxy { source, .. } => source.as_ref(),
             Self::ProxyTargetUnreachable { .. } => None,
         }
