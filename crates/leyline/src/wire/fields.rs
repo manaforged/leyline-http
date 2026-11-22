@@ -43,10 +43,15 @@ impl Fact {
         Self::ALL.into_iter().find(|fact| *name == fact.header())
     }
 
+    #[inline]
     pub(crate) fn named(name: &[u8]) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|fact| name.eq_ignore_ascii_case(fact.header().as_str().as_bytes()))
+        match name.len() {
+            7 if name.eq_ignore_ascii_case(b"alt-svc") => Some(Self::AltSvc),
+            10 if name.eq_ignore_ascii_case(b"set-cookie") => Some(Self::Cookies),
+            16 if name.eq_ignore_ascii_case(b"content-encoding") => Some(Self::Encoded),
+            25 if name.eq_ignore_ascii_case(b"strict-transport-security") => Some(Self::Hsts),
+            _ => None,
+        }
     }
 }
 

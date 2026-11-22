@@ -124,25 +124,48 @@ pub(crate) fn framing_value(name: &str) -> Result<(), Error> {
     Ok(())
 }
 
+#[inline]
 pub(crate) fn trim_start(mut bytes: &[u8]) -> &[u8] {
-    while let Some(n) = edge_space(bytes, true) {
-        bytes = &bytes[n..];
+    while let Some(&b) = bytes.first() {
+        if b == b' ' || b == b'\t' {
+            bytes = &bytes[1..];
+        } else if b < 0x80 {
+            if char::from(b).is_whitespace() {
+                bytes = &bytes[1..];
+            } else {
+                break;
+            }
+        } else if let Some(n) = non_ascii_space(bytes, true) {
+            bytes = &bytes[n..];
+        } else {
+            break;
+        }
     }
     bytes
 }
 
+#[inline]
 pub(crate) fn trim_end(mut bytes: &[u8]) -> &[u8] {
-    while let Some(n) = edge_space(bytes, false) {
-        bytes = &bytes[..bytes.len() - n];
+    while let Some(&b) = bytes.last() {
+        if b == b' ' || b == b'\t' {
+            bytes = &bytes[..bytes.len() - 1];
+        } else if b < 0x80 {
+            if char::from(b).is_whitespace() {
+                bytes = &bytes[..bytes.len() - 1];
+            } else {
+                break;
+            }
+        } else if let Some(n) = non_ascii_space(bytes, false) {
+            bytes = &bytes[..bytes.len() - n];
+        } else {
+            break;
+        }
     }
     bytes
 }
 
-pub(crate) fn edge_space(bytes: &[u8], front: bool) -> Option<usize> {
-    let edge = if front { bytes.first() } else { bytes.last() };
-    if let Some(&byte) = edge.filter(|byte| byte.is_ascii()) {
-        return char::from(byte).is_whitespace().then_some(1);
-    }
+#[cold]
+fn non_ascii_space(bytes: &[u8], front: bool) -> Option<usize> {
     let part = |n: usize| {
         let range = if front {
             0..n
@@ -161,27 +184,40 @@ pub(crate) fn edge_space(bytes: &[u8], front: bool) -> Option<usize> {
     ch.filter(|c| c.is_whitespace()).map(|_| n)
 }
 
-pub(crate) fn lines(head: &[u8]) -> impl Iterator<Item = &[u8]> {
-    let mut rest = Some(head);
-    std::iter::from_fn(move || {
-        let current = rest?;
-        match memchr::memchr_iter(b'\n', current)
-            .find(|&i| i > 0 && current[i - 1] == b'\r')
-            .map(|i| i - 1)
-        {
-            Some(end) => {
-                rest = Some(&current[end + 2..]);
-                Some(&current[..end])
-            }
-            None => {
-                rest = None;
-                Some(current)
-            }
+#[inline]
+fn next_crlf(bytes: &[u8]) -> Option<usize> {
+    let mut offset = 0;
+    while let Some(rel) = memchr::memchr(b'\n', &bytes[offset..]) {
+        let i = offset + rel;
+        if i > 0 && bytes[i - 1] == b'\r' {
+            return Some(i - 1);
         }
-    })
+        offset = i + 1;
+    }
+    None
 }
 
 pub(crate) fn status_line(line: &[u8]) -> Result<(u16, u8), Error> {
+    if line.len() >= 12
+        && &line[..7] == b"HTTP/1."
+        && (line[7] == b'1' || line[7] == b'0')
+        && line[8] == b' '
+        && line[9].is_ascii_digit()
+        && line[9] != b'0'
+        && line[10].is_ascii_digit()
+        && line[11].is_ascii_digit()
+        && (line.len() == 12 || line[12] == b' ')
+    {
+        let status = u16::from(line[9] - b'0') * 100
+            + u16::from(line[10] - b'0') * 10
+            + u16::from(line[11] - b'0');
+        return Ok((status, line[7] - b'0'));
+    }
+    status_line_slow(line)
+}
+
+#[cold]
+fn status_line_slow(line: &[u8]) -> Result<(u16, u8), Error> {
     let shown = || String::from_utf8_lossy(line);
     let mut parts = line.splitn(3, |&b| b == b' ');
     let version = parts.next().unwrap_or_default();
@@ -212,12 +248,22 @@ pub(crate) fn status_line(line: &[u8]) -> Result<(u16, u8), Error> {
 }
 
 pub(crate) fn parse<'a, S: Sink<'a>>(head: &'a [u8], sink: &mut S) -> Result<(u16, u8), Error> {
-    let mut lines = lines(head);
-    let first = lines
-        .next()
-        .ok_or_else(|| malformed("missing HTTP/1.1 status line"))?;
+    let (first, mut rest) = match next_crlf(head) {
+        Some(end) => (&head[..end], Some(&head[end + 2..])),
+        None => (head, None),
+    };
     let (status, minor) = status_line(first)?;
-    for line in lines {
+    while let Some(current) = rest {
+        let line = match next_crlf(current) {
+            Some(end) => {
+                rest = Some(&current[end + 2..]);
+                &current[..end]
+            }
+            None => {
+                rest = None;
+                current
+            }
+        };
         match line.first() {
             None => continue,
             Some(b' ' | b'\t') => {
@@ -226,20 +272,20 @@ pub(crate) fn parse<'a, S: Sink<'a>>(head: &'a [u8], sink: &mut S) -> Result<(u1
             }
             Some(_) => {}
         }
-        let mut halves = line.splitn(2, |&b| b == b':');
-        let (Some(name), Some(value)) = (halves.next(), halves.next()) else {
+        let Some(colon) = memchr::memchr(b':', line) else {
             return Err(malformed(format!(
                 "HTTP/1.1 header line has no colon: {}",
                 String::from_utf8_lossy(line)
             )));
         };
-        if name.is_empty() || name.ends_with(b" ") || name.ends_with(b"\t") {
+        let name = &line[..colon];
+        if name.is_empty() || matches!(name.last(), Some(b' ' | b'\t')) {
             return Err(malformed(format!(
                 "invalid HTTP/1.1 header name: {}",
                 String::from_utf8_lossy(name)
             )));
         }
-        sink.field(name, value)?;
+        sink.field(name, &line[colon + 1..])?;
     }
     Ok((status, minor))
 }

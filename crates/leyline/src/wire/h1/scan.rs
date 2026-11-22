@@ -78,8 +78,6 @@ enum Known {
 }
 
 impl Known {
-    const READ: [Self; 3] = [Self::Length, Self::Coding, Self::Connection];
-
     fn name(self) -> Option<&'static str> {
         match self {
             Self::Length => Some("content-length"),
@@ -105,15 +103,15 @@ impl Scanned<'_> {
 impl<'a> Pick<'a> for Scanned<'a> {
     type Key = Known;
 
+    #[inline]
     fn key(&self, name: &[u8]) -> Option<Known> {
-        Known::READ
-            .into_iter()
-            .find(|known| {
-                known
-                    .name()
-                    .is_some_and(|n| name.eq_ignore_ascii_case(n.as_bytes()))
-            })
-            .or_else(|| Fact::named(name).map(Known::Fact))
+        match name.len() {
+            10 if name.eq_ignore_ascii_case(b"connection") => Some(Known::Connection),
+            14 if name.eq_ignore_ascii_case(b"content-length") => Some(Known::Length),
+            17 if name.eq_ignore_ascii_case(b"transfer-encoding") => Some(Known::Coding),
+            7 | 10 | 16 | 25 => Fact::named(name).map(Known::Fact),
+            _ => None,
+        }
     }
 
     fn framing(key: Known) -> Option<&'static str> {

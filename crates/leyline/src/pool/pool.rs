@@ -17,7 +17,7 @@ use crate::quic::H3Client;
 use crate::pool::ConnectionStats;
 #[cfg(feature = "bench-internals")]
 use crate::pool::types::MuxHandle;
-use crate::pool::types::{Counter, MuxClient, PoolCounters, PoolKey, Proto};
+use crate::pool::types::{Counter, HostName, MuxClient, PoolCounters, PoolKey, Proto};
 use crate::profile::Carrier;
 use crate::util::{lock, read, write};
 use crate::wire::Scheme;
@@ -360,7 +360,7 @@ impl Pool {
     ) -> PoolKey {
         PoolKey {
             scheme,
-            host: host.to_string(),
+            host: HostName::new(host),
             port,
             proxy: proxy.cloned(),
             transport,

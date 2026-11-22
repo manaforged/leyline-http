@@ -130,20 +130,24 @@ pub(super) fn has_excess(framing: BodyFraming, buffered: usize) -> bool {
     }
 }
 
-fn bare_lf(head: &[u8]) -> bool {
-    memchr::memchr_iter(b'\n', head).any(|i| i == 0 || head[i - 1] != b'\r')
+fn scan_header_end(buf: &[u8]) -> Result<Option<usize>, H1Error> {
+    for i in memchr::memchr_iter(b'\n', buf) {
+        if i == 0 || buf[i - 1] != b'\r' {
+            return Err(malformed("HTTP/1.1 head has a bare LF line ending").into());
+        }
+        if i >= 3 && buf[i - 2] == b'\n' && buf[i - 3] == b'\r' {
+            return Ok(Some(i - 3));
+        }
+    }
+    Ok(None)
 }
+
 pub(super) async fn read_h1_headers<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<usize, H1Error>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
     loop {
-        let end = find_header_end(buf);
-        let scanned = end.map_or(buf.len(), |end| end + 4);
-        if bare_lf(&buf[..scanned]) {
-            return Err(malformed("HTTP/1.1 head has a bare LF line ending").into());
-        }
-        if let Some(header_end) = end {
+        if let Some(header_end) = scan_header_end(buf)? {
             if header_end + 4 > MAX_H1_HEADER_BYTES {
                 return Err(headers_too_large());
             }
