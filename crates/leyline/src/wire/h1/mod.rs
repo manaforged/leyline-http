@@ -445,3 +445,30 @@ pub(crate) fn field_lines(headers: &[HeaderPair]) -> Option<Vec<u8>> {
 #[cfg(kani)]
 #[path = "chunk_proofs.rs"]
 mod chunk_proofs;
+
+#[cfg(test)]
+mod chunk_tests {
+    use super::chunk_size_value;
+
+    #[test]
+    fn chunk_size_overflow_is_exact_at_u64_max() {
+        const HEX: &[u8] = b"0123456789abcdefABCDEF";
+        let mut line = [b'f'; 17];
+        for &first in HEX {
+            for &last in HEX {
+                line[0] = first;
+                line[16] = last;
+                if first == b'0' {
+                    let low = match last {
+                        b'0'..=b'9' => u64::from(last - b'0'),
+                        b'a'..=b'f' => u64::from(last - b'a') + 10,
+                        _ => u64::from(last - b'A') + 10,
+                    };
+                    assert_eq!(chunk_size_value(&line), Some(0xffff_ffff_ffff_fff0 | low));
+                } else {
+                    assert_eq!(chunk_size_value(&line), None);
+                }
+            }
+        }
+    }
+}

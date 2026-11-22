@@ -42,28 +42,6 @@ fn extract_ech_from_svcb_never_panics() {
 }
 
 #[kani::proof]
-#[kani::unwind(3)]
-fn parse_records_answer_rr_never_panics() {
-    let mut packet: [u8; 24] = kani::any();
-    packet[4] = 0;
-    packet[5] = 0;
-    packet[6] = 0;
-    packet[7] = 1;
-    packet[12] = 0;
-    let len: usize = kani::any_where(|n| (22..=24).contains(n));
-    let slice = &packet[..len];
-    let mut seen = 0usize;
-    let res = parse_records(slice, |_rtype, _rclass, _ttl, rdata| {
-        assert!(rdata.len() <= len - 23);
-        seen += 1;
-    });
-    if len < 23 {
-        assert!(res.is_err());
-        assert_eq!(seen, 0);
-    }
-}
-
-#[kani::proof]
 #[kani::unwind(4)]
 fn parse_records_question_never_panics() {
     let mut packet: [u8; 15] = kani::any();

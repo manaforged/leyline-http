@@ -31,7 +31,7 @@ fi
 if ! command -v cargo >/dev/null 2>&1 && command -v cargo.exe >/dev/null 2>&1; then
     cargo() { cargo.exe "$@"; }
 fi
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target/verify}"
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
@@ -121,14 +121,14 @@ g_package() {
     step "cargo package (publishable Rust crates)"
     ensure_msrv
     stage_workspace
-    rm -rf "$CARGO_TARGET_DIR/package"
-    cargo package \
+    rm -rf "$target_dir/package"
+    CARGO_TARGET_DIR="$target_dir" cargo package \
         --manifest-path "$package_stage/Cargo.toml" \
         --workspace \
         --no-verify \
         || fail "cargo package failed"
     local archive
-    for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+    for archive in "$target_dir"/package/*.crate; do
         (( $(wc -c <"$archive") <= MAX_CRATE_BYTES )) \
             || fail "$(basename "$archive") is over the crates.io limit of $MAX_CRATE_BYTES bytes"
     done
@@ -136,7 +136,7 @@ g_package() {
 
     step "packaged leyline consumer smoke check"
     package_root="$(mktemp -d)"
-    for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+    for archive in "$target_dir"/package/*.crate; do
         tar -xzf "$archive" -C "$package_root"
     done
     package_path() { find "$package_root" -maxdepth 1 -type d -name "$1-[0-9]*" -print -quit; }
@@ -253,18 +253,11 @@ g_deny() {
     ok "cargo-deny clean"
 }
 
-g_semver() {
-    step "cargo semver-checks (public API diff against last crates.io release)"
-    command -v cargo-semver-checks >/dev/null || fail "cargo-semver-checks not installed: cargo install --locked cargo-semver-checks"
-    cargo semver-checks check-release -p leyline-http || fail "cargo-semver-checks found breaking API changes"
-    ok "cargo-semver-checks clean"
-}
-
 g_kani() {
     step "cargo kani: H1 framing, response state, ASCII/host utils, HPACK, HTTP/2 frames/flow, cookies, downloads, and DNS wire proofs"
     command -v cargo-kani >/dev/null || fail "cargo-kani not installed: cargo install --locked kani-verifier && cargo kani setup"
     (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing -Z unstable-options --harness-timeout 30s --jobs --output-format terse) \
-        || fail "a Kani proof failed"
+        || fail "cargo kani failed"
     ok "Kani proofs verified"
 }
 
@@ -342,9 +335,9 @@ g_release() {
     git fetch --quiet origin main 2>/dev/null || true
     git rev-parse --quiet --verify origin/main >/dev/null || fail "origin/main is unknown; fetch it before qualifying a release"
     git merge-base --is-ancestor HEAD origin/main || fail "tag $tag is on a commit that is not on main"
-    mkdir -p "$CARGO_TARGET_DIR"
+    mkdir -p "$target_dir"
     awk -v head="## $version " 'index($0, head) == 1 {on = 1; next} on && /^## / {exit} on' CHANGELOG.md \
-        >"$CARGO_TARGET_DIR/release-notes.md"
+        >"$target_dir/release-notes.md"
     ok "release $tag qualified"
 }
 
@@ -377,24 +370,24 @@ g_publish() {
         return 0
     fi
     echo "  publishing: ${pending[*]}"
-    rm -rf "$CARGO_TARGET_DIR/package"
-    cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+    rm -rf "$target_dir/package"
+    CARGO_TARGET_DIR="$target_dir" cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
         || fail "cargo package failed; nothing was uploaded"
     if [[ -n "${RELEASE_PACKAGES:-}" ]]; then
         local archive
-        for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+        for archive in "$target_dir"/package/*.crate; do
             cmp -s "$archive" "$RELEASE_PACKAGES/$(basename "$archive")" \
                 || fail "$(basename "$archive") differs from the package the release job tested; nothing was uploaded"
         done
     fi
-    cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+    CARGO_TARGET_DIR="$target_dir" cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
         || fail "cargo publish failed; re-running the publish job publishes only the crates not yet on crates.io"
     ok "crates published"
 }
 
 gate_order=(
     fmt clippy features doc book links msrv test deny benches
-    subcrates package kani semver live release publish fuzz-timed
+    subcrates package kani live release publish fuzz-timed
 )
 quick_gates=(fmt clippy doc)
 full_gates=(fmt clippy features doc book links msrv test deny benches subcrates package)

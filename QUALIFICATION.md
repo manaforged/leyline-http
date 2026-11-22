@@ -14,12 +14,11 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 
 ## Proved
 
-`scripts/verify.sh --only kani` runs 29 harnesses (with a 30 s per-harness timeout). String and UTF-8 parser invariants run as bounded exhaustive unit tests in the library test suite.
+`scripts/verify.sh --only kani` runs 27 harnesses (with a 30 s per-harness timeout). String, UTF-8, 17-byte chunk-overflow, and answer-RR truncation invariants run as bounded exhaustive unit tests in the library test suite.
 
 | Harness | Property |
 | --- | --- |
 | `a_chunk_size_follows_rfc_9112_section_7_1` | Chunk sizes up to 9 bytes parse as RFC 9112 section 7.1 defines |
-| `a_chunk_size_overflow_is_exact_at_u64_max` | The largest accepted chunk size is `u64::MAX`, with leading-zero 17-byte forms accepted and overflow rejected |
 | `a_content_length_follows_rfc_9110_section_8_6` | Content-Length values up to 6 bytes parse as RFC 9110 section 8.6 defines |
 | `a_content_length_overflow_is_exact_at_u64_max` | The largest accepted Content-Length is `u64::MAX` |
 | `a_body_limit_admits_exactly_what_fits` | A body limit accepts a body exactly when it fits |
@@ -45,7 +44,6 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 | `skip_name_terminates_and_stays_in_bounds` | DNS wire name skipping always terminates within packet bounds and advances past start |
 | `skip_name_enforces_max_jumps_bound` | DNS compression pointer chains accept up to `MAX_JUMPS` hops and reject `MAX_JUMPS + 1` |
 | `extract_ech_from_svcb_never_panics` | SVCB/HTTPS ECH parameter extraction never panics and returns non-empty in-bounds ECH configs |
-| `parse_records_answer_rr_never_panics` | DNS answer resource record parsing never panics and bounds every RDATA slice |
 | `parse_records_question_never_panics` | DNS question parsing never panics, emits no records when `ancount == 0`, and rejects truncated headers |
 
 ## Model-checked

@@ -43,22 +43,3 @@ fn a_chunk_size_follows_rfc_9112_section_7_1() {
     let line = &bytes[..length];
     assert_eq!(chunk_size_value(line), expected(line));
 }
-
-#[kani::proof]
-#[kani::unwind(20)]
-fn a_chunk_size_overflow_is_exact_at_u64_max() {
-    const HEX: [u8; 22] = *b"0123456789abcdefABCDEF";
-    let mut line = [b'f'; 17];
-    let first_idx: usize = kani::any_where(|&i| i < HEX.len());
-    let last_idx: usize = kani::any_where(|&i| i < HEX.len());
-    let first = HEX[first_idx];
-    let last = HEX[last_idx];
-    line[0] = first;
-    line[16] = last;
-    if first == b'0' {
-        let low = hex(last).unwrap();
-        assert_eq!(chunk_size_value(&line), Some(0xffff_ffff_ffff_fff0 | low));
-    } else {
-        assert_eq!(chunk_size_value(&line), None);
-    }
-}

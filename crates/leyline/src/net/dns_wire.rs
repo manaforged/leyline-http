@@ -357,4 +357,39 @@ mod tests {
         let over_name = format!("{max_name}e");
         assert_eq!(validate_qname(&over_name), Err(WireError::InvalidName));
     }
+
+    #[test]
+    fn parse_records_answer_rr_bounds_rdata_exhaustively() {
+        for len in 12..=26usize {
+            for rdlen in 0..=4u16 {
+                let mut packet = vec![0u8; len];
+                packet[2] = 0x81;
+                packet[3] = 0x80;
+                packet[7] = 1;
+                if len >= 23 {
+                    packet[21..23].copy_from_slice(&rdlen.to_be_bytes());
+                }
+                let mut seen = 0usize;
+                let res = parse_records(&packet, |_rtype, _rclass, _ttl, rdata| {
+                    assert_eq!(rdata.len(), usize::from(rdlen));
+                    assert!(rdata.len() <= len - 23);
+                    seen += 1;
+                });
+                if len >= 23 + usize::from(rdlen) {
+                    assert_eq!(res, Ok(()), "len={len} rdlen={rdlen}");
+                    assert_eq!(seen, 1);
+                } else if len == 12 {
+                    assert_eq!(
+                        res,
+                        Err(WireError::MalformedName),
+                        "len={len} rdlen={rdlen}"
+                    );
+                    assert_eq!(seen, 0);
+                } else {
+                    assert_eq!(res, Err(WireError::Truncated), "len={len} rdlen={rdlen}");
+                    assert_eq!(seen, 0);
+                }
+            }
+        }
+    }
 }
