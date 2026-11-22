@@ -198,6 +198,16 @@ pub(crate) struct BodyHeaders<'a> {
     coding: Option<Cow<'a, [u8]>>,
 }
 
+enum FramingError<'a> {
+    MultipleLength,
+    NonAsciiLength,
+    CommaLength,
+    BadLength(&'a str),
+    BothLengthAndCoding,
+    NonAsciiCoding,
+    BadCoding(&'a str),
+}
+
 impl BodyHeaders<'_> {
     fn length(&self) -> Option<&str> {
         self.length.as_deref().and_then(text)
@@ -208,38 +218,52 @@ impl BodyHeaders<'_> {
     }
 
     pub(crate) fn validate(&self) -> Result<(), Error> {
+        self.check_framing().map_err(|err| match err {
+            FramingError::MultipleLength => {
+                malformed("response has multiple Content-Length headers (RFC 9112 §6.1)")
+            }
+            FramingError::NonAsciiLength => {
+                malformed("response Content-Length contains non-ASCII bytes (RFC 9112 §8.6)")
+            }
+            FramingError::CommaLength => {
+                malformed("response Content-Length contains multiple values")
+            }
+            FramingError::BadLength(v) => malformed(format!(
+                "response Content-Length `{v}` is not a valid decimal integer (RFC 9112 §8.6)"
+            )),
+            FramingError::BothLengthAndCoding => {
+                malformed("response has both Content-Length and Transfer-Encoding (RFC 9112 §6.1)")
+            }
+            FramingError::NonAsciiCoding => {
+                malformed("response Transfer-Encoding contains non-ASCII bytes")
+            }
+            FramingError::BadCoding(te) => malformed(format!(
+                "response Transfer-Encoding `{te}`: `chunked` must be the final coding, once"
+            )),
+        })
+    }
+
+    fn check_framing(&self) -> Result<(), FramingError<'_>> {
         if self.lengths > 1 {
-            return Err(malformed(
-                "response has multiple Content-Length headers (RFC 9112 §6.1)",
-            ));
+            return Err(FramingError::MultipleLength);
         }
         if self.length.is_some() {
             let Some(v) = self.length() else {
-                return Err(malformed(
-                    "response Content-Length contains non-ASCII bytes (RFC 9112 §8.6)",
-                ));
+                return Err(FramingError::NonAsciiLength);
             };
             if v.contains(',') {
-                return Err(malformed(
-                    "response Content-Length contains multiple values",
-                ));
+                return Err(FramingError::CommaLength);
             }
             if crate::util::content_length(v).is_none() {
-                return Err(malformed(format!(
-                    "response Content-Length `{v}` is not a valid decimal integer (RFC 9112 §8.6)"
-                )));
+                return Err(FramingError::BadLength(v));
             }
         }
         if self.coding.is_some() && self.lengths > 0 {
-            return Err(malformed(
-                "response has both Content-Length and Transfer-Encoding (RFC 9112 §6.1)",
-            ));
+            return Err(FramingError::BothLengthAndCoding);
         }
         if self.coding.is_some() {
             let Some(te) = self.coding() else {
-                return Err(malformed(
-                    "response Transfer-Encoding contains non-ASCII bytes",
-                ));
+                return Err(FramingError::NonAsciiCoding);
             };
             let last = te
                 .split(',')
@@ -251,9 +275,7 @@ impl BodyHeaders<'_> {
                 .filter(|t| t.trim().eq_ignore_ascii_case("chunked"))
                 .count();
             if !last.eq_ignore_ascii_case("chunked") || chunked != 1 {
-                return Err(malformed(format!(
-                    "response Transfer-Encoding `{te}`: `chunked` must be the final coding, once"
-                )));
+                return Err(FramingError::BadCoding(te));
             }
         }
         Ok(())
@@ -273,3 +295,7 @@ impl BodyHeaders<'_> {
 #[cfg(test)]
 #[path = "scan_framing_tests.rs"]
 mod framing_tests;
+
+#[cfg(kani)]
+#[path = "scan_proofs.rs"]
+mod proofs;

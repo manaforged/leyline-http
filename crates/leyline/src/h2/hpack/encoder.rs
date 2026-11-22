@@ -30,10 +30,7 @@ impl Encoder {
 
     pub fn set_max_table_size(&mut self, size: usize) {
         self.dynamic.set_max_size(size);
-        self.pending_size_update = Some(match self.pending_size_update {
-            Some((min, _)) => (min.min(size), size),
-            None => (size, size),
-        });
+        record_size_update(&mut self.pending_size_update, size);
     }
 
     #[cfg(any(test, feature = "bench-internals"))]
@@ -184,5 +181,16 @@ fn encode_string(s: &str, dst: &mut Vec<u8>) {
     }
 }
 
+fn record_size_update(pending: &mut Option<(usize, usize)>, size: usize) {
+    *pending = Some(match *pending {
+        Some((min, _)) => (min.min(size), size),
+        None => (size, size),
+    });
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(kani)]
+#[path = "encoder_proofs.rs"]
+mod proofs;

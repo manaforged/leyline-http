@@ -237,3 +237,7 @@ pub fn parse_cookie_date(s: &str) -> Option<Duration> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(kani)]
+#[path = "parse/expiry_proofs.rs"]
+mod expiry_proofs;
