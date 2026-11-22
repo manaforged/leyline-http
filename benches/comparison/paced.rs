@@ -12,23 +12,62 @@ pub struct Plan {
     pub workers: usize,
 }
 
-/// One request: when its worker became free, when the schedule wanted it sent, when it was sent, and when it finished.
+/// Compact post-warmup latency sample in microseconds (8 bytes).
 #[derive(Clone, Copy)]
-pub struct Row {
-    pub ready: Instant,
-    pub intended: Instant,
-    pub sent: Instant,
-    pub done: Instant,
+pub struct Sample {
+    pub service_us: u32,
+    pub lag_us: u32,
 }
 
-impl Row {
-    /// Returns the time latency counts from: the scheduled time when the client was behind it, else the send.
-    fn origin(&self) -> Instant {
-        if self.ready > self.intended {
-            self.intended
-        } else {
-            self.sent
+/// Collected post-warmup samples and timing window for one paced run.
+pub struct Batch {
+    pub first: Instant,
+    pub last: Instant,
+    pub samples: Vec<Sample>,
+}
+
+impl Batch {
+    /// Creates an empty post-warmup collector starting at `first` with `capacity`.
+    pub fn new(first: Instant, capacity: usize) -> Self {
+        Self {
+            first,
+            last: first,
+            samples: Vec::with_capacity(capacity),
         }
+    }
+
+    /// Records one completed request, discarding warm-up observations before `first`.
+    #[inline]
+    pub fn record(&mut self, ready: Instant, intended: Instant, sent: Instant, done: Instant) {
+        if intended < self.first {
+            return;
+        }
+        if done > self.last {
+            self.last = done;
+        }
+        let origin = if ready > intended { intended } else { sent };
+        self.samples.push(Sample {
+            service_us: done.saturating_duration_since(sent).as_micros() as u32,
+            lag_us: sent.saturating_duration_since(origin).as_micros() as u32,
+        });
+    }
+
+    /// Merges per-worker or per-lane batches into one batch.
+    pub fn merge(mut batches: impl Iterator<Item = Self>) -> Self {
+        let Some(mut out) = batches.next() else {
+            let now = Instant::now();
+            return Self::new(now, 0);
+        };
+        for batch in batches {
+            if batch.first < out.first {
+                out.first = batch.first;
+            }
+            if batch.last > out.last {
+                out.last = batch.last;
+            }
+            out.samples.extend_from_slice(&batch.samples);
+        }
+        out
     }
 }
 
@@ -61,9 +100,19 @@ impl Plan {
         Instant::now() + LEAD
     }
 
+    /// Returns the instant when the warm-up window ends.
+    pub fn warmup_end(&self, start: Instant) -> Instant {
+        start + Duration::from_secs(WARMUP_SECONDS)
+    }
+
     /// Returns how many requests each worker sends, warm-up included.
     pub fn per_worker(&self) -> u64 {
         self.rate.saturating_mul(self.seconds + WARMUP_SECONDS) / self.workers as u64
+    }
+
+    /// Returns the approximate post-warmup sample count for one worker.
+    pub fn measured_per_worker(&self) -> usize {
+        (self.rate.saturating_mul(self.seconds) / self.workers as u64) as usize + 1
     }
 
     fn gap(&self) -> Duration {
@@ -87,50 +136,61 @@ pub fn connections() -> usize {
         .max(1)
 }
 
-/// Prints the PACED summary line and the slowest 0.1% of requests, leaving out the warm-up.
-pub fn report(plan: &Plan, rows: Vec<Row>) {
-    let Some(start) = rows.iter().map(|r| r.intended).min() else {
-        panic!("paced run completed no requests");
-    };
-    let first = start + Duration::from_secs(WARMUP_SECONDS);
-    let mut rows: Vec<Row> = rows.into_iter().filter(|r| r.intended >= first).collect();
-    assert!(
-        !rows.is_empty(),
-        "paced run measured no requests after the warm-up"
+fn quantiles(buf: &mut [u32], qs: &[f64]) -> Vec<u32> {
+    let last = buf.len() - 1;
+    let mut indices: Vec<(usize, usize)> = qs
+        .iter()
+        .enumerate()
+        .map(|(i, &q)| (i, (last as f64 * q).round() as usize))
+        .collect();
+    indices.sort_unstable_by_key(|&(_, idx)| idx);
+    let mut out = vec![0u32; qs.len()];
+    let mut hi = buf.len();
+    for &(slot, idx) in indices.iter().rev() {
+        let (_, val, _) = buf[..hi].select_nth_unstable(idx);
+        out[slot] = *val;
+        hi = idx + 1;
+    }
+    out
+}
+
+/// Prints the PACED summary line using one reused scratch buffer and linear-time selection.
+pub fn report(plan: &Plan, batch: Batch) {
+    let n = batch.samples.len();
+    assert!(n > 0, "paced run measured no requests after the warm-up");
+    let elapsed = batch.last.duration_since(batch.first).as_secs_f64();
+    let mut buf = Vec::with_capacity(n);
+
+    buf.extend(batch.samples.iter().map(|s| s.service_us));
+    let svc_max = buf.iter().copied().max().unwrap_or(0);
+    let svc = quantiles(&mut buf, &[0.50, 0.99, 0.999]);
+
+    buf.clear();
+    buf.extend(batch.samples.iter().map(|s| s.lag_us));
+    let lag = quantiles(&mut buf, &[0.50, 0.999]);
+
+    buf.clear();
+    buf.extend(
+        batch
+            .samples
+            .iter()
+            .map(|s| s.service_us.saturating_add(s.lag_us)),
     );
-    let last = rows.iter().map(|r| r.done).max().unwrap_or(first);
-    let elapsed = last.duration_since(first).as_secs_f64();
-    let micros = |d: Duration| d.as_micros() as u32;
-    let pct = |mut values: Vec<u32>, p: f64| {
-        values.sort_unstable();
-        values[((values.len() - 1) as f64 * p).round() as usize]
-    };
-    let service = |r: &Row| micros(r.done.duration_since(r.sent));
-    let lag = |r: &Row| micros(r.sent.duration_since(r.origin()));
-    let column = |f: &dyn Fn(&Row) -> u32| rows.iter().map(f).collect::<Vec<u32>>();
-    let corrected = |r: &Row| micros(r.done.duration_since(r.origin()));
+    let corr = quantiles(&mut buf, &[0.50, 0.99, 0.999]);
+
     println!(
         "PACED rate={} completed={} elapsed_s={elapsed:.3} rps={:.1} service_p50_us={} service_p99_us={} service_p999_us={} service_max_us={} lag_p50_us={} lag_p999_us={} corrected_p50_us={} corrected_p99_us={} corrected_p999_us={}",
         plan.rate,
-        rows.len(),
-        rows.len() as f64 / elapsed,
-        pct(column(&service), 0.50),
-        pct(column(&service), 0.99),
-        pct(column(&service), 0.999),
-        pct(column(&service), 1.0),
-        pct(column(&lag), 0.50),
-        pct(column(&lag), 0.999),
-        pct(column(&corrected), 0.50),
-        pct(column(&corrected), 0.99),
-        pct(column(&corrected), 0.999),
+        n,
+        n as f64 / elapsed,
+        svc[0],
+        svc[1],
+        svc[2],
+        svc_max,
+        lag[0],
+        lag[1],
+        corr[0],
+        corr[1],
+        corr[2],
     );
-    rows.sort_unstable_by_key(|r| std::cmp::Reverse(service(r)));
-    for r in rows.iter().take((rows.len() / 1000).max(1)) {
-        println!(
-            "SLOW at_us={} service_us={} lag_us={}",
-            micros(r.intended.duration_since(first)),
-            service(r),
-            lag(r)
-        );
-    }
 }

@@ -1,20 +1,22 @@
 use std::future::Future;
 use std::time::Instant;
 
-use crate::paced::{Plan, Row};
+use crate::paced::{Batch, Plan};
 
 /// Runs the schedule on one Tokio task per worker; `one(worker)` sends and checks one request.
-pub async fn run_tasks<F, Fut>(plan: Plan, one: F) -> Vec<Row>
+pub async fn run_tasks<F, Fut>(plan: Plan, one: F) -> Batch
 where
     F: Fn(usize) -> Fut + Clone + Send + 'static,
     Fut: Future<Output = ()> + Send,
 {
     let start = plan.start();
+    let first = plan.warmup_end(start);
+    let cap = plan.measured_per_worker();
     let handles: Vec<_> = (0..plan.workers)
         .map(|worker| {
             let one = one.clone();
             tokio::spawn(async move {
-                let mut rows = Vec::with_capacity(plan.per_worker() as usize);
+                let mut batch = Batch::new(first, cap);
                 let mut ready = start;
                 for i in 0..plan.per_worker() {
                     let intended = plan.intended(start, worker, i);
@@ -22,21 +24,16 @@ where
                     let sent = Instant::now();
                     one(worker).await;
                     let done = Instant::now();
-                    rows.push(Row {
-                        ready,
-                        intended,
-                        sent,
-                        done,
-                    });
+                    batch.record(ready, intended, sent, done);
                     ready = done;
                 }
-                rows
+                batch
             })
         })
         .collect();
-    let mut rows = Vec::new();
+    let mut batches = Vec::with_capacity(handles.len());
     for handle in handles {
-        rows.extend(handle.await.expect("paced worker"));
+        batches.push(handle.await.expect("paced worker"));
     }
-    rows
+    Batch::merge(batches.into_iter())
 }

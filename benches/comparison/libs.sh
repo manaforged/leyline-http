@@ -136,15 +136,26 @@ cat "$OUT/headers.txt"
 
 P=${U##*:}; P=${P%/}
 : > "$OUT/conns.txt"
-for cell in $CELLS; do IFS=: read -r name conns streams n <<<"$cell"; [ "$name" = seq ] && continue
-  for lib in $LIBS; do
-    CMP_CONNECTIONS=$conns "${CPIN[@]}" ${CMD[$lib]} "$U" 1 0 100000000 "$streams" </dev/null >/dev/null 2>&1 & X=$!
-    want=$conns; [ "$PROTO" = h1 ] && want=$streams
-    for _ in $(seq 30); do seen=$(ss -Htn state established "( dport = :$P )" | wc -l); [ "$seen" -ge "$want" ] && break; sleep 0.1; done
-    echo "$name $lib $seen" >> "$OUT/conns.txt"
-    pkill -P $X; kill $X; wait $X 2>/dev/null
+if [ "${MODE:-throughput}" != paced ] && [ "${SKIP_CONNS:-0}" != 1 ]; then
+  for cell in $CELLS; do IFS=: read -r name conns streams n <<<"$cell"; [ "$name" = seq ] && continue
+    for lib in $LIBS; do
+      CMP_CONNECTIONS=$conns "${CPIN[@]}" ${CMD[$lib]} "$U" 1 0 100000000 "$streams" </dev/null >/dev/null 2>&1 & X=$!
+      want=$conns; [ "$PROTO" = h1 ] && want=$streams
+      for _ in $(seq 30); do seen=$(ss -Htn state established "( dport = :$P )" | wc -l); [ "$seen" -ge "$want" ] && break; sleep 0.1; done
+      echo "$name $lib $seen" >> "$OUT/conns.txt"
+      pkill -P $X; kill $X; wait $X 2>/dev/null
+    done
   done
-done
+fi
+
+run_wall() {
+  local w0 w1 args=("$U" 1 0 "$4" "$3")
+  [ "$3" = 0 ] && args=("$U" "$4" 0 1 1)
+  w0=$(date +%s%N)
+  CMP_CONNECTIONS=$2 timeout 900 "${CPIN[@]}" ${CMD[$1]} "${args[@]}" </dev/null >/dev/null 2>>"$OUT/stderr.$1" || return
+  w1=$(date +%s%N)
+  echo $((w1 - w0))
+}
 
 run() {
   local st=$OUT/stat.$$ w0 w1 args=("$U" 1 0 "$4" "$3")
@@ -159,11 +170,39 @@ run() {
 : > "$OUT/rows.txt"
 : > "$OUT/rss.txt"
 declare -A SIZED
+if [ -n "${SIZED_CACHE:-}" ] && [ -f "$SIZED_CACHE" ]; then
+  while read -r key val; do [ -n "$key" ] && SIZED[$key]=$val; done < "$SIZED_CACHE"
+fi
+PINNED_CPU_RE=""
+if [ -n "${SERVER_CPUS:-}${CLIENT_CPUS:-}" ]; then
+  PINNED_CPU_RE=$(python3 -c '
+import sys
+cpus = set()
+for spec in sys.argv[1:]:
+    for part in spec.split(","):
+        part = part.strip()
+        if not part: continue
+        if "-" in part:
+            a, b = part.split("-", 1)
+            cpus.update(range(int(a), int(b) + 1))
+        else:
+            cpus.add(int(part))
+if cpus:
+    print("^cpu(" + "|".join(str(c) for c in sorted(cpus)) + ") ")
+' "${SERVER_CPUS:-}" "${CLIENT_CPUS:-}")
+fi
+stat_sample() {
+  if [ -n "$PINNED_CPU_RE" ]; then
+    awk -v re="$PINNED_CPU_RE" '$0 ~ re { t += $2+$3+$4+$5+$6+$7+$8+$9; i += $5+$6 } END { print t, i }' /proc/stat
+  else
+    awk '$1 == "cpu" { print $2+$3+$4+$5+$6+$7+$8+$9, $5+$6; exit }' /proc/stat
+  fi
+}
 busy_percent() {
-  local a b c d e f g h t1 i1 t2 i2
-  read -r _ a b c d e f g h _ < /proc/stat; t1=$((a+b+c+d+e+f+g+h)); i1=$((d+e)); sleep "${IDLE_GATE_SAMPLE:-0.2}"
-  read -r _ a b c d e f g h _ < /proc/stat; t2=$((a+b+c+d+e+f+g+h)); i2=$((d+e))
-  echo $(( 100 * ((t2-t1) - (i2-i1)) / (t2-t1) ))
+  local t1 i1 t2 i2 dt
+  read -r t1 i1 < <(stat_sample); sleep "${IDLE_GATE_SAMPLE:-0.2}"
+  read -r t2 i2 < <(stat_sample); dt=$((t2 - t1))
+  [ "$dt" -gt 0 ] && echo $(( 100 * (dt - (i2 - i1)) / dt )) || echo 0
 }
 idle_gate() {
   [ -n "${IDLE_GATE:-}" ] || return 0
@@ -175,17 +214,44 @@ idle_gate() {
   [ "$waited" -eq 0 ] || echo "waited $waited $lib $name round $r" >> "$OUT/gate.log"
 }
 calibrate() {
-  local lib=$1 name=$2 conns=$3 streams=$4 limit=$5 m a b dt
-  m=$(( streams > 0 ? streams * 8 : 256 ))
+  local lib=$1 name=$2 conns=$3 streams=$4 limit=$5 m a b dt=0 mult next half
+  half=$((limit / 2))
+  if [ -n "${SIZED[$name.$lib]:-}" ]; then
+    [ "${SIZED[$name.$lib]}" -gt "$limit" ] && SIZED[$name.$lib]=$limit
+    return
+  fi
+  m=$(( streams > 0 ? streams * 32 : 1024 ))
+  [ "$half" -lt 1 ] && half=1
+  [ "$m" -gt "$half" ] && m=$half
+  a=$(run_wall "$lib" "$conns" "$streams" "$m")
   while :; do
-    a=$(run "$lib" "$conns" "$streams" "$m"); b=$(run "$lib" "$conns" "$streams" $((2 * m)))
-    dt=$(( ${b##* } - ${a##* } ))
-    [ "$dt" -lt 50000000 ] && [ $((2 * m)) -le "$limit" ] || break
-    m=$((2 * m))
+    [ $((2 * m)) -le "$limit" ] || break
+    b=$(run_wall "$lib" "$conns" "$streams" $((2 * m)))
+    dt=$(( b - a ))
+    [ "$dt" -ge 50000000 ] && break
+    if [ "$dt" -gt 1000000 ]; then
+      mult=$(( 50000000 / dt + 1 ))
+      [ "$mult" -lt 2 ] && mult=2
+      [ "$mult" -gt 8 ] && mult=8
+      next=$(( m * mult ))
+      [ "$next" -gt "$half" ] && next=$half
+      if [ "$next" -le "$m" ]; then
+        break
+      elif [ "$next" -eq $((2 * m)) ]; then
+        m=$next; a=$b
+      else
+        m=$next; a=$(run_wall "$lib" "$conns" "$streams" "$m")
+      fi
+    else
+      next=$((2 * m))
+      [ "$next" -gt "$half" ] && break
+      m=$next; a=$b
+    fi
   done
   m=$(( m * ${TARGET_MS:-1000} * 1000000 / (dt > 0 ? dt : 1) ))
   [ "$m" -gt "$limit" ] && m=$limit
   SIZED[$name.$lib]=$(( m > 0 ? m : 1 ))
+  [ -n "${SIZED_CACHE:-}" ] && echo "$name.$lib ${SIZED[$name.$lib]}" >> "$SIZED_CACHE"
 }
 paced() {
   local st=$OUT/stat.$$ line

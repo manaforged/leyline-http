@@ -23,8 +23,8 @@ CONCURRENCY="${CONCURRENCY:-64}"
 WARM="${WARM:-1}"
 COLD="${COLD:-1}"
 WREQ_TARGET="${WREQ_TARGET:-target}"
-SERVER_CPUS="${SERVER_CPUS:-0-1}"
-CLIENT_CPUS="${CLIENT_CPUS:-2-15}"
+SERVER_CPUS="${SERVER_CPUS:-}"
+CLIENT_CPUS="${CLIENT_CPUS:-}"
 CONTROL="${CONTROL:-1}"
 LEFT="${LEFT:-leyline}"
 RIGHT="${RIGHT:-wreq}"
@@ -51,7 +51,11 @@ build_client "$LEFT"
 build_client "$RIGHT"
 
 SRV=""
-cleanup() { [ -n "$SRV" ] && kill "$SRV" 2>/dev/null || true; }
+SRV_LOG=""
+cleanup() {
+  [ -n "$SRV" ] && kill "$SRV" 2>/dev/null || true
+  [ -n "$SRV_LOG" ] && rm -f "$SRV_LOG"
+}
 trap cleanup EXIT
 
 if [ -n "${TARGET_URL:-}" ]; then
@@ -63,17 +67,17 @@ else
     hyper) ( cd .. && cargo build --release -q --example origin && cp target/release/examples/origin comparison/bin/server ) ;;
     *) echo "ERROR: ORIGIN must be go or hyper" >&2; exit 1 ;;
   esac
-  : > /tmp/cmp-paired-server.log
+  SRV_LOG="$(mktemp)"
   if [ -n "$SERVER_CPUS" ] && command -v taskset >/dev/null 2>&1; then
-    taskset -c "$SERVER_CPUS" ./bin/server "127.0.0.1:0" >/tmp/cmp-paired-server.log 2>&1 &
+    taskset -c "$SERVER_CPUS" ./bin/server "127.0.0.1:0" >"$SRV_LOG" 2>&1 &
   else
-    ./bin/server "127.0.0.1:0" >/tmp/cmp-paired-server.log 2>&1 &
+    ./bin/server "127.0.0.1:0" >"$SRV_LOG" 2>&1 &
   fi
   SRV=$!
   URL=""
   for _ in $(seq 1 100); do
-    kill -0 "$SRV" 2>/dev/null || { echo "ERROR: server exited" >&2; cat /tmp/cmp-paired-server.log >&2; exit 1; }
-    URL=$(grep -oE 'https://[0-9.]+:[0-9]+/' /tmp/cmp-paired-server.log | head -1 || true)
+    kill -0 "$SRV" 2>/dev/null || { echo "ERROR: server exited" >&2; cat "$SRV_LOG" >&2; exit 1; }
+    URL=$(grep -oE 'https://[0-9.]+:[0-9]+/' "$SRV_LOG" | head -1 || true)
     [ -n "$URL" ] && break
     sleep 0.1
   done
