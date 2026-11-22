@@ -62,10 +62,8 @@ impl Shutdown {
     }
 
     pub(crate) fn note_coarse(self: &Arc<Self>) {
-        if !self.saw_activity.load(Ordering::Relaxed) {
-            self.saw_activity.store(true, Ordering::Relaxed);
-        }
-        if !self.ticker_live.load(Ordering::Acquire) {
+        self.saw_activity.store(true, Ordering::SeqCst);
+        if !self.ticker_live.load(Ordering::SeqCst) {
             self.start_ticker();
         }
     }
@@ -77,17 +75,18 @@ impl Shutdown {
         }
         if self
             .ticker_live
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
             .is_err()
         {
             return;
         }
         let weak: Weak<Self> = Arc::downgrade(self);
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            self.ticker_live.store(false, Ordering::Release);
+            self.ticker_live.store(false, Ordering::SeqCst);
             return;
         };
         handle.spawn(async move {
+            let _guard = TickerGuard(weak.clone());
             let mut idle_ticks = 0u8;
             loop {
                 tokio::time::sleep(COARSE_TICK).await;
@@ -95,10 +94,9 @@ impl Shutdown {
                     return;
                 };
                 if shutdown.is_stopped() {
-                    shutdown.ticker_live.store(false, Ordering::Release);
                     return;
                 }
-                let active = shutdown.saw_activity.swap(false, Ordering::AcqRel);
+                let active = shutdown.saw_activity.swap(false, Ordering::SeqCst);
                 shutdown.wake_all();
                 if active {
                     idle_ticks = 0;
@@ -106,11 +104,11 @@ impl Shutdown {
                 }
                 idle_ticks += 1;
                 if idle_ticks >= 2 {
-                    shutdown.ticker_live.store(false, Ordering::Release);
-                    if shutdown.saw_activity.load(Ordering::Acquire)
+                    shutdown.ticker_live.store(false, Ordering::SeqCst);
+                    if shutdown.saw_activity.load(Ordering::SeqCst)
                         && shutdown
                             .ticker_live
-                            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                             .is_ok()
                     {
                         idle_ticks = 0;
@@ -120,6 +118,16 @@ impl Shutdown {
                 }
             }
         });
+    }
+}
+
+struct TickerGuard(Weak<Shutdown>);
+
+impl Drop for TickerGuard {
+    fn drop(&mut self) {
+        if let Some(shutdown) = self.0.upgrade() {
+            shutdown.ticker_live.store(false, Ordering::SeqCst);
+        }
     }
 }
 

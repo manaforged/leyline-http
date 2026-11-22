@@ -12,6 +12,7 @@ foreign_type_and_impl_send_sync! {
 impl HpkeKey {
     /// Generates a fresh X25519-HKDF-SHA256 HPKE keypair.
     pub fn generate_x25519() -> Result<Self, ErrorStack> {
+        // SAFETY: BoringSSL allocates an owned EVP_HPKE_KEY and initializes it with the static X25519 KEM.
         unsafe {
             let ptr = cvt_p(ffi::EVP_HPKE_KEY_new())?;
             let key = Self::from_ptr(ptr);

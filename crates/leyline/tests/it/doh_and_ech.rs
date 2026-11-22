@@ -172,7 +172,10 @@ async fn doh_auto_ech_fetches_https_record_and_encrypts_sni() {
 
     let mut records: HashMap<(String, u16), Vec<u8>> = HashMap::new();
     records.insert(("inner.doh.test".into(), 1), vec![127, 0, 0, 1]);
-    records.insert(("inner.doh.test".into(), 65), svcb_ech_rdata(1, &ech_list));
+    records.insert(
+        (format!("_{origin_port}._https.inner.doh.test"), 65),
+        svcb_ech_rdata(1, &ech_list),
+    );
     let records = Arc::new(records);
     let https_queries = Arc::new(AtomicUsize::new(0));
     let https_queries_bg = Arc::clone(&https_queries);
@@ -282,5 +285,146 @@ async fn doh_auto_ech_fetches_https_record_and_encrypts_sni() {
         https_queries.load(Ordering::SeqCst),
         1,
         "cached HTTPS ECH record must not re-query DoH within TTL"
+    );
+}
+
+#[tokio::test]
+async fn doh_does_not_leak_origin_pins_or_client_cert() {
+    use sha2::{Digest, Sha256};
+
+    let (origin_cert, origin_key) = super::tls_support::self_signed_dns("pinned.doh.test");
+    let origin_pin: [u8; 32] = Sha256::digest(origin_cert.to_der().unwrap()).into();
+    let (doh_cert, doh_key) = super::tls_support::self_signed_dns("dns.local");
+    let (client_cert, client_key) = super::tls_support::self_signed_dns("client.local");
+    let p12 = leyline_bssl::pkcs12::create("pw", "c", &client_key, &client_cert, None).unwrap();
+
+    let mut ca_bundle = origin_cert.to_pem().unwrap();
+    ca_bundle.extend_from_slice(&doh_cert.to_pem().unwrap());
+
+    let origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_port = origin_listener.local_addr().unwrap().port();
+    let mut origin_ctx = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    origin_ctx.set_certificate(&origin_cert).unwrap();
+    origin_ctx.set_private_key(&origin_key).unwrap();
+    origin_ctx.cert_store_mut().add_cert(client_cert).unwrap();
+    origin_ctx.set_verify(
+        leyline_bssl::ssl::SslVerifyMode::PEER
+            | leyline_bssl::ssl::SslVerifyMode::FAIL_IF_NO_PEER_CERT,
+    );
+    let origin_ctx = Arc::new(origin_ctx.build());
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = origin_listener.accept().await {
+            let ctx = Arc::clone(&origin_ctx);
+            tokio::spawn(async move {
+                let ssl = Ssl::new(&ctx).unwrap();
+                if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await
+                {
+                    serve_h1_ok(stream, "origin-pinned-mtls").await;
+                }
+            });
+        }
+    });
+
+    let doh_saw_client_cert = Arc::new(AtomicUsize::new(0));
+    let doh_saw_bg = Arc::clone(&doh_saw_client_cert);
+    let doh_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let doh_addr = doh_listener.local_addr().unwrap();
+    let mut doh_ctx = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    doh_ctx.set_certificate(&doh_cert).unwrap();
+    doh_ctx.set_private_key(&doh_key).unwrap();
+    doh_ctx.set_verify(leyline_bssl::ssl::SslVerifyMode::PEER);
+    let doh_ctx = Arc::new(doh_ctx.build());
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = doh_listener.accept().await {
+            let ctx = Arc::clone(&doh_ctx);
+            let doh_saw_bg = Arc::clone(&doh_saw_bg);
+            tokio::spawn(async move {
+                let ssl = Ssl::new(&ctx).unwrap();
+                let Ok(mut stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await
+                else {
+                    return;
+                };
+                if stream.ssl().peer_certificate().is_some() {
+                    doh_saw_bg.fetch_add(1, Ordering::SeqCst);
+                }
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 4096];
+                loop {
+                    let Ok(n) = stream.read(&mut tmp).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&buf[..head_end]);
+                    let content_len: usize = head
+                        .lines()
+                        .find_map(|line| {
+                            let (k, v) = line.split_once(':')?;
+                            k.eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse().ok())
+                                .flatten()
+                        })
+                        .unwrap_or(0);
+                    let total = head_end + 4 + content_len;
+                    if buf.len() < total {
+                        continue;
+                    }
+                    let body = &buf[head_end + 4..total];
+                    let Some((name, qtype)) = decode_qname_and_qtype(body) else {
+                        return;
+                    };
+                    let wire = if name == "pinned.doh.test" && qtype == 1 {
+                        dns_response(body, 0, &[(1, 120, &[127, 0, 0, 1])])
+                    } else {
+                        dns_response(body, 0, &[])
+                    };
+                    let resp_head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\n\r\n",
+                        wire.len()
+                    );
+                    if stream.write_all(resp_head.as_bytes()).await.is_err()
+                        || stream.write_all(&wire).await.is_err()
+                    {
+                        return;
+                    }
+                    buf.drain(..total);
+                }
+            });
+        }
+    });
+
+    let session = Session::builder()
+        .resolve("dns.local", [doh_addr])
+        .doh(format!("https://dns.local:{}/dns-query", doh_addr.port()))
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(ca_bundle)
+                .pin_cert_sha256(origin_pin)
+                .client_cert_pkcs12(p12, "pw"),
+        )
+        .build()
+        .unwrap();
+
+    let body = session
+        .get(format!("https://pinned.doh.test:{origin_port}/secret"))
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "origin-pinned-mtls");
+    assert_eq!(
+        doh_saw_client_cert.load(Ordering::SeqCst),
+        0,
+        "origin mTLS client cert must never be presented to the DoH provider"
     );
 }

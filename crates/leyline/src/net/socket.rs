@@ -134,6 +134,13 @@ pub(super) fn configure(
     user_timeout(socket, options)
 }
 
+fn local_ip_for(peer: SocketAddr, options: &SocketOptions) -> Option<IpAddr> {
+    match peer {
+        SocketAddr::V4(_) => options.local_ipv4.map(IpAddr::V4),
+        SocketAddr::V6(_) => options.local_ipv6.map(IpAddr::V6),
+    }
+}
+
 #[cfg(feature = "http3")]
 pub(crate) fn bind_udp(
     peer: SocketAddr,
@@ -147,16 +154,10 @@ pub(crate) fn bind_udp(
     };
     let socket = Socket::new(domain, socket2::Type::DGRAM, Some(socket2::Protocol::UDP))?;
     bind_interface(&socket, is_v6, options)?;
-    let local = match peer {
-        SocketAddr::V4(_) => options.local_ipv4.map_or_else(
-            || crate::util::unspecified_for(peer),
-            |ip| SocketAddr::new(IpAddr::V4(ip), 0),
-        ),
-        SocketAddr::V6(_) => options.local_ipv6.map_or_else(
-            || crate::util::unspecified_for(peer),
-            |ip| SocketAddr::new(IpAddr::V6(ip), 0),
-        ),
-    };
+    let local = local_ip_for(peer, options).map_or_else(
+        || crate::util::unspecified_for(peer),
+        |ip| SocketAddr::new(ip, 0),
+    );
     socket.bind(&local.into())?;
     socket.set_nonblocking(true)?;
     tokio::net::UdpSocket::from_std(socket.into())
@@ -170,11 +171,7 @@ fn bind_interface(socket: &Socket, is_v6: bool, options: &SocketOptions) -> io::
 }
 
 fn bind_local(socket: &Socket, peer: SocketAddr, options: &SocketOptions) -> io::Result<()> {
-    let local_ip = match peer {
-        SocketAddr::V4(_) => options.local_ipv4.map(IpAddr::V4),
-        SocketAddr::V6(_) => options.local_ipv6.map(IpAddr::V6),
-    };
-    if let Some(ip) = local_ip {
+    if let Some(ip) = local_ip_for(peer, options) {
         socket.bind(&SocketAddr::new(ip, 0).into())?;
     }
     Ok(())

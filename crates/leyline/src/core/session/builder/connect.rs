@@ -16,7 +16,6 @@ use crate::tls::trust::Tls;
 use super::SessionBuilder;
 
 /// Every builder setting the connection pool and its connector are built from.
-#[derive(PartialEq)]
 pub(super) struct PoolInputs<'a> {
     pool: PoolConfig,
     io: Io,
@@ -24,23 +23,45 @@ pub(super) struct PoolInputs<'a> {
     tls: &'a Tls,
     dns: &'a DnsConfig,
     doh: Option<&'a url::Url>,
+    proxy: &'a Proxy,
     socket: &'a SocketOptions,
     tcp: Option<&'a TcpProfile>,
     ja4t: Option<&'a Ja4t>,
     protocol: Protocol,
 }
 
+impl PartialEq for PoolInputs<'_> {
+    fn eq(&self, other: &Self) -> bool {
+        self.pool == other.pool
+            && self.io == other.io
+            && self.connect_timeout == other.connect_timeout
+            && self.tls == other.tls
+            && self.dns == other.dns
+            && self.doh == other.doh
+            && (self.doh.is_none() || self.proxy.same_for_doh(other.proxy))
+            && self.socket == other.socket
+            && self.tcp == other.tcp
+            && self.ja4t == other.ja4t
+            && self.protocol == other.protocol
+    }
+}
+
 impl PoolInputs<'_> {
     fn build_doh(&self, endpoint: &url::Url) -> Result<Arc<dyn Resolver>> {
         let mut trust = self.tls.clone();
-        trust.ech_config_list = None;
-        trust.auto_ech = false;
+        trust.clear_origin_identity();
         let mut builder = Session::builder()
             .tls(trust)
-            .proxy(Proxy::new().env(false))
+            .proxy(self.proxy.clone())
             .cookies(None)
             .cache(None)
             .redirect(Redirect::none());
+        let mut socket = self.socket.clone();
+        #[cfg(unix)]
+        {
+            socket.unix_socket = None;
+        }
+        builder = builder.with_socket_options(socket);
         if let Some(timeout) = self.connect_timeout {
             builder = builder.timeout(crate::deadline::Timeout::new().connect(timeout));
         }
@@ -91,6 +112,7 @@ impl SessionBuilder {
             tls: &self.tls_trust,
             dns: &self.dns_config,
             doh: self.doh_endpoint.as_ref(),
+            proxy: &self.proxy_config,
             socket: &self.socket_config,
             tcp: self.tcp_profile.as_ref(),
             ja4t: self.ja4t.as_ref(),

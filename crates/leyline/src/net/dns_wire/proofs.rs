@@ -1,15 +1,34 @@
-use super::{TYPE_A, WireError, encode_query, extract_ech_from_svcb, parse_header, skip_name};
+use super::{
+    MAX_JUMPS, WireError, extract_ech_from_svcb, parse_records, skip_name, validate_qname,
+};
 
 #[kani::proof]
-#[kani::unwind(12)]
+#[kani::unwind(14)]
 fn skip_name_terminates_and_stays_in_bounds() {
-    let packet: [u8; 8] = kani::any();
+    let packet: [u8; 10] = kani::any();
     let len: usize = kani::any_where(|n| *n <= packet.len());
     let start: usize = kani::any_where(|n| *n <= len);
     if let Some(next) = skip_name(&packet[..len], start) {
         assert!(next <= len);
         assert!(next > start);
     }
+}
+
+#[kani::proof]
+#[kani::unwind(14)]
+fn skip_name_enforces_max_jumps_bound() {
+    let mut packet = [0u8; 20];
+    packet[0] = 0;
+    for hop in 0..=MAX_JUMPS {
+        let at = 2 + hop * 2;
+        let prev = if hop == 0 { 0 } else { at - 2 };
+        packet[at] = 0xC0 | ((prev >> 8) as u8);
+        packet[at + 1] = (prev & 0xFF) as u8;
+    }
+    let at_limit = 2 + (MAX_JUMPS - 1) * 2;
+    assert_eq!(skip_name(&packet, at_limit), Some(at_limit + 2));
+    let over_limit = 2 + MAX_JUMPS * 2;
+    assert_eq!(skip_name(&packet, over_limit), None);
 }
 
 #[kani::proof]
@@ -25,36 +44,81 @@ fn extract_ech_from_svcb_never_panics() {
 }
 
 #[kani::proof]
-#[kani::unwind(8)]
-fn parse_header_enforces_qr_rcode_and_length() {
-    let packet: [u8; 14] = kani::any();
-    let len: usize = kani::any_where(|n| *n <= packet.len());
+#[kani::unwind(4)]
+fn parse_records_answer_rr_never_panics() {
+    let mut packet: [u8; 25] = kani::any();
+    packet[4] = 0;
+    packet[5] = 0;
+    packet[6] = 0;
+    packet[7] = 1;
+    packet[12] = 0;
+    let len: usize = kani::any_where(|n| (20..=25).contains(n));
     let slice = &packet[..len];
-    let res = parse_header(slice);
-    if len < 12 {
-        assert_eq!(res, Err(WireError::Truncated));
-    } else {
-        let flags = u16::from_be_bytes([slice[2], slice[3]]);
-        let rcode = (flags & 0x000F) as u8;
-        if flags & 0x8000 == 0 {
-            assert_eq!(res, Err(WireError::NotResponse));
-        } else if rcode == 3 {
-            assert_eq!(res, Err(WireError::NxDomain));
-        } else if rcode != 0 {
-            assert_eq!(res, Err(WireError::Rcode(rcode)));
-        } else {
-            assert!(res.is_ok());
-        }
+    let mut seen = 0usize;
+    let res = parse_records(slice, |_rtype, _rclass, _ttl, rdata| {
+        assert!(rdata.len() <= len - 23);
+        seen += 1;
+    });
+    if len < 23 {
+        assert!(res.is_err());
+        assert_eq!(seen, 0);
     }
 }
 
 #[kani::proof]
 #[kani::unwind(10)]
-fn encode_query_validates_label_bounds() {
-    assert!(encode_query("", TYPE_A).is_err());
-    assert!(encode_query("a..b", TYPE_A).is_err());
-    let ok = encode_query("a.b", TYPE_A).expect("valid short domain");
-    assert_eq!(ok.len(), 12 + 5 + 4);
-    assert_eq!(ok[2], 0x01);
-    assert_eq!(ok[5], 0x01);
+fn parse_records_question_never_panics() {
+    let mut packet: [u8; 18] = kani::any();
+    packet[4] = 0;
+    packet[5] = kani::any_where(|&n| n <= 1);
+    packet[6] = 0;
+    packet[7] = 0;
+    let len: usize = kani::any_where(|n| *n <= packet.len());
+    let slice = &packet[..len];
+    let res = parse_records(slice, |_, _, _, _| {
+        panic!("ancount == 0 must never emit records");
+    });
+    if len < 12 {
+        assert_eq!(res, Err(WireError::Truncated));
+    }
+}
+
+#[kani::proof]
+#[kani::unwind(8)]
+fn validate_qname_enforces_arbitrary_ascii_label_rules() {
+    let raw: [u8; 5] = kani::any();
+    let len: usize = kani::any_where(|n| *n <= raw.len());
+    let bytes = &raw[..len];
+    kani::assume(bytes.iter().all(|&b| b == b'.' || b == b'a'));
+    let Ok(host) = std::str::from_utf8(bytes) else {
+        return;
+    };
+    let trimmed = host.strip_suffix('.').unwrap_or(host);
+    let mut has_empty = trimmed.is_empty();
+    let mut label_len = 0usize;
+    for &b in trimmed.as_bytes() {
+        if b == b'.' {
+            if label_len == 0 {
+                has_empty = true;
+            }
+            label_len = 0;
+        } else {
+            label_len += 1;
+        }
+    }
+    if label_len == 0 {
+        has_empty = true;
+    }
+    match validate_qname(host) {
+        Ok(out) => {
+            assert!(!has_empty);
+            assert_eq!(out, trimmed);
+        }
+        Err(WireError::InvalidName) => {
+            assert!(has_empty);
+        }
+        Err(_) => {
+            panic!("unexpected error variant from validate_qname");
+        }
+    }
 }

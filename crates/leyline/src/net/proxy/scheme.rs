@@ -50,12 +50,7 @@ impl std::fmt::Debug for ProxyUrl {
         } else {
             f.debug_struct("ProxyUrl")
                 .field("url", &redact(&self.raw))
-                .field(
-                    "headers",
-                    &crate::util::masked(
-                        self.headers.iter().map(|(k, _)| (k.as_str(), &b"***"[..])),
-                    ),
-                )
+                .field("headers", &Self::masked_headers(&self.headers))
                 .finish()
         }
     }
@@ -98,6 +93,24 @@ impl ProxyUrl {
 
     pub(crate) fn headers(&self) -> &[(String, String)] {
         &self.headers
+    }
+
+    pub(crate) fn basic_auth_header(&self) -> Option<String> {
+        let custom_auth = self
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("proxy-authorization"));
+        if custom_auth {
+            None
+        } else {
+            crate::util::proxy_basic_auth(&self.url)
+        }
+    }
+
+    pub(crate) fn masked_headers(
+        headers: &[(String, String)],
+    ) -> Vec<(&str, std::borrow::Cow<'_, str>)> {
+        crate::util::masked(headers.iter().map(|(k, _)| (k.as_str(), &b"***"[..])))
     }
 
     pub(crate) fn push_header(&mut self, name: String, value: String) {

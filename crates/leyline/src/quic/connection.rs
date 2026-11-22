@@ -194,7 +194,7 @@ async fn open(
         .apply(conn.ssl_mut(), true)
         .map_err(|e| QuicError::Config(format!("quic hello: {e}")))?;
     let resolved_ech = if trust.ech_config().is_none() && trust.auto_ech() {
-        connector.dialer().resolver().resolve_ech(host).await
+        connector.dialer().resolver().resolve_ech(host, port).await
     } else {
         None
     };

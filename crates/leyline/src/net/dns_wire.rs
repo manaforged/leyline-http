@@ -30,33 +30,64 @@ pub(crate) struct DnsAnswer {
     pub(crate) min_ttl: Option<u32>,
 }
 
-pub(crate) fn encode_query(host: &str, qtype: u16) -> Result<Vec<u8>, WireError> {
+pub(crate) fn validate_qname(host: &str) -> Result<&str, WireError> {
     let trimmed = host.strip_suffix('.').unwrap_or(host);
-    if trimmed.is_empty() {
+    let bytes = trimmed.as_bytes();
+    if bytes.is_empty() {
         return Err(WireError::InvalidName);
     }
+    let mut wire_len = 1usize;
+    let mut label_len = 0usize;
+    for &b in bytes {
+        if !b.is_ascii() {
+            return Err(WireError::InvalidName);
+        }
+        if b == b'.' {
+            if label_len == 0 || label_len > MAX_LABEL_LEN {
+                return Err(WireError::InvalidName);
+            }
+            wire_len = wire_len
+                .checked_add(1 + label_len)
+                .ok_or(WireError::InvalidName)?;
+            label_len = 0;
+        } else {
+            label_len += 1;
+        }
+    }
+    if label_len == 0 || label_len > MAX_LABEL_LEN {
+        return Err(WireError::InvalidName);
+    }
+    wire_len = wire_len
+        .checked_add(1 + label_len)
+        .ok_or(WireError::InvalidName)?;
+    if wire_len > MAX_NAME_LEN {
+        return Err(WireError::InvalidName);
+    }
+    Ok(trimmed)
+}
+
+pub(crate) fn encode_query(host: &str, qtype: u16) -> Result<Vec<u8>, WireError> {
+    let trimmed = validate_qname(host)?;
     let mut packet = Vec::with_capacity(HEADER_LEN + trimmed.len() + 6);
     packet.extend_from_slice(&[
         0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ]);
-    let name_start = packet.len();
     for label in trimmed.split('.') {
-        if label.is_empty() || label.len() > MAX_LABEL_LEN || !label.is_ascii() {
-            return Err(WireError::InvalidName);
-        }
         packet.push(label.len() as u8);
         packet.extend_from_slice(label.as_bytes());
     }
     packet.push(0);
-    if packet.len() - name_start > MAX_NAME_LEN {
-        return Err(WireError::InvalidName);
-    }
     packet.extend_from_slice(&qtype.to_be_bytes());
     packet.extend_from_slice(&CLASS_IN.to_be_bytes());
     Ok(packet)
 }
 
+#[cfg(any(test, kani))]
 pub(crate) fn skip_name(packet: &[u8], start: usize) -> Option<usize> {
+    skip_name_with_floor(packet, start, 0)
+}
+
+fn skip_name_with_floor(packet: &[u8], start: usize, min_target: usize) -> Option<usize> {
     let mut pos = start;
     let mut after_first_jump: Option<usize> = None;
     let mut jump_limit = start;
@@ -84,7 +115,11 @@ pub(crate) fn skip_name(packet: &[u8], start: usize) -> Option<usize> {
                 } else {
                     jump_limit
                 };
-                if target >= ceiling || target >= packet.len() || jumps >= MAX_JUMPS {
+                if target < min_target
+                    || target >= ceiling
+                    || target >= packet.len()
+                    || jumps >= MAX_JUMPS
+                {
                     return None;
                 }
                 if after_first_jump.is_none() {
@@ -179,23 +214,21 @@ pub(crate) fn parse_header(packet: &[u8]) -> Result<(u16, u16), WireError> {
     Ok((qdcount, ancount))
 }
 
-pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
+pub(crate) fn parse_records<'a>(
+    packet: &'a [u8],
+    mut on_record: impl FnMut(u16, u16, u32, &'a [u8]),
+) -> Result<(), WireError> {
     let (qdcount, ancount) = parse_header(packet)?;
-
     let mut pos = HEADER_LEN;
     for _ in 0..qdcount {
-        pos = skip_name(packet, pos).ok_or(WireError::MalformedName)?;
+        pos = skip_name_with_floor(packet, pos, HEADER_LEN).ok_or(WireError::MalformedName)?;
         pos = pos.checked_add(4).ok_or(WireError::Truncated)?;
         if pos > packet.len() {
             return Err(WireError::Truncated);
         }
     }
-
-    let mut answer = DnsAnswer::default();
-    let mut best_ech_priority: Option<u16> = None;
-
     for _ in 0..ancount {
-        pos = skip_name(packet, pos).ok_or(WireError::MalformedName)?;
+        pos = skip_name_with_floor(packet, pos, HEADER_LEN).ok_or(WireError::MalformedName)?;
         let rtype = read_u16(packet, pos).ok_or(WireError::Truncated)?;
         let rclass = read_u16(packet, pos + 2).ok_or(WireError::Truncated)?;
         let ttl = read_u32(packet, pos + 4).ok_or(WireError::Truncated)?;
@@ -208,9 +241,18 @@ pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
             .get(rdata_start..rdata_end)
             .ok_or(WireError::Truncated)?;
         pos = rdata_end;
+        on_record(rtype, rclass, ttl, rdata);
+    }
+    Ok(())
+}
 
+pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
+    let mut answer = DnsAnswer::default();
+    let mut best_ech_priority: Option<u16> = None;
+
+    parse_records(packet, |rtype, rclass, ttl, rdata| {
         if rclass != CLASS_IN {
-            continue;
+            return;
         }
         match rtype {
             TYPE_A if rdata.len() == 4 => {
@@ -236,7 +278,7 @@ pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
             }
             _ => {}
         }
-    }
+    })?;
 
     Ok(answer)
 }

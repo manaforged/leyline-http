@@ -86,7 +86,9 @@ let session = Session::builder().proxy(proxies).build()?;
 proxy requests and `CONNECT` tunnel handshakes (such as sticky-session routing
 tags or a custom `Proxy-Authorization` header that overrides URL userinfo).
 Header values are redacted in `Debug` output, and framing headers (`host`,
-`content-length`, `transfer-encoding`) are rejected at `build()`.
+`content-length`, `transfer-encoding`) are rejected at `build()`. Proxy headers
+are not written by `Session::save`, so proxy credentials never land on disk;
+re-apply them on the loaded builder when needed.
 
 ```rust,no_run
 use leyline::{Proxy, Session};

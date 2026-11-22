@@ -203,6 +203,13 @@ impl Tls {
         self.auto_ech
     }
 
+    pub(crate) fn clear_origin_identity(&mut self) {
+        self.client_identity = None;
+        self.pinned_leaf_sha256.clear();
+        self.ech_config_list = None;
+        self.auto_ech = false;
+    }
+
     pub(crate) fn has_client_identity(&self) -> bool {
         self.client_identity.is_some()
     }

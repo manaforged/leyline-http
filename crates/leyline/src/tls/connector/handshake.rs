@@ -14,6 +14,13 @@ use crate::tls::trust::{
 use crate::tls::{TlsIo, TlsStream};
 use crate::trace;
 
+#[derive(Clone, Copy)]
+pub(super) enum EchMode<'a> {
+    Session,
+    Override(&'a [u8]),
+    Disabled,
+}
+
 pub(super) enum HandshakeFailure {
     EchRetry {
         retry_configs: Vec<u8>,
@@ -38,7 +45,8 @@ impl FingerprintConnector {
         session_key: &str,
         plan: AlpnPlan,
     ) -> impl Future<Output = Result<TlsStream, TlsError>> {
-        let fut = self.tls_handshake_with_ech(tcp_stream, host, session_key, plan, None);
+        let fut =
+            self.tls_handshake_with_ech(tcp_stream, host, session_key, plan, EchMode::Disabled);
         async move { fut.await.map_err(HandshakeFailure::into_error) }
     }
 
@@ -48,7 +56,7 @@ impl FingerprintConnector {
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-        ech_override: Option<&[u8]>,
+        ech_mode: EchMode<'_>,
     ) -> impl Future<Output = Result<TlsStream, HandshakeFailure>> {
         let records = self.hello.records();
         self.handshake_over(
@@ -56,7 +64,7 @@ impl FingerprintConnector {
             host,
             session_key,
             plan,
-            ech_override,
+            ech_mode,
             move |stream| {
                 if !records {
                     return TlsIo::Boring(stream);
@@ -75,9 +83,9 @@ impl FingerprintConnector {
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-        ech_override: Option<&[u8]>,
+        ech_mode: EchMode<'_>,
     ) -> impl Future<Output = Result<TlsStream, HandshakeFailure>> {
-        self.handshake_over(inner, host, session_key, plan, ech_override, |stream| {
+        self.handshake_over(inner, host, session_key, plan, ech_mode, |stream| {
             TlsIo::Nested(Box::new(stream))
         })
     }
@@ -89,16 +97,11 @@ impl FingerprintConnector {
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-        ech_override: Option<&[u8]>,
+        ech_mode: EchMode<'_>,
     ) -> impl Future<Output = Result<TlsStream, HandshakeFailure>> {
-        self.handshake_over(
-            unix_stream,
-            host,
-            session_key,
-            plan,
-            ech_override,
-            |stream| TlsIo::Unix(Box::new(stream)),
-        )
+        self.handshake_over(unix_stream, host, session_key, plan, ech_mode, |stream| {
+            TlsIo::Unix(Box::new(stream))
+        })
     }
 
     async fn handshake_over<S>(
@@ -107,7 +110,7 @@ impl FingerprintConnector {
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-        ech_override: Option<&[u8]>,
+        ech_mode: EchMode<'_>,
         wrap: impl FnOnce(leyline_bssl_tokio::SslStream<S>) -> TlsIo,
     ) -> Result<TlsStream, HandshakeFailure>
     where
@@ -115,7 +118,7 @@ impl FingerprintConnector {
     {
         let host = crate::util::bare_host(host);
         let (ssl, verification_failure) = self
-            .prepare_ssl(host, session_key, plan, ech_override)
+            .prepare_ssl(host, session_key, plan, ech_mode)
             .map_err(HandshakeFailure::Error)?;
 
         let stream = match leyline_bssl_tokio::SslStreamBuilder::new(ssl, io)
@@ -175,7 +178,7 @@ impl FingerprintConnector {
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-        ech_override: Option<&[u8]>,
+        ech_mode: EchMode<'_>,
     ) -> Result<(leyline_bssl::ssl::Ssl, Option<VerificationFailure>), TlsError> {
         let mut config = self
             .ssl_connector
@@ -199,7 +202,12 @@ impl FingerprintConnector {
             self.session_cache.attach(&mut ssl, session_key)?;
         }
         self.hello.apply(&mut ssl, plan.alps())?;
-        if let Some(ech) = ech_override.or_else(|| self.trust.ech_config()) {
+        let ech = match ech_mode {
+            EchMode::Session => self.trust.ech_config(),
+            EchMode::Override(bytes) => Some(bytes),
+            EchMode::Disabled => None,
+        };
+        if let Some(ech) = ech {
             ssl.set_enable_ech_grease(false);
             ssl.set_ech_config_list(ech).map_err(TlsError::from_stack)?;
         }

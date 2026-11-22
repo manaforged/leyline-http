@@ -242,16 +242,11 @@ fn proxy_target(
     let Some(proxy_url) = proxy.filter(|_| scheme == Scheme::Http) else {
         return (H1Target::OriginForm, Vec::new());
     };
-    let parsed = proxy_url.url();
     if proxy_url.scheme().is_socks() {
         return (H1Target::OriginForm, Vec::new());
     }
     let mut extra = Vec::new();
-    let custom_auth = proxy_url
-        .headers()
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("proxy-authorization"));
-    if !custom_auth && let Some(credentials) = crate::util::proxy_basic_auth(parsed) {
+    if let Some(credentials) = proxy_url.basic_auth_header() {
         extra.push(("Proxy-Authorization".to_owned(), credentials));
     }
     extra.extend(proxy_url.headers().iter().cloned());

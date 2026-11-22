@@ -38,7 +38,7 @@ pub(crate) struct DohResolver {
     endpoint: Url,
     client: Session,
     ip_cache: Mutex<LruCache<String, CachedIps>>,
-    ech_cache: Mutex<LruCache<String, CachedEch>>,
+    ech_cache: Mutex<LruCache<(String, u16), CachedEch>>,
 }
 
 impl DohResolver {
@@ -96,7 +96,7 @@ impl DohResolver {
         lock(&self.ip_cache).put(key, CachedIps { addrs, expires });
     }
 
-    fn cached_ech(&self, key: &str) -> Option<Option<Vec<u8>>> {
+    fn cached_ech(&self, key: &(String, u16)) -> Option<Option<Vec<u8>>> {
         let mut cache = lock(&self.ech_cache);
         let entry = cache.get(key)?;
         if Instant::now() < entry.expires {
@@ -106,7 +106,7 @@ impl DohResolver {
         None
     }
 
-    fn store_ech(&self, key: String, config: Option<Vec<u8>>, ttl: Option<u32>) {
+    fn store_ech(&self, key: (String, u16), config: Option<Vec<u8>>, ttl: Option<u32>) {
         let fallback = if config.is_some() {
             DEFAULT_TTL
         } else {
@@ -169,20 +169,26 @@ impl Resolver for DohResolver {
         })
     }
 
-    fn resolve_ech<'a>(&'a self, host: &'a str) -> EchFuture<'a> {
+    fn resolve_ech<'a>(&'a self, host: &'a str, port: u16) -> EchFuture<'a> {
         if host.parse::<IpAddr>().is_ok() {
             return Box::pin(async { None });
         }
-        let key = normalize_host(host);
+        let host = normalize_host(host);
         Box::pin(async move {
-            if let Some(cached) = self.cached_ech(&key) {
+            let cache_key = (host, port);
+            if let Some(cached) = self.cached_ech(&cache_key) {
                 return cached;
             }
-            let (config, ttl) = match self.query(&key, TYPE_HTTPS).await {
+            let qname = if port == 443 {
+                cache_key.0.clone()
+            } else {
+                format!("_{port}._https.{}", cache_key.0)
+            };
+            let (config, ttl) = match self.query(&qname, TYPE_HTTPS).await {
                 Ok(answer) => (answer.ech_config_list, answer.min_ttl),
                 Err(_) => (None, None),
             };
-            self.store_ech(key, config.clone(), ttl);
+            self.store_ech(cache_key, config.clone(), ttl);
             config
         })
     }

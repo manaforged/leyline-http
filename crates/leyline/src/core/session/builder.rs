@@ -145,6 +145,9 @@ impl SessionBuilder {
     /// Sets the proxy or proxy pool for every request.
     pub fn proxy(mut self, config: impl Into<Proxy>) -> Self {
         let mut config = config.into();
+        if let Err(err) = config.check_headers() {
+            self.reject(err);
+        }
         self.proxy_pool = config.pool.take();
         self.proxy_config = if self.proxy_pool.is_some() {
             Proxy::new().env(false)

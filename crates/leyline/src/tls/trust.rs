@@ -58,11 +58,17 @@ fn verify_callback(
     let failure = VerificationFailure::default();
     let slot = failure.clone();
     let callback = move |ssl: &mut SslRef| {
-        let hostname = host
-            .as_deref()
+        let ech_override = ssl.ech_name_override();
+        let hostname = ech_override
+            .or(host.as_deref())
             .or_else(|| ssl.servername(NameType::HOST_NAME))
             .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-        verify(ssl, hostname, &pins, system_roots, check_hostname).map_err(|reason| {
+        let active_pins = if ech_override.is_some() {
+            &[][..]
+        } else {
+            pins.as_slice()
+        };
+        verify(ssl, hostname, active_pins, system_roots, check_hostname).map_err(|reason| {
             tracing::debug!(target: "leyline::tls::trust", ?reason, "peer certificate rejected");
             *crate::util::lock(&slot) = Some(reason);
             SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)

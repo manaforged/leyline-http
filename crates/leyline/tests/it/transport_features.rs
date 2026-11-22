@@ -37,15 +37,42 @@ impl Drop for TempSocket {
 
 #[tokio::test]
 async fn local_addresses_binds_ipv4_loopback() {
-    let server = Server::http(|_| Response::new(200).body("bound"))
-        .await
-        .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let seen_ip = Arc::new(Mutex::new(None));
+    let seen_bg = Arc::clone(&seen_ip);
+    tokio::spawn(async move {
+        let (mut sock, peer) = listener.accept().await.unwrap();
+        *seen_bg.lock().unwrap() = Some(peer.ip());
+        let mut buf = [0u8; 1024];
+        drop(sock.read(&mut buf).await);
+        drop(
+            sock.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nbound",
+            )
+            .await,
+        );
+    });
+    let bind_v4 = if cfg!(target_os = "linux") {
+        Ipv4Addr::new(127, 0, 0, 2)
+    } else {
+        Ipv4Addr::LOCALHOST
+    };
     let session = Session::builder()
-        .local_addresses(Ipv4Addr::LOCALHOST, Ipv6Addr::LOCALHOST)
+        .local_addresses(bind_v4, Ipv6Addr::LOCALHOST)
         .build()
         .unwrap();
-    let body = session.get(server.url("/ok")).text().await.unwrap();
+    let body = session
+        .get(format!("http://{addr}/ok"))
+        .text()
+        .await
+        .unwrap();
     assert_eq!(body, "bound");
+    assert_eq!(
+        *seen_ip.lock().unwrap(),
+        Some(std::net::IpAddr::V4(bind_v4)),
+        "server must observe the bound local source IP"
+    );
 }
 
 #[tokio::test]
@@ -175,6 +202,41 @@ fn proxy_rejects_forbidden_and_invalid_headers() {
         .build()
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Config);
+
+    let err = Session::builder()
+        .proxy(Proxy::list(["http://127.0.0.1:8080"]).header("host", "forbidden"))
+        .build()
+        .unwrap_err();
+    assert_eq!(err.kind(), Kind::Config);
+}
+
+#[tokio::test]
+async fn proxy_list_forwards_custom_headers() {
+    let seen = Arc::new(Mutex::new(String::new()));
+    let seen_bg = Arc::clone(&seen);
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut sock, _) = proxy_listener.accept().await.unwrap();
+        let mut buf = [0u8; 4096];
+        let n = sock.read(&mut buf).await.unwrap();
+        *seen_bg.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).into_owned();
+        drop(
+            sock.write_all(
+                b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\npool",
+            )
+            .await,
+        );
+    });
+
+    let session = Session::builder()
+        .proxy(Proxy::list([format!("http://{proxy_addr}")]).header("x-pool-tag", "slot-1"))
+        .build()
+        .unwrap();
+    let body = session.get("http://origin.example/p").text().await.unwrap();
+    assert_eq!(body, "pool");
+    let raw = seen.lock().unwrap().to_ascii_lowercase();
+    assert!(raw.contains("x-pool-tag: slot-1\r\n"), "{raw}");
 }
 
 #[cfg(unix)]
@@ -274,8 +336,8 @@ async fn unix_socket_serves_https_with_tls_verification() {
 }
 
 #[cfg(unix)]
-#[test]
-fn unix_socket_rejects_proxy_and_http3() {
+#[tokio::test]
+async fn unix_socket_rejects_proxy_and_http3() {
     let err = Session::builder()
         .unix_socket("/tmp/nonexistent.sock")
         .proxy("http://127.0.0.1:8080")
@@ -291,6 +353,64 @@ fn unix_socket_rejects_proxy_and_http3() {
             .build()
             .unwrap_err();
         assert_eq!(err.kind(), Kind::Config);
+
+        let session = Session::builder()
+            .unix_socket("/tmp/nonexistent.sock")
+            .build()
+            .unwrap();
+        let err = session
+            .get("https://unix.local/")
+            .protocol(Protocol::Http3)
+            .send()
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind(), Kind::Config);
     }
     let _ = Protocol::Http1;
+}
+
+#[test]
+fn coarse_timeout_recovers_after_owning_runtime_drops() {
+    use std::time::Duration;
+
+    let session = Session::builder()
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+
+    let rt1 = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt1.block_on(async {
+        let server = Server::http(|_| Response::new(200).body("fast"))
+            .await
+            .unwrap();
+        let body = session.get(server.url("/")).text().await.unwrap();
+        assert_eq!(body, "fast");
+    });
+    drop(rt1);
+
+    let rt2 = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+    rt2.block_on(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let _hold = tokio::spawn(async move {
+            let (_sock, _) = listener.accept().await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+        });
+        let err = session
+            .get(format!("http://{addr}/hang"))
+            .send()
+            .await
+            .unwrap_err();
+        assert_eq!(
+            err.kind(),
+            Kind::Timeout,
+            "coarse ticker must restart after the first runtime drops: {err:?}"
+        );
+    });
 }

@@ -88,6 +88,20 @@ impl ProxyPool {
         self.entries.iter().map(|entry| &entry.config)
     }
 
+    pub(crate) fn with_headers(mut self, headers: &[(String, String)]) -> Self {
+        let entries: Arc<[Entry]> = self
+            .entries
+            .iter()
+            .cloned()
+            .map(|mut entry| {
+                entry.config.push_validated_headers(headers);
+                entry
+            })
+            .collect();
+        self.entries = entries;
+        self
+    }
+
     fn from_entries(entries: impl Iterator<Item = Entry>) -> Self {
         let entries: Arc<[Entry]> = entries.collect();
         let state = PoolState::new(entries.len());

@@ -20,10 +20,11 @@ pub trait Resolver: Send + Sync + 'static {
         port: u16,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, io::Error>> + Send + 'a>>;
 
-    /// Returns an RFC 9460 `ECHConfigList` for `host` when the resolver can supply HTTPS/SVCB records.
+    /// Returns an RFC 9460 `ECHConfigList` for `host` and `port` when the resolver can supply HTTPS/SVCB records.
     fn resolve_ech<'a>(
         &'a self,
         _host: &'a str,
+        _port: u16,
     ) -> Pin<Box<dyn Future<Output = Option<Vec<u8>>> + Send + 'a>> {
         Box::pin(async { None })
     }
@@ -56,7 +57,7 @@ type Lookup = Result<Vec<SocketAddr>, Arc<io::Error>>;
 pub(crate) struct Coalesced {
     inner: Arc<dyn Resolver>,
     running: Coalesce<(String, u16), Lookup>,
-    ech_running: Coalesce<String, Option<Vec<u8>>>,
+    ech_running: Coalesce<(String, u16), Option<Vec<u8>>>,
 }
 
 impl Coalesced {
@@ -85,12 +86,12 @@ impl Resolver for Coalesced {
         })
     }
 
-    fn resolve_ech<'a>(&'a self, host: &'a str) -> EchFuture<'a> {
+    fn resolve_ech<'a>(&'a self, host: &'a str, port: u16) -> EchFuture<'a> {
         let inner = Arc::clone(&self.inner);
         let owned = host.to_owned();
         let lookup = self.ech_running.join_or_spawn(
-            &owned.clone(),
-            move || async move { inner.resolve_ech(&owned).await },
+            &(owned.clone(), port),
+            move || async move { inner.resolve_ech(&owned, port).await },
             |_| None,
         );
         Box::pin(lookup)

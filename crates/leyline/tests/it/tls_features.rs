@@ -308,3 +308,180 @@ async fn ech_config_list_encrypts_sni_and_recovers_from_stale_config() {
         "malformed ECHConfigList must fail cleanly: {err:?}"
     );
 }
+
+#[tokio::test]
+async fn ech_retry_works_under_custom_verifier_with_distinct_outer_cert() {
+    let (_live_hpke, _live_list, server_keys) = build_ech_config_list(12, "public.outer.test");
+    let (_stale_hpke, stale_list, _stale_keys) = build_ech_config_list(88, "public.outer.test");
+    let (inner_cert, inner_key) = self_signed_dns("secret.inner.test");
+    let (outer_cert, outer_key) = self_signed_dns("public.outer.test");
+    let inner_pin: [u8; 32] = Sha256::digest(inner_cert.to_der().unwrap()).into();
+    let mut ca_bundle = inner_cert.to_pem().unwrap();
+    ca_bundle.extend_from_slice(&outer_cert.to_pem().unwrap());
+
+    let mut inner_ctx = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    inner_ctx
+        .set_min_proto_version(Some(SslVersion::TLS1_3))
+        .unwrap();
+    inner_ctx.set_certificate(&inner_cert).unwrap();
+    inner_ctx.set_private_key(&inner_key).unwrap();
+    inner_ctx.set_ech_keys(&server_keys).unwrap();
+    let inner_ctx = Arc::new(inner_ctx.build());
+
+    let mut outer_ctx = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    outer_ctx
+        .set_min_proto_version(Some(SslVersion::TLS1_3))
+        .unwrap();
+    outer_ctx.set_certificate(&outer_cert).unwrap();
+    outer_ctx.set_private_key(&outer_key).unwrap();
+    outer_ctx.set_ech_keys(&server_keys).unwrap();
+    let outer_ctx = Arc::new(outer_ctx.build());
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let conn_idx = Arc::new(AtomicUsize::new(0));
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = listener.accept().await {
+            let idx = conn_idx.fetch_add(1, Ordering::SeqCst);
+            let ctx = if idx == 0 {
+                Arc::clone(&outer_ctx)
+            } else {
+                Arc::clone(&inner_ctx)
+            };
+            tokio::spawn(async move {
+                let ssl = Ssl::new(&ctx).unwrap();
+                if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await
+                {
+                    let accepted = stream.ssl().ech_accepted();
+                    serve_h1_ok(stream, &format!("ech={accepted}")).await;
+                }
+            });
+        }
+    });
+
+    let session = Session::builder()
+        .resolve("secret.inner.test", [addr])
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(ca_bundle)
+                .pin_cert_sha256(inner_pin)
+                .ech_config_list(stale_list),
+        )
+        .build()
+        .unwrap();
+    let resp = session
+        .get(format!("https://secret.inner.test:{}/ok", addr.port()))
+        .await
+        .unwrap();
+    assert!(resp.ech_accepted());
+    assert_eq!(resp.text().await.unwrap(), "ech=true");
+}
+
+#[tokio::test]
+async fn https_proxy_does_not_receive_origin_ech_config() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let (_hpke, live_list, server_keys) = build_ech_config_list(15, "public.outer.test");
+    let (origin_cert, origin_key) =
+        self_signed_dns_names(&["secret.inner.test", "public.outer.test"]);
+    let (proxy_cert, proxy_key) = self_signed_dns("proxy.local");
+    let mut ca_bundle = origin_cert.to_pem().unwrap();
+    ca_bundle.extend_from_slice(&proxy_cert.to_pem().unwrap());
+
+    let origin_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin_addr = origin_listener.local_addr().unwrap();
+    let mut origin_ctx = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    origin_ctx
+        .set_min_proto_version(Some(SslVersion::TLS1_3))
+        .unwrap();
+    origin_ctx.set_certificate(&origin_cert).unwrap();
+    origin_ctx.set_private_key(&origin_key).unwrap();
+    origin_ctx.set_ech_keys(&server_keys).unwrap();
+    let origin_ctx = Arc::new(origin_ctx.build());
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = origin_listener.accept().await {
+            let ctx = Arc::clone(&origin_ctx);
+            tokio::spawn(async move {
+                let ssl = Ssl::new(&ctx).unwrap();
+                if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await
+                {
+                    let accepted = stream.ssl().ech_accepted();
+                    serve_h1_ok(stream, &format!("proxied-ech={accepted}")).await;
+                }
+            });
+        }
+    });
+
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    let mut proxy_ctx = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    proxy_ctx.set_certificate(&proxy_cert).unwrap();
+    proxy_ctx.set_private_key(&proxy_key).unwrap();
+    let proxy_ctx = Arc::new(proxy_ctx.build());
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = proxy_listener.accept().await {
+            let ctx = Arc::clone(&proxy_ctx);
+            tokio::spawn(async move {
+                let ssl = Ssl::new(&ctx).unwrap();
+                let Ok(mut client) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await
+                else {
+                    return;
+                };
+                assert!(
+                    !client.ssl().ech_accepted(),
+                    "https proxy must not receive origin ECH"
+                );
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 512];
+                loop {
+                    let Ok(n) = client.read(&mut tmp).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let mut upstream = tokio::net::TcpStream::connect(origin_addr).await.unwrap();
+                client
+                    .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                    .await
+                    .unwrap();
+                drop(tokio::io::copy_bidirectional(&mut client, &mut upstream).await);
+            });
+        }
+    });
+
+    let session = Session::builder()
+        .resolve("proxy.local", [proxy_addr])
+        .proxy(format!("https://proxy.local:{}", proxy_addr.port()))
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(ca_bundle)
+                .ech_config_list(live_list),
+        )
+        .build()
+        .unwrap();
+    let resp = session
+        .get(format!(
+            "https://secret.inner.test:{}/p",
+            origin_addr.port()
+        ))
+        .await
+        .unwrap();
+    assert!(resp.ech_accepted());
+    assert_eq!(resp.text().await.unwrap(), "proxied-ech=true");
+}

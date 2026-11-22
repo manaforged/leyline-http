@@ -119,6 +119,12 @@ impl Session {
 
     #[cfg(feature = "http3")]
     async fn send_h3_only(&self, req: Prepared<'_>) -> Result<Box<TransportResponse>> {
+        #[cfg(unix)]
+        if self.inner.connector.dialer().unix_socket().is_some() {
+            return Err(Error::config(
+                "unix_socket cannot be combined with Protocol::Http3",
+            ));
+        }
         if let Some(cause) = h3_proxy_blocker(req.proxy) {
             return Err(Error::config(cause));
         }
@@ -154,6 +160,10 @@ impl Session {
 
     #[cfg(feature = "http3")]
     fn h3_usable(&self, req: &Prepared<'_>) -> bool {
+        #[cfg(unix)]
+        if self.inner.connector.dialer().unix_socket().is_some() {
+            return false;
+        }
         let pool = &self.inner.pool;
         crate::wire::host_port(req.url)
             .ok()

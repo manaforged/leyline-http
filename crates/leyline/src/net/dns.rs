@@ -89,8 +89,8 @@ impl Resolver for LayeredResolver {
         self.resolver.resolve(host, port)
     }
 
-    fn resolve_ech<'a>(&'a self, host: &'a str) -> EchFuture<'a> {
-        self.resolver.resolve_ech(host)
+    fn resolve_ech<'a>(&'a self, host: &'a str, port: u16) -> EchFuture<'a> {
+        self.resolver.resolve_ech(host, port)
     }
 }
 

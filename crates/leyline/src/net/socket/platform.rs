@@ -132,13 +132,27 @@ pub(super) fn apply(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) -> io
     Ok(())
 }
 
+#[cfg(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "visionos"
+))]
+fn invalid_interface_name(name: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("invalid network interface name `{name}`"),
+    )
+}
+
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
 pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::Result<()> {
     if name.is_empty() || name.as_bytes().contains(&0) {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("invalid network interface name `{name}`"),
-        ));
+        return Err(invalid_interface_name(name));
     }
     socket.bind_device(Some(name.as_bytes()))
 }
@@ -151,12 +165,11 @@ pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::R
     target_os = "visionos"
 ))]
 pub(super) fn bind_interface(socket: &Socket, name: &str, is_v6: bool) -> io::Result<()> {
-    let c_name = std::ffi::CString::new(name).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("invalid network interface name `{name}`"),
-        )
-    })?;
+    if name.is_empty() {
+        return Err(invalid_interface_name(name));
+    }
+    let c_name = std::ffi::CString::new(name)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
     // SAFETY: `c_name` is a valid NUL-terminated C string for the duration of this call.
     let index = unsafe { libc::if_nametoindex(c_name.as_ptr()) };
     let Some(index) = std::num::NonZeroU32::new(index) else {

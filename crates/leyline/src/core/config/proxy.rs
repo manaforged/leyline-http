@@ -59,10 +59,7 @@ impl std::fmt::Debug for Proxy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Proxy")
             .field("rules", &self.rules)
-            .field(
-                "headers",
-                &crate::util::masked(self.headers.iter().map(|(k, _)| (k.as_str(), &b"***"[..]))),
-            )
+            .field("headers", &ProxyUrl::masked_headers(&self.headers))
             .field("no_proxy", &self.no_proxy)
             .field("no_proxy_explicit", &self.no_proxy_explicit)
             .field("use_env", &self.use_env)
@@ -167,12 +164,7 @@ impl Proxy {
                         continue;
                     };
                     let (k, v) = (key.to_owned(), val.to_owned());
-                    for rule in &mut self.rules {
-                        if let Ok(proxy) = &mut rule.parsed {
-                            proxy.push_header(k.clone(), v.clone());
-                        }
-                    }
-                    self.headers.push((k, v));
+                    self.push_validated_headers(std::slice::from_ref(&(k, v)));
                 }
                 (Ok(name), Err(_)) => self.record_header_error(format!(
                     "invalid proxy header `{}`",
@@ -182,6 +174,20 @@ impl Proxy {
             }
         }
         self
+    }
+
+    pub(crate) fn push_validated_headers(&mut self, headers: &[(String, String)]) {
+        for (k, v) in headers {
+            for rule in &mut self.rules {
+                if let Ok(proxy) = &mut rule.parsed {
+                    proxy.push_header(k.clone(), v.clone());
+                }
+            }
+            self.headers.push((k.clone(), v.clone()));
+        }
+        if let Some(pool) = self.pool.take() {
+            self.pool = Some(pool.with_headers(headers));
+        }
     }
 
     fn record_header_error(&mut self, msg: String) {
@@ -195,6 +201,23 @@ impl Proxy {
             return Err(Error::config(err.clone()));
         }
         Ok(())
+    }
+
+    pub(crate) fn same_for_doh(&self, other: &Self) -> bool {
+        self.use_env == other.use_env
+            && self.no_proxy_explicit == other.no_proxy_explicit
+            && self.headers == other.headers
+            && self.rules.len() == other.rules.len()
+            && self
+                .rules
+                .iter()
+                .zip(&other.rules)
+                .all(|(a, b)| a.scheme == b.scheme && a.url() == b.url())
+            && match (&self.custom, &other.custom) {
+                (Some(a), Some(b)) => Arc::ptr_eq(&a.0, &b.0),
+                (None, None) => true,
+                _ => false,
+            }
     }
 
     /// Sets the host patterns that bypass the proxy, replacing the `NO_PROXY` value.

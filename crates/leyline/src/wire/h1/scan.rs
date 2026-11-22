@@ -109,8 +109,7 @@ impl<'a> Pick<'a> for Scanned<'a> {
             10 if name.eq_ignore_ascii_case(b"connection") => Some(Known::Connection),
             14 if name.eq_ignore_ascii_case(b"content-length") => Some(Known::Length),
             17 if name.eq_ignore_ascii_case(b"transfer-encoding") => Some(Known::Coding),
-            7 | 10 | 16 | 25 => Fact::named(name).map(Known::Fact),
-            _ => None,
+            _ => Fact::named(name).map(Known::Fact),
         }
     }
 

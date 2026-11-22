@@ -37,8 +37,7 @@ impl Drop for RawPkcs12 {
 
 /// Parses a DER-encoded PKCS#12 archive using `password`.
 pub fn parse(der: &[u8], password: &str) -> Result<ParsedPkcs12, ErrorStack> {
-    let pass = CString::new(password)
-        .map_err(|_| ErrorStack::internal_error_str("pkcs12 password contains interior NUL"))?;
+    let pass = CString::new(password).map_err(ErrorStack::internal_error)?;
     let mut input = der.as_ptr();
     // SAFETY: input points to der.len() readable bytes; d2i_PKCS12 returns an owned PKCS12 or null.
     let raw = RawPkcs12(unsafe { cvt_p(ffi::d2i_PKCS12(ptr::null_mut(), &mut input, der.len()))? });
@@ -83,10 +82,8 @@ pub fn create(
     cert: &X509Ref,
     chain: Option<&StackRef<X509>>,
 ) -> Result<Vec<u8>, ErrorStack> {
-    let pass = CString::new(password)
-        .map_err(|_| ErrorStack::internal_error_str("pkcs12 password contains interior NUL"))?;
-    let friendly = CString::new(name)
-        .map_err(|_| ErrorStack::internal_error_str("pkcs12 name contains interior NUL"))?;
+    let pass = CString::new(password).map_err(ErrorStack::internal_error)?;
+    let friendly = CString::new(name).map_err(ErrorStack::internal_error)?;
     let chain_ptr = chain.map_or(ptr::null(), |c| c.as_ptr().cast_const());
     // SAFETY: all pointers are valid for the duration of PKCS12_create.
     let raw = RawPkcs12(unsafe {

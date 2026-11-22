@@ -4,7 +4,6 @@ use tokio::net::TcpStream;
 
 use crate::error::Error;
 use crate::net::{Dialer, NetError, ProxyReply, ProxyUrl};
-use crate::util::proxy_basic_auth;
 use crate::wire::h1::{self, MAX_H1_HEADER_BYTES, Sink};
 
 const TARGET_UNREACHABLE_STATUSES: [u16; 2] = [502, 504];
@@ -32,11 +31,7 @@ where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
     let mut connect_req = format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n");
-    let custom_auth = proxy
-        .headers()
-        .iter()
-        .any(|(name, _)| name.eq_ignore_ascii_case("proxy-authorization"));
-    if !custom_auth && let Some(credentials) = proxy_basic_auth(proxy.url()) {
+    if let Some(credentials) = proxy.basic_auth_header() {
         connect_req.push_str("Proxy-Authorization: ");
         connect_req.push_str(&credentials);
         connect_req.push_str("\r\n");

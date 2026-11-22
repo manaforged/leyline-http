@@ -392,10 +392,29 @@ pub(crate) fn h1_header_name(name: &str) -> &str {
     }
 }
 
+pub(crate) enum HeaderEnd {
+    Found(usize),
+    Incomplete,
+    BareLf,
+}
+
+pub(crate) fn scan_header_end(buf: &[u8]) -> HeaderEnd {
+    for i in memchr::memchr_iter(b'\n', buf) {
+        if i == 0 || buf[i - 1] != b'\r' {
+            return HeaderEnd::BareLf;
+        }
+        if i >= 3 && buf[i - 2] == b'\n' && buf[i - 3] == b'\r' {
+            return HeaderEnd::Found(i - 3);
+        }
+    }
+    HeaderEnd::Incomplete
+}
+
 pub(crate) fn find_header_end(buf: &[u8]) -> Option<usize> {
-    memchr::memchr_iter(b'\n', buf)
-        .find(|&i| i >= 3 && &buf[i - 3..=i] == b"\r\n\r\n")
-        .map(|i| i - 3)
+    match scan_header_end(buf) {
+        HeaderEnd::Found(pos) => Some(pos),
+        HeaderEnd::Incomplete | HeaderEnd::BareLf => None,
+    }
 }
 
 pub(crate) fn put(req: &mut Vec<u8>, name: &str, value: &str) {

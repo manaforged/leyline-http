@@ -7,6 +7,11 @@ use super::SessionBuilder;
 use crate::net::{HappyEyeballs, SocketOptions};
 
 impl SessionBuilder {
+    pub(super) fn with_socket_options(mut self, options: SocketOptions) -> Self {
+        self.socket_config = options;
+        self
+    }
+
     fn update_socket(mut self, f: impl FnOnce(&mut SocketOptions)) -> Self {
         f(&mut self.socket_config);
         self

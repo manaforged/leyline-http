@@ -99,8 +99,7 @@ pub fn marshal_ech_config(
     public_name: &str,
     max_name_len: usize,
 ) -> Result<Vec<u8>, ErrorStack> {
-    let name = CString::new(public_name)
-        .map_err(|_| ErrorStack::internal_error_str("ECH public_name contains interior NUL"))?;
+    let name = CString::new(public_name).map_err(ErrorStack::internal_error)?;
     let mut out: *mut u8 = ptr::null_mut();
     let mut out_len: usize = 0;
     // SAFETY: key and name are valid; BoringSSL allocates out with OPENSSL_malloc on success.
@@ -159,6 +158,22 @@ impl SslRef {
     pub fn ech_accepted(&self) -> bool {
         // SAFETY: ssl is valid.
         unsafe { ffi::SSL_ech_accepted(self.as_ptr()) == 1 }
+    }
+
+    #[corresponds(SSL_get0_ech_name_override)]
+    #[must_use]
+    pub fn ech_name_override(&self) -> Option<&str> {
+        let mut ptr: *const std::ffi::c_char = ptr::null();
+        let mut len: usize = 0;
+        // SAFETY: ssl is valid; returned slice borrows memory owned by ssl.
+        unsafe {
+            ffi::SSL_get0_ech_name_override(self.as_ptr(), &mut ptr, &mut len);
+            if ptr.is_null() || len == 0 {
+                None
+            } else {
+                std::str::from_utf8(slice::from_raw_parts(ptr.cast::<u8>(), len)).ok()
+            }
+        }
     }
 
     #[corresponds(SSL_get0_ech_retry_configs)]
