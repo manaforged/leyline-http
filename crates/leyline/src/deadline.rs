@@ -72,6 +72,22 @@ pub(crate) struct Deadline {
     error_body: Option<Duration>,
 }
 
+const COARSE_TIMER_FLOOR: Duration = Duration::from_secs(2);
+
+pub(crate) enum Timer {
+    Coarse(Instant),
+    Exact(Pin<Box<tokio::time::Sleep>>),
+}
+
+impl Timer {
+    pub(crate) fn deadline(&self) -> Instant {
+        match self {
+            Self::Coarse(at) => *at,
+            Self::Exact(sleep) => sleep.deadline(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Elapsed;
 
@@ -135,8 +151,13 @@ impl Deadline {
         tokio::time::sleep(wait.min(self.remaining())).await;
     }
 
-    pub(crate) fn timer(&self) -> Option<tokio::time::Sleep> {
-        self.at.map(tokio::time::sleep_until)
+    pub(crate) fn timer(&self) -> Option<Timer> {
+        let at = self.at?;
+        if at.saturating_duration_since(Instant::now()) >= COARSE_TIMER_FLOOR {
+            Some(Timer::Coarse(at))
+        } else {
+            Some(Timer::Exact(Box::pin(tokio::time::sleep_until(at))))
+        }
     }
 
     pub(crate) fn total<T, F>(&self, fut: F) -> impl Future<Output = Result<T>> + use<T, F>

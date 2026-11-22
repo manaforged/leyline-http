@@ -2,8 +2,8 @@ use super::Session;
 use crate::core::BodyRules;
 use crate::core::request::Draft;
 use crate::core::response::Response;
-use crate::deadline::Deadline;
-use crate::deadline::Timeout;
+use crate::core::shutdown::{Shutdown, Wake};
+use crate::deadline::{Deadline, Timeout, Timer};
 use crate::error::{Error, Kind, Result};
 use crate::trace;
 use crate::util::redact;
@@ -38,6 +38,7 @@ impl Session {
         trace::scope(
             self.inner.inputs.trace.as_ref(),
             Guarded {
+                shutdown: &self.inner.shutdown,
                 stop: self.inner.shutdown.wait(),
                 fut,
                 timer,
@@ -155,12 +156,12 @@ where
 
 pin_project_lite::pin_project! {
     struct Guarded<'a, F> {
+        shutdown: &'a std::sync::Arc<Shutdown>,
         #[pin]
         stop: crate::core::shutdown::Wait<'a>,
         #[pin]
         fut: F,
-        #[pin]
-        timer: Option<tokio::time::Sleep>,
+        timer: Option<Timer>,
         span: tracing::Span,
     }
 }
@@ -175,29 +176,36 @@ where
         self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<Response>> {
-        let this = self.project();
-        let at = this
-            .timer
-            .as_ref()
-            .get_ref()
-            .as_ref()
-            .map(tokio::time::Sleep::deadline);
+        let mut this = self.project();
+        let at = this.timer.as_ref().map(Timer::deadline);
         let out = if this.stop.shutdown().is_stopped() {
             Err(Error::shut_down())
         } else if let std::task::Poll::Ready(out) =
             crate::deadline::expiring(at, || this.span.in_scope(|| this.fut.poll(cx)))
         {
             out
-        } else if this
-            .timer
-            .as_pin_mut()
-            .is_some_and(|timer| timer.poll(cx).is_ready())
-        {
-            Err(Error::new(Kind::Timeout))
-        } else if this.stop.poll(cx).is_ready() {
-            Err(Error::shut_down())
         } else {
-            return std::task::Poll::Pending;
+            loop {
+                match this.timer.as_mut() {
+                    Some(Timer::Exact(sleep)) => {
+                        if sleep.as_mut().poll(cx).is_ready() {
+                            break Err(Error::new(Kind::Timeout));
+                        }
+                    }
+                    Some(Timer::Coarse(at)) => {
+                        if tokio::time::Instant::now() >= *at {
+                            break Err(Error::new(Kind::Timeout));
+                        }
+                        this.shutdown.note_coarse();
+                    }
+                    None => {}
+                }
+                match this.stop.as_mut().poll_wake(cx) {
+                    std::task::Poll::Ready(Wake::Stopped) => break Err(Error::shut_down()),
+                    std::task::Poll::Ready(Wake::Tick) => continue,
+                    std::task::Poll::Pending => return std::task::Poll::Pending,
+                }
+            }
         };
         trace::done(out.as_ref().map(|_| ()));
         std::task::Poll::Ready(out)
