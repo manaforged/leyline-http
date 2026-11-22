@@ -272,7 +272,7 @@ pub(crate) async fn send_request(
         Some(opened),
         body,
         move |opened, body, first| send_on(ctx, opened, body, first),
-        move |body| reopen_h2(pool, connector, h2_config, key.clone(), body),
+        move |body| Box::pin(reopen_h2(pool, connector, h2_config, key.clone(), body)),
     )
     .await
 }
@@ -317,7 +317,7 @@ async fn send_on(
     if let Some(probe) = opened.probe.take()
         && !(leg == LegKind::Pooled && replay.is_some() && is_idempotent(ctx.method))
     {
-        if !confirm(ctx.pool, ctx.key, &opened.conn, *probe).await {
+        if !Box::pin(confirm(ctx.pool, ctx.key, &opened.conn, *probe)).await {
             return Ok(Sent::Retry(body));
         }
         send_started = Instant::now();

@@ -40,29 +40,44 @@ impl Default for Download {
 impl RequestBuilder {
     /// Verifies the SHA-256 of a download before replacing the destination file.
     pub fn sha256(mut self, checksum: [u8; 32]) -> Self {
-        self.draft.download.get_or_insert_default().checksum = Some(checksum);
+        self.draft
+            .build_extras_mut()
+            .download
+            .get_or_insert_default()
+            .checksum = Some(checksum);
         self
     }
     /// Calls `progress` during a download with the bytes written to the file so far and the complete length in bytes, which is `None` when the server does not declare it.
     pub fn progress(mut self, progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static) -> Self {
-        self.draft.download.get_or_insert_default().progress = Some(Arc::new(progress));
+        self.draft
+            .build_extras_mut()
+            .download
+            .get_or_insert_default()
+            .progress = Some(Arc::new(progress));
         self
     }
     /// Enables resuming a prior download, on by default for RequestBuilder::download_to.
     pub fn resume(mut self, resume: bool) -> Self {
-        self.draft.download.get_or_insert_default().resume = resume;
+        self.draft
+            .build_extras_mut()
+            .download
+            .get_or_insert_default()
+            .resume = resume;
         self
     }
     /// Downloads atomically, retries a dropped transfer under the retry policy, and resumes a saved prefix only when a strong ETag still matches.
     pub async fn download_to(mut self, path: impl AsRef<Path>) -> Result<u64> {
         let key = self.prepare_download()?;
-        let options = self.draft.download.take().unwrap_or_default();
+        let options = self
+            .draft
+            .build
+            .as_deref_mut()
+            .and_then(|b| b.download.take())
+            .unwrap_or_default();
         let target = path.as_ref().to_path_buf();
-        let retry = std::mem::replace(
-            &mut self.draft.carry.retry_policy,
-            crate::core::retry::Retry::unset(),
-        );
-        let deadline = self.session.deadline(self.draft.carry.timeouts.as_ref());
+        let retry = self.draft.carry.take_retry_policy(&self.session);
+        self.draft.carry.overrides_mut().retry_policy = Some(crate::core::retry::Retry::unset());
+        let deadline = self.session.deadline(self.draft.carry.timeouts());
         let mut attempt = 0;
         loop {
             deadline.check()?;

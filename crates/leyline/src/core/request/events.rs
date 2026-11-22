@@ -208,7 +208,7 @@ impl Source {
         let mut draft = self
             .request
             .again(Body::default(), self.request.headers.clone());
-        draft.carry.retry_policy = Retry::unset();
+        draft.carry.overrides_mut().retry_policy = Some(Retry::unset());
         if self.parser.last_id.is_empty() {
             draft.headers.remove_all("last-event-id");
         } else {

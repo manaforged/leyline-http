@@ -366,7 +366,9 @@ async fn deliver_head(
         .flatten();
     if !response.keeps_stream(status) || inline_error.is_some() {
         let (body, complete) = match inline_error {
-            Some((budget, len)) => read_error_prefix(io.as_mut(), &mut head, budget, len).await,
+            Some((budget, len)) => {
+                Box::pin(read_error_prefix(io.as_mut(), &mut head, budget, len)).await
+            }
             None => (
                 read_h1_body(io.as_mut(), &mut head, body_limit).await?,
                 true,

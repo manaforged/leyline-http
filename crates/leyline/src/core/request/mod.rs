@@ -44,18 +44,23 @@ pub struct RequestBuilder {
     draft: Box<Draft>,
 }
 
+#[derive(Default)]
+struct BuildExtras {
+    query_params: Vec<(String, String)>,
+    builder_error: Option<Error>,
+    compress: Option<Encoding>,
+    download: Option<Box<download::Download>>,
+}
+
 pub(crate) struct Draft {
     pub(crate) method: Method,
     pub(crate) url: Option<std::sync::Arc<url::Url>>,
     pub(crate) body: Body,
     pub(crate) headers: HeaderList,
-    query_params: Vec<(String, String)>,
-    builder_error: Option<Error>,
-    compress: Option<Encoding>,
     pub(crate) deadline: Deadline,
     pub(crate) response: ResponseMode,
-    download: Option<Box<download::Download>>,
     pub(crate) carry: Carry,
+    build: Option<Box<BuildExtras>>,
 }
 
 #[derive(Clone)]
@@ -63,20 +68,64 @@ pub(crate) struct Carry {
     pub(crate) retrying: bool,
     pub(crate) preset: Option<RequestKind>,
     pub(crate) preset_user: bool,
-    pub(crate) timeouts: Option<Timeout>,
     pub(crate) stream_response: bool,
-    pub(crate) retry_policy: Retry,
+    pub(crate) status_errors: bool,
+    pub(crate) protocol: Option<Protocol>,
+    pub(crate) body_rules: BodyRules,
+    pub(crate) overrides: Option<Box<Overrides>>,
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct Overrides {
+    pub(crate) timeouts: Option<Timeout>,
+    pub(crate) retry_policy: Option<Retry>,
     pub(crate) digest_auth: Option<DigestAuth>,
     pub(crate) proxy: Option<Proxy>,
-    pub(crate) protocol: Option<Protocol>,
     pub(crate) first_hop: Option<Option<crate::net::ProxyUrl>>,
     pub(crate) header_order: Option<Vec<String>>,
     pub(crate) redirect: Option<Redirect>,
     pub(crate) initiator: Option<url::Url>,
     pub(crate) trusted_origin: Option<url::Url>,
     pub(crate) label: Option<String>,
-    pub(crate) status_errors: bool,
-    pub(crate) body_rules: BodyRules,
+}
+
+impl Carry {
+    pub(crate) fn overrides(&self) -> Option<&Overrides> {
+        self.overrides.as_deref()
+    }
+
+    pub(crate) fn overrides_mut(&mut self) -> &mut Overrides {
+        self.overrides.get_or_insert_with(Box::default)
+    }
+
+    pub(crate) fn timeouts(&self) -> Option<&Timeout> {
+        self.overrides().and_then(|o| o.timeouts.as_ref())
+    }
+
+    pub(crate) fn proxy(&self) -> Option<&Proxy> {
+        self.overrides().and_then(|o| o.proxy.as_ref())
+    }
+
+    pub(crate) fn header_order(&self) -> Option<&[String]> {
+        self.overrides().and_then(|o| o.header_order.as_deref())
+    }
+
+    pub(crate) fn redirect(&self) -> Option<&Redirect> {
+        self.overrides().and_then(|o| o.redirect.as_ref())
+    }
+
+    pub(crate) fn retry_policy<'a>(&'a self, session: &'a Session) -> &'a Retry {
+        self.overrides()
+            .and_then(|o| o.retry_policy.as_ref())
+            .unwrap_or_else(|| session.default_retry())
+    }
+
+    pub(crate) fn take_retry_policy(&mut self, session: &Session) -> Retry {
+        self.overrides
+            .as_deref_mut()
+            .and_then(|o| o.retry_policy.take())
+            .unwrap_or_else(|| session.default_retry().clone())
+    }
 }
 
 fn default_preset(session: &Session, method: &Method) -> Option<RequestKind> {
@@ -97,32 +146,28 @@ impl Draft {
             url,
             body: Body::default(),
             headers: HeaderList::new(),
-            query_params: Vec::new(),
-            builder_error: None,
-            compress: None,
             deadline: Deadline::default(),
             response: ResponseMode::Buffered,
-            download: None,
             carry: Carry {
                 retrying: false,
                 preset,
                 preset_user: false,
-                timeouts: None,
                 stream_response: false,
-                retry_policy: session.default_retry().clone(),
-                digest_auth: None,
-                proxy: None,
-                protocol: None,
-                first_hop: None,
-                header_order: None,
-                redirect: None,
-                initiator: None,
-                trusted_origin: None,
-                label: None,
                 status_errors: false,
+                protocol: None,
                 body_rules: session.body_rules(),
+                overrides: None,
             },
+            build: None,
         }
+    }
+
+    fn build_extras(&self) -> Option<&BuildExtras> {
+        self.build.as_deref()
+    }
+
+    fn build_extras_mut(&mut self) -> &mut BuildExtras {
+        self.build.get_or_insert_with(Box::default)
     }
 
     fn again(&self, body: Body, headers: HeaderList) -> Box<Draft> {
@@ -131,13 +176,10 @@ impl Draft {
             url: self.url.clone(),
             body,
             headers,
-            query_params: Vec::new(),
-            builder_error: None,
-            compress: None,
             deadline: self.deadline,
             response: self.response,
-            download: None,
             carry: self.carry.clone(),
+            build: None,
         })
     }
 
@@ -167,7 +209,9 @@ impl RequestBuilder {
     }
 
     pub(crate) fn trusting(mut self, origin: Option<url::Url>) -> Self {
-        self.draft.carry.trusted_origin = origin;
+        if origin.is_some() {
+            self.draft.carry.overrides_mut().trusted_origin = origin;
+        }
         self
     }
 
@@ -176,28 +220,35 @@ impl RequestBuilder {
             Ok(url) => Self::new(session, method, Some(url)),
             Err(err) => {
                 let mut builder = Self::new(session, method, None);
-                builder.draft.builder_error = Some(err);
+                builder.fail(err);
                 builder
             }
         }
     }
 
     pub(crate) fn fail(&mut self, err: Error) {
-        if self.draft.builder_error.is_none() {
-            self.draft.builder_error = Some(err);
+        let build = self.draft.build_extras_mut();
+        if build.builder_error.is_none() {
+            build.builder_error = Some(err);
         }
     }
 
     /// Returns a copy of this request with every option, or `None` when the body is a stream or a setter recorded an error.
     pub fn try_clone(&self) -> Option<Self> {
         let draft = &self.draft;
-        if draft.builder_error.is_some() {
+        if draft
+            .build_extras()
+            .is_some_and(|b| b.builder_error.is_some())
+        {
             return None;
         }
         let mut copy = draft.again(draft.body.try_clone()?, draft.headers.clone());
-        copy.query_params.clone_from(&draft.query_params);
-        copy.compress = draft.compress;
-        copy.download.clone_from(&draft.download);
+        if let Some(build) = draft.build_extras() {
+            let copy_build = copy.build_extras_mut();
+            copy_build.query_params.clone_from(&build.query_params);
+            copy_build.compress = build.compress;
+            copy_build.download.clone_from(&build.download);
+        }
         Some(Self {
             session: self.session.clone(),
             draft: copy,
@@ -207,7 +258,7 @@ impl RequestBuilder {
     /// Converts this request into an `http::Request` with its absolute URL, the headers set on it and its options in the extensions, or returns the error a setter recorded; `Session::request_from` converts it back.
     pub fn build(mut self) -> crate::error::Result<http::Request<Body>> {
         self.prepare_in_place()?;
-        self.draft.into_http()
+        self.draft.into_http(self.session.default_retry())
     }
 
     fn infer_from_content_type(&mut self) {
@@ -230,7 +281,7 @@ impl RequestBuilder {
 
     /// Sets the timeouts for this request, overriding the session timeouts.
     pub fn timeout(mut self, config: impl Into<Timeout>) -> Self {
-        self.draft.carry.timeouts = Some(config.into());
+        self.draft.carry.overrides_mut().timeouts = Some(config.into());
         self
     }
 
@@ -253,7 +304,7 @@ impl RequestBuilder {
         I: IntoIterator<Item = S>,
         S: AsRef<str>,
     {
-        self.draft.carry.header_order =
+        self.draft.carry.overrides_mut().header_order =
             Some(order.into_iter().map(|s| s.as_ref().to_owned()).collect());
         self
     }
@@ -272,7 +323,8 @@ impl RequestBuilder {
                 self.draft.body = Body::from(bytes);
             }
             Err(e) => {
-                self.draft.builder_error = Some(Error::new(Kind::Json).with_source(e));
+                self.draft.build_extras_mut().builder_error =
+                    Some(Error::new(Kind::Json).with_source(e));
             }
         }
         self
@@ -314,7 +366,7 @@ impl RequestBuilder {
 
     /// Compresses the request body with the given encoding before sending.
     pub fn compress_body(mut self, encoding: Encoding) -> Self {
-        self.draft.compress = Some(encoding);
+        self.draft.build_extras_mut().compress = Some(encoding);
         self
     }
 
@@ -326,8 +378,9 @@ impl RequestBuilder {
         K: AsRef<str>,
         V: AsRef<str>,
     {
+        let query_params = &mut self.draft.build_extras_mut().query_params;
         for pair in params {
-            self.draft.query_params.push(param_pair(pair));
+            query_params.push(param_pair(pair));
         }
         self
     }
@@ -399,19 +452,20 @@ impl RequestBuilder {
 
     /// Sets the retry policy for this request, overriding the session default.
     pub fn retry(mut self, retry: impl Into<Retry>) -> Self {
-        self.draft.carry.retry_policy = retry.into();
+        self.draft.carry.overrides_mut().retry_policy = Some(retry.into());
         self
     }
 
     /// Sets the redirect policy for this request, overriding the session policy.
     pub fn redirect(mut self, policy: impl Into<Redirect>) -> Self {
-        self.draft.carry.redirect = Some(policy.into());
+        self.draft.carry.overrides_mut().redirect = Some(policy.into());
         self
     }
 
     /// Answers an HTTP Digest challenge with the given credentials.
     pub fn digest_auth(mut self, username: impl AsRef<str>, password: impl AsRef<str>) -> Self {
-        self.draft.carry.digest_auth = Some(DigestAuth::new(username.as_ref(), password.as_ref()));
+        self.draft.carry.overrides_mut().digest_auth =
+            Some(DigestAuth::new(username.as_ref(), password.as_ref()));
         self
     }
 
@@ -431,7 +485,7 @@ impl RequestBuilder {
                 "a request takes one proxy; set a proxy list on the session",
             ));
         }
-        self.draft.carry.proxy = Some(config);
+        self.draft.carry.overrides_mut().proxy = Some(config);
         self
     }
 }

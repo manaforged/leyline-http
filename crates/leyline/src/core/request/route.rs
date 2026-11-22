@@ -18,7 +18,7 @@ impl<'a> Route<'a> {
     pub(super) fn new(session: &'a Session, attempt: &Draft, policy: &'a Retry) -> Self {
         let pool = session
             .proxy_pool()
-            .filter(|_| attempt.carry.proxy.is_none());
+            .filter(|_| attempt.carry.proxy().is_none());
         Self {
             session,
             pool,
@@ -65,7 +65,7 @@ impl<'a> Route<'a> {
 
     fn lease(&self, this: &mut Draft, origin: Option<&Origin>) -> Option<Box<Lease>> {
         let lease = Box::new(self.pool?.lease(origin, self.last)?);
-        this.carry.proxy = Some(lease.config().clone());
+        this.carry.overrides_mut().proxy = Some(lease.config().clone());
         Some(lease)
     }
 
@@ -82,12 +82,12 @@ impl<'a> Route<'a> {
         };
         let upgraded = self.session.hsts_upgrade(url);
         let carry = &mut this.carry;
-        let used = self.session.proxy_for(&upgraded, carry.proxy.as_ref())?;
+        let used = self.session.proxy_for(&upgraded, carry.proxy())?;
         let name = used.as_deref().map(|proxy| proxy.as_str().to_owned());
         if let Some(std::borrow::Cow::Owned(proxy)) = used {
-            carry.first_hop = Some(Some(proxy));
-        } else if name.is_none() && self.session.proxy_is_custom(carry.proxy.as_ref()) {
-            carry.first_hop = Some(None);
+            carry.overrides_mut().first_hop = Some(Some(proxy));
+        } else if name.is_none() && self.session.proxy_is_custom(carry.proxy()) {
+            carry.overrides_mut().first_hop = Some(None);
         }
         Ok(name)
     }

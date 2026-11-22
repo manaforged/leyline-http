@@ -287,7 +287,7 @@ async fn pick_h2_lane(
         };
         key.lane = lane;
         let started = Instant::now();
-        let failed = match open_h2(pool, connector, h2_config, key.clone()).await {
+        let failed = match Box::pin(open_h2(pool, connector, h2_config, key.clone())).await {
             Ok(H2Leg::Mux(opened)) => {
                 if let Some(slot) = opened.conn.reserve() {
                     return Ok(H2Leg::Mux(opened.on_lane(lane).with_slot(Some(slot))));

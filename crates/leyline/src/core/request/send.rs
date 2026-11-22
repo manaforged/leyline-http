@@ -60,12 +60,16 @@ impl RequestBuilder {
         mut self,
         url: Arc<url::Url>,
     ) -> impl Future<Output = Result<Response>> + Send + 'static {
-        let carry = &mut self.draft.carry;
-        let retry_policy = std::mem::take(&mut carry.retry_policy);
-        let label = carry.label.take();
-        let status_errors = carry.status_errors;
-        let streamed = carry.stream_response;
-        let deadline = self.session.deadline(carry.timeouts.as_ref());
+        let retry_policy = self.draft.carry.take_retry_policy(&self.session);
+        let label = self
+            .draft
+            .carry
+            .overrides
+            .as_deref_mut()
+            .and_then(|o| o.label.take());
+        let status_errors = self.draft.carry.status_errors;
+        let streamed = self.draft.carry.stream_response;
+        let deadline = self.session.deadline(self.draft.carry.timeouts());
         let (session, attempt) = self.into_attempt(deadline, Arc::clone(&url));
         async move {
             let method = attempt.method.clone();
@@ -114,17 +118,21 @@ impl RequestBuilder {
     }
 
     pub(super) fn resolve(&mut self) -> Result<Arc<url::Url>> {
-        if let Some(err) = self.draft.builder_error.take() {
+        if let Some(build) = self.draft.build.as_deref_mut()
+            && let Some(err) = build.builder_error.take()
+        {
             return Err(err);
         }
         let Some(mut url) = self.draft.url.take() else {
             return Err(Error::from(url::ParseError::EmptyHost));
         };
-        let params = std::mem::take(&mut self.draft.query_params);
-        if !params.is_empty() {
-            Arc::make_mut(&mut url)
-                .query_pairs_mut()
-                .extend_pairs(&params);
+        if let Some(build) = self.draft.build.as_deref_mut() {
+            let params = std::mem::take(&mut build.query_params);
+            if !params.is_empty() {
+                Arc::make_mut(&mut url)
+                    .query_pairs_mut()
+                    .extend_pairs(&params);
+            }
         }
         Ok(url)
     }
@@ -140,7 +148,12 @@ impl RequestBuilder {
         http_scheme(&url)?;
         self.infer_from_content_type();
 
-        if let Some(encoding) = self.draft.compress.take() {
+        if let Some(encoding) = self
+            .draft
+            .build
+            .as_deref_mut()
+            .and_then(|b| b.compress.take())
+        {
             match &self.draft.body.0 {
                 BodyKind::Bytes(b) => {
                     let compressed = super::compress::encode(encoding, b)?;

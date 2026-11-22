@@ -86,7 +86,9 @@ impl Template {
             .as_ref()
             .is_some_and(|first| Origin::same(first, url))
         {
-            next.draft.carry.digest_auth = None;
+            if let Some(overrides) = next.draft.carry.overrides.as_deref_mut() {
+                overrides.digest_auth = None;
+            }
             next.draft
                 .headers
                 .remove_where(|name| cross_origin_header(name.as_str()));

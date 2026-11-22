@@ -37,7 +37,7 @@ impl Draft {
         Ok(())
     }
 
-    pub(super) fn into_http(mut self) -> Result<http::Request<Body>> {
+    pub(super) fn into_http(mut self, default_retry: &Retry) -> Result<http::Request<Body>> {
         let layout = Layout::of(&self.headers);
         let mut request = self.as_http()?;
         let carry = &mut self.carry;
@@ -46,17 +46,28 @@ impl Draft {
             options.insert(kind);
         }
         carry.preset_user = false;
-        if let Some(timeouts) = carry.timeouts.take() {
-            options.insert(timeouts);
+        let mut retry = None;
+        if let Some(overrides) = carry.overrides.as_deref_mut() {
+            if let Some(timeouts) = overrides.timeouts.take() {
+                options.insert(timeouts);
+            }
+            retry = overrides.retry_policy.take();
+            if let Some(redirect) = overrides.redirect.take() {
+                options.insert(redirect);
+            }
+            if let Some(proxy) = overrides.proxy.take() {
+                options.insert(proxy);
+            }
         }
-        if carry.retry_policy.is_configured() {
-            options.insert(std::mem::replace(&mut carry.retry_policy, Retry::unset()));
-        }
-        if let Some(redirect) = carry.redirect.take() {
-            options.insert(redirect);
-        }
-        if let Some(proxy) = carry.proxy.take() {
-            options.insert(proxy);
+        match retry {
+            Some(policy) if policy.is_configured() => {
+                options.insert(policy);
+            }
+            Some(_) => {}
+            None if default_retry.is_configured() => {
+                options.insert(default_retry.clone());
+            }
+            None => {}
         }
         if let Some(protocol) = carry.protocol.take() {
             options.insert(protocol);
@@ -64,7 +75,7 @@ impl Draft {
         if !layout.0.is_empty() {
             options.insert(layout);
         }
-        if let Some(download) = self.download.take() {
+        if let Some(download) = self.build.as_deref_mut().and_then(|b| b.download.take()) {
             options.insert(download);
         }
         options.insert(self.carry);
@@ -104,11 +115,15 @@ impl RequestBuilder {
             Err(err) => builder.fail(err),
         }
         builder.draft.body = body;
-        builder.draft.download = options.remove::<Box<Download>>();
+        if let Some(download) = options.remove::<Box<Download>>() {
+            builder.draft.build_extras_mut().download = Some(download);
+        }
         if let Some(rest) = options.remove::<Carry>() {
             let fresh = std::mem::replace(&mut builder.draft.carry, rest);
             builder.draft.carry.preset = fresh.preset;
-            builder.draft.carry.retry_policy = fresh.retry_policy;
+            if let Some(overrides) = builder.draft.carry.overrides.as_deref_mut() {
+                overrides.retry_policy = None;
+            }
         }
         if let Some(kind) = options.remove::<RequestKind>() {
             builder = builder.kind(kind);

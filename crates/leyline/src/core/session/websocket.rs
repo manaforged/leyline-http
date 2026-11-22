@@ -25,7 +25,7 @@ impl Session {
             self.store_cookies(conn.headers(), &http_url);
             Ok::<_, Error>(conn)
         };
-        self.unless_shut_down(self.deadline(carry.timeouts.as_ref()).total(handshake))
+        self.unless_shut_down(self.deadline(carry.timeouts()).total(handshake))
             .await
     }
 
@@ -37,12 +37,11 @@ impl Session {
     ) -> Result<WebSocket> {
         let config = self.inner.inputs.websocket_config;
         let protocol = carry.protocol.unwrap_or(self.inner.inputs.protocol_policy);
-        let proxy = self.proxy_for(http_url, carry.proxy.as_ref())?;
+        let proxy = self.proxy_for(http_url, carry.proxy())?;
         let extra_headers = self.websocket_headers(http_url, extra_headers);
         let origin = Origin::ascii(http_url);
         let header_order = carry
-            .header_order
-            .as_deref()
+            .header_order()
             .map(Cow::Borrowed)
             .or_else(|| self.session_header_order());
         let handshake = Handshake {

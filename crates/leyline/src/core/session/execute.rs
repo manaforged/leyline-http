@@ -23,7 +23,16 @@ mod response;
 
 impl Session {
     pub(super) async fn execute_inner(&self, mut attempt: Box<Draft>) -> Result<Response> {
-        let first_hop = attempt.carry.first_hop.take();
+        let overrides = attempt.carry.overrides.as_deref_mut();
+        let (first_hop, initiator, trusted_origin, digest_auth) = match overrides {
+            Some(o) => (
+                o.first_hop.take(),
+                o.initiator.take(),
+                o.trusted_origin.take(),
+                o.digest_auth.take(),
+            ),
+            None => (None, None, None, None),
+        };
         let url = attempt
             .url
             .expect("invariant: send stores the prepared URL before the attempt");
@@ -33,23 +42,22 @@ impl Session {
             attempt.method,
             attempt.body,
             (!attempt.headers.is_empty()).then_some(attempt.headers),
-            attempt.carry.initiator,
+            initiator,
             self.session_referer(),
         )
-        .trusting(attempt.carry.trusted_origin);
+        .trusting(trusted_origin);
         let redirect_policy = attempt
             .carry
-            .redirect
-            .as_ref()
+            .redirect()
             .unwrap_or(&self.inner.inputs.redirect_policy);
-        let request_proxy = attempt.carry.proxy.as_ref();
+        let request_proxy = attempt.carry.proxy();
         let protocol = attempt
             .carry
             .protocol
             .unwrap_or(self.inner.inputs.protocol_policy);
-        let header_order = attempt.carry.header_order.as_deref();
+        let header_order = attempt.carry.header_order();
 
-        let mut digest = attempt.carry.digest_auth.map(DigestLeg::new);
+        let mut digest = digest_auth.map(DigestLeg::new);
         let mut pass = None;
         let mut answered = false;
         let mut refreshed = false;
@@ -127,7 +135,7 @@ impl Session {
                     .as_ref()
                     .expect("invariant: refresh version requires bearer auth");
                 drop(leg);
-                self.unless_shut_down(attempt.deadline.total(token.renew(version)))
+                Box::pin(self.unless_shut_down(attempt.deadline.total(token.renew(version))))
                     .await?;
                 journey.body =
                     replay_body.expect("invariant: replayable body checked before refresh");

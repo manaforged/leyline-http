@@ -188,7 +188,7 @@ impl Session {
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
                 let (buf, resp_headers) =
-                    buffer_and_strip(bs, resp_headers.into_map(), rules).await?;
+                    Box::pin(buffer_and_strip(bs, resp_headers.into_map(), rules)).await?;
                 (
                     crate::core::response::ResponseBody::Buffered(buf),
                     resp_headers.into(),
