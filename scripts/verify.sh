@@ -254,7 +254,7 @@ g_deny() {
 }
 
 g_kani() {
-    step "cargo kani: HPACK integer, HTTP/2 frame header, SETTINGS, stream state and flow-window proofs"
+    step "cargo kani: H1 framing, response state, ASCII/host utils, HPACK, HTTP/2 frames/flow, cookies, and download proofs"
     command -v cargo-kani >/dev/null || fail "cargo-kani not installed: cargo install --locked kani-verifier && cargo kani setup"
     (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing --jobs --output-format terse) \
         || fail "a Kani proof failed"

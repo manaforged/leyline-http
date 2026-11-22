@@ -358,6 +358,10 @@ fn remainder(response: &Response, old: &Metadata) -> Result<u64> {
     Ok(total)
 }
 
+fn range_matches(start: u64, end: u64, total: u64, offset: u64) -> Option<u64> {
+    (start == offset && start <= end && end.checked_add(1)? == total).then_some(total)
+}
+
 fn range(value: &str, offset: u64) -> Option<u64> {
     let (span, total) = value.strip_prefix("bytes ")?.split_once('/')?;
     let (start, end) = span.split_once('-')?;
@@ -366,7 +370,7 @@ fn range(value: &str, offset: u64) -> Option<u64> {
         crate::util::parse_ascii_u64(end)?,
         crate::util::parse_ascii_u64(total)?,
     );
-    (start == offset && start <= end && end.checked_add(1)? == total).then_some(total)
+    range_matches(start, end, total, offset)
 }
 
 fn unsatisfied_total(response: &Response) -> Option<u64> {
@@ -398,3 +402,7 @@ fn limit() -> Error {
     Error::new(Kind::BodyLimit)
         .with_message("download exceeds the complete representation size limit")
 }
+
+#[cfg(kani)]
+#[path = "download_proofs.rs"]
+mod proofs;

@@ -1,7 +1,7 @@
 #![no_main]
 
 use bytes::Bytes;
-use leyline::internals::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader};
+use leyline::internals::h2::frame::{FRAME_HEADER_LEN, Frame, FrameHeader, U31_MAX};
 use libfuzzer_sys::fuzz_target;
 
 fuzz_target!(|data: &[u8]| {
@@ -13,6 +13,19 @@ fuzz_target!(|data: &[u8]| {
             break;
         };
         rest = &rest[header.length as usize..];
-        let _ = Frame::parse(header, Bytes::copy_from_slice(payload));
+        if let Ok(frame) = Frame::parse(header, Bytes::copy_from_slice(payload)) {
+            match frame {
+                Frame::WindowUpdate(f) => assert!(f.increment > 0 && f.increment <= U31_MAX),
+                Frame::Ping(_) | Frame::GoAway(_) => assert_eq!(header.stream_id, 0),
+                Frame::Settings(s) => {
+                    assert_eq!(header.stream_id, 0);
+                    if s.ack {
+                        assert!(s.params.is_empty());
+                    }
+                }
+                Frame::RstStream(r) => assert_ne!(r.stream_id, 0),
+                _ => {}
+            }
+        }
     }
 });

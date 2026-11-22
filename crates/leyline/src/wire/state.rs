@@ -211,3 +211,7 @@ impl ResponseHead {
             .ok_or("response missing :status pseudo-header")
     }
 }
+
+#[cfg(kani)]
+#[path = "state_proofs.rs"]
+mod proofs;

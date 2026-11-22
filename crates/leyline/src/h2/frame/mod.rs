@@ -70,26 +70,34 @@ pub(super) fn check_scope(header: &FrameHeader, scope: Scope, frame: &str) -> Re
     })
 }
 
-/// Returns where the field block ends after RFC 9113 padding, checking frame size before padding.
-pub(super) fn padded_end(payload: &[u8], padded: bool, fixed: usize) -> Result<usize, H2Error> {
-    let mandatory = usize::from(padded) + fixed;
+fn padded_end_checked(payload: &[u8], padded: bool, fixed: usize) -> Result<usize, ErrorCode> {
+    let mandatory = usize::from(padded).saturating_add(fixed);
     if payload.len() < mandatory {
-        return Err(H2Error::Connection {
-            code: ErrorCode::FrameSizeError,
-            reason: format!(
-                "frame of {} bytes is shorter than its {mandatory} fixed bytes",
-                payload.len()
-            ),
-        });
+        return Err(ErrorCode::FrameSizeError);
     }
     let pad_len = if padded { usize::from(payload[0]) } else { 0 };
     if pad_len > payload.len() - mandatory {
-        return Err(H2Error::Connection {
-            code: ErrorCode::ProtocolError,
-            reason: "padding exceeds the field block".into(),
-        });
+        return Err(ErrorCode::ProtocolError);
     }
     Ok(payload.len() - pad_len)
+}
+
+/// Returns where the field block ends after RFC 9113 padding, checking frame size before padding.
+pub(super) fn padded_end(payload: &[u8], padded: bool, fixed: usize) -> Result<usize, H2Error> {
+    padded_end_checked(payload, padded, fixed).map_err(|code| match code {
+        ErrorCode::FrameSizeError => H2Error::Connection {
+            code,
+            reason: format!(
+                "frame of {} bytes is shorter than its {} fixed bytes",
+                payload.len(),
+                usize::from(padded) + fixed
+            ),
+        },
+        _ => H2Error::Connection {
+            code,
+            reason: "padding exceeds the field block".into(),
+        },
+    })
 }
 
 pub(crate) struct ContinuationFrame<'a> {

@@ -251,7 +251,7 @@ impl BodyHeaders<'_> {
             let Some(v) = self.length() else {
                 return Err(FramingError::NonAsciiLength);
             };
-            if v.contains(',') {
+            if v.as_bytes().contains(&b',') {
                 return Err(FramingError::CommaLength);
             }
             if crate::util::content_length(v).is_none() {
@@ -265,16 +265,7 @@ impl BodyHeaders<'_> {
             let Some(te) = self.coding() else {
                 return Err(FramingError::NonAsciiCoding);
             };
-            let last = te
-                .split(',')
-                .map(|t| t.trim())
-                .rfind(|t| !t.is_empty())
-                .unwrap_or("");
-            let chunked = te
-                .split(',')
-                .filter(|t| t.trim().eq_ignore_ascii_case("chunked"))
-                .count();
-            if !last.eq_ignore_ascii_case("chunked") || chunked != 1 {
+            if !is_single_final_chunked(te.as_bytes()) {
                 return Err(FramingError::BadCoding(te));
             }
         }
@@ -290,6 +281,19 @@ impl BodyHeaders<'_> {
             BodyFraming::ToClose
         }
     }
+}
+
+fn is_single_final_chunked(bytes: &[u8]) -> bool {
+    let mut last_is_chunked = false;
+    let mut chunked = 0usize;
+    crate::util::any_token(bytes, |tok| {
+        last_is_chunked = tok.eq_ignore_ascii_case(b"chunked");
+        if last_is_chunked {
+            chunked += 1;
+        }
+        false
+    });
+    chunked == 1 && last_is_chunked
 }
 
 #[cfg(test)]

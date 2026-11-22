@@ -7,5 +7,8 @@ fuzz_target!(|data: &[u8]| {
     let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") else {
         return;
     };
-    drop(validate_connect_response(data, end + 4));
+    if validate_connect_response(data, end + 4).is_ok() {
+        assert!(data.starts_with(b"HTTP/1."));
+        assert_eq!(data.get(9).copied(), Some(b'2'));
+    }
 });

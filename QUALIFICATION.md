@@ -14,7 +14,7 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 
 ## Proved
 
-`cargo kani --no-default-features --lib -Z stubbing` runs 11 harnesses.
+`cargo kani --no-default-features --lib -Z stubbing` runs 28 harnesses.
 
 | Harness | Property |
 | --- | --- |
@@ -23,12 +23,29 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 | `a_content_length_overflow_is_exact_at_u64_max` | The largest accepted Content-Length is `u64::MAX` |
 | `a_body_limit_admits_exactly_what_fits` | A body limit accepts a body exactly when it fits |
 | `a_body_limit_room_is_exactly_what_is_left` | The room a body limit reports is the exact remainder |
+| `non_ascii_content_length_is_always_rejected` | Non-ASCII bytes in `Content-Length` are always rejected |
+| `dual_content_length_and_transfer_encoding_is_always_rejected` | Responses with both `Content-Length` and `Transfer-Encoding` are always rejected |
+| `transfer_encoding_requires_chunked_once_and_final` | `Transfer-Encoding` is accepted iff `chunked` appears once and is the final coding |
+| `valid_framing_matches_check_framing` | `BodyHeaders::framing` agrees with `check_framing` on every accepted header pair |
+| `response_state_rejects_101_and_caps_informational_responses` | Response state machine rejects `101`, caps 1xx responses, and preserves state on error |
+| `response_state_data_trailers_and_finish_enforce_lifecycle` | Response `data`, `trailers`, and `finish` transitions follow the HTTP/2 and HTTP/3 lifecycle |
+| `has_ascii_uppercase_swar_matches_byte_scan` | SWAR `has_ascii_uppercase` matches byte-by-byte scan for all byte slices up to 16 bytes |
+| `parse_ascii_u64_and_delta_seconds_match_spec` | `parse_ascii_u64` and `delta_seconds` match strict ASCII-digit and trimming rules |
+| `bare_host_strips_only_matched_brackets` | `bare_host` strips `[` and `]` iff both ends match |
 | `every_hpack_integer_round_trips` | HPACK integers encode and decode to the same value |
 | `arbitrary_bytes_never_decode_past_the_hpack_limit` | No byte string decodes to an HPACK integer past the limit |
+| `size_update_tracks_min_and_final_within_bounds` | HPACK dynamic table size updates preserve minimum and final bounds |
 | `a_frame_header_round_trips_and_ignores_the_reserved_bit` | HTTP/2 frame headers round-trip, and the reserved bit is ignored |
+| `padded_end_never_underflows_or_exceeds_payload` | HTTP/2 padding bounds never underflow or exceed the payload length |
+| `window_update_encode_masks_reserved_bits` | `WINDOW_UPDATE` encoding clears reserved high bits and preserves 31-bit values |
 | `a_server_setting_follows_rfc_9113_section_6_5_2` | Server SETTINGS values are accepted or refused as RFC 9113 section 6.5.2 defines |
 | `every_stream_transition_follows_rfc_9113_section_5_1` | Every HTTP/2 stream state transition matches RFC 9113 section 5.1 |
 | `a_flow_window_is_exact_and_never_passes_the_protocol_maximum` | Flow-control windows are exact and stay at or below 2^31 - 1 |
+| `zero_max_age_always_expires_at_unix_epoch` | `Max-Age=0` cookies always expire at the Unix epoch regardless of `Expires` |
+| `cookie_prefix_rules_enforce_rfc_6265bis` | `__Secure-` and `__Host-` cookie prefixes enforce RFC 6265bis attribute rules |
+| `domain_match_enforces_label_boundary` | Cookie domain matching requires exact match or dot-label boundary |
+| `download_strong_etag_rejects_weak_and_ctl` | Resumable download ETag check rejects weak tags and control bytes |
+| `download_content_range_requires_exact_offset_and_total` | Resumable download `Content-Range` parser enforces exact offset and non-overflowing total |
 
 ## Model-checked
 

@@ -123,10 +123,33 @@ pub(crate) fn header_contains_token<K: AsRef<str>, V: AsRef<[u8]>>(
     header_first(headers, name).is_some_and(|v| has_token(v, token))
 }
 
+pub(crate) fn any_token(bytes: &[u8], mut f: impl FnMut(&[u8]) -> bool) -> bool {
+    let mut i = 0;
+    while i < bytes.len() {
+        let mut start = i;
+        while i < bytes.len() && bytes[i] != b',' {
+            i += 1;
+        }
+        let mut end = i;
+        if i < bytes.len() {
+            i += 1;
+        }
+        while start < end && bytes[start].is_ascii_whitespace() {
+            start += 1;
+        }
+        while end > start && bytes[end - 1].is_ascii_whitespace() {
+            end -= 1;
+        }
+        if start < end && f(&bytes[start..end]) {
+            return true;
+        }
+    }
+    false
+}
+
 pub(crate) fn has_token(value: &str, token: &str) -> bool {
-    value
-        .split(',')
-        .any(|part| part.trim().eq_ignore_ascii_case(token))
+    let target = token.as_bytes();
+    any_token(value.as_bytes(), |tok| tok.eq_ignore_ascii_case(target))
 }
 
 pub(crate) fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
@@ -223,11 +246,14 @@ const SECRET_HEADERS: [&str; 4] = [
 const CROSS_ORIGIN_EXTRA_HEADERS: [&str; 1] = ["host"];
 
 pub(crate) fn has_ascii_uppercase(text: &str) -> bool {
+    has_ascii_uppercase_bytes(text.as_bytes())
+}
+
+fn has_ascii_uppercase_bytes(bytes: &[u8]) -> bool {
     const ASCII: u64 = 0x7f7f_7f7f_7f7f_7f7f;
     const ONES: u64 = 0x0101_0101_0101_0101;
     const FROM_A: u64 = ONES * (0x80 - b'A' as u64);
     const PAST_Z: u64 = ONES * (0x80 - b'Z' as u64 - 1);
-    let bytes = text.as_bytes();
     let (Some(tail), (words, _)) = (bytes.last_chunk::<8>(), bytes.as_chunks::<8>()) else {
         return bytes.iter().any(u8::is_ascii_uppercase);
     };
@@ -384,6 +410,10 @@ mod tests;
 #[cfg(kani)]
 #[path = "util/content_length_proofs.rs"]
 mod content_length_proofs;
+
+#[cfg(kani)]
+#[path = "util/ascii_proofs.rs"]
+mod ascii_proofs;
 
 /// Calls `check` with every concatenation of up to `max_len` tokens from `alphabet`.
 #[cfg(test)]
