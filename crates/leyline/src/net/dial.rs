@@ -103,14 +103,7 @@ impl Dialer {
         })
         .await
         .map_err(|err| {
-            if self.socket.interface.is_some()
-                && matches!(
-                    err.kind(),
-                    io::ErrorKind::InvalidInput
-                        | io::ErrorKind::NotFound
-                        | io::ErrorKind::Unsupported
-                )
-            {
+            if self.socket.is_interface_config_error(&err) {
                 NetError::Config(err)
             } else {
                 NetError::TcpConnect(err)

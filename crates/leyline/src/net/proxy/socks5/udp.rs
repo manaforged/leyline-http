@@ -67,8 +67,14 @@ impl Socks5Udp {
         let mut header = HEADER_PREFIX.to_vec();
         header.extend_from_slice(&encode_addr(host, port)?);
         let (control, relay) = udp_associate(dialer, proxy).await?;
-        let socket =
-            crate::net::bind_udp(relay, dialer.socket_options()).map_err(NetError::proxy_io)?;
+        let options = dialer.socket_options();
+        let socket = crate::net::bind_udp(relay, options).map_err(|err| {
+            if options.is_interface_config_error(&err) {
+                NetError::Config(err)
+            } else {
+                NetError::proxy_io(err)
+            }
+        })?;
         socket.connect(relay).await.map_err(NetError::proxy_io)?;
         Ok((
             Self {

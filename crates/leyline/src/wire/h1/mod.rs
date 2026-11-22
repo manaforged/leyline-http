@@ -398,10 +398,14 @@ pub(crate) enum HeaderEnd {
     BareLf,
 }
 
-pub(crate) fn scan_header_end(buf: &[u8]) -> HeaderEnd {
+#[inline(always)]
+fn scan_header_end_inner(buf: &[u8], reject_bare_lf: bool) -> HeaderEnd {
     for i in memchr::memchr_iter(b'\n', buf) {
         if i == 0 || buf[i - 1] != b'\r' {
-            return HeaderEnd::BareLf;
+            if reject_bare_lf {
+                return HeaderEnd::BareLf;
+            }
+            continue;
         }
         if i >= 3 && buf[i - 2] == b'\n' && buf[i - 3] == b'\r' {
             return HeaderEnd::Found(i - 3);
@@ -410,13 +414,15 @@ pub(crate) fn scan_header_end(buf: &[u8]) -> HeaderEnd {
     HeaderEnd::Incomplete
 }
 
+pub(crate) fn scan_header_end(buf: &[u8]) -> HeaderEnd {
+    scan_header_end_inner(buf, true)
+}
+
 pub(crate) fn find_header_end(buf: &[u8]) -> Option<usize> {
-    for i in memchr::memchr_iter(b'\n', buf) {
-        if i >= 3 && buf[i - 1] == b'\r' && buf[i - 2] == b'\n' && buf[i - 3] == b'\r' {
-            return Some(i - 3);
-        }
+    match scan_header_end_inner(buf, false) {
+        HeaderEnd::Found(pos) => Some(pos),
+        HeaderEnd::Incomplete | HeaderEnd::BareLf => None,
     }
-    None
 }
 
 pub(crate) fn put(req: &mut Vec<u8>, name: &str, value: &str) {

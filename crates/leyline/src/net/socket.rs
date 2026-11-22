@@ -31,6 +31,16 @@ pub(crate) struct SocketOptions {
     pub(crate) happy_eyeballs: Option<HappyEyeballs>,
 }
 
+impl SocketOptions {
+    pub(crate) fn is_interface_config_error(&self, err: &io::Error) -> bool {
+        self.interface.is_some()
+            && matches!(
+                err.kind(),
+                io::ErrorKind::InvalidInput | io::ErrorKind::NotFound | io::ErrorKind::Unsupported
+            )
+    }
+}
+
 impl Default for SocketOptions {
     fn default() -> Self {
         Self {

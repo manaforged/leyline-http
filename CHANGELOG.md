@@ -12,9 +12,10 @@ and publish as separate crates.
 ## Unreleased
 
 This release cleans up `0.2` API ergonomics while keeping the same five core
-types, cuts 9–14% of hot-path instructions per request across HTTP/1.1 and
-HTTP/2, and adds built-in DNS-over-HTTPS, TLS 1.3 ECH, PKCS#12 mTLS, Unix
-sockets, interface binding, and custom proxy headers.
+types, cuts 9–13% of user-space instructions per request on bare HTTP/1.1 and
+HTTP/2 workloads (5–8% with Chrome 146 profiles), and adds built-in
+DNS-over-HTTPS, TLS 1.3 ECH, PKCS#12 mTLS, Unix sockets, interface binding, and
+custom proxy headers.
 
 ### Breaking changes
 
@@ -95,7 +96,7 @@ sockets, interface binding, and custom proxy headers.
 - On Linux a binary no longer loads `libstdc++`: `leyline-bssl-sys` supplies the two C++ runtime symbols that BoringSSL uses and links `libstdc++` only when a trial link shows that it is needed. `LEYLINE_BSSL_RUST_CPPLIB=stdc++` restores the link.
 - The zstd decoder is built without the legacy frame formats and the dictionary builder, which removes about 230 KB of code from a binary.
 - Request deadlines of 2 seconds or longer now use a shared 250 ms coarse ticker instead of a per-request timer wheel entry, so total timeouts of 2 s or more can fire up to 250 ms late.
-- Hot-path optimizations (boxed cold request overrides, inline HTTP/2 driver commands, zero-copy URL pseudo-headers, pre-validated HPACK table fields, inline 24-byte pool hostnames, and single-pass HTTP/1.1 header scanning) cut per-request heap allocations from 15 to 11 on HTTP/2 and 9 to 7 on HTTP/1.1, reduce user-space instructions by 9–14% across every measured workload, and lower client CPU cycles by 14.6% on concurrent HTTP/2 (`8×256`) and 9.0% on concurrent HTTP/1.1 (`1×64`) in paired A/B runs (see [BENCHMARKS.md](BENCHMARKS.md)).
+- Hot-path optimizations (boxed cold request overrides, inline HTTP/2 driver commands, zero-copy URL pseudo-headers, pre-validated HPACK table fields, inline 24-byte pool hostnames, and single-pass HTTP/1.1 header scanning) cut user-space instructions per request by 9–13% on bare HTTP/1.1 and HTTP/2 workloads and 5–8% with Chrome 146 profiles comparing the `0.2.0` (`2026-11-03`/`2026-11-05`) and `2026-11-22` pooled tables in `benches/comparison/results/`, reaching 1.49M HTTP/2 req/s at 5.32 µs CPU/req and 1.08M HTTP/1.1 req/s with `run_per_core` (see [BENCHMARKS.md](BENCHMARKS.md)).
 
 ## 0.2.0 - 2026-11-08
 

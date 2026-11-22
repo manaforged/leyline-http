@@ -45,8 +45,14 @@ impl DatagramTransport {
         port: u16,
     ) -> Result<(Self, SocketAddr), QuicError> {
         let peer_addr = resolve_peer(connector.dialer().resolver(), host, port).await?;
-        let socket = crate::net::bind_udp(peer_addr, connector.dialer().socket_options())
-            .map_err(|e| QuicError::Socket(format!("udp bind: {e}")))?;
+        let options = connector.dialer().socket_options();
+        let socket = crate::net::bind_udp(peer_addr, options).map_err(|e| {
+            if options.is_interface_config_error(&e) {
+                QuicError::Config(format!("udp bind: {e}"))
+            } else {
+                QuicError::Socket(format!("udp bind: {e}"))
+            }
+        })?;
         socket
             .connect(peer_addr)
             .await
@@ -63,7 +69,10 @@ impl DatagramTransport {
     ) -> Result<(Self, SocketAddr), QuicError> {
         let (relay, relay_addr) = Socks5Udp::open(connector.dialer(), proxy, host, port)
             .await
-            .map_err(|e| QuicError::Proxy(format!("h3 proxy: {e}")))?;
+            .map_err(|e| match e {
+                crate::net::NetError::Config(err) => QuicError::Config(format!("h3 proxy: {err}")),
+                other => QuicError::Proxy(format!("h3 proxy: {other}")),
+            })?;
         Ok((Self::Socks5(relay), relay_addr))
     }
 

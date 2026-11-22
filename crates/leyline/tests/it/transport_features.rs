@@ -88,6 +88,24 @@ async fn interface_rejects_unknown_device() {
     let err = session.get(server.url("/")).send().await.unwrap_err();
     assert_eq!(err.kind(), Kind::Config, "expected Config, got {err:?}");
     assert!(!err.is_retryable(), "invalid interface must not retry");
+    #[cfg(feature = "http3")]
+    {
+        let h3_err = session
+            .get("https://127.0.0.1:443/")
+            .protocol(leyline::Protocol::Http3)
+            .send()
+            .await
+            .unwrap_err();
+        assert_eq!(
+            h3_err.kind(),
+            Kind::Config,
+            "expected HTTP/3 Config, got {h3_err:?}"
+        );
+        assert!(
+            !h3_err.is_retryable(),
+            "invalid HTTP/3 interface must not retry"
+        );
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -433,7 +451,11 @@ fn coarse_timeout_recovers_after_unpolled_runtime_drop() {
 
     let session = Session::builder()
         .retry(0)
-        .timeout(Duration::from_secs(3))
+        .timeout(
+            leyline::Timeout::new()
+                .total(Duration::from_secs(3))
+                .read(Duration::from_secs(30)),
+        )
         .build()
         .unwrap();
 
@@ -463,13 +485,21 @@ fn coarse_timeout_recovers_after_unpolled_runtime_drop() {
             let (_sock, _) = listener.accept().await.unwrap();
             tokio::time::sleep(Duration::from_secs(30)).await;
         });
-        let err = tokio::time::timeout(
-            Duration::from_secs(6),
-            session.get(format!("http://{addr}/hang")).send(),
-        )
-        .await
-        .expect("3s coarse timeout must fire within 6s after unpolled rt1 drop")
-        .unwrap_err();
+        let started = std::time::Instant::now();
+        let req = tokio::spawn({
+            let session = session.clone();
+            async move { session.get(format!("http://{addr}/hang")).send().await }
+        });
+        let err = tokio::time::timeout(Duration::from_secs(5), req)
+            .await
+            .expect("3s coarse timeout must fire within 5s after unpolled rt1 drop")
+            .unwrap()
+            .unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "3s coarse timeout took {:?} instead of firing on its own ticker",
+            started.elapsed()
+        );
         assert_eq!(
             err.kind(),
             Kind::Timeout,
