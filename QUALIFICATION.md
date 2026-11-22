@@ -1,6 +1,6 @@
 # Qualification
 
-This page lists what is known about Leyline's behaviour under failure and load, and how each fact was established. Each row says which of five kinds of evidence backs it:
+This page lists what is known about Leyline's behavior under failure and load, and how each fact was established. Each row says which of five kinds of evidence backs it:
 
 | Kind | Meaning | Limit |
 | --- | --- | --- |

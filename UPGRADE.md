@@ -14,7 +14,7 @@ For new code, start with the [five main types](AGENTS.md#the-five-types). The [u
 
 ## Breaking changes after 0.2.0
 
-These changes clean up early `0.2` API rough edges as Leyline moves toward a stable `1.0` surface — hiding raw struct fields behind getters/builders, aligning argument order across sibling methods, and fixing naming typos while keeping the same five core types (`Session`, `Tab`, `RequestBuilder`, `Response`, `Error`). Every changed call maps 1-to-1 below.
+These changes clean up `0.2` API rough edges while keeping the same five core types (`Session`, `Tab`, `RequestBuilder`, `Response`, `Error`). Raw fields move behind getters and builders, sibling argument orders align, and every changed call maps 1-to-1 below.
 
 | 0.2.0 | Now |
 | --- | --- |

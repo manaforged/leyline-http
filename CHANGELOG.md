@@ -3,19 +3,18 @@
 The minimum supported Rust version is 1.96, two releases behind stable at
 release time.
 
-Leyline is pre-`1.0` and moving toward a stable API: breaking changes are only
-made with clear justification and every change is mapped 1-to-1 in
-[UPGRADE.md](UPGRADE.md) (see [AGENTS.md](AGENTS.md) for the concise coding-agent
-reference). The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
-`leyline-bssl-tokio` share this version and publish as separate crates.
+Before `1.0`, breaking changes are limited to clear correctness or ergonomic
+fixes and are mapped 1-to-1 in [UPGRADE.md](UPGRADE.md) (see
+[AGENTS.md](AGENTS.md) for the coding-agent reference). The BoringSSL crates
+`leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this version
+and publish as separate crates.
 
 ## Unreleased
 
-This release takes another step toward a stable `1.0` API surface (cleaning up
-early `0.2` ergonomic rough edges while keeping the same five core types),
-speeds up hot-path HTTP/1.1 and HTTP/2 execution, and adds built-in
-DNS-over-HTTPS, TLS 1.3 ECH, PKCS#12 mTLS, Unix sockets, interface binding, and
-custom proxy headers.
+This release cleans up `0.2` API ergonomics while keeping the same five core
+types, cuts 9–14% of hot-path instructions per request across HTTP/1.1 and
+HTTP/2, and adds built-in DNS-over-HTTPS, TLS 1.3 ECH, PKCS#12 mTLS, Unix
+sockets, interface binding, and custom proxy headers.
 
 ### Breaking changes
 
@@ -95,7 +94,8 @@ custom proxy headers.
 - The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.
 - On Linux a binary no longer loads `libstdc++`: `leyline-bssl-sys` supplies the two C++ runtime symbols that BoringSSL uses and links `libstdc++` only when a trial link shows that it is needed. `LEYLINE_BSSL_RUST_CPPLIB=stdc++` restores the link.
 - The zstd decoder is built without the legacy frame formats and the dictionary builder, which removes about 230 KB of code from a binary.
-- Request deadlines of 2 seconds or longer now use a shared 250 ms coarse ticker rather than a per-request timer wheel entry (so total timeouts of 2 s or more can fire up to 250 ms late), paired with boxed cold request overrides, inline HTTP/2 driver commands, zero-copy URL pseudo-headers, pre-validated HPACK table fields, inline 24-byte pool hostnames, and single-pass HTTP/1.1 header scanning. In paired 8-round loopback benchmarks, this reduces client CPU cycles per request by 14.6% on concurrent HTTP/2 (`8x256`), 9.0% on concurrent HTTP/1.1 (`1x64`), and 8.0–10.0% fewer instructions across all cells, cutting per-request heap allocations from 15 to 11 on HTTP/2 and 9 to 7 on HTTP/1.1.
+- Request deadlines of 2 seconds or longer now use a shared 250 ms coarse ticker instead of a per-request timer wheel entry, so total timeouts of 2 s or more can fire up to 250 ms late.
+- Hot-path optimizations (boxed cold request overrides, inline HTTP/2 driver commands, zero-copy URL pseudo-headers, pre-validated HPACK table fields, inline 24-byte pool hostnames, and single-pass HTTP/1.1 header scanning) cut per-request heap allocations from 15 to 11 on HTTP/2 and 9 to 7 on HTTP/1.1, reduce user-space instructions by 9–14% across every measured workload, and lower client CPU cycles by 14.6% on concurrent HTTP/2 (`8×256`) and 9.0% on concurrent HTTP/1.1 (`1×64`) in paired A/B runs (see [BENCHMARKS.md](BENCHMARKS.md)).
 
 ## 0.2.0 - 2026-11-08
 
