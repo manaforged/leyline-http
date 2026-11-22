@@ -1,4 +1,6 @@
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+#[cfg(unix)]
+use std::path::Path;
 use std::time::Duration;
 
 use super::SessionBuilder;
@@ -25,6 +27,34 @@ impl SessionBuilder {
                 s.local_ipv6 = None;
             }
         })
+    }
+
+    /// Binds new IPv4 and IPv6 connections to the given local addresses.
+    pub fn local_addresses(
+        self,
+        ipv4: impl Into<Option<Ipv4Addr>>,
+        ipv6: impl Into<Option<Ipv6Addr>>,
+    ) -> Self {
+        let ipv4 = ipv4.into();
+        let ipv6 = ipv6.into();
+        self.update_socket(|s| {
+            s.local_ipv4 = ipv4;
+            s.local_ipv6 = ipv6;
+        })
+    }
+
+    /// Binds new sockets to the named network interface, such as `"eth0"` or `"lo0"`.
+    pub fn interface(self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        self.update_socket(|s| s.interface = Some(name))
+    }
+
+    /// Routes all HTTP and HTTPS connections for this session over a Unix domain socket at `path`.
+    #[cfg(unix)]
+    #[cfg_attr(docsrs, doc(cfg(unix)))]
+    pub fn unix_socket(self, path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref().to_path_buf();
+        self.update_socket(|s| s.unix_socket = Some(path))
     }
 
     /// Sets `TCP_NODELAY` on new sockets; the default leaves the OS setting.

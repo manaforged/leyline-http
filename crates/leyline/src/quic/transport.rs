@@ -45,8 +45,7 @@ impl DatagramTransport {
         port: u16,
     ) -> Result<(Self, SocketAddr), QuicError> {
         let peer_addr = resolve_peer(connector.dialer().resolver(), host, port).await?;
-        let socket = UdpSocket::bind(crate::util::unspecified_for(peer_addr))
-            .await
+        let socket = crate::net::bind_udp(peer_addr, connector.dialer().socket_options())
             .map_err(|e| QuicError::Socket(format!("udp bind: {e}")))?;
         socket
             .connect(peer_addr)

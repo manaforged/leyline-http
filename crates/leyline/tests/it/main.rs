@@ -181,6 +181,7 @@ mod tls_peet;
 mod tls_pinning_hostname;
 mod tls_system_trust_live;
 mod trace_unwind;
+mod transport_features;
 mod websocket_messages;
 #[cfg(feature = "websocket")]
 mod websocket_subprotocol;

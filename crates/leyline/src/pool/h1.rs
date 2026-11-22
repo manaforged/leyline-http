@@ -220,16 +220,16 @@ fn h1_target(
     proxy: Option<&crate::net::ProxyUrl>,
     mut headers: RequestHeaders,
 ) -> (H1Target, RequestHeaders) {
-    let (target, credentials) = proxy_target(scheme, proxy);
+    let (target, extra) = proxy_target(scheme, proxy);
     if target == H1Target::OriginForm && headers.h1_lines().is_some() {
         return (target, headers);
     }
     let pairs = headers.to_mut();
     pairs.retain(|(k, v)| crate::wire::sent_on(http::Version::HTTP_11, k, v));
-    if let Some(credentials) = credentials {
+    for (name, value) in extra {
         pairs.push((
-            "Proxy-Authorization".into(),
-            crate::header_str::HeaderStr::from(credentials),
+            std::borrow::Cow::Owned(name),
+            crate::header_str::HeaderStr::from(value),
         ));
     }
     (target, headers)
@@ -238,18 +238,24 @@ fn h1_target(
 fn proxy_target(
     scheme: Scheme,
     proxy: Option<&crate::net::ProxyUrl>,
-) -> (H1Target, Option<String>) {
+) -> (H1Target, Vec<(String, String)>) {
     let Some(proxy_url) = proxy.filter(|_| scheme == Scheme::Http) else {
-        return (H1Target::OriginForm, None);
+        return (H1Target::OriginForm, Vec::new());
     };
     let parsed = proxy_url.url();
     if proxy_url.scheme().is_socks() {
-        return (H1Target::OriginForm, None);
+        return (H1Target::OriginForm, Vec::new());
     }
-    (
-        H1Target::AbsoluteForm,
-        crate::util::proxy_basic_auth(parsed),
-    )
+    let mut extra = Vec::new();
+    let custom_auth = proxy_url
+        .headers()
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("proxy-authorization"));
+    if !custom_auth && let Some(credentials) = crate::util::proxy_basic_auth(parsed) {
+        extra.push(("Proxy-Authorization".to_owned(), credentials));
+    }
+    extra.extend(proxy_url.headers().iter().cloned());
+    (H1Target::AbsoluteForm, extra)
 }
 
 pub(super) async fn send_h1<W: Copy + Send>(

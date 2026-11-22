@@ -67,6 +67,13 @@ pub(super) async fn dial_plain(
     io: Io,
 ) -> Result<(Box<dyn H1Io>, Option<std::net::SocketAddr>), Error> {
     let Some(proxy) = proxy else {
+        #[cfg(unix)]
+        if let Some(path) = connector.dialer().unix_socket() {
+            let stream = connector
+                .with_timeout(connector.dialer().dial_unix(path))
+                .await?;
+            return Ok((Box::new(stream), None));
+        }
         let stream = connector
             .with_timeout(connector.dialer().dial(host, port))
             .await?;

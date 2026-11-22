@@ -20,12 +20,35 @@ impl SessionBuilder {
             ));
         }
         self.check_proxy_pool()?;
+        #[cfg(unix)]
+        self.check_unix_socket()?;
         self.resolve_platform();
         #[cfg(feature = "http3")]
         self.resolve_protocol();
         self.resolve_proxies(on_invalid)?;
         #[cfg(feature = "http3")]
         self.check_h3_proxy()?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    fn check_unix_socket(&mut self) -> Result<()> {
+        if self.socket_config.unix_socket.is_none() {
+            return Ok(());
+        }
+        if !self.proxy_config.rules().is_empty()
+            || self.proxy_config.is_custom()
+            || self.proxy_pool.is_some()
+        {
+            return Err(Error::config("unix_socket cannot be combined with a proxy"));
+        }
+        self.proxy_config = std::mem::take(&mut self.proxy_config).env(false);
+        #[cfg(feature = "http3")]
+        if matches!(self.protocol_policy, Protocol::Http3) {
+            return Err(Error::config(
+                "unix_socket cannot be combined with Protocol::Http3",
+            ));
+        }
         Ok(())
     }
 
@@ -66,6 +89,10 @@ impl SessionBuilder {
 
     #[cfg(feature = "http3")]
     fn resolve_protocol(&mut self) {
+        #[cfg(unix)]
+        if self.socket_config.unix_socket.is_some() {
+            return;
+        }
         if !self.protocol_explicit && self.profile_races_h3() {
             self.protocol_policy = Protocol::Race;
         }
@@ -90,6 +117,10 @@ impl SessionBuilder {
     }
 
     fn resolve_proxies(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
+        self.proxy_config.check_headers()?;
+        for config in self.proxy_pool.iter().flat_map(ProxyPool::configs) {
+            config.check_headers()?;
+        }
         for rule in self.proxy_rules() {
             rule.proxy()?;
         }

@@ -12,6 +12,8 @@ pub(crate) enum TlsIo {
     Records(Box<leyline_bssl_tokio::RecordStream<TcpStream>>),
     Blocking(Box<leyline_bssl_tokio::RecordStream<BlockingTcp>>),
     Nested(Box<leyline_bssl_tokio::SslStream<TlsIo>>),
+    #[cfg(unix)]
+    Unix(Box<leyline_bssl_tokio::SslStream<tokio::net::UnixStream>>),
 }
 
 impl TlsIo {
@@ -38,6 +40,8 @@ impl AsyncRead for TlsIo {
             TlsIo::Records(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
             TlsIo::Blocking(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
             TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+            #[cfg(unix)]
+            TlsIo::Unix(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
         }
     }
 }
@@ -54,6 +58,8 @@ impl AsyncWrite for TlsIo {
             TlsIo::Records(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
             TlsIo::Blocking(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
             TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+            #[cfg(unix)]
+            TlsIo::Unix(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
         }
     }
 
@@ -64,6 +70,8 @@ impl AsyncWrite for TlsIo {
             TlsIo::Records(s) => Pin::new(s.as_mut()).poll_flush(cx),
             TlsIo::Blocking(s) => Pin::new(s.as_mut()).poll_flush(cx),
             TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_flush(cx),
+            #[cfg(unix)]
+            TlsIo::Unix(s) => Pin::new(s.as_mut()).poll_flush(cx),
         }
     }
 
@@ -74,6 +82,8 @@ impl AsyncWrite for TlsIo {
             TlsIo::Records(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
             TlsIo::Blocking(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
             TlsIo::Nested(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+            #[cfg(unix)]
+            TlsIo::Unix(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
         }
     }
 }

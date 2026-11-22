@@ -28,6 +28,8 @@ impl std::panic::RefUnwindSafe for Choose {}
 #[must_use]
 pub struct Proxy {
     pub(super) rules: Vec<ProxyRule>,
+    pub(super) headers: Vec<(String, String)>,
+    pub(super) header_error: Option<String>,
     pub(super) no_proxy: NoProxy,
     pub(super) no_proxy_explicit: bool,
     pub(super) use_env: bool,
@@ -57,6 +59,10 @@ impl std::fmt::Debug for Proxy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Proxy")
             .field("rules", &self.rules)
+            .field(
+                "headers",
+                &crate::util::masked(self.headers.iter().map(|(k, _)| (k.as_str(), &b"***"[..]))),
+            )
             .field("no_proxy", &self.no_proxy)
             .field("no_proxy_explicit", &self.no_proxy_explicit)
             .field("use_env", &self.use_env)
@@ -72,6 +78,8 @@ impl Default for Proxy {
     fn default() -> Self {
         Self {
             rules: Vec::new(),
+            headers: Vec::new(),
+            header_error: None,
             no_proxy: NoProxy::default(),
             no_proxy_explicit: false,
             use_env: true,
@@ -83,6 +91,8 @@ impl Default for Proxy {
     }
 }
 
+const FORBIDDEN_PROXY_HEADERS: [&str; 3] = ["host", "content-length", "transfer-encoding"];
+
 impl Proxy {
     /// Returns the default settings: environment proxies on and no explicit rules.
     pub fn new() -> Self {
@@ -92,24 +102,99 @@ impl Proxy {
     /// Sets one proxy URL for every scheme, with any username and password inside it as in `http://user:pass@host:8080`, replacing any earlier all-scheme proxy.
     pub fn all(mut self, proxy_url: impl Into<String>) -> Self {
         self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
-        self.rules
-            .push(ProxyRule::new(ProxyRuleScheme::All, proxy_url));
+        self.rules.push(ProxyRule::new(
+            ProxyRuleScheme::All,
+            proxy_url,
+            &self.headers,
+        ));
         self.from_env = false;
         self
     }
 
     /// Adds a proxy for `http` URLs.
     pub fn http(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules
-            .push(ProxyRule::new(ProxyRuleScheme::Http, proxy_url));
+        self.rules.push(ProxyRule::new(
+            ProxyRuleScheme::Http,
+            proxy_url,
+            &self.headers,
+        ));
         self
     }
 
     /// Adds a proxy for `https` URLs.
     pub fn https(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules
-            .push(ProxyRule::new(ProxyRuleScheme::Https, proxy_url));
+        self.rules.push(ProxyRule::new(
+            ProxyRuleScheme::Https,
+            proxy_url,
+            &self.headers,
+        ));
         self
+    }
+
+    /// Adds one custom header sent to HTTP and HTTPS proxies on `CONNECT` and plain-HTTP proxy requests.
+    pub fn header(
+        self,
+        name: impl TryInto<http::HeaderName>,
+        value: impl TryInto<http::HeaderValue>,
+    ) -> Self {
+        self.headers([(name, value)])
+    }
+
+    /// Adds custom headers sent to HTTP and HTTPS proxies on `CONNECT` and plain-HTTP proxy requests.
+    pub fn headers<I, K, V>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: TryInto<http::HeaderName>,
+        V: TryInto<http::HeaderValue>,
+    {
+        for (name, value) in headers {
+            let name = crate::core::headers::name(name);
+            let value = crate::core::headers::value(value);
+            match (name, value) {
+                (Ok(name), Ok(value)) => {
+                    let key = name.as_str();
+                    if FORBIDDEN_PROXY_HEADERS.contains(&key) {
+                        self.record_header_error(format!(
+                            "proxy header `{key}` cannot be overridden"
+                        ));
+                        continue;
+                    }
+                    let Ok(val) = std::str::from_utf8(value.as_bytes()) else {
+                        self.record_header_error(format!(
+                            "invalid proxy header `{}`",
+                            key.escape_debug()
+                        ));
+                        continue;
+                    };
+                    let (k, v) = (key.to_owned(), val.to_owned());
+                    for rule in &mut self.rules {
+                        if let Ok(proxy) = &mut rule.parsed {
+                            proxy.push_header(k.clone(), v.clone());
+                        }
+                    }
+                    self.headers.push((k, v));
+                }
+                (Ok(name), Err(_)) => self.record_header_error(format!(
+                    "invalid proxy header `{}`",
+                    name.as_str().escape_debug()
+                )),
+                (Err(err), _) => self.record_header_error(err.to_string()),
+            }
+        }
+        self
+    }
+
+    fn record_header_error(&mut self, msg: String) {
+        if self.header_error.is_none() {
+            self.header_error = Some(msg);
+        }
+    }
+
+    pub(crate) fn check_headers(&self) -> crate::error::Result<()> {
+        if let Some(err) = &self.header_error {
+            return Err(Error::config(err.clone()));
+        }
+        Ok(())
     }
 
     /// Sets the host patterns that bypass the proxy, replacing the `NO_PROXY` value.
@@ -285,6 +370,7 @@ impl Proxy {
     }
 
     fn rule_for(&self, url: &url::Url) -> crate::error::Result<Option<&ProxyUrl>> {
+        self.check_headers()?;
         if let Some(rejected) = self.rejected {
             return Err(rejected.error(Kind::Proxy));
         }
@@ -344,12 +430,23 @@ impl std::fmt::Debug for ProxyRule {
 }
 
 impl ProxyRule {
-    pub(super) fn new(scheme: ProxyRuleScheme, proxy_url: impl Into<String>) -> Self {
+    pub(super) fn new(
+        scheme: ProxyRuleScheme,
+        proxy_url: impl Into<String>,
+        headers: &[(String, String)],
+    ) -> Self {
         let raw = proxy_url.into();
-        Self {
-            scheme,
-            parsed: ProxyUrl::parse(&raw).ok().ok_or(raw),
-        }
+        let parsed = ProxyUrl::parse(&raw)
+            .map(|p| {
+                if headers.is_empty() {
+                    p
+                } else {
+                    p.with_headers(headers.to_vec())
+                }
+            })
+            .ok()
+            .ok_or(raw);
+        Self { scheme, parsed }
     }
 
     fn matches(&self, scheme: Option<Scheme>) -> bool {

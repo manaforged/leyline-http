@@ -191,6 +191,8 @@ pub(crate) fn remote_addr(io: &TlsIo) -> Option<std::net::SocketAddr> {
         TlsIo::Records(stream) => stream.get_ref().peer_addr().ok(),
         TlsIo::Blocking(stream) => stream.get_ref().peer_addr().ok(),
         TlsIo::Nested(stream) => remote_addr(stream.get_ref()),
+        #[cfg(unix)]
+        TlsIo::Unix(_) => None,
     }
 }
 

@@ -3,7 +3,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::error::Error;
-use crate::net::{Dialer, NetError, ProxyReply};
+use crate::net::{Dialer, NetError, ProxyReply, ProxyUrl};
 use crate::util::proxy_basic_auth;
 use crate::wire::h1::{self, MAX_H1_HEADER_BYTES, Sink};
 
@@ -15,9 +15,9 @@ pub(crate) async fn tunnel(
     dialer: &Dialer,
     host: &str,
     port: u16,
-    proxy: &url::Url,
+    proxy: &ProxyUrl,
 ) -> Result<TcpStream, NetError> {
-    let mut tcp_stream = super::connect_to_proxy(dialer, proxy).await?;
+    let mut tcp_stream = super::connect_to_proxy(dialer, proxy.url()).await?;
     write_connect_and_validate(&mut tcp_stream, host, port, proxy).await?;
     Ok(tcp_stream)
 }
@@ -26,18 +26,28 @@ pub(crate) async fn write_connect_and_validate<S>(
     stream: &mut S,
     host: &str,
     port: u16,
-    proxy: &url::Url,
+    proxy: &ProxyUrl,
 ) -> Result<(), NetError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let connect_req = if let Some(credentials) = proxy_basic_auth(proxy) {
-        format!(
-            "CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: {credentials}\r\n\r\n"
-        )
-    } else {
-        format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n")
-    };
+    let mut connect_req = format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n");
+    let custom_auth = proxy
+        .headers()
+        .iter()
+        .any(|(name, _)| name.eq_ignore_ascii_case("proxy-authorization"));
+    if !custom_auth && let Some(credentials) = proxy_basic_auth(proxy.url()) {
+        connect_req.push_str("Proxy-Authorization: ");
+        connect_req.push_str(&credentials);
+        connect_req.push_str("\r\n");
+    }
+    for (name, value) in proxy.headers() {
+        connect_req.push_str(name);
+        connect_req.push_str(": ");
+        connect_req.push_str(value);
+        connect_req.push_str("\r\n");
+    }
+    connect_req.push_str("\r\n");
 
     stream
         .write_all(connect_req.as_bytes())

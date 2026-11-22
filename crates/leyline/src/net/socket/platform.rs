@@ -131,3 +131,60 @@ pub(super) fn apply(socket: &Socket, profile: &TcpProfile, is_v6: bool) -> io::R
 pub(super) fn apply(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) -> io::Result<()> {
     Ok(())
 }
+
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::Result<()> {
+    if name.is_empty() || name.as_bytes().contains(&0) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid network interface name `{name}`"),
+        ));
+    }
+    socket.bind_device(Some(name.as_bytes()))
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "visionos"
+))]
+pub(super) fn bind_interface(socket: &Socket, name: &str, is_v6: bool) -> io::Result<()> {
+    let c_name = std::ffi::CString::new(name).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid network interface name `{name}`"),
+        )
+    })?;
+    // SAFETY: `c_name` is a valid NUL-terminated C string for the duration of this call.
+    let index = unsafe { libc::if_nametoindex(c_name.as_ptr()) };
+    let Some(index) = std::num::NonZeroU32::new(index) else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("unknown network interface `{name}`"),
+        ));
+    };
+    if is_v6 {
+        socket.bind_device_by_index_v6(Some(index))
+    } else {
+        socket.bind_device_by_index_v4(Some(index))
+    }
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "visionos"
+)))]
+pub(super) fn bind_interface(_socket: &Socket, _name: &str, _is_v6: bool) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "binding sockets to a network interface is not supported on this platform",
+    ))
+}

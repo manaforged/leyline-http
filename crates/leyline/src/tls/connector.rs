@@ -211,6 +211,14 @@ impl FingerprintConnector {
         port: u16,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
+        #[cfg(unix)]
+        if let Some(path) = self.dialer.unix_socket() {
+            let unix_stream = self.dialer.dial_unix(path).await?;
+            let session_key = SessionCache::key(host, port, None);
+            return self
+                .tls_handshake_unix(unix_stream, host, &session_key, plan)
+                .await;
+        }
         let tcp_stream = self.dialer.dial(host, port).await?;
         let session_key = SessionCache::key(host, port, None);
         self.tls_handshake(tcp_stream, host, &session_key, plan)

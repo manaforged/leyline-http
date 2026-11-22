@@ -32,6 +32,7 @@ pub struct ProxyUrl {
     raw: String,
     url: url::Url,
     scheme: ProxyScheme,
+    headers: Vec<(String, String)>,
 }
 
 impl TryFrom<String> for ProxyUrl {
@@ -44,7 +45,19 @@ impl TryFrom<String> for ProxyUrl {
 
 impl std::fmt::Debug for ProxyUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ProxyUrl").field(&redact(&self.raw)).finish()
+        if self.headers.is_empty() {
+            f.debug_tuple("ProxyUrl").field(&redact(&self.raw)).finish()
+        } else {
+            f.debug_struct("ProxyUrl")
+                .field("url", &redact(&self.raw))
+                .field(
+                    "headers",
+                    &crate::util::masked(
+                        self.headers.iter().map(|(k, _)| (k.as_str(), &b"***"[..])),
+                    ),
+                )
+                .finish()
+        }
     }
 }
 
@@ -67,6 +80,7 @@ impl ProxyUrl {
             raw: raw.to_string(),
             url,
             scheme,
+            headers: Vec::new(),
         })
     }
 
@@ -82,6 +96,19 @@ impl ProxyUrl {
         self.scheme
     }
 
+    pub(crate) fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
+    pub(crate) fn push_header(&mut self, name: String, value: String) {
+        self.headers.push((name, value));
+    }
+
+    pub(crate) fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers;
+        self
+    }
+
     pub(crate) fn with_password(&self, password: &str) -> Result<Self> {
         let mut url = self.url.clone();
         url.set_password(Some(password))
@@ -90,6 +117,7 @@ impl ProxyUrl {
             raw: url.to_string(),
             url,
             scheme: self.scheme,
+            headers: self.headers.clone(),
         })
     }
 
@@ -102,6 +130,7 @@ impl ProxyUrl {
             raw: url.to_string(),
             url,
             scheme: self.scheme,
+            headers: self.headers.clone(),
         }
     }
 }

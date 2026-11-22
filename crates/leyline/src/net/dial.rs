@@ -54,6 +54,26 @@ impl Dialer {
     }
 
     #[cfg(feature = "http3")]
+    pub(crate) fn socket_options(&self) -> &SocketOptions {
+        &self.socket
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn unix_socket(&self) -> Option<&std::path::Path> {
+        self.socket.unix_socket.as_deref()
+    }
+
+    #[cfg(unix)]
+    pub(crate) async fn dial_unix(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<tokio::net::UnixStream, NetError> {
+        tokio::net::UnixStream::connect(path)
+            .await
+            .map_err(NetError::TcpConnect)
+    }
+
+    #[cfg(feature = "http3")]
     pub(crate) fn resolver(&self) -> &dyn Resolver {
         self.resolver.as_ref()
     }

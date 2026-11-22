@@ -46,6 +46,19 @@ impl FingerprintConnector {
         })
     }
 
+    #[cfg(unix)]
+    pub(crate) fn tls_handshake_unix(
+        &self,
+        unix_stream: tokio::net::UnixStream,
+        host: &str,
+        session_key: &str,
+        plan: AlpnPlan,
+    ) -> impl Future<Output = Result<TlsStream, TlsError>> {
+        self.handshake_over(unix_stream, host, session_key, plan, |stream| {
+            TlsIo::Unix(Box::new(stream))
+        })
+    }
+
     async fn handshake_over<S>(
         &self,
         io: S,

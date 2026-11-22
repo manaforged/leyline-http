@@ -34,12 +34,12 @@ pub(crate) async fn open(
             net_proxy::socks(dialer, host, port, proxy).await?,
         )),
         (ProxyScheme::Http, Route::Connect) => Ok(Tunnel::Plain(
-            http_proxy::tunnel(dialer, host, port, url).await?,
+            http_proxy::tunnel(dialer, host, port, proxy).await?,
         )),
         (ProxyScheme::Http, Route::Forward) => Ok(Tunnel::Plain(
             net_proxy::connect_to_proxy(dialer, url).await?,
         )),
-        (ProxyScheme::Https, Route::Connect) => tunnel_via_tls(connector, host, port, url)
+        (ProxyScheme::Https, Route::Connect) => tunnel_via_tls(connector, host, port, proxy)
             .await
             .map(Tunnel::Tls),
         (ProxyScheme::Https, Route::Forward) => open_tls_to_proxy(connector, url)
@@ -52,9 +52,9 @@ async fn tunnel_via_tls(
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
-    proxy: &url::Url,
+    proxy: &ProxyUrl,
 ) -> Result<TlsIo, TlsError> {
-    let mut tunnel = open_tls_to_proxy(connector, proxy).await?.stream;
+    let mut tunnel = open_tls_to_proxy(connector, proxy.url()).await?.stream;
     http_proxy::write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
     Ok(tunnel)
 }

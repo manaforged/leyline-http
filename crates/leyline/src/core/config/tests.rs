@@ -65,14 +65,9 @@ fn no_proxy_does_not_match_unrelated_ipv6() {
 
 fn cfg_with_env_no_proxy(patterns: &str) -> Proxy {
     Proxy {
-        rules: Vec::new(),
         no_proxy: NoProxy::from_string(patterns).unwrap(),
-        no_proxy_explicit: false,
         use_env: true,
-        from_env: false,
-        rejected: None,
-        pool: None,
-        custom: None,
+        ..Proxy::default()
     }
 }
 
@@ -196,6 +191,7 @@ fn proxy_debug_redacts_password() {
     let rule = ProxyRule::new(
         super::proxy::ProxyRuleScheme::All,
         "socks5://user:hunter2@proxy.example:1080",
+        &[],
     );
     let shown = format!("{rule:?}");
     assert!(!shown.contains("hunter2"), "{shown}");
