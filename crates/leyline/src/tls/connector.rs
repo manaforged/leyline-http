@@ -192,7 +192,7 @@ impl FingerprintConnector {
                 proxy::open(self, host, port, proxy, Route::Connect),
             )
             .await
-            .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
+            .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()).into_proxy())?
             .map_err(TlsError::into_proxy)?;
             let remaining = self
                 .connect_timeout
