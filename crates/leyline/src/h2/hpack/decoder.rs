@@ -172,43 +172,6 @@ impl Decoder {
             integer::decode(byte & mask, prefix_bits, &src[offset..]).map_err(|e| e.to_string())?;
         offset += consumed;
 
-        if !add_to_table {
-            let (name_owned, typed_name) = if name_index == 0 {
-                let (s, consumed) = decode_string_cow(&src[offset..])?;
-                offset += consumed;
-                let typed = parse_name(&s);
-                (Some(s), typed)
-            } else {
-                let (n, _, entry_typed) = table::entry(name_index, &self.dynamic)
-                    .ok_or_else(|| format!("invalid name index {name_index}"))?;
-                let typed = match entry_typed {
-                    Some((typed, _)) => Some(typed.clone()),
-                    None => parse_name(n),
-                };
-                (None, typed)
-            };
-
-            let (value, consumed) = decode_string_cow(&src[offset..])?;
-            offset += consumed;
-
-            let name_bytes: &[u8] = match &name_owned {
-                Some(s) => s,
-                None => {
-                    table::entry(name_index, &self.dynamic)
-                        .expect("validated index")
-                        .0
-                }
-            };
-            self.account(total_size, name_bytes.len() + value.len())?;
-            let typed = typed_name.and_then(|name| {
-                http::HeaderValue::from_bytes(&value)
-                    .ok()
-                    .map(|value| (name, value))
-            });
-            each(name_bytes, &value, typed);
-            return Ok(offset - pos);
-        }
-
         let (name, typed_name) = if name_index == 0 {
             let (s, consumed) = decode_string(&src[offset..])?;
             offset += consumed;
@@ -221,13 +184,25 @@ impl Decoder {
                 Some((typed, _)) => Some(typed.clone()),
                 None => parse_name(n),
             };
-            (Bytes::copy_from_slice(n), typed)
+            (std::borrow::Cow::Borrowed(n), typed)
         };
 
         let (value, consumed) = decode_string(&src[offset..])?;
         offset += consumed;
 
         self.account(total_size, name.len() + value.len())?;
+        if !add_to_table {
+            let typed = typed_name.and_then(|name| {
+                http::HeaderValue::from_bytes(&value)
+                    .ok()
+                    .map(|value| (name, value))
+            });
+            each(&name, &value, typed);
+            return Ok(offset - pos);
+        }
+
+        let name = cow_to_bytes(name);
+        let value = cow_to_bytes(value);
         let typed = typed_name.and_then(|name| {
             http::HeaderValue::from_maybe_shared(value.clone())
                 .ok()
@@ -248,7 +223,7 @@ fn parse_name(name: &[u8]) -> Option<http::HeaderName> {
     http::HeaderName::from_bytes(name).ok()
 }
 
-fn decode_string_cow(src: &[u8]) -> Result<(std::borrow::Cow<'_, [u8]>, usize), String> {
+fn decode_string(src: &[u8]) -> Result<(std::borrow::Cow<'_, [u8]>, usize), String> {
     if src.is_empty() {
         return Err("unexpected end of string".into());
     }
@@ -273,13 +248,11 @@ fn decode_string_cow(src: &[u8]) -> Result<(std::borrow::Cow<'_, [u8]>, usize), 
     Ok((value, end))
 }
 
-fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
-    let (value, end) = decode_string_cow(src)?;
-    let bytes = match value {
+fn cow_to_bytes(value: std::borrow::Cow<'_, [u8]>) -> Bytes {
+    match value {
         std::borrow::Cow::Borrowed(raw) => Bytes::copy_from_slice(raw),
         std::borrow::Cow::Owned(vec) => Bytes::from(vec),
-    };
-    Ok((bytes, end))
+    }
 }
 
 #[cfg(test)]

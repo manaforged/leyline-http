@@ -33,6 +33,17 @@ impl RequestBuilder {
         self.send().await?.bytes().await
     }
 
+    pub(super) fn send_prepared(
+        mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
+        let Some(url) = self.draft.url.take() else {
+            return Box::pin(std::future::ready(Err(Error::from(
+                url::ParseError::EmptyHost,
+            ))));
+        };
+        Box::pin(self.respond_prepared(url))
+    }
+
     fn run(self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
         match self.respond() {
             Ok(respond) => Box::pin(respond),
@@ -42,6 +53,13 @@ impl RequestBuilder {
 
     fn respond(mut self) -> Result<impl Future<Output = Result<Response>> + Send + 'static> {
         let url = self.prepare()?;
+        Ok(self.respond_prepared(url))
+    }
+
+    fn respond_prepared(
+        mut self,
+        url: Arc<url::Url>,
+    ) -> impl Future<Output = Result<Response>> + Send + 'static {
         let carry = &mut self.draft.carry;
         let retry_policy = std::mem::take(&mut carry.retry_policy);
         let label = carry.label.take();
@@ -49,7 +67,7 @@ impl RequestBuilder {
         let streamed = carry.stream_response;
         let deadline = self.session.deadline(carry.timeouts.as_ref());
         let (session, attempt) = self.into_attempt(deadline, Arc::clone(&url));
-        Ok(async move {
+        async move {
             let method = attempt.method.clone();
             let mut exhausted = false;
             let attempts = run_attempts(
@@ -78,7 +96,7 @@ impl RequestBuilder {
                     error.set_retry_outcome(policy_wait, exhausted);
                     error
                 })
-        })
+        }
     }
 
     fn into_attempt(self, deadline: Deadline, url: Arc<url::Url>) -> (Session, Box<Draft>) {
@@ -122,7 +140,7 @@ impl RequestBuilder {
         http_scheme(&url)?;
         self.infer_from_content_type();
 
-        if let Some(encoding) = self.draft.compress {
+        if let Some(encoding) = self.draft.compress.take() {
             match &self.draft.body.0 {
                 BodyKind::Bytes(b) => {
                     let compressed = super::compress::encode(encoding, b)?;
@@ -204,13 +222,7 @@ async fn run_attempts(
         };
         drop(result);
 
-        let slept = session
-            .unless_shut_down(async {
-                deadline.sleep(sleep).await;
-                Ok(())
-            })
-            .await;
-        if let Err(err) = slept {
+        if let Err(err) = sleep_backoff(session, deadline, sleep).await {
             return (counted(Err(err), n + 1), n + 1);
         }
         n += 1;
@@ -220,6 +232,19 @@ async fn run_attempts(
             .or_else(|| rewind.as_mut().and_then(Rewind::again))
             .unwrap_or_default();
     }
+}
+
+pub(super) async fn sleep_backoff(
+    session: &Session,
+    deadline: &Deadline,
+    wait: std::time::Duration,
+) -> Result<()> {
+    session
+        .unless_shut_down(async {
+            deadline.sleep(wait).await;
+            Ok(())
+        })
+        .await
 }
 
 fn counted(result: Result<Response>, attempts: u32) -> Result<Response> {

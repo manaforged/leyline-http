@@ -23,7 +23,7 @@ mod response;
 
 impl Session {
     pub(super) async fn execute_inner(&self, mut attempt: Box<Draft>) -> Result<Response> {
-        let mut first_hop = attempt.carry.first_hop.take();
+        let first_hop = attempt.carry.first_hop.take();
         let url = attempt
             .url
             .expect("invariant: send stores the prepared URL before the attempt");
@@ -53,6 +53,7 @@ impl Session {
         let mut pass = None;
         let mut answered = false;
         let mut refreshed = false;
+        let mut hop_proxy: Option<Option<crate::net::ProxyUrl>> = first_hop;
         loop {
             drop(pass.take());
             pass = self.admit_host(&journey.url).await?;
@@ -66,11 +67,20 @@ impl Session {
             let step_body = std::mem::take(&mut journey.body);
             let replay_body = step_body.try_clone();
 
-            let proxy = match first_hop.take() {
-                Some(chosen) => chosen.map(std::borrow::Cow::Owned),
-                None => self
-                    .proxy_for(&journey.url, request_proxy)
-                    .map_err(leg_error(answered))?,
+            let proxy = match &hop_proxy {
+                Some(chosen) => chosen.as_ref().map(std::borrow::Cow::Borrowed),
+                None => {
+                    let chosen = self
+                        .proxy_for(&journey.url, request_proxy)
+                        .map_err(leg_error(answered))?
+                        .map(std::borrow::Cow::into_owned);
+                    hop_proxy = Some(chosen);
+                    hop_proxy
+                        .as_ref()
+                        .expect("hop_proxy just set")
+                        .as_ref()
+                        .map(std::borrow::Cow::Borrowed)
+                }
             };
             let leg = {
                 let prepared = Prepared {
@@ -130,9 +140,13 @@ impl Session {
                 headers: &leg.headers,
                 redirect_policy,
             };
+            let prev_url = std::sync::Arc::clone(&journey.url);
             if next.take(&mut journey, digest.as_mut(), replay_body)? {
                 drop(leg.body);
                 journey.url = self.hsts_upgrade(&journey.url);
+                if journey.url != prev_url {
+                    hop_proxy = None;
+                }
                 continue;
             }
 

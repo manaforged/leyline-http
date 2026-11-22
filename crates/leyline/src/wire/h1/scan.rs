@@ -93,14 +93,12 @@ impl Known {
 #[derive(Default)]
 pub(crate) struct Scanned<'a> {
     pub(crate) body: BodyHeaders<'a>,
-    connection: Option<Cow<'a, [u8]>>,
     seen: Seen,
 }
 
 impl Scanned<'_> {
     pub(crate) fn seen(&self) -> Seen {
         self.seen
-            .connection(self.connection.as_deref().and_then(text))
     }
 }
 
@@ -134,10 +132,7 @@ impl<'a> Pick<'a> for Scanned<'a> {
                 Some(coding) => *coding = Cow::Owned([&**coding, b",", &*value].concat()),
                 None => self.body.coding = Some(value),
             },
-            Known::Connection => match &mut self.connection {
-                Some(conn) => *conn = Cow::Owned([&**conn, b",", &*value].concat()),
-                None => self.connection = Some(value),
-            },
+            Known::Connection => self.seen.note_connection_bytes(&value),
             Known::Fact(fact) => self.seen.note(fact),
         }
     }

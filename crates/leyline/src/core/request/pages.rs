@@ -35,12 +35,16 @@ struct Template {
 impl RequestBuilder {
     /// Sends the request and follows each `Link: rel="next"` header, yielding one response per page.
     pub fn pages(mut self) -> impl Stream<Item = Result<Response>> + Send + Unpin + use<> {
-        drop(self.prepare_in_place());
+        let prepared = self.prepare_in_place();
         let template = Template::of(&self);
         let visited = template.first.iter().cloned().collect();
+        let pending: PageFuture = match prepared {
+            Ok(()) => self.send_prepared(),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        };
         Pages {
             template,
-            pending: Some(Box::pin(self.send())),
+            pending: Some(pending),
             visited,
         }
     }

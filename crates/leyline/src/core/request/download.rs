@@ -76,12 +76,7 @@ impl RequestBuilder {
             let failed = Err(error);
             match retry.plan(&failed, attempt) {
                 RetryPlan::Backoff(wait) if wait < deadline.remaining() => {
-                    self.session
-                        .unless_shut_down(async {
-                            deadline.sleep(wait).await;
-                            Ok(())
-                        })
-                        .await?;
+                    super::send::sleep_backoff(&self.session, &deadline, wait).await?;
                 }
                 _ => return failed.map(|_| 0),
             }

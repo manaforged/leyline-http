@@ -51,7 +51,21 @@ fn default_dedup_min_words() -> Option<usize> {
     Some(DEFAULT_MIN_DEDUP_WORDS)
 }
 
-pub(super) fn min_some(a: Option<usize>, b: Option<usize>) -> Option<usize> {
+pub(super) fn origin_cap_for(
+    pace: &HostGates,
+    own: &HostGates,
+    origin: &Origin,
+    fallback: usize,
+) -> usize {
+    min_some(
+        pace.max_in_flight_for(origin),
+        own.max_in_flight_for(origin),
+    )
+    .unwrap_or(fallback)
+    .max(1)
+}
+
+fn min_some(a: Option<usize>, b: Option<usize>) -> Option<usize> {
     match (a, b) {
         (Some(a), Some(b)) => Some(a.min(b)),
         (a, b) => a.or(b),
@@ -328,12 +342,29 @@ impl Crawl {
     }
 
     pub(super) fn origin_cap(&self, origin: &Origin) -> usize {
-        min_some(
-            self.pace.max_in_flight_for(origin),
-            self.session.host_limits().max_in_flight_for(origin),
+        origin_cap_for(
+            &self.pace,
+            self.session.host_limits(),
+            origin,
+            self.max_active(),
         )
-        .unwrap_or_else(|| self.max_active())
-        .max(1)
+    }
+
+    pub(super) fn approve_redirect_hop(
+        &self,
+        hops: usize,
+        status: u16,
+        url: &Url,
+        location: &str,
+        previous: &[Url],
+    ) -> Option<Url> {
+        self.redirect_policy
+            .check_hops(hops + 1)
+            .ok()
+            .and_then(|()| {
+                self.redirect_policy
+                    .approved_hop(status, url, location, previous)
+            })
     }
 
     fn resolve_pace(&mut self) -> Option<HostGates> {
@@ -433,15 +464,13 @@ impl Crawl {
     }
 
     fn follow_redirect(&mut self, mut queued: Queued, status: u16, location: String, to: Url) {
-        let hop = self
-            .redirect_policy
-            .check_hops(queued.hops + 1)
-            .ok()
-            .and_then(|()| {
-                self.redirect_policy
-                    .approved_hop(status, &queued.url, &location, &queued.previous)
-            });
-        let Some(hop) = hop else {
+        let Some(hop) = self.approve_redirect_hop(
+            queued.hops,
+            status,
+            &queued.url,
+            &location,
+            &queued.previous,
+        ) else {
             self.stats.skip(SkipReason::Redirects);
             return;
         };

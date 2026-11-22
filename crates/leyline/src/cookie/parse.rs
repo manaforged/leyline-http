@@ -96,9 +96,12 @@ fn split_pair(header: &str) -> Option<(&str, &str, &str)> {
     Some((name, value, attrs))
 }
 
+pub(crate) fn has_ctl(s: &str) -> bool {
+    s.bytes().any(|b| b < 0x20 || b == 0x7F)
+}
+
 fn trimmed_pair<'a>(name: &'a str, value: &'a str) -> Option<(&'a str, &'a str)> {
     let (name, value) = (name.trim(), value.trim());
-    let has_ctl = |s: &str| s.bytes().any(|b| b < 0x20 || b == 0x7F);
     if name.is_empty()
         || has_ctl(name)
         || has_ctl(value)

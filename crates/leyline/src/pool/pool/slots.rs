@@ -53,7 +53,8 @@ impl Pool {
         handle: C,
         tls: TlsInfo,
     ) -> (C, TlsInfo) {
-        let mut entries = write(&self.conns.shards.of(&key).entries);
+        let shard = self.conns.shards.of(&key);
+        let mut entries = write(&shard.entries);
         if let Some(existing) = entries.mux.get(&key)
             && !existing.is_dead()
             && let Some(conn) = C::in_handle(&existing.handle)
@@ -81,7 +82,7 @@ impl Pool {
         );
         drop(entries);
         drop(evicted);
-        self.evict_excess_across_shards();
+        self.evict_excess_across_shards(shard);
         self.conns.counters.add(Counter::Installs, 1);
         self.watch_idle();
         out
@@ -119,7 +120,8 @@ impl Pool {
     }
 
     fn park_h1_locked(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) -> bool {
-        let mut entries = write(&self.conns.shards.of(key).entries);
+        let shard = self.conns.shards.of(key);
+        let mut entries = write(&shard.entries);
         if let Some(entry) = entries.h1.get_mut(key) {
             let now = Instant::now();
             entry.idle.queue().push_back((slot, tls, now));
@@ -141,17 +143,17 @@ impl Pool {
         );
         drop(entries);
         drop(evicted);
-        self.evict_excess_across_shards();
+        self.evict_excess_across_shards(shard);
         true
     }
 
-    fn evict_excess_across_shards(&self) {
+    fn evict_excess_across_shards(&self, skip: &super::shards::Shard) {
         let shards = &self.conns.shards;
         if shards.over_limit() == 0 {
             return;
         }
         let mut evicted = Vec::new();
-        for shard in shards.iter() {
+        for shard in shards.evict_order(skip) {
             let excess = shards.over_limit();
             if excess == 0 {
                 break;

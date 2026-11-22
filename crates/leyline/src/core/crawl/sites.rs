@@ -6,7 +6,7 @@ use url::Url;
 
 use super::frontier::{Queued, Scope, page_key, same_site};
 use super::sitemap::SitemapRead;
-use super::{Crawl, Event, SkipReason, Task, min_some, sitemap};
+use super::{Crawl, Event, SkipReason, Task, origin_cap_for, sitemap};
 use crate::core::config::Origin;
 use crate::core::robots::{Robots, RobotsSource, fallback};
 use crate::net::normalize_host;
@@ -114,12 +114,7 @@ impl Crawl {
         let fallback = self.max_active();
         let obey = self.settings.respect.is_some();
         self.frontier.pop_where(|origin| {
-            let cap = min_some(
-                pace.max_in_flight_for(origin),
-                own.max_in_flight_for(origin),
-            )
-            .unwrap_or(fallback)
-            .max(1);
+            let cap = origin_cap_for(pace, own, origin, fallback);
             !(obey && matches!(sites.get(origin), Some(Site::Pending)))
                 && busy.get(origin).copied().unwrap_or(0) < cap
                 && pace.ready(origin)
@@ -248,15 +243,9 @@ impl Crawl {
     }
 
     fn redirect_sitemap(&mut self, mut file: SitemapFile, status: u16, location: String, to: Url) {
-        let hop = self
-            .redirect_policy
-            .check_hops(file.hops + 1)
-            .ok()
-            .and_then(|()| {
-                self.redirect_policy
-                    .approved_hop(status, &file.url, &location, &file.previous)
-            });
-        let Some(hop) = hop else {
+        let Some(hop) =
+            self.approve_redirect_hop(file.hops, status, &file.url, &location, &file.previous)
+        else {
             self.stats.skip(SkipReason::Redirects);
             return;
         };

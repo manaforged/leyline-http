@@ -66,6 +66,10 @@ impl Session {
             {
                 return Ok(conn);
             }
+            if matches!(protocol, super::Protocol::Http2) {
+                return Err(Error::new(crate::error::Kind::Http2)
+                    .with_message("HTTP/2 extended CONNECT is not offered by the server"));
+            }
             tracing::debug!("H2 extended CONNECT not available, falling back to H1 Upgrade");
         }
 

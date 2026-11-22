@@ -22,7 +22,11 @@ fuzz_target!(|data: &[u8]| {
             let decoded = verify
                 .decode_header_block(&encoded)
                 .expect("re-encoded HPACK block must decode");
-            assert_eq!(decoded, headers);
+            assert_eq!(decoded.len(), headers.len());
+            for (got, want) in decoded.iter().zip(headers.iter()) {
+                assert_eq!(got.name.as_ref(), want.name.to_ascii_lowercase().as_slice());
+                assert_eq!(got.value, want.value);
+            }
         }
     }
 });

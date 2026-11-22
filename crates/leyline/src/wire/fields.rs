@@ -39,6 +39,10 @@ impl Fact {
         }
     }
 
+    pub(crate) fn from_header(name: &HeaderName) -> Option<Self> {
+        Self::ALL.into_iter().find(|fact| *name == fact.header())
+    }
+
     pub(crate) fn named(name: &[u8]) -> Option<Self> {
         Self::ALL
             .into_iter()
@@ -48,14 +52,8 @@ impl Fact {
 
 impl Seen {
     pub(crate) fn note_header(&mut self, name: &HeaderName) {
-        if *name == http::header::SET_COOKIE {
-            self.cookies = true;
-        } else if *name == http::header::STRICT_TRANSPORT_SECURITY {
-            self.hsts = true;
-        } else if *name == http::header::ALT_SVC {
-            self.alt_svc = true;
-        } else if *name == http::header::CONTENT_ENCODING {
-            self.encoded = true;
+        if let Some(fact) = Fact::from_header(name) {
+            self.note(fact);
         }
     }
 
@@ -68,13 +66,22 @@ impl Seen {
         }
     }
 
+    pub(crate) fn note_connection(&mut self, value: &str) {
+        self.close |= has_token(value, "close");
+        self.keep_alive |= has_token(value, "keep-alive");
+    }
+
+    pub(crate) fn note_connection_bytes(&mut self, value: &[u8]) {
+        if let Some(v) = text(value) {
+            self.note_connection(v);
+        }
+    }
+
     fn of(map: &HeaderMap) -> Self {
         let mut seen = Self::default();
         let mut connection = false;
         for name in map.keys() {
-            if let Some(fact) = Fact::ALL.into_iter().find(|fact| *name == fact.header()) {
-                seen.note(fact);
-            }
+            seen.note_header(name);
             connection |= name == http::header::CONNECTION;
         }
         if !connection {
@@ -82,17 +89,10 @@ impl Seen {
         }
         for value in map.get_all(http::header::CONNECTION) {
             if let Ok(v) = value.to_str() {
-                seen.close |= has_token(v, "close");
-                seen.keep_alive |= has_token(v, "keep-alive");
+                seen.note_connection(v);
             }
         }
         seen
-    }
-
-    pub(crate) fn connection(mut self, value: Option<&str>) -> Self {
-        self.close = value.is_some_and(|v| has_token(v, "close"));
-        self.keep_alive = value.is_some_and(|v| has_token(v, "keep-alive"));
-        self
     }
 }
 
@@ -136,11 +136,10 @@ impl Fields {
             Repr::Map(map) => map,
             Repr::Raw { head, map, .. } => map.get_or_init(|| Box::new(build(head))),
             Repr::List { pairs, map, .. } => map.get_or_init(|| {
-                let mut out = HeaderMap::with_capacity(pairs.len());
-                for (name, value) in pairs {
-                    out.append(name.clone(), value.clone());
-                }
-                Box::new(out)
+                Box::new(pairs_to_map(
+                    pairs.iter().map(|(n, v)| (n.clone(), v.clone())),
+                    pairs.len(),
+                ))
             }),
         }
     }
@@ -154,11 +153,8 @@ impl Fields {
             }
             Repr::List { pairs, map, .. } => map.into_inner().map_or_else(
                 || {
-                    let mut out = HeaderMap::with_capacity(pairs.len());
-                    for (name, value) in pairs {
-                        out.append(name, value);
-                    }
-                    out
+                    let len = pairs.len();
+                    pairs_to_map(pairs.into_iter(), len)
                 },
                 |map| *map,
             ),
@@ -188,6 +184,17 @@ impl Fields {
             _ => self.map().get_all(name).iter().any(|v| hit(v.as_bytes())),
         }
     }
+}
+
+fn pairs_to_map(
+    pairs: impl Iterator<Item = (HeaderName, HeaderValue)>,
+    capacity: usize,
+) -> HeaderMap {
+    let mut out = HeaderMap::with_capacity(capacity);
+    for (name, value) in pairs {
+        out.append(name, value);
+    }
+    out
 }
 
 fn build(head: &Bytes) -> HeaderMap {

@@ -370,19 +370,17 @@ pub(crate) fn percent_decode(s: &str) -> String {
         .into_owned()
 }
 
+fn is_ascii_digits(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
+}
+
 pub(crate) fn parse_ascii_u64(value: &str) -> Option<u64> {
-    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    value.parse().ok()
+    is_ascii_digits(value).then(|| value.parse().ok()).flatten()
 }
 
 pub(crate) fn delta_seconds(value: &str) -> Option<u64> {
     let value = value.trim();
-    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    Some(value.parse().unwrap_or(u64::MAX))
+    is_ascii_digits(value).then(|| value.parse().unwrap_or(u64::MAX))
 }
 
 pub(crate) fn domain_match(host: &str, domain: &str) -> bool {

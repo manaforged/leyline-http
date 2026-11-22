@@ -69,12 +69,7 @@ impl Partial {
         let data_path = sidecar(&target, ".leyline.part")?;
         let metadata_path = sidecar(&target, ".leyline.part.json")?;
         let lock_path = sidecar(&target, ".leyline.lock")?;
-        let locked = open(&lock_path)?;
-        locked.try_lock().map_err(|error| {
-            Error::new(Kind::Io)
-                .with_message("download target is locked")
-                .with_source(error)
-        })?;
+        let locked = acquire_lock(&lock_path)?;
         let mut file = open(&data_path)?;
         let metadata = if resume {
             read_metadata(&metadata_path)?
@@ -180,15 +175,49 @@ impl Partial {
         self.checkpoint_locked(&mut data)?;
         waiting.check()?;
         atomic::commit(&self.data_path, &self.target)?;
-        let result = match std::fs::remove_file(&self.metadata_path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(Error::from(error)
-                .with_message("download committed but removing its metadata failed")),
-        };
+        let result = remove_if_present(&self.metadata_path, "removing its metadata failed");
+        #[cfg(unix)]
+        let unlink = remove_if_present(&self.lock_path, "removing its lock failed");
         drop(data.lock.take());
-        drop(std::fs::remove_file(&self.lock_path));
-        result
+        #[cfg(not(unix))]
+        let unlink = remove_if_present(&self.lock_path, "removing its lock failed");
+        result.and(unlink)
+    }
+}
+
+fn remove_if_present(path: &Path, detail: &str) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => {
+            Err(Error::from(error).with_message(format!("download committed but {detail}")))
+        }
+    }
+}
+
+fn acquire_lock(lock_path: &Path) -> Result<File> {
+    loop {
+        let locked = open(lock_path)?;
+        locked.try_lock().map_err(|error| {
+            Error::new(Kind::Io)
+                .with_message("download target is locked")
+                .with_source(error)
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let fd_meta = locked.metadata()?;
+            match std::fs::metadata(lock_path) {
+                Ok(path_meta)
+                    if path_meta.dev() == fd_meta.dev() && path_meta.ino() == fd_meta.ino() =>
+                {
+                    return Ok(locked);
+                }
+                Ok(_) | Err(_) => continue,
+            }
+        }
+        #[cfg(not(unix))]
+        return Ok(locked);
     }
 }
 

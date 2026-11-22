@@ -273,10 +273,10 @@ fn cookie_rfc6265_edge_cases() {
 
     let jar5 = Jar::new();
     jar5.store("https://example.com/", "slot=1");
-    jar5.store("https://example.com/", "slot=2; Domain=example.com");
-    assert_eq!(jar5.len(), 1);
+    jar5.store("https://evil.example.com/", "slot=2; Domain=example.com");
+    assert_eq!(jar5.len(), 2);
     assert_eq!(
-        jar5.get("https://example.com/", "slot").as_deref(),
+        jar5.get("https://sub.example.com/", "slot").as_deref(),
         Some("2")
     );
 }

@@ -310,7 +310,7 @@ fn sent_to(url: &Url) -> impl Fn(&Cookie) -> bool {
 }
 
 fn plain_token(text: &str) -> bool {
-    !text.chars().any(|c| c == ';' || c.is_control())
+    !text.contains(';') && !parse::has_ctl(text)
 }
 
 #[cfg(test)]
