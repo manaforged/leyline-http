@@ -63,6 +63,11 @@ version and publish as separate crates.
 - `Session::base_url`, `cookie::Cookie::parse`, and `cookie::Jar::{len, is_empty, cookies_for}` expose the session base URL, standalone `Set-Cookie` parsing, and RFC 6265 send-order cookie matching.
 - `testing::Server::https_on` starts a local HTTPS test server on a pre-bound `std::net::TcpListener` without an active Tokio runtime on the calling thread.
 - A Firefox 160 profile, `Browser::Firefox160`, from captures of Firefox 160.0 on macOS, Linux, and Windows.
+- `SessionBuilder::local_addresses`, `SessionBuilder::interface`, and `SessionBuilder::unix_socket` (Unix) bind dual-stack source IPs, pin sockets to a named network interface, or route HTTP and HTTPS requests over a Unix domain socket.
+- `Proxy::header` and `Proxy::headers` attach custom headers to plain-HTTP proxy requests and `CONNECT` tunnels, with values redacted in `Debug` output and framing headers rejected at `build()`.
+- `Tls::client_cert_pkcs12` loads a DER-encoded PKCS#12 client identity and password in memory, with both redacted in `Debug` output.
+- `Tls::danger_accept_invalid_hostnames` skips only hostname verification while keeping CA trust-chain and leaf-pin checks active across HTTP/1.1, HTTP/2, and HTTP/3.
+- `Tls::ech_config_list`, `Tls::ech`, `Response::ech_accepted`, `SessionBuilder::doh`, and `Resolver::resolve_ech` add built-in RFC 8484 DNS-over-HTTPS (with TTL caching and `HTTPS`/SVCB wire parsing) and real TLS 1.3 Encrypted Client Hello (ECH) with automatic RFC 9460 `retry_configs` recovery.
 
 ### Fixed
 
@@ -84,6 +89,7 @@ version and publish as separate crates.
 - The minimum versions of `http` (1.4), `http-cache-semantics` (2.1.1), and `serde` (1.0.220) are raised. With the old minimums, a minimal-versions build resolved `time` 0.3.26, which does not compile on current Rust.
 - On Linux a binary no longer loads `libstdc++`: `leyline-bssl-sys` supplies the two C++ runtime symbols that BoringSSL uses and links `libstdc++` only when a trial link shows that it is needed. `LEYLINE_BSSL_RUST_CPPLIB=stdc++` restores the link.
 - The zstd decoder is built without the legacy frame formats and the dictionary builder, which removes about 230 KB of code from a binary.
+- Request deadlines of 2 seconds or longer now use a shared 250 ms coarse ticker rather than a per-request timer wheel entry (so total timeouts of 2 s or more can fire up to 250 ms late), paired with boxed cold request overrides, inline HTTP/2 driver commands, zero-copy URL pseudo-headers, pre-validated HPACK table fields, inline 24-byte pool hostnames, and single-pass HTTP/1.1 header scanning. In paired 8-round loopback benchmarks, this reduces client CPU cycles per request by 14.6% on concurrent HTTP/2 (`8x256`), 9.0% on concurrent HTTP/1.1 (`1x64`), and 8.0–10.0% fewer instructions across all cells, cutting per-request heap allocations from 15 to 11 on HTTP/2 and 9 to 7 on HTTP/1.1.
 
 ## 0.2.0 - 2026-11-08
 

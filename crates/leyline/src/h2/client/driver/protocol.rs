@@ -9,7 +9,9 @@ use bytes::Bytes;
 use tokio::sync::{Notify, mpsc};
 
 use crate::h2::H2Error;
-use crate::h2::connection::{PseudoHeaders, PseudoList, build_pseudo_fields};
+#[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
+use crate::h2::connection::PseudoHeaders;
+use crate::h2::connection::{PseudoList, build_pseudo_fields};
 use crate::header_str::HeaderStr;
 use crate::profile::PseudoOrder;
 use crate::wire::Body;
@@ -32,6 +34,7 @@ enum RequestTarget {
         method: HeaderStr,
         url: Arc<url::Url>,
     },
+    #[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
     Pseudo(Box<PseudoHeaders>),
 }
 
@@ -68,6 +71,7 @@ impl Head {
     pub(crate) fn method_is(&self, method: &http::Method) -> bool {
         match &self.target {
             RequestTarget::Url { method: m, .. } => m.eq_ignore_ascii_case(method.as_str()),
+            #[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
             RequestTarget::Pseudo(pseudo) => pseudo.method_is(method),
         }
     }
@@ -85,6 +89,7 @@ impl Head {
                 None,
                 pseudo_order,
             ),
+            #[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
             RequestTarget::Pseudo(pseudo) => pseudo.build_pseudo_list(pseudo_order),
         }
     }

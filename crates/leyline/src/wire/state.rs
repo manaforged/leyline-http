@@ -101,6 +101,7 @@ impl BlockReader {
         }
     }
 
+    #[cfg(any(test, feature = "http3"))]
     pub(crate) fn field(
         &mut self,
         name: &[u8],
@@ -193,6 +194,7 @@ pub(crate) fn is_valid_h2_field(name: &[u8], value: &[u8]) -> bool {
         && !matches!(value.last(), Some(b' ' | b'\t'))
 }
 
+#[cfg(any(test, feature = "http3"))]
 fn response_field(
     name: &[u8],
     value: &[u8],

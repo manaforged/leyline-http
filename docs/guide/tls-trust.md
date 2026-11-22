@@ -93,22 +93,48 @@ let session = leyline::Session::builder()
 ```
 
 When the certificate comes from a secret store and not from disk, give
-`client_cert_pem` the same two PEM documents as bytes in memory. It replaces
-any `client_cert` files, and `Debug` output never prints the bytes.
+`client_cert_pem` the same two PEM documents as bytes in memory, or give
+`client_cert_pkcs12` a DER-encoded PKCS#12 archive and its password. Either
+replaces any earlier client certificate, and `Debug` output never prints the
+key bytes or password.
 
 ```rust,no_run
-# fn run(chain_pem: Vec<u8>, key_pem: Vec<u8>) -> leyline::Result<()> {
-let session = leyline::Session::builder()
+# fn run(chain_pem: Vec<u8>, key_pem: Vec<u8>, p12_der: Vec<u8>) -> leyline::Result<()> {
+let pem_session = leyline::Session::builder()
     .browser(leyline::Browser::default())
     .tls(leyline::Tls::new().client_cert_pem(chain_pem, key_pem))
     .build()?;
-# let _ = session;
+let p12_session = leyline::Session::builder()
+    .browser(leyline::Browser::default())
+    .tls(leyline::Tls::new().client_cert_pkcs12(p12_der, "archive-password"))
+    .build()?;
+# let _ = (pem_session, p12_session);
 # Ok(())
 # }
 ```
 
 A session with pins or a client certificate cannot use an `https://` proxy.
 A request through one fails with `Kind::Proxy`.
+
+## Encrypt SNI with ECH
+
+Pass a raw RFC 9460 `ECHConfigList` to `Tls::ech_config_list` to encrypt the
+TLS 1.3 ClientHello SNI. If the server rejects a stale config and supplies
+fresh `retry_configs`, Leyline retries once automatically. To fetch `HTTPS`
+records automatically through a DoH or custom resolver, pair
+`SessionBuilder::doh` with `Tls::new().ech(true)`. `Response::ech_accepted()`
+reports whether ECH succeeded on the connection.
+
+```rust,no_run
+# fn run() -> leyline::Result<()> {
+let session = leyline::Session::builder()
+    .doh("https://cloudflare-dns.com/dns-query")
+    .tls(leyline::Tls::new().ech(true))
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
 
 ## Set a TLS version floor
 
@@ -145,11 +171,11 @@ uses TLS 1.3, so the floor does not change a QUIC handshake.
 
 ## Turn verification off
 
-`danger_accept_invalid_certs(true)` accepts any certificate on TCP
-connections (HTTP/1.1 and HTTP/2). Use it against a local test server only.
-On those connections it also skips pin checks and turns off TLS session
-resumption. It has no effect on HTTP/3: QUIC always verifies the certificate
-and applies pins.
+`danger_accept_invalid_hostnames(true)` skips only hostname matching while
+continuing to verify the CA trust chain and any leaf pins.
+`danger_accept_invalid_certs(true)` accepts any server certificate across
+HTTP/1.1, HTTP/2, and HTTP/3, skipping pin checks and TLS session resumption.
+Use either option against controlled or local servers only.
 
 ## Next
 

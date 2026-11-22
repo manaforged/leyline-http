@@ -80,6 +80,26 @@ let session = Session::builder().proxy(proxies).build()?;
 # }
 ```
 
+## Custom proxy headers
+
+`Proxy::header` and `Proxy::headers` attach extra headers to both plain-HTTP
+proxy requests and `CONNECT` tunnel handshakes (such as sticky-session routing
+tags or a custom `Proxy-Authorization` header that overrides URL userinfo).
+Header values are redacted in `Debug` output, and framing headers (`host`,
+`content-length`, `transfer-encoding`) are rejected at `build()`.
+
+```rust,no_run
+use leyline::{Proxy, Session};
+
+# fn run() -> leyline::Result<()> {
+let proxy = Proxy::from("http://proxy.example:8080")
+    .header("x-proxy-session", "sticky-1");
+let session = Session::builder().proxy(proxy).build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
 ## Bypass with NO_PROXY
 
 `Proxy::no_proxy(patterns)` lists the hosts that must not go through a

@@ -34,9 +34,23 @@ override.
 
 ## Replace the resolver
 
-The default is the system resolver. To use your own, implement
-`tls::Resolver` and pass it to `SessionBuilder::dns_resolver` as an
+The default is the system resolver. To resolve over DNS-over-HTTPS (RFC 8484)
+with built-in TTL caching and `HTTPS`/SVCB record support, pass an `https://`
+endpoint to `SessionBuilder::doh`. Combine it with `resolve` to pin bootstrap
+IPs for the DoH host itself. To plug in your own resolver, implement
+`Resolver` and pass it to `SessionBuilder::dns_resolver` as an
 `Arc<dyn Resolver>`. The overrides from `resolve` still apply first.
+
+```rust,no_run
+# fn run() -> leyline::Result<()> {
+let session = leyline::Session::builder()
+    .doh("https://cloudflare-dns.com/dns-query")
+    .resolve("cloudflare-dns.com", ["1.1.1.1:443".parse().unwrap()])
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
 
 ## Happy Eyeballs
 
@@ -93,6 +107,9 @@ connects.
 | `tcp_user_timeout` | unset | `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged (Linux, Android) |
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
 | `local_address` | unset | Source IP to bind for that IP's address family; call it once per family |
+| `local_addresses` | unset | Bind both IPv4 and IPv6 source addresses in one call |
+| `interface` | unset | Bind sockets to a network interface (`SO_BINDTODEVICE` on Linux, `IP_BOUND_IF` on Apple) |
+| `unix_socket` | unset | Route all HTTP and HTTPS traffic over a Unix domain socket path (Unix) |
 | `strict_socket_options` | `false` | Fail when the platform does not support an option |
 
 The timing and size setters take a value or `None`, which clears it. Leyline

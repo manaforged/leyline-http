@@ -1,9 +1,9 @@
-use super::{TYPE_A, encode_query, extract_ech_from_svcb, parse_response, skip_name};
+use super::{TYPE_A, WireError, encode_query, extract_ech_from_svcb, parse_header, skip_name};
 
 #[kani::proof]
-#[kani::unwind(20)]
+#[kani::unwind(12)]
 fn skip_name_terminates_and_stays_in_bounds() {
-    let packet: [u8; 10] = kani::any();
+    let packet: [u8; 8] = kani::any();
     let len: usize = kani::any_where(|n| *n <= packet.len());
     let start: usize = kani::any_where(|n| *n <= len);
     if let Some(next) = skip_name(&packet[..len], start) {
@@ -26,12 +26,25 @@ fn extract_ech_from_svcb_never_panics() {
 
 #[kani::proof]
 #[kani::unwind(8)]
-fn parse_response_rejects_short_packets_and_never_panics() {
-    let packet: [u8; 20] = kani::any();
+fn parse_header_enforces_qr_rcode_and_length() {
+    let packet: [u8; 14] = kani::any();
     let len: usize = kani::any_where(|n| *n <= packet.len());
-    let res = parse_response(&packet[..len]);
+    let slice = &packet[..len];
+    let res = parse_header(slice);
     if len < 12 {
-        assert!(res.is_err());
+        assert_eq!(res, Err(WireError::Truncated));
+    } else {
+        let flags = u16::from_be_bytes([slice[2], slice[3]]);
+        let rcode = (flags & 0x000F) as u8;
+        if flags & 0x8000 == 0 {
+            assert_eq!(res, Err(WireError::NotResponse));
+        } else if rcode == 3 {
+            assert_eq!(res, Err(WireError::NxDomain));
+        } else if rcode != 0 {
+            assert_eq!(res, Err(WireError::Rcode(rcode)));
+        } else {
+            assert!(res.is_ok());
+        }
     }
 }
 

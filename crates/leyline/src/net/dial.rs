@@ -73,7 +73,6 @@ impl Dialer {
             .map_err(NetError::TcpConnect)
     }
 
-    #[cfg(feature = "http3")]
     pub(crate) fn resolver(&self) -> &dyn Resolver {
         self.resolver.as_ref()
     }

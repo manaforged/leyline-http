@@ -10,7 +10,7 @@ const SVC_PARAM_ECH: u16 = 5;
 const HEADER_LEN: usize = 12;
 const MAX_NAME_LEN: usize = 255;
 const MAX_LABEL_LEN: usize = 63;
-const MAX_JUMPS: usize = 16;
+const MAX_JUMPS: usize = 8;
 const MAX_LABELS: usize = 128;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +59,7 @@ pub(crate) fn encode_query(host: &str, qtype: u16) -> Result<Vec<u8>, WireError>
 pub(crate) fn skip_name(packet: &[u8], start: usize) -> Option<usize> {
     let mut pos = start;
     let mut after_first_jump: Option<usize> = None;
+    let mut jump_limit = start;
     let mut jumps = 0usize;
     let mut labels = 0usize;
     while labels < MAX_LABELS {
@@ -78,12 +79,18 @@ pub(crate) fn skip_name(packet: &[u8], start: usize) -> Option<usize> {
             0xC0 => {
                 let lo = *packet.get(pos.checked_add(1)?)?;
                 let target = (usize::from(byte & 0x3F) << 8) | usize::from(lo);
-                if target >= packet.len() || jumps >= MAX_JUMPS {
+                let ceiling = if after_first_jump.is_none() {
+                    pos
+                } else {
+                    jump_limit
+                };
+                if target >= ceiling || target >= packet.len() || jumps >= MAX_JUMPS {
                     return None;
                 }
                 if after_first_jump.is_none() {
                     after_first_jump = Some(pos + 2);
                 }
+                jump_limit = target;
                 pos = target;
                 jumps += 1;
                 labels += 1;
@@ -152,7 +159,7 @@ fn read_u32(packet: &[u8], pos: usize) -> Option<u32> {
     Some(u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
 }
 
-pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
+pub(crate) fn parse_header(packet: &[u8]) -> Result<(u16, u16), WireError> {
     if packet.len() < HEADER_LEN {
         return Err(WireError::Truncated);
     }
@@ -167,9 +174,13 @@ pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
     if rcode != 0 {
         return Err(WireError::Rcode(rcode));
     }
-
     let qdcount = u16::from_be_bytes([packet[4], packet[5]]);
     let ancount = u16::from_be_bytes([packet[6], packet[7]]);
+    Ok((qdcount, ancount))
+}
+
+pub(crate) fn parse_response(packet: &[u8]) -> Result<DnsAnswer, WireError> {
+    let (qdcount, ancount) = parse_header(packet)?;
 
     let mut pos = HEADER_LEN;
     for _ in 0..qdcount {

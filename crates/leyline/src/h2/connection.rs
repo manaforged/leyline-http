@@ -8,6 +8,7 @@ use crate::h2::frame::{
     DEFAULT_HEADER_TABLE_SIZE, DEFAULT_MAX_FRAME_SIZE, MAX_FRAME_SIZE_LIMIT, U31_MAX,
 };
 use crate::h2::hpack;
+#[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
 use crate::header_str::HeaderStr;
 use crate::profile::{DEFAULT_WINDOW_SIZE, PseudoOrder, SettingId};
 
@@ -191,6 +192,7 @@ use crate::wire::HeaderPair;
 
 pub type PseudoList<'a> = ([(&'a str, &'a str); 5], usize);
 
+#[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
 #[derive(Debug, Clone, Default)]
 pub struct PseudoHeaders {
     pub method: HeaderStr,
@@ -200,6 +202,7 @@ pub struct PseudoHeaders {
     pub protocol: Option<HeaderStr>,
 }
 
+#[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
 impl PseudoHeaders {
     /// Returns whether `:method` is `method`, ignoring ASCII case.
     pub fn method_is(&self, method: &http::Method) -> bool {
