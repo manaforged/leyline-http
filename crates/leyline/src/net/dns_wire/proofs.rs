@@ -1,4 +1,7 @@
-use super::{MAX_JUMPS, WireError, extract_ech_from_svcb, parse_records, skip_name};
+use super::{
+    HEADER_LEN, MAX_JUMPS, WireError, extract_ech_from_svcb, parse_answer_rr, parse_records,
+    skip_name,
+};
 
 #[kani::proof]
 #[kani::unwind(14)]
@@ -38,6 +41,20 @@ fn extract_ech_from_svcb_never_panics() {
         assert!(priority > 0);
         assert!(!ech.is_empty());
         assert!(ech.len() < len);
+    }
+}
+
+#[kani::proof]
+#[kani::unwind(15)]
+fn parse_answer_rr_never_panics() {
+    let packet: [u8; 24] = kani::any();
+    let len: usize = kani::any_where(|&n| (HEADER_LEN..=packet.len()).contains(&n));
+    let start: usize = kani::any_where(|&n| (HEADER_LEN..=len).contains(&n));
+    let slice = &packet[..len];
+    if let Ok((_rtype, _rclass, _ttl, rdata, next)) = parse_answer_rr(slice, start) {
+        assert!(next <= len);
+        assert!(next > start);
+        assert!(rdata.len() <= next - start);
     }
 }
 

@@ -14,7 +14,7 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 
 ## Proved
 
-`scripts/verify.sh --only kani` runs 27 harnesses (with a 30 s per-harness timeout). String, UTF-8, 17-byte chunk-overflow, and answer-RR truncation invariants run as bounded exhaustive unit tests in the library test suite.
+`scripts/verify.sh --only kani` runs 28 harnesses (with a 30 s per-harness timeout). String, UTF-8, and 17-byte chunk-overflow invariants run as bounded exhaustive unit tests in the library test suite.
 
 | Harness | Property |
 | --- | --- |
@@ -44,6 +44,7 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 | `skip_name_terminates_and_stays_in_bounds` | DNS wire name skipping always terminates within packet bounds and advances past start |
 | `skip_name_enforces_max_jumps_bound` | DNS compression pointer chains accept up to `MAX_JUMPS` hops and reject `MAX_JUMPS + 1` |
 | `extract_ech_from_svcb_never_panics` | SVCB/HTTPS ECH parameter extraction never panics and returns non-empty in-bounds ECH configs |
+| `parse_answer_rr_never_panics` | DNS answer resource record parsing never panics over arbitrary 24-byte packets with symbolic start offsets (`>= 12`), names, pointers, and RDATA lengths |
 | `parse_records_question_never_panics` | DNS question parsing never panics, emits no records when `ancount == 0`, and rejects truncated headers |
 
 ## Model-checked

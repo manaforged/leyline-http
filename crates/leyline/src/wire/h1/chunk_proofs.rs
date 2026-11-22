@@ -2,21 +2,14 @@ use super::chunk_size_value;
 
 const LONGEST: usize = 9;
 
-fn hex(byte: u8) -> Option<u64> {
-    match byte {
-        b'0'..=b'9' => Some(u64::from(byte - b'0')),
-        b'a'..=b'f' => Some(u64::from(byte - b'a') + 10),
-        b'A'..=b'F' => Some(u64::from(byte - b'A') + 10),
-        _ => None,
-    }
-}
-
 fn expected(line: &[u8]) -> Option<u64> {
     let mut index = 0;
     let mut value = 0u64;
     let mut overflow = false;
     while index < line.len() {
-        let Some(digit) = hex(line[index]) else { break };
+        let Some(digit) = char::from(line[index]).to_digit(16).map(u64::from) else {
+            break;
+        };
         match value.checked_mul(16).and_then(|v| v.checked_add(digit)) {
             Some(next) => value = next,
             None => overflow = true,

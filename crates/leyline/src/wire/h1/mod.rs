@@ -459,11 +459,7 @@ mod chunk_tests {
                 line[0] = first;
                 line[16] = last;
                 if first == b'0' {
-                    let low = match last {
-                        b'0'..=b'9' => u64::from(last - b'0'),
-                        b'a'..=b'f' => u64::from(last - b'a') + 10,
-                        _ => u64::from(last - b'A') + 10,
-                    };
+                    let low = u64::from(char::from(last).to_digit(16).expect("hex"));
                     assert_eq!(chunk_size_value(&line), Some(0xffff_ffff_ffff_fff0 | low));
                 } else {
                     assert_eq!(chunk_size_value(&line), None);

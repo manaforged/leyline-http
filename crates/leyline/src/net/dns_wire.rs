@@ -214,6 +214,25 @@ pub(crate) fn parse_header(packet: &[u8]) -> Result<(u16, u16), WireError> {
     Ok((qdcount, ancount))
 }
 
+pub(crate) fn parse_answer_rr(
+    packet: &[u8],
+    pos: usize,
+) -> Result<(u16, u16, u32, &[u8], usize), WireError> {
+    let pos = skip_name_with_floor(packet, pos, HEADER_LEN).ok_or(WireError::MalformedName)?;
+    let rtype = read_u16(packet, pos).ok_or(WireError::Truncated)?;
+    let rclass = read_u16(packet, pos + 2).ok_or(WireError::Truncated)?;
+    let ttl = read_u32(packet, pos + 4).ok_or(WireError::Truncated)?;
+    let rdlength = usize::from(read_u16(packet, pos + 8).ok_or(WireError::Truncated)?);
+    let rdata_start = pos.checked_add(10).ok_or(WireError::Truncated)?;
+    let rdata_end = rdata_start
+        .checked_add(rdlength)
+        .ok_or(WireError::Truncated)?;
+    let rdata = packet
+        .get(rdata_start..rdata_end)
+        .ok_or(WireError::Truncated)?;
+    Ok((rtype, rclass, ttl, rdata, rdata_end))
+}
+
 pub(crate) fn parse_records<'a>(
     packet: &'a [u8],
     mut on_record: impl FnMut(u16, u16, u32, &'a [u8]),
@@ -228,19 +247,8 @@ pub(crate) fn parse_records<'a>(
         }
     }
     for _ in 0..ancount {
-        pos = skip_name_with_floor(packet, pos, HEADER_LEN).ok_or(WireError::MalformedName)?;
-        let rtype = read_u16(packet, pos).ok_or(WireError::Truncated)?;
-        let rclass = read_u16(packet, pos + 2).ok_or(WireError::Truncated)?;
-        let ttl = read_u32(packet, pos + 4).ok_or(WireError::Truncated)?;
-        let rdlength = usize::from(read_u16(packet, pos + 8).ok_or(WireError::Truncated)?);
-        let rdata_start = pos.checked_add(10).ok_or(WireError::Truncated)?;
-        let rdata_end = rdata_start
-            .checked_add(rdlength)
-            .ok_or(WireError::Truncated)?;
-        let rdata = packet
-            .get(rdata_start..rdata_end)
-            .ok_or(WireError::Truncated)?;
-        pos = rdata_end;
+        let (rtype, rclass, ttl, rdata, next) = parse_answer_rr(packet, pos)?;
+        pos = next;
         on_record(rtype, rclass, ttl, rdata);
     }
     Ok(())
