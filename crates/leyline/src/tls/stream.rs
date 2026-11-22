@@ -94,6 +94,7 @@ pub struct TlsStream {
     pub peer_cert_der: Option<Vec<u8>>,
     pub tls_version: Option<String>,
     pub tls_cipher: Option<String>,
+    pub ech_accepted: bool,
 }
 
 impl TlsStream {

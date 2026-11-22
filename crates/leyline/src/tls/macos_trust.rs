@@ -83,10 +83,10 @@ fn check(status: i32) -> Result<()> {
     }
 }
 
-fn evaluate(chain: &[Vec<u8>], host: &str) -> Result<bool> {
-    if chain.is_empty() || host.is_empty() {
+fn evaluate(chain: &[Vec<u8>], host: Option<&str>) -> Result<bool> {
+    if chain.is_empty() || matches!(host, Some("")) {
         return Err(Error::other(
-            "certificate evaluation needs a peer chain and hostname",
+            "certificate evaluation needs a peer chain and non-empty hostname",
         ));
     }
     let certificates = chain
@@ -94,13 +94,19 @@ fn evaluate(chain: &[Vec<u8>], host: &str) -> Result<bool> {
         .map(|der| certificate(der))
         .collect::<Result<Vec<_>>>()?;
     let certificates_array = array(&certificates)?;
-    let length = isize::try_from(host.len()).map_err(Error::other)?;
-    // SAFETY: the host bytes are valid UTF-8, copied by the Create API; 0x08000100 is kCFStringEncodingUTF8.
-    let hostname = OwnedCf::new(unsafe {
-        CFStringCreateWithBytes(null(), host.as_ptr(), length, 0x0800_0100, 0)
-    })?;
-    // SAFETY: hostname is a live CFString; true selects verification of a TLS server certificate.
-    let policy = OwnedCf::new(unsafe { SecPolicyCreateSSL(1, hostname.0) })?;
+    let hostname = match host {
+        Some(host) => {
+            let length = isize::try_from(host.len()).map_err(Error::other)?;
+            // SAFETY: the host bytes are valid UTF-8, copied by the Create API; 0x08000100 is kCFStringEncodingUTF8.
+            Some(OwnedCf::new(unsafe {
+                CFStringCreateWithBytes(null(), host.as_ptr(), length, 0x0800_0100, 0)
+            })?)
+        }
+        None => None,
+    };
+    let host_ref = hostname.as_ref().map_or(null(), |h| h.0);
+    // SAFETY: host_ref is either null (skip hostname match) or a live CFString; true selects TLS server verification.
+    let policy = OwnedCf::new(unsafe { SecPolicyCreateSSL(1, host_ref) })?;
     let mut raw = null();
     // SAFETY: both input references are live, and raw is a valid output pointer.
     check(unsafe { SecTrustCreateWithCertificates(certificates_array.0, policy.0, &mut raw) })?;
@@ -111,7 +117,7 @@ fn evaluate(chain: &[Vec<u8>], host: &str) -> Result<bool> {
     Ok(unsafe { SecTrustEvaluateWithError(trust.0, std::ptr::null_mut()) })
 }
 
-pub(crate) fn verify(ssl: &SslRef, host: &str) -> Result<bool> {
+pub(crate) fn verify(ssl: &SslRef, host: Option<&str>) -> Result<bool> {
     let leaf = ssl
         .peer_certificate()
         .ok_or_else(|| Error::other("peer certificate missing"))?;

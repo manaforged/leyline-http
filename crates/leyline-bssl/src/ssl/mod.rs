@@ -40,7 +40,9 @@ pub use self::async_callbacks::{
 pub use self::connector::{
     ConnectConfiguration, SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder,
 };
-pub use self::ech::{SslEchKeys, SslEchKeysRef};
+pub use self::ech::{
+    is_ech_rejected, marshal_ech_config, SslEchKeys, SslEchKeysBuilder, SslEchKeysRef,
+};
 pub use self::error::{Error, ErrorCode, HandshakeError};
 
 mod async_callbacks;

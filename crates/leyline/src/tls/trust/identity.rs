@@ -16,10 +16,11 @@ impl TrustIdentity {
 /// Everything that decides which peers a TLS context trusts and how it presents itself.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct TrustKey {
-    flags: [u8; 4],
+    flags: [u8; 5],
     pins: Vec<[u8; 32]>,
     roots: Vec<[u8; 32]>,
     identity: Vec<[u8; 32]>,
+    ech: Option<[u8; 32]>,
 }
 
 impl TrustKey {
@@ -32,11 +33,16 @@ impl TrustKey {
                 u8::from(config.use_system_roots),
                 u8::from(config.use_env_roots),
                 u8::from(config.accept_invalid_certs),
+                u8::from(config.accept_invalid_hostnames),
                 config.min_tls_version as u8,
             ],
             pins,
             roots: Vec::new(),
             identity: Vec::new(),
+            ech: config
+                .ech_config_list
+                .as_deref()
+                .map(|bytes| Sha256::digest(bytes).into()),
         };
         for root in &config.ca_roots {
             if let super::config::Pem::Bytes(pem) = root {
@@ -68,6 +74,12 @@ impl TrustKey {
             for item in section {
                 hasher.update(item);
             }
+        }
+        if let Some(ech) = self.ech {
+            hasher.update([1u8]);
+            hasher.update(ech);
+        } else {
+            hasher.update([0u8]);
         }
         TrustIdentity(hex::encode(hasher.finalize()).into())
     }

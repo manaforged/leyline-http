@@ -43,16 +43,40 @@ pub(super) fn set_client_identity(
     identity: &ClientIdentity,
     loaded: &mut TrustKey,
 ) -> Result<(), TlsError> {
-    let chain = identity.certificate_chain.load()?;
-    builder
-        .set_certificate_chain_pem(&chain)
-        .map_err(TlsError::from_stack)?;
-    let key_pem = identity.private_key.load()?;
-    let key = PKey::private_key_from_pem(&key_pem).map_err(TlsError::from_stack)?;
-    builder
-        .set_private_key(&key)
-        .map_err(TlsError::from_stack)?;
-    loaded.identity_bytes(&chain);
-    loaded.identity_bytes(&key_pem);
+    match identity {
+        ClientIdentity::Pem {
+            certificate_chain,
+            private_key,
+        } => {
+            let chain = certificate_chain.load()?;
+            builder
+                .set_certificate_chain_pem(&chain)
+                .map_err(TlsError::from_stack)?;
+            let key_pem = private_key.load()?;
+            let key = PKey::private_key_from_pem(&key_pem).map_err(TlsError::from_stack)?;
+            builder
+                .set_private_key(&key)
+                .map_err(TlsError::from_stack)?;
+            loaded.identity_bytes(&chain);
+            loaded.identity_bytes(&key_pem);
+        }
+        ClientIdentity::Pkcs12 { der, password } => {
+            let parsed =
+                leyline_bssl::pkcs12::parse(der, password).map_err(TlsError::from_stack)?;
+            builder
+                .set_certificate(&parsed.cert)
+                .map_err(TlsError::from_stack)?;
+            for extra in parsed.chain {
+                builder
+                    .add_extra_chain_cert(extra)
+                    .map_err(TlsError::from_stack)?;
+            }
+            builder
+                .set_private_key(&parsed.pkey)
+                .map_err(TlsError::from_stack)?;
+            loaded.identity_bytes(der);
+            loaded.identity_bytes(password.as_bytes());
+        }
+    }
     Ok(())
 }

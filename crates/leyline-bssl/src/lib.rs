@@ -36,6 +36,7 @@ pub mod hash;
 pub mod hmac;
 pub mod hpke;
 pub mod nid;
+pub mod pkcs12;
 pub mod pkey;
 /// TLS 1.3 record protection that a caller runs after the handshake.
 pub mod records;

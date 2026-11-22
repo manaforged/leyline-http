@@ -109,6 +109,12 @@ impl Response {
         self.parts.timing.from_cache
     }
 
+    /// Returns whether the TLS handshake for this response succeeded with Encrypted Client Hello (ECH).
+    #[must_use]
+    pub fn ech_accepted(&self) -> bool {
+        self.parts.tls.as_ref().is_some_and(|tls| tls.ech_accepted)
+    }
+
     /// Returns the number of attempts made, including retries.
     pub fn attempts(&self) -> u32 {
         self.parts.attempts

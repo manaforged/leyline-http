@@ -38,7 +38,8 @@ fn needs_verifier(trust: &Tls, host: Option<&str>, transport: Transport) -> bool
     let unchecked_ip = transport == Transport::Quic
         && host.is_some_and(|host| host.parse::<std::net::IpAddr>().is_ok());
     !trust.accept_invalid_certs
-        && (!trust.pinned_leaf_sha256.is_empty()
+        && (trust.accept_invalid_hostnames
+            || !trust.pinned_leaf_sha256.is_empty()
             || unchecked_ip
             || cfg!(target_os = "macos") && trust.use_system_roots)
 }
@@ -52,6 +53,7 @@ fn verify_callback(
 ) {
     let pins = trust.pinned_leaf_sha256.clone();
     let system_roots = trust.use_system_roots;
+    let check_hostname = !trust.accept_invalid_hostnames;
     let host = host.map(str::to_owned);
     let failure = VerificationFailure::default();
     let slot = failure.clone();
@@ -60,7 +62,7 @@ fn verify_callback(
             .as_deref()
             .or_else(|| ssl.servername(NameType::HOST_NAME))
             .ok_or(SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN))?;
-        verify(ssl, hostname, &pins, system_roots).map_err(|reason| {
+        verify(ssl, hostname, &pins, system_roots, check_hostname).map_err(|reason| {
             tracing::debug!(target: "leyline::tls::trust", ?reason, "peer certificate rejected");
             *crate::util::lock(&slot) = Some(reason);
             SslVerifyError::Invalid(SslAlert::CERTIFICATE_UNKNOWN)
@@ -103,7 +105,12 @@ fn rejected(error: &leyline_bssl::error::ErrorStack, failure: TrustFailure) -> T
     failure
 }
 
-fn trusted(ssl: &SslRef, _host: &str, _system_roots: bool) -> Result<bool, TrustFailure> {
+fn trusted(
+    ssl: &SslRef,
+    _host: &str,
+    _system_roots: bool,
+    _check_hostname: bool,
+) -> Result<bool, TrustFailure> {
     let cert = ssl.peer_certificate().ok_or(TrustFailure::Certificate)?;
     let chain = ssl.peer_cert_chain().ok_or(TrustFailure::Certificate)?;
     let configured = X509StoreContext::new()
@@ -118,7 +125,7 @@ fn trusted(ssl: &SslRef, _host: &str, _system_roots: bool) -> Result<bool, Trust
     }
     #[cfg(target_os = "macos")]
     if _system_roots {
-        return super::macos_trust::verify(ssl, _host).map_err(|error| {
+        return super::macos_trust::verify(ssl, _check_hostname.then_some(_host)).map_err(|error| {
             tracing::debug!(target: "leyline::tls::trust", %error, "macOS certificate evaluation failed");
             TrustFailure::Certificate
         });
@@ -131,17 +138,20 @@ fn verify(
     host: &str,
     pins: &[[u8; 32]],
     system_roots: bool,
+    check_hostname: bool,
 ) -> Result<(), TrustFailure> {
     let cert = ssl.peer_certificate().ok_or(TrustFailure::Certificate)?;
-    let hostname_matches = match host.parse::<std::net::IpAddr>() {
-        Ok(_) => cert.check_ip_asc(host),
-        Err(_) => cert.check_host(host),
+    if check_hostname {
+        let hostname_matches = match host.parse::<std::net::IpAddr>() {
+            Ok(_) => cert.check_ip_asc(host),
+            Err(_) => cert.check_host(host),
+        }
+        .map_err(|error| rejected(&error, TrustFailure::Hostname))?;
+        if !hostname_matches {
+            return Err(TrustFailure::Hostname);
+        }
     }
-    .map_err(|error| rejected(&error, TrustFailure::Hostname))?;
-    if !hostname_matches {
-        return Err(TrustFailure::Hostname);
-    }
-    if !trusted(ssl, host, system_roots)? {
+    if !trusted(ssl, host, system_roots, check_hostname)? {
         return Err(TrustFailure::Certificate);
     }
     if !pins.is_empty() {

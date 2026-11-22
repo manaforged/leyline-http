@@ -39,7 +39,7 @@ impl H3Config {
         let mut config =
             quiche::Config::with_boring_ssl_ctx_builder(quiche::PROTOCOL_VERSION, ssl_builder)
                 .map_err(|e| QuicError::Config(format!("quic config: {e}")))?;
-        config.verify_peer(true);
+        config.verify_peer(!trust.accepts_invalid_certs());
         config
             .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
             .map_err(|e| QuicError::Config(format!("quic alpn: {e}")))?;
@@ -120,14 +120,16 @@ pub(crate) async fn connect_and_handshake(
     let h3 = handshake(h3_cfg, &mut opening).await?;
     let Opening {
         socket,
-        conn,
+        mut conn,
         peer_addr,
         local_addr,
     } = opening;
+    let ech_accepted = conn.ssl_mut().ech_accepted();
     let tls = crate::wire::TlsInfo::from(crate::wire::TlsFacts {
         peer_cert_der: conn.peer_cert().map(Into::into),
         version: Some("TLSv1.3".into()),
         cipher: conn.cipher().map(Into::into),
+        ech_accepted,
         remote_addr: Some(peer_addr),
     });
     Ok(EstablishedH3 {
@@ -191,6 +193,12 @@ async fn open(
     hello
         .apply(conn.ssl_mut(), true)
         .map_err(|e| QuicError::Config(format!("quic hello: {e}")))?;
+    if let Some(ech) = trust.ech_config() {
+        conn.ssl_mut().set_enable_ech_grease(false);
+        conn.ssl_mut()
+            .set_ech_config_list(ech)
+            .map_err(|e| QuicError::Config(format!("quic ech: {e}")))?;
+    }
     Ok(Opening {
         socket,
         conn,

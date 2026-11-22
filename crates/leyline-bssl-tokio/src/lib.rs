@@ -240,6 +240,15 @@ impl<S> HandshakeError<S> {
             _ => None,
         }
     }
+
+    #[must_use]
+    pub fn ssl_error(&self) -> Option<&leyline_bssl::error::ErrorStack> {
+        match &self.0 {
+            ssl::HandshakeError::Failure(s) => s.error().ssl_error(),
+            ssl::HandshakeError::SetupFailure(stack) => Some(stack),
+            ssl::HandshakeError::WouldBlock(_) => None,
+        }
+    }
 }
 
 impl<S> fmt::Debug for HandshakeError<S>

@@ -173,26 +173,50 @@ impl FingerprintConnector {
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
         let started = Instant::now();
-        let tunnel = self
-            .with_timeout(proxy::open(self, host, port, proxy, Route::Connect))
-            .await
-            .map_err(TlsError::into_proxy)?;
-        let remaining = self
-            .connect_timeout
-            .map(|budget| budget.saturating_sub(started.elapsed()));
         let session_key = SessionCache::key(host, port, Some(proxy.url()));
-        let handshake = async {
-            match tunnel {
-                Tunnel::Plain(tcp) => self.tls_handshake(tcp, host, &session_key, plan).await,
-                Tunnel::Tls(io) => {
-                    self.tls_handshake_nested(io, host, &session_key, plan)
-                        .await
-                }
-            }
-        };
-        within(remaining, handshake)
+        let mut ech_override: Option<Vec<u8>> = None;
+        let mut retried_ech = false;
+        loop {
+            let remaining = self
+                .connect_timeout
+                .map(|budget| budget.saturating_sub(started.elapsed()));
+            let tunnel = within(
+                remaining,
+                proxy::open(self, host, port, proxy, Route::Connect),
+            )
             .await
             .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
+            .map_err(TlsError::into_proxy)?;
+            let remaining = self
+                .connect_timeout
+                .map(|budget| budget.saturating_sub(started.elapsed()));
+            let ech = ech_override.as_deref();
+            let handshake = async {
+                match tunnel {
+                    Tunnel::Plain(tcp) => {
+                        self.tls_handshake_with_ech(tcp, host, &session_key, plan, ech)
+                            .await
+                    }
+                    Tunnel::Tls(io) => {
+                        self.tls_handshake_nested_with_ech(io, host, &session_key, plan, ech)
+                            .await
+                    }
+                }
+            };
+            let result = within(remaining, handshake)
+                .await
+                .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?;
+            match result {
+                Ok(stream) => return Ok(stream),
+                Err(handshake::HandshakeFailure::EchRetry { retry_configs, .. })
+                    if !retried_ech =>
+                {
+                    retried_ech = true;
+                    ech_override = Some(retry_configs);
+                }
+                Err(other) => return Err(other.into_error()),
+            }
+        }
     }
 
     pub(crate) async fn with_timeout<T, E, F>(&self, fut: F) -> Result<T, E>
@@ -211,18 +235,40 @@ impl FingerprintConnector {
         port: u16,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
-        #[cfg(unix)]
-        if let Some(path) = self.dialer.unix_socket() {
-            let unix_stream = self.dialer.dial_unix(path).await?;
-            let session_key = SessionCache::key(host, port, None);
-            return self
-                .tls_handshake_unix(unix_stream, host, &session_key, plan)
-                .await;
-        }
-        let tcp_stream = self.dialer.dial(host, port).await?;
         let session_key = SessionCache::key(host, port, None);
-        self.tls_handshake(tcp_stream, host, &session_key, plan)
-            .await
+        let mut ech_override: Option<Vec<u8>> = None;
+        let mut retried_ech = false;
+        loop {
+            let ech = ech_override.as_deref();
+            let result = {
+                #[cfg(unix)]
+                if let Some(path) = self.dialer.unix_socket() {
+                    let unix_stream = self.dialer.dial_unix(path).await?;
+                    self.tls_handshake_unix_with_ech(unix_stream, host, &session_key, plan, ech)
+                        .await
+                } else {
+                    let tcp_stream = self.dialer.dial(host, port).await?;
+                    self.tls_handshake_with_ech(tcp_stream, host, &session_key, plan, ech)
+                        .await
+                }
+                #[cfg(not(unix))]
+                {
+                    let tcp_stream = self.dialer.dial(host, port).await?;
+                    self.tls_handshake_with_ech(tcp_stream, host, &session_key, plan, ech)
+                        .await
+                }
+            };
+            match result {
+                Ok(stream) => return Ok(stream),
+                Err(handshake::HandshakeFailure::EchRetry { retry_configs, .. })
+                    if !retried_ech =>
+                {
+                    retried_ech = true;
+                    ech_override = Some(retry_configs);
+                }
+                Err(other) => return Err(other.into_error()),
+            }
+        }
     }
 }
 

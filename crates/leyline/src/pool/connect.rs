@@ -181,6 +181,7 @@ pub(crate) fn tls_info(tls_stream: &TlsStream) -> TlsInfo {
         peer_cert_der: tls_stream.peer_cert_der.clone(),
         version: tls_stream.tls_version.clone(),
         cipher: tls_stream.tls_cipher.clone(),
+        ech_accepted: tls_stream.ech_accepted,
         remote_addr: remote_addr(&tls_stream.stream),
     })
 }

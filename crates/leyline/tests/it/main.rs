@@ -172,6 +172,7 @@ mod surface_unlocks;
 mod timeouts;
 #[cfg(feature = "bench-internals")]
 mod tls_client_hello_order;
+mod tls_features;
 mod tls_floor;
 #[cfg(feature = "bench-internals")]
 mod tls_happy_eyeballs;

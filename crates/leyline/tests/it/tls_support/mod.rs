@@ -20,20 +20,24 @@ use leyline_bssl_tokio::SslStream;
 use tokio::net::{TcpListener, TcpStream};
 
 pub fn self_signed() -> (X509, PKey<Private>) {
-    self_signed_for("127.0.0.1", true)
+    self_signed_for(&["127.0.0.1"], true)
 }
 
 pub fn self_signed_dns(host: &str) -> (X509, PKey<Private>) {
-    self_signed_for(host, false)
+    self_signed_for(&[host], false)
 }
 
-fn self_signed_for(subject: &str, is_ip: bool) -> (X509, PKey<Private>) {
+pub fn self_signed_dns_names(hosts: &[&str]) -> (X509, PKey<Private>) {
+    self_signed_for(hosts, false)
+}
+
+fn self_signed_for(subjects: &[&str], is_ip: bool) -> (X509, PKey<Private>) {
     let key = PKey::from_ec_key(
         EcKey::generate(&EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap(),
     )
     .unwrap();
     let mut name = X509NameBuilder::new().unwrap();
-    name.append_entry_by_text("CN", subject).unwrap();
+    name.append_entry_by_text("CN", subjects[0]).unwrap();
     let name = name.build();
     let mut cert = X509::builder().unwrap();
     cert.set_version(2).unwrap();
@@ -51,10 +55,12 @@ fn self_signed_for(subject: &str, is_ip: bool) -> (X509, PKey<Private>) {
     cert.append_extension(&BasicConstraints::new().critical().ca().build().unwrap())
         .unwrap();
     let mut san = SubjectAlternativeName::new();
-    if is_ip {
-        san.ip(subject);
-    } else {
-        san.dns(subject);
+    for subject in subjects {
+        if is_ip {
+            san.ip(subject);
+        } else {
+            san.dns(subject);
+        }
     }
     let san = san.build(&cert.x509v3_context(None, None)).unwrap();
     cert.append_extension(&san).unwrap();

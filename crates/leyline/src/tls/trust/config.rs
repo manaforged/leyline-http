@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use super::identity::TrustKey;
 use crate::profile::TlsMinVersion;
 
-/// TLS trust settings: root stores, extra CAs, a client certificate, pins, and the minimum version.
+/// TLS trust settings: root stores, extra CAs, a client certificate, pins, ECH, and the minimum version.
 #[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 #[must_use]
@@ -12,9 +12,11 @@ pub struct Tls {
     pub(crate) use_system_roots: bool,
     pub(super) ca_roots: Vec<Pem>,
     pub(crate) ca_der: Vec<Vec<u8>>,
-    pub(crate) client_identity: Option<ClientIdentity>,
+    pub(super) client_identity: Option<ClientIdentity>,
     pub(crate) pinned_leaf_sha256: Vec<[u8; 32]>,
     pub(crate) accept_invalid_certs: bool,
+    pub(crate) accept_invalid_hostnames: bool,
+    pub(crate) ech_config_list: Option<Vec<u8>>,
     pub(crate) min_tls_version: TlsMinVersion,
 }
 
@@ -30,6 +32,11 @@ impl std::fmt::Debug for Tls {
             .field("client_identity", &self.client_identity)
             .field("pinned_leaf_sha256", &pins)
             .field("accept_invalid_certs", &self.accept_invalid_certs)
+            .field("accept_invalid_hostnames", &self.accept_invalid_hostnames)
+            .field(
+                "ech_config_list_len",
+                &self.ech_config_list.as_ref().map(Vec::len),
+            )
             .field("min_tls_version", &self.min_tls_version)
             .finish()
     }
@@ -45,6 +52,8 @@ impl Default for Tls {
             client_identity: None,
             pinned_leaf_sha256: Vec::new(),
             accept_invalid_certs: false,
+            accept_invalid_hostnames: false,
+            ech_config_list: None,
             min_tls_version: TlsMinVersion::Tls10,
         }
     }
@@ -98,18 +107,31 @@ impl Tls {
         certificate_chain_file: impl AsRef<Path>,
         private_key_file: impl AsRef<Path>,
     ) -> Self {
-        self.client_identity = Some(ClientIdentity {
+        self.client_identity = Some(ClientIdentity::Pem {
             certificate_chain: Pem::File(certificate_chain_file.as_ref().to_path_buf()),
             private_key: Pem::File(private_key_file.as_ref().to_path_buf()),
         });
         self
     }
 
-    /// Sets the client certificate from PEM bytes in memory: the certificate chain with the leaf first, then its unencrypted private key, replacing any `client_cert` files.
+    /// Sets the client certificate from PEM bytes in memory: the certificate chain with the leaf first, then its unencrypted private key, replacing any previous client certificate.
     pub fn client_cert_pem(mut self, cert: impl Into<Vec<u8>>, key: impl Into<Vec<u8>>) -> Self {
-        self.client_identity = Some(ClientIdentity {
+        self.client_identity = Some(ClientIdentity::Pem {
             certificate_chain: Pem::Bytes(cert.into()),
             private_key: Pem::Bytes(key.into()),
+        });
+        self
+    }
+
+    /// Sets the client certificate from a DER-encoded PKCS#12 archive and its password, replacing any previous client certificate.
+    pub fn client_cert_pkcs12(
+        mut self,
+        der: impl Into<Vec<u8>>,
+        password: impl Into<String>,
+    ) -> Self {
+        self.client_identity = Some(ClientIdentity::Pkcs12 {
+            der: der.into(),
+            password: password.into(),
         });
         self
     }
@@ -117,6 +139,18 @@ impl Tls {
     /// Sets whether invalid server certificates are accepted, off by default.
     pub fn danger_accept_invalid_certs(mut self, accept: bool) -> Self {
         self.accept_invalid_certs = accept;
+        self
+    }
+
+    /// Sets whether server certificates with mismatched hostnames are accepted while still verifying trust chains and pins, off by default.
+    pub fn danger_accept_invalid_hostnames(mut self, accept: bool) -> Self {
+        self.accept_invalid_hostnames = accept;
+        self
+    }
+
+    /// Sets a raw RFC 9460 `ECHConfigList` to encrypt the ClientHello SNI on TLS 1.3 connections.
+    pub fn ech_config_list(mut self, config_list: impl Into<Vec<u8>>) -> Self {
+        self.ech_config_list = Some(config_list.into());
         self
     }
 
@@ -148,6 +182,14 @@ impl Tls {
         self.accept_invalid_certs
     }
 
+    pub(crate) fn accepts_invalid_hostnames(&self) -> bool {
+        self.accept_invalid_hostnames
+    }
+
+    pub(crate) fn ech_config(&self) -> Option<&[u8]> {
+        self.ech_config_list.as_deref()
+    }
+
     pub(crate) fn has_client_identity(&self) -> bool {
         self.client_identity.is_some()
     }
@@ -157,10 +199,36 @@ impl Tls {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ClientIdentity {
-    pub(super) certificate_chain: Pem,
-    pub(super) private_key: Pem,
+#[derive(Clone, PartialEq, Eq)]
+pub(super) enum ClientIdentity {
+    Pem {
+        certificate_chain: Pem,
+        private_key: Pem,
+    },
+    Pkcs12 {
+        der: Vec<u8>,
+        password: String,
+    },
+}
+
+impl std::fmt::Debug for ClientIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Pem {
+                certificate_chain,
+                private_key,
+            } => f
+                .debug_struct("Pem")
+                .field("certificate_chain", certificate_chain)
+                .field("private_key", private_key)
+                .finish(),
+            Self::Pkcs12 { .. } => f
+                .debug_struct("Pkcs12")
+                .field("der", &"***")
+                .field("password", &"***")
+                .finish(),
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
