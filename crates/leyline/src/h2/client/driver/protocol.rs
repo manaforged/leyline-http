@@ -8,7 +8,10 @@ use std::task::{Context, Poll};
 use bytes::Bytes;
 use tokio::sync::{Notify, mpsc};
 
-use crate::h2::connection::PseudoHeaders;
+use crate::h2::H2Error;
+use crate::h2::connection::{PseudoHeaders, PseudoList, build_pseudo_fields};
+use crate::header_str::HeaderStr;
+use crate::profile::PseudoOrder;
 use crate::wire::Body;
 
 use super::ResponseSink;
@@ -24,8 +27,16 @@ pub(crate) fn checked_window_add(current: i64, delta: i64) -> Result<i64, i64> {
     }
 }
 
+enum RequestTarget {
+    Url {
+        method: HeaderStr,
+        url: Arc<url::Url>,
+    },
+    Pseudo(Box<PseudoHeaders>),
+}
+
 pub struct Head {
-    pub pseudo: PseudoHeaders,
+    target: RequestTarget,
     pub(crate) headers: crate::wire::RequestHeaders,
     pub(crate) body_limit: crate::error::BodyLimit,
 }
@@ -35,11 +46,56 @@ impl Head {
     /// Builds a request head from its pseudo-headers and header fields.
     pub fn new(pseudo: PseudoHeaders, headers: Vec<crate::wire::HeaderPair>) -> Self {
         Self {
-            pseudo,
+            target: RequestTarget::Pseudo(Box::new(pseudo)),
             headers: headers.into(),
             body_limit: crate::error::BodyLimit::session(crate::wire::DEFAULT_MAX_BODY_SIZE),
         }
     }
+
+    pub(crate) fn from_url(
+        method: HeaderStr,
+        url: Arc<url::Url>,
+        headers: crate::wire::RequestHeaders,
+        body_limit: crate::error::BodyLimit,
+    ) -> Self {
+        Self {
+            target: RequestTarget::Url { method, url },
+            headers,
+            body_limit,
+        }
+    }
+
+    pub(crate) fn method_is(&self, method: &http::Method) -> bool {
+        match &self.target {
+            RequestTarget::Url { method: m, .. } => m.eq_ignore_ascii_case(method.as_str()),
+            RequestTarget::Pseudo(pseudo) => pseudo.method_is(method),
+        }
+    }
+
+    pub(crate) fn build_pseudo_list<'a>(
+        &'a self,
+        pseudo_order: &[PseudoOrder; 4],
+    ) -> Result<PseudoList<'a>, H2Error> {
+        match &self.target {
+            RequestTarget::Url { method, url } => build_pseudo_fields(
+                method.as_str(),
+                "https",
+                &url[url::Position::BeforeHost..url::Position::AfterPort],
+                crate::util::request_target(url),
+                None,
+                pseudo_order,
+            ),
+            RequestTarget::Pseudo(pseudo) => pseudo.build_pseudo_list(pseudo_order),
+        }
+    }
+}
+
+#[cfg(feature = "websocket")]
+pub(crate) struct OpenConnect {
+    pub(crate) head: Box<Head>,
+    pub(crate) write_rx: mpsc::Receiver<io::Result<Bytes>>,
+    pub(crate) sink: ResponseSink,
+    pub(crate) slot: Option<super::super::handle::Slot>,
 }
 
 pub(crate) enum DriverCommand {
@@ -50,26 +106,16 @@ pub(crate) enum DriverCommand {
         slot: Option<super::super::handle::Slot>,
     },
     #[cfg(feature = "websocket")]
-    OpenConnect {
-        head: Box<Head>,
-        write_rx: mpsc::Receiver<io::Result<Bytes>>,
-        sink: ResponseSink,
-        slot: Option<super::super::handle::Slot>,
-    },
+    OpenConnect(Box<OpenConnect>),
     Ping(super::Ping),
 }
 
 const _: () = assert!(
-    size_of::<DriverCommand>() <= 112,
-    "DriverCommand is copied into the driver queue after the channel unboxes it"
+    size_of::<DriverCommand>() <= 80,
+    "DriverCommand is stored inline in the unbounded channel without per-request boxing"
 );
 
-pub(super) type CommandSlot = Box<DriverCommand>;
-
-const _: () = assert!(
-    size_of::<CommandSlot>() == size_of::<usize>(),
-    "the command channel stores a box, not the enum"
-);
+pub(super) type CommandSlot = DriverCommand;
 
 #[derive(Default)]
 struct Queue {
@@ -115,9 +161,9 @@ impl CommandTx {
         let mut waited = false;
         loop {
             if self.queue.queued.fetch_add(1, Ordering::AcqRel) < self.capacity {
-                let sent = self.tx.send(Box::new(cmd)).map_err(|err| {
+                let sent = self.tx.send(cmd).map_err(|err| {
                     self.queue.queued.fetch_sub(1, Ordering::AcqRel);
-                    mpsc::error::SendError(*err.0)
+                    mpsc::error::SendError(err.0)
                 });
                 if waited && self.queue.queued.load(Ordering::Acquire) < self.capacity {
                     self.queue.space.notify_one();
@@ -148,13 +194,11 @@ impl Drop for CommandRx {
 
 impl CommandRx {
     pub(super) fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<DriverCommand>> {
-        self.rx
-            .poll_recv(cx)
-            .map(|cmd| cmd.map(|boxed| self.taken(*boxed)))
+        self.rx.poll_recv(cx).map(|cmd| cmd.map(|c| self.taken(c)))
     }
 
     pub(super) fn try_recv(&mut self) -> Result<DriverCommand, mpsc::error::TryRecvError> {
-        self.rx.try_recv().map(|boxed| self.taken(*boxed))
+        self.rx.try_recv().map(|c| self.taken(c))
     }
 
     fn taken(&self, cmd: DriverCommand) -> DriverCommand {
@@ -174,7 +218,7 @@ impl DriverCommand {
         match self {
             DriverCommand::SendRequest { sink, .. } => sink.is_cancelled(),
             #[cfg(feature = "websocket")]
-            DriverCommand::OpenConnect { sink, .. } => sink.is_cancelled(),
+            DriverCommand::OpenConnect(connect) => connect.sink.is_cancelled(),
             DriverCommand::Ping(_) => false,
         }
     }
@@ -183,7 +227,7 @@ impl DriverCommand {
         match self {
             DriverCommand::SendRequest { sink, .. } => Some(sink),
             #[cfg(feature = "websocket")]
-            DriverCommand::OpenConnect { sink, .. } => Some(sink),
+            DriverCommand::OpenConnect(connect) => Some(connect.sink),
             DriverCommand::Ping(_) => None,
         }
     }

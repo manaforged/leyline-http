@@ -191,8 +191,9 @@ impl Decoder {
         offset += consumed;
 
         self.account(total_size, name.len() + value.len())?;
+        let valid = crate::wire::is_valid_h2_field(&name, &value);
         if !add_to_table {
-            let typed = typed_name.and_then(|name| {
+            let typed = valid.then_some(typed_name).flatten().and_then(|name| {
                 http::HeaderValue::from_bytes(&value)
                     .ok()
                     .map(|value| (name, value))
@@ -203,7 +204,7 @@ impl Decoder {
 
         let name = cow_to_bytes(name);
         let value = cow_to_bytes(value);
-        let typed = typed_name.and_then(|name| {
+        let typed = valid.then_some(typed_name).flatten().and_then(|name| {
             http::HeaderValue::from_maybe_shared(value.clone())
                 .ok()
                 .map(|value| (name, value))

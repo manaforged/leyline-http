@@ -217,12 +217,12 @@ impl H2Client {
             oneshot::channel::<Result<Box<TransportResponse>, H2Error>>();
         let (sink, body_rx) = ResponseSink::streaming(headers_tx);
 
-        let cmd = DriverCommand::OpenConnect {
+        let cmd = DriverCommand::OpenConnect(Box::new(super::driver::OpenConnect {
             head: Box::new(Head::new(pseudo, headers)),
             write_rx,
             sink,
             slot,
-        };
+        }));
         self.shared.tx.send(cmd).await.map_err(|e| {
             tracing::debug!(error = %e, "h2 driver command channel closed");
             H2Error::NotSent

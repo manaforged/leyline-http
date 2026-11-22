@@ -40,30 +40,28 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         match cmd {
             DriverCommand::Ping(ping) => self.send_ping(ping),
             #[cfg(feature = "websocket")]
-            DriverCommand::OpenConnect {
-                head,
-                write_rx,
-                sink,
-                slot,
-            } if self.peer_settings.enable_connect_protocol => match self.admit() {
-                Admit::Open => {
-                    let upload = Upload::Stream(Box::pin(futures_util::stream::unfold(
-                        write_rx,
-                        |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
-                    )));
-                    self.open_stream(&head, upload, sink);
-                    drop(slot);
+            DriverCommand::OpenConnect(connect) if self.peer_settings.enable_connect_protocol => {
+                match self.admit() {
+                    Admit::Open => {
+                        let protocol::OpenConnect {
+                            head,
+                            write_rx,
+                            sink,
+                            slot,
+                        } = *connect;
+                        let upload = Upload::Stream(Box::pin(futures_util::stream::unfold(
+                            write_rx,
+                            |mut rx| async move { rx.recv().await.map(|item| (item, rx)) },
+                        )));
+                        self.open_stream(&head, upload, sink);
+                        drop(slot);
+                    }
+                    Admit::Defer => self.pending.push_back(DriverCommand::OpenConnect(connect)),
+                    Admit::Refuse(e) => connect.sink.fail(e),
                 }
-                Admit::Defer => self.pending.push_back(DriverCommand::OpenConnect {
-                    head,
-                    write_rx,
-                    sink,
-                    slot,
-                }),
-                Admit::Refuse(e) => sink.fail(e),
-            },
+            }
             #[cfg(feature = "websocket")]
-            DriverCommand::OpenConnect { sink, .. } => sink.fail(H2Error::NoExtendedConnect),
+            DriverCommand::OpenConnect(connect) => connect.sink.fail(H2Error::NoExtendedConnect),
             DriverCommand::SendRequest {
                 head,
                 body,
@@ -109,14 +107,13 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     fn open_stream(&mut self, head: &Head, upload: Upload, sink: ResponseSink) {
         let stream_id = self.alloc_stream_id();
-        let (pseudo_list, pseudo_len) =
-            match head.pseudo.build_pseudo_list(&self.config.pseudo_order) {
-                Ok(list) => list,
-                Err(e) => {
-                    sink.fail(e);
-                    return;
-                }
-            };
+        let (pseudo_list, pseudo_len) = match head.build_pseudo_list(&self.config.pseudo_order) {
+            Ok(list) => list,
+            Err(e) => {
+                sink.fail(e);
+                return;
+            }
+        };
         let pseudo = &pseudo_list[..pseudo_len];
         let headers: &[HeaderPair] = &head.headers;
         if let Err(e) = self.check_header_list(pseudo, headers) {
@@ -127,7 +124,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let end_stream = matches!(upload, Upload::None);
         let initial_send = self.peer_settings.initial_window_size as i64;
         let initial_recv = self.config.advertised_initial_window_size() as i64;
-        let is_head = head.pseudo.method_is(&http::Method::HEAD);
+        let is_head = head.method_is(&http::Method::HEAD);
         let mut actor =
             StreamActor::new(initial_send, initial_recv, sink, is_head, head.body_limit);
         if matches!(upload, Upload::Stream(_)) {

@@ -90,7 +90,7 @@ impl BlockReader {
     pub(crate) fn new(state: ResponseState) -> Self {
         let collect = match state {
             ResponseState::Initial(_) => Collect::Head(ResponseHead {
-                headers: Vec::with_capacity(8),
+                headers: Vec::with_capacity(4),
                 ..ResponseHead::default()
             }),
             ResponseState::Final | ResponseState::Trailers => Collect::Trailers(HeaderMap::new()),
@@ -120,6 +120,30 @@ impl BlockReader {
                     fields.append(name, value);
                 })
             }
+        };
+        self.error = result.err();
+    }
+
+    pub(crate) fn field_hpack(
+        &mut self,
+        name: &[u8],
+        value: &[u8],
+        typed: Option<(HeaderName, HeaderValue)>,
+    ) {
+        if self.error.is_some() {
+            return;
+        }
+        let result = match (&mut self.collect, typed) {
+            (Collect::Head(head), Some(pair)) => head.field(Ok(pair)),
+            (Collect::Trailers(fields), Some((name, value))) => {
+                fields.append(name, value);
+                Ok(())
+            }
+            (Collect::Head(head), None) if name.starts_with(b":") => head.pseudo(name, value),
+            (Collect::Trailers(_), None) if name.starts_with(b":") => {
+                Err("trailers must not contain pseudo-headers")
+            }
+            (_, None) => Err("response contains malformed fields"),
         };
         self.error = result.err();
     }
@@ -162,16 +186,19 @@ struct ResponseHead {
     length: Option<u64>,
 }
 
+pub(crate) fn is_valid_h2_field(name: &[u8], value: &[u8]) -> bool {
+    !name.iter().any(u8::is_ascii_uppercase)
+        && !value.iter().any(|byte| matches!(byte, 0 | b'\r' | b'\n'))
+        && !matches!(value.first(), Some(b' ' | b'\t'))
+        && !matches!(value.last(), Some(b' ' | b'\t'))
+}
+
 fn response_field(
     name: &[u8],
     value: &[u8],
     typed: Option<(HeaderName, HeaderValue)>,
 ) -> Result<(HeaderName, HeaderValue), &'static str> {
-    if name.iter().any(u8::is_ascii_uppercase)
-        || value.iter().any(|byte| matches!(byte, 0 | b'\r' | b'\n'))
-        || matches!(value.first(), Some(b' ' | b'\t'))
-        || matches!(value.last(), Some(b' ' | b'\t'))
-    {
+    if !is_valid_h2_field(name, value) {
         return Err("response contains malformed fields");
     }
     typed.ok_or("response contains malformed fields")

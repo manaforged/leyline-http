@@ -143,9 +143,10 @@ pub async fn send_request_h1_pooled(
     let method = Method::from_bytes(method.as_bytes())
         .ok()
         .ok_or_else(|| invalid_method(method))?;
+    let url = Arc::new(url.clone());
     let req = Prepared {
         method: &method,
-        url,
+        url: &url,
         headers: headers
             .into_iter()
             .map(|(name, value)| (name.into(), value.into()))

@@ -39,14 +39,14 @@ fn enforce_odd(sid: u32) -> Result<(), H2Error> {
 
 impl StreamActor {
     fn forward_chunk(&mut self, d: &DataFrame) -> Result<usize, Failure> {
-        let Some(ResponseSink::StreamingEx { body_tx, .. }) = self.response_tx.as_ref() else {
+        let Some(ResponseSink::StreamingEx(sink)) = self.response_tx.as_ref() else {
             return Ok(0);
         };
         if d.data.is_empty() {
             return Ok(0);
         }
         let sent = if self.stalled.is_empty() {
-            body_tx.try_send(Ok(d.data.clone()))
+            sink.body_tx.try_send(Ok(d.data.clone()))
         } else {
             Err(mpsc::error::TrySendError::Full(Ok(d.data.clone())))
         };
@@ -77,7 +77,7 @@ impl StreamActor {
     fn store_chunk(&mut self, d: &DataFrame) -> Result<usize, Failure> {
         if !self.has_body {
             Ok(0)
-        } else if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+        } else if matches!(self.response_tx, Some(ResponseSink::StreamingEx(_))) {
             self.forward_chunk(d)
         } else {
             self.buffer_chunk(d)

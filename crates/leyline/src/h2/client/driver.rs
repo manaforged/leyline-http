@@ -32,6 +32,8 @@ mod stream_map;
 
 pub use self::bootstrap::start;
 pub use protocol::Head;
+#[cfg(feature = "websocket")]
+pub(crate) use protocol::OpenConnect;
 pub(crate) use protocol::{CommandTx, DriverCommand, checked_window_add};
 
 const COMMAND_CHANNEL_CAPACITY: usize = 1024;
@@ -51,30 +53,36 @@ struct PendingSend {
     remaining: Bytes,
 }
 
+pub(crate) struct StreamingSink {
+    pub(super) headers_tx: Option<oneshot::Sender<Result<Box<TransportResponse>, H2Error>>>,
+    pub(super) body_tx: mpsc::Sender<io::Result<Bytes>>,
+    pub(super) terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
+}
+
+pub(crate) struct AdaptiveSink {
+    pub(super) tx: oneshot::Sender<Result<Box<TransportResponse>, H2Error>>,
+    pub(super) body_tx: mpsc::Sender<io::Result<Bytes>>,
+    pub(super) terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
+    pub(super) mode: ResponseMode,
+}
+
 pub(crate) enum ResponseSink {
     Buffered(oneshot::Sender<Result<Box<TransportResponse>, H2Error>>),
-    StreamingEx {
-        headers_tx: Option<oneshot::Sender<Result<Box<TransportResponse>, H2Error>>>,
-        body_tx: mpsc::Sender<io::Result<Bytes>>,
-        terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
-    },
-    Adaptive {
-        tx: oneshot::Sender<Result<Box<TransportResponse>, H2Error>>,
-        body_tx: mpsc::Sender<io::Result<Bytes>>,
-        terminal: mpsc::OwnedPermit<io::Result<Bytes>>,
-        mode: ResponseMode,
-    },
+    StreamingEx(Box<StreamingSink>),
+    Adaptive(Box<AdaptiveSink>),
 }
 
 impl ResponseSink {
     pub(super) fn is_cancelled(&self) -> bool {
         match self {
-            Self::Buffered(tx) | Self::Adaptive { tx, .. } => tx.is_closed(),
-            Self::StreamingEx {
-                headers_tx,
-                body_tx,
-                ..
-            } => headers_tx.as_ref().is_none_or(oneshot::Sender::is_closed) && body_tx.is_closed(),
+            Self::Buffered(tx) => tx.is_closed(),
+            Self::Adaptive(sink) => sink.tx.is_closed(),
+            Self::StreamingEx(sink) => {
+                sink.headers_tx
+                    .as_ref()
+                    .is_none_or(oneshot::Sender::is_closed)
+                    && sink.body_tx.is_closed()
+            }
         }
     }
 
@@ -91,45 +99,40 @@ impl ResponseSink {
     ) -> (Self, mpsc::Receiver<io::Result<Bytes>>) {
         let (body_tx, terminal, body_rx) = crate::wire::body_channel();
         (
-            Self::Adaptive {
+            Self::Adaptive(Box::new(AdaptiveSink {
                 tx,
                 body_tx,
                 terminal,
                 mode,
-            },
+            })),
             body_rx,
         )
     }
 
     pub(super) fn fail(self, err: H2Error) {
         match self {
-            Self::Buffered(tx)
-            | Self::Adaptive { tx, .. }
-            | Self::StreamingEx {
-                headers_tx: Some(tx),
-                ..
-            } => drop(tx.send(Err(err))),
-            Self::StreamingEx {
-                headers_tx: None,
-                terminal,
-                ..
-            } => drop(terminal.send(Err(io::Error::other(format!("h2 stream failed: {err}"))))),
+            Self::Buffered(tx) => drop(tx.send(Err(err))),
+            Self::Adaptive(sink) => drop(sink.tx.send(Err(err))),
+            Self::StreamingEx(sink) => match sink.headers_tx {
+                Some(tx) => drop(tx.send(Err(err))),
+                None => drop(
+                    sink.terminal
+                        .send(Err(io::Error::other(format!("h2 stream failed: {err}")))),
+                ),
+            },
         }
     }
 
     pub(super) fn settle(self, status: http::StatusCode) -> Self {
         match self {
-            Self::Adaptive {
-                tx,
-                body_tx,
-                terminal,
-                mode,
-            } if mode.keeps_stream(status.as_u16()) => Self::StreamingEx {
-                headers_tx: Some(tx),
-                body_tx,
-                terminal,
-            },
-            Self::Adaptive { tx, .. } => Self::Buffered(tx),
+            Self::Adaptive(sink) if sink.mode.keeps_stream(status.as_u16()) => {
+                Self::StreamingEx(Box::new(StreamingSink {
+                    headers_tx: Some(sink.tx),
+                    body_tx: sink.body_tx,
+                    terminal: sink.terminal,
+                }))
+            }
+            Self::Adaptive(sink) => Self::Buffered(sink.tx),
             settled => settled,
         }
     }
@@ -212,8 +215,8 @@ impl StreamActor {
     }
 
     fn deliver_headers_streaming(&mut self) {
-        if let Some(ResponseSink::StreamingEx { headers_tx, .. }) = self.response_tx.as_mut()
-            && let Some(tx) = headers_tx.take()
+        if let Some(ResponseSink::StreamingEx(sink)) = self.response_tx.as_mut()
+            && let Some(tx) = sink.headers_tx.take()
         {
             drop(tx.send(Ok(self.response(Vec::new()))));
         }
@@ -225,16 +228,16 @@ impl StreamActor {
                 let body = std::mem::take(&mut self.body);
                 drop(tx.send(Ok(self.response(body))));
             }
-            Some(ResponseSink::StreamingEx {
-                body_tx, terminal, ..
-            }) if !self.stalled.is_empty() && !body_tx.is_closed() => {
+            Some(ResponseSink::StreamingEx(sink))
+                if !self.stalled.is_empty() && !sink.body_tx.is_closed() =>
+            {
                 let mut tail = BytesMut::with_capacity(self.stalled.iter().map(Bytes::len).sum());
                 for chunk in self.stalled.drain(..) {
                     tail.extend_from_slice(&chunk);
                 }
-                drop(terminal.send(Ok(tail.freeze())));
+                drop(sink.terminal.send(Ok(tail.freeze())));
             }
-            None | Some(ResponseSink::StreamingEx { .. } | ResponseSink::Adaptive { .. }) => {}
+            None | Some(ResponseSink::StreamingEx(_) | ResponseSink::Adaptive(_)) => {}
         }
     }
 

@@ -28,7 +28,7 @@ pub(crate) use method::{has_body_by_default, is_idempotent, is_retrieval, is_saf
 pub use mode::{ErrorBudget, ResponseMode};
 pub(crate) use request_headers::{HeaderBlock, RequestHeaders};
 pub(crate) use scheme::{Scheme, authority, host_port};
-pub(crate) use state::{BlockReader, ResponseBlock, ResponseState};
+pub(crate) use state::{BlockReader, ResponseBlock, ResponseState, is_valid_h2_field};
 pub(crate) use timing::ResponseTiming;
 pub use tls::{TlsFacts, TlsInfo};
 pub(crate) use upload::Upload;

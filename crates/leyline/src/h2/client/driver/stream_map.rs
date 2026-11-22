@@ -88,13 +88,13 @@ impl StreamMap {
     pub(super) fn flush_stalled(&mut self) -> Vec<(u32, bool)> {
         let mut drained = Vec::new();
         for (&sid, actor) in self.inner.iter_mut() {
-            let Some(ResponseSink::StreamingEx { body_tx, .. }) = actor.response_tx.as_ref() else {
+            let Some(ResponseSink::StreamingEx(sink)) = actor.response_tx.as_ref() else {
                 continue;
             };
             let mut closed = false;
             while let Some(chunk) = actor.stalled.pop_front() {
                 self.stalled -= 1;
-                match body_tx.try_send(Ok(chunk)) {
+                match sink.body_tx.try_send(Ok(chunk)) {
                     Ok(()) => {}
                     Err(TrySendError::Full(Ok(chunk))) => {
                         actor.stalled.push_front(chunk);

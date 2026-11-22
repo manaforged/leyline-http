@@ -14,7 +14,7 @@ impl StreamActor {
         if !self.has_body {
             return;
         }
-        if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+        if matches!(self.response_tx, Some(ResponseSink::StreamingEx(_))) {
             return;
         }
         if let Some(len) = self.declared_len {
@@ -42,7 +42,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let mut block = BlockReader::new(response);
         self.decoder
             .decode_block(&full_fragment, |name, value, typed| {
-                block.field(name, value, || typed);
+                block.field_hpack(name, value, typed);
             })
             .map_err(H2Error::Hpack)?;
         self.on_block(&h, block)
@@ -174,7 +174,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         actor.response_tx = actor.response_tx.take().map(|sink| sink.settle(status));
         actor.has_body = crate::wire::has_body(actor.head_request, status.as_u16());
         actor.reserve_body();
-        if matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+        if matches!(actor.response_tx, Some(ResponseSink::StreamingEx(_))) {
             actor.deliver_headers_streaming();
         }
         if h.end_stream {
