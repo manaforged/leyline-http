@@ -15,6 +15,7 @@ pub struct Decoder {
     max_header_list_size: usize,
 }
 
+#[cfg(any(test, feature = "bench-internals"))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header {
     pub name: Bytes,
@@ -89,11 +90,16 @@ impl Decoder {
                 b if b & 0xE0 == 0x00 => (4, 0x0F, false),
                 _ => return Err(format!("unexpected byte {byte:#04x} at position {pos}")),
             };
-            let (header, typed, consumed) =
-                self.decode_literal(src, pos, prefix, mask, add_to_table)?;
+            let consumed = self.decode_literal(
+                src,
+                pos,
+                prefix,
+                mask,
+                add_to_table,
+                &mut total_size,
+                &mut each,
+            )?;
             pos += consumed;
-            self.account(&mut total_size, header.name.len() + header.value.len())?;
-            each(&header.name, &header.value, typed);
         }
         Ok(())
     }
@@ -145,6 +151,10 @@ impl Decoder {
         Ok(1 + consumed)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "internal literal header decode passes parser cursor and callback"
+    )]
     fn decode_literal(
         &mut self,
         src: &[u8],
@@ -152,7 +162,9 @@ impl Decoder {
         prefix_bits: u8,
         mask: u8,
         add_to_table: bool,
-    ) -> Result<(Header, Typed, usize), String> {
+        total_size: &mut usize,
+        each: &mut impl FnMut(&[u8], &[u8], Typed),
+    ) -> Result<usize, String> {
         let byte = src[pos];
         let mut offset = pos + 1;
 
@@ -160,35 +172,72 @@ impl Decoder {
             integer::decode(byte & mask, prefix_bits, &src[offset..]).map_err(|e| e.to_string())?;
         offset += consumed;
 
+        if !add_to_table {
+            let (name_owned, typed_name) = if name_index == 0 {
+                let (s, consumed) = decode_string_cow(&src[offset..])?;
+                offset += consumed;
+                let typed = parse_name(&s);
+                (Some(s), typed)
+            } else {
+                let (n, _, entry_typed) = table::entry(name_index, &self.dynamic)
+                    .ok_or_else(|| format!("invalid name index {name_index}"))?;
+                let typed = match entry_typed {
+                    Some((typed, _)) => Some(typed.clone()),
+                    None => parse_name(n),
+                };
+                (None, typed)
+            };
+
+            let (value, consumed) = decode_string_cow(&src[offset..])?;
+            offset += consumed;
+
+            let name_bytes: &[u8] = match &name_owned {
+                Some(s) => s,
+                None => {
+                    table::entry(name_index, &self.dynamic)
+                        .expect("validated index")
+                        .0
+                }
+            };
+            self.account(total_size, name_bytes.len() + value.len())?;
+            let typed = typed_name.and_then(|name| {
+                http::HeaderValue::from_bytes(&value)
+                    .ok()
+                    .map(|value| (name, value))
+            });
+            each(name_bytes, &value, typed);
+            return Ok(offset - pos);
+        }
+
         let (name, typed_name) = if name_index == 0 {
             let (s, consumed) = decode_string(&src[offset..])?;
             offset += consumed;
             let typed = parse_name(&s);
             (s, typed)
         } else {
-            let (n, _) = table::lookup(name_index, &self.dynamic)
+            let (n, _, entry_typed) = table::entry(name_index, &self.dynamic)
                 .ok_or_else(|| format!("invalid name index {name_index}"))?;
-            let typed = match table::entry(name_index, &self.dynamic) {
-                Some((_, _, Some((typed, _)))) => Some(typed.clone()),
-                _ => parse_name(&n),
+            let typed = match entry_typed {
+                Some((typed, _)) => Some(typed.clone()),
+                None => parse_name(n),
             };
-            (n, typed)
+            (Bytes::copy_from_slice(n), typed)
         };
 
         let (value, consumed) = decode_string(&src[offset..])?;
         offset += consumed;
 
+        self.account(total_size, name.len() + value.len())?;
         let typed = typed_name.and_then(|name| {
             http::HeaderValue::from_maybe_shared(value.clone())
                 .ok()
                 .map(|value| (name, value))
         });
-        if add_to_table {
-            self.dynamic
-                .insert_typed(name.clone(), value.clone(), typed.clone());
-        }
+        self.dynamic
+            .insert_typed(name.clone(), value.clone(), typed.clone());
+        each(&name, &value, typed);
 
-        Ok((Header { name, value }, typed, offset - pos))
+        Ok(offset - pos)
     }
 }
 
@@ -199,7 +248,7 @@ fn parse_name(name: &[u8]) -> Option<http::HeaderName> {
     http::HeaderName::from_bytes(name).ok()
 }
 
-fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
+fn decode_string_cow(src: &[u8]) -> Result<(std::borrow::Cow<'_, [u8]>, usize), String> {
     if src.is_empty() {
         return Err("unexpected end of string".into());
     }
@@ -216,12 +265,21 @@ fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
     let raw = &src[start..end];
 
     let value = if huffman_encoded {
-        Bytes::from(huffman::decode(raw).map_err(|e| e.to_string())?)
+        std::borrow::Cow::Owned(huffman::decode(raw).map_err(|e| e.to_string())?)
     } else {
-        Bytes::copy_from_slice(raw)
+        std::borrow::Cow::Borrowed(raw)
     };
 
     Ok((value, end))
+}
+
+fn decode_string(src: &[u8]) -> Result<(Bytes, usize), String> {
+    let (value, end) = decode_string_cow(src)?;
+    let bytes = match value {
+        std::borrow::Cow::Borrowed(raw) => Bytes::copy_from_slice(raw),
+        std::borrow::Cow::Owned(vec) => Bytes::from(vec),
+    };
+    Ok((bytes, end))
 }
 
 #[cfg(test)]
