@@ -25,6 +25,9 @@ version and publish as separate crates.
 
 ### Added
 
+- A Brave (Chromium 158) profile, `Browser::Brave158`, from captures of Brave 1.100.58 (Chromium 158) on macOS and Linux.
+- A Chrome 158 profile, `Browser::Chrome158` (with `Browser::Edge158` in lockstep), from captures of Chrome 158.0.8127.36 on Linux and 158.0.8127.37 on macOS.
+- An Opera 140 brand overlay, `Browser::Opera140`, from Opera 140.0.6074.36 on Chromium 157.
 - `SessionBuilder::before_send` runs a hook on every request before each attempt; the hook may change the method, URL, headers and body.
 - `RequestBuilder::build` converts a request into an `http::Request`, and `Session::request_from` converts one back into a `RequestBuilder`, so a request can be read, changed, streamed, or sent from a `tower` service of your own.
 - `RequestBuilder::try_clone` copies a request with a buffered body so it can be sent more than once.

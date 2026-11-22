@@ -13,11 +13,13 @@
 | Chrome 155 | `Chrome155` | `browser` | `chrome-155.0.8059.40` | estimated | tls.peet.ws 2026-10-09 Chrome 155.0.8059.40 macOS and Windows, 155.0.8059.39 Linux --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
 | Chrome 156 | `Chrome156` | `browser` | `chrome-156.0.8078.48` | estimated | tls.peet.ws 2026-10-22 Chrome 156.0.8078.48 macOS and Windows, 156.0.8078.47 Linux --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
 | Chrome 157 | `Chrome157` | `browser` | `chrome-157.0.8103.39` | estimated | tls.peet.ws 2026-11-04 Chrome 157.0.8103.39 macOS and Windows, 157.0.8103.38 Linux --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
+| Chrome 158 | `Chrome158` | `browser` | `chrome-158.0.8127.37` | estimated | tls.peet.ws 2026-11-21 Chrome 158.0.8127.37 macOS, 158.0.8127.36 Linux --headless=new; quic.browserleaks.com macOS and Linux --headless=new |
 | Brave (Chromium 146) | `Brave146` | `browser` | `brave-146.1.88.138` | estimated | tls.peet.ws 2026-09-25 Brave 1.88.138 (Chromium 146.0.7680.178) macOS, Windows and Linux headful |
 | Brave (Chromium 154) | `Brave154` | `browser` | `brave-154.1.96.59` | estimated | tls.peet.ws 2026-09-25 Brave 1.96.59 (Chromium 154.0.8037.58) macOS, Windows and Linux headful |
 | Brave (Chromium 155) | `Brave155` | `browser` | `brave-155.1.97.56` | estimated | tls.peet.ws 2026-10-09 Brave 1.97.56 (Chromium 155) macOS, Linux, and Windows --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
 | Brave (Chromium 156) | `Brave156` | `browser` | `brave-156.1.98.60` | estimated | tls.peet.ws 2026-10-23 Brave 1.98.60 (Chromium 156) macOS, Linux, and Windows --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
 | Brave (Chromium 157) | `Brave157` | `browser` | `brave-157.1.99.55` | estimated | tls.peet.ws 2026-11-08 Brave 1.99.55 (Chromium 157) macOS, Linux, and Windows --headless=new; quic.browserleaks.com macOS, Linux, and Windows --headless=new |
+| Brave (Chromium 158) | `Brave158` | `browser` | `brave-158.1.100.58` | estimated | tls.peet.ws 2026-11-21 Brave 1.100.58 (Chromium 158) macOS and Linux --headless=new; quic.browserleaks.com macOS and Linux --headless=new |
 | Firefox 148 | `Firefox148` | `browser` | `firefox-148.0.2` | gated | tls.peet.ws 2026-09-25 Firefox 148.0.2 macOS and Linux --headless, Windows headful |
 | Firefox 149 | `Firefox149` | `browser` | `firefox-149.0.2` | gated | tls.peet.ws 2026-09-25 Firefox 149.0.2 macOS and Linux --headless, Windows headful |
 | Firefox 150 | `Firefox150` | `browser` | `firefox-150.0` | gated | tls.peet.ws 2026-09-25 Firefox 150.0 macOS and Linux --headless, Windows headful |
@@ -44,5 +46,5 @@
 
 | Browser | `Browser` variants | Chrome capture |
 | --- | --- | --- |
-| Edge | `Edge145` to `Edge157` | Chrome 145 to 157 |
-| Opera | `Opera129` to `Opera139` | Chrome 145 to 155 |
+| Edge | `Edge145` to `Edge158` | Chrome 145 to 158 |
+| Opera | `Opera129` to `Opera140` | Chrome 145 to 157 |
