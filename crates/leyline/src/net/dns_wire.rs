@@ -325,4 +325,36 @@ mod tests {
             Some((1, &b"\xde\xad\xbe\xef"[..]))
         );
     }
+
+    #[test]
+    fn validate_qname_enforces_label_rules_exhaustively() {
+        let alphabet: &[&[u8]] = &[b".", b"a", b"-"];
+        crate::util::every_input(alphabet, 6, |bytes| {
+            let host = std::str::from_utf8(bytes).expect("ascii");
+            let trimmed = host.strip_suffix('.').unwrap_or(host);
+            let has_empty = trimmed.is_empty() || trimmed.split('.').any(str::is_empty);
+            match validate_qname(host) {
+                Ok(out) => {
+                    assert!(!has_empty, "{host:?}");
+                    assert_eq!(out, trimmed, "{host:?}");
+                }
+                Err(WireError::InvalidName) => assert!(has_empty, "{host:?}"),
+                Err(other) => panic!("unexpected error {other:?} for {host:?}"),
+            }
+        });
+        assert_eq!(validate_qname("café.test"), Err(WireError::InvalidName));
+        let max_label = "a".repeat(63);
+        assert_eq!(validate_qname(&max_label), Ok(max_label.as_str()));
+        let max_name = format!(
+            "{}.{}.{}.{}",
+            "a".repeat(63),
+            "b".repeat(63),
+            "c".repeat(63),
+            "d".repeat(61)
+        );
+        assert_eq!(max_name.len(), 253);
+        assert_eq!(validate_qname(&max_name), Ok(max_name.as_str()));
+        let over_name = format!("{max_name}e");
+        assert_eq!(validate_qname(&over_name), Err(WireError::InvalidName));
+    }
 }

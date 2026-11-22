@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -10,6 +10,9 @@ use tokio::sync::futures::Notified;
 
 const SHARDS: usize = 32;
 const COARSE_TICK: Duration = Duration::from_millis(250);
+const TICKER_IDLE: u8 = 0;
+const TICKER_QUIET: u8 = 1;
+const TICKER_ACTIVE: u8 = 2;
 
 pub(crate) type Stopped = Pin<Box<dyn Future<Output = ()> + Send + Sync>>;
 
@@ -26,8 +29,7 @@ pub(crate) enum Wake {
 #[derive(Default)]
 pub(crate) struct Shutdown {
     stopped: AtomicBool,
-    ticker_live: AtomicBool,
-    saw_activity: AtomicBool,
+    ticker: AtomicU8,
     wake: [PaddedNotify; SHARDS],
 }
 
@@ -62,8 +64,21 @@ impl Shutdown {
     }
 
     pub(crate) fn note_coarse(self: &Arc<Self>) {
-        self.saw_activity.store(true, Ordering::SeqCst);
-        if !self.ticker_live.load(Ordering::SeqCst) {
+        match self.ticker.load(Ordering::Relaxed) {
+            TICKER_ACTIVE => {}
+            TICKER_QUIET => self.mark_active_or_start(),
+            _ => self.start_ticker(),
+        }
+    }
+
+    #[cold]
+    fn mark_active_or_start(self: &Arc<Self>) {
+        if let Err(TICKER_IDLE) = self.ticker.compare_exchange(
+            TICKER_QUIET,
+            TICKER_ACTIVE,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        ) {
             self.start_ticker();
         }
     }
@@ -74,19 +89,24 @@ impl Shutdown {
             return;
         }
         if self
-            .ticker_live
-            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ticker
+            .compare_exchange(
+                TICKER_IDLE,
+                TICKER_ACTIVE,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
             .is_err()
         {
             return;
         }
         let weak: Weak<Self> = Arc::downgrade(self);
         let Ok(handle) = tokio::runtime::Handle::try_current() else {
-            self.ticker_live.store(false, Ordering::SeqCst);
+            self.ticker.store(TICKER_IDLE, Ordering::Release);
             return;
         };
         handle.spawn(async move {
-            let _guard = TickerGuard(weak.clone());
+            let mut guard = TickerGuard(Some(weak.clone()));
             let mut idle_ticks = 0u8;
             loop {
                 tokio::time::sleep(COARSE_TICK).await;
@@ -96,37 +116,51 @@ impl Shutdown {
                 if shutdown.is_stopped() {
                     return;
                 }
-                let active = shutdown.saw_activity.swap(false, Ordering::SeqCst);
+                let prev = shutdown.ticker.swap(TICKER_QUIET, Ordering::AcqRel);
                 shutdown.wake_all();
-                if active {
+                if prev == TICKER_ACTIVE {
                     idle_ticks = 0;
                     continue;
                 }
                 idle_ticks += 1;
                 if idle_ticks >= 2 {
-                    shutdown.ticker_live.store(false, Ordering::SeqCst);
-                    if shutdown.saw_activity.load(Ordering::SeqCst)
-                        && shutdown
-                            .ticker_live
-                            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                            .is_ok()
-                    {
-                        idle_ticks = 0;
-                        continue;
+                    match shutdown.ticker.compare_exchange(
+                        TICKER_QUIET,
+                        TICKER_IDLE,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    ) {
+                        Ok(_) => {
+                            guard.disarm();
+                            return;
+                        }
+                        Err(TICKER_ACTIVE) => {
+                            idle_ticks = 0;
+                            continue;
+                        }
+                        Err(_) => {
+                            guard.disarm();
+                            return;
+                        }
                     }
-                    return;
                 }
             }
         });
     }
 }
 
-struct TickerGuard(Weak<Shutdown>);
+struct TickerGuard(Option<Weak<Shutdown>>);
+
+impl TickerGuard {
+    fn disarm(&mut self) {
+        self.0 = None;
+    }
+}
 
 impl Drop for TickerGuard {
     fn drop(&mut self) {
-        if let Some(shutdown) = self.0.upgrade() {
-            shutdown.ticker_live.store(false, Ordering::SeqCst);
+        if let Some(shutdown) = self.0.as_ref().and_then(Weak::upgrade) {
+            shutdown.ticker.store(TICKER_IDLE, Ordering::Release);
         }
     }
 }

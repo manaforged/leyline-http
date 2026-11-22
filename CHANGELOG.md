@@ -3,12 +3,18 @@
 The minimum supported Rust version is 1.96, two releases behind stable at
 release time.
 
-Leyline is experimental: any `0.x` release can change the API and its
-behaviour, and each change is listed here. The BoringSSL crates
-`leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this
-version and publish as separate crates.
+Leyline is pre-`1.0` and moving toward a stable API: breaking changes are only
+made with clear justification and every change is mapped 1-to-1 in
+[UPGRADE.md](UPGRADE.md) (see [AGENTS.md](AGENTS.md) for the concise coding-agent
+reference). The BoringSSL crates `leyline-bssl`, `leyline-bssl-sys`, and
+`leyline-bssl-tokio` share this version and publish as separate crates.
 
 ## Unreleased
+
+This release takes another step toward a stable `1.0` API surface (cleaning up
+early `0.2` ergonomic rough edges without adding new top-level types), speeds up
+hot-path HTTP/1.1 and HTTP/2 execution, and adds built-in DNS-over-HTTPS, TLS 1.3
+ECH, PKCS#12 mTLS, Unix sockets, interface binding, and custom proxy headers.
 
 ### Breaking changes
 

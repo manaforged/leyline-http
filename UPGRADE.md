@@ -14,6 +14,8 @@ For new code, start with the [five main types](AGENTS.md#the-five-types). The [u
 
 ## Breaking changes after 0.2.0
 
+These changes clean up early `0.2` API rough edges as Leyline moves toward a stable `1.0` surface — hiding raw struct fields behind getters/builders, aligning argument order across sibling methods, and fixing naming typos without adding new top-level types. Every changed call maps 1-to-1 below.
+
 | 0.2.0 | Now |
 | --- | --- |
 | `jar.store(set_cookie, &url)` | `jar.store(&url, set_cookie)` |

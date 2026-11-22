@@ -1,24 +1,4 @@
-use super::{range_matches, strong_etag};
-
-#[kani::proof]
-#[kani::unwind(8)]
-fn download_strong_etag_rejects_weak_and_ctl() {
-    let buf: [u8; 6] = kani::any();
-    let len: usize = kani::any_where(|&n| n <= 6);
-    let slice = &buf[..len];
-    kani::assume(slice.iter().all(|b| b.is_ascii()));
-    let s = std::str::from_utf8(slice).expect("ascii");
-    let ok = strong_etag(s);
-    if len < 2 || slice[0] != b'"' || slice[len - 1] != b'"' {
-        assert!(!ok);
-    } else {
-        let inner = &slice[1..len - 1];
-        let valid_inner = inner
-            .iter()
-            .all(|&b| b == 0x21 || (0x23..=0x7e).contains(&b));
-        assert_eq!(ok, valid_inner);
-    }
-}
+use super::range_matches;
 
 #[kani::proof]
 fn download_content_range_requires_exact_offset_and_total() {

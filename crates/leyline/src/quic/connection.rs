@@ -116,8 +116,32 @@ pub(crate) async fn connect_and_handshake(
     proxy: Option<&crate::net::ProxyUrl>,
 ) -> Result<EstablishedH3, QuicError> {
     let host = crate::util::bare_host(host);
-    let mut opening = open(h3_cfg, trust, connector, host, port, proxy).await?;
-    let h3 = handshake(h3_cfg, &mut opening).await?;
+    let mut ech_override = if trust.ech_config().is_none() && trust.auto_ech() {
+        connector.dialer().resolver().resolve_ech(host, port).await
+    } else {
+        None
+    };
+    let mut retried_ech = false;
+    let (opening, h3) = loop {
+        let ech = ech_override.as_deref().or_else(|| trust.ech_config());
+        let mut opening = open(h3_cfg, trust, connector, host, port, proxy, ech).await?;
+        match handshake(h3_cfg, &mut opening).await {
+            Ok(h3) => break (opening, h3),
+            Err(err) => {
+                let retry_configs = (!retried_ech && ech.is_some())
+                    .then(|| opening.conn.ssl_mut().ech_retry_configs())
+                    .flatten()
+                    .filter(|bytes| !bytes.is_empty())
+                    .map(<[u8]>::to_vec);
+                if let Some(retry_configs) = retry_configs {
+                    retried_ech = true;
+                    ech_override = Some(retry_configs);
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    };
     let Opening {
         socket,
         mut conn,
@@ -167,6 +191,7 @@ async fn open(
     host: &str,
     port: u16,
     proxy: Option<&crate::net::ProxyUrl>,
+    ech: Option<&[u8]>,
 ) -> Result<Opening, QuicError> {
     let (scid_bytes, dcid_bytes) = connection_ids(h3_cfg)?;
     let mut config = h3_cfg.build_quic_config(trust, host)?;
@@ -193,12 +218,7 @@ async fn open(
     hello
         .apply(conn.ssl_mut(), true)
         .map_err(|e| QuicError::Config(format!("quic hello: {e}")))?;
-    let resolved_ech = if trust.ech_config().is_none() && trust.auto_ech() {
-        connector.dialer().resolver().resolve_ech(host, port).await
-    } else {
-        None
-    };
-    if let Some(ech) = trust.ech_config().or(resolved_ech.as_deref()) {
+    if let Some(ech) = ech {
         conn.ssl_mut().set_enable_ech_grease(false);
         conn.ssl_mut()
             .set_ech_config_list(ech)

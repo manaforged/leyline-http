@@ -253,10 +253,17 @@ g_deny() {
     ok "cargo-deny clean"
 }
 
+g_semver() {
+    step "cargo semver-checks (public API diff against last crates.io release)"
+    command -v cargo-semver-checks >/dev/null || fail "cargo-semver-checks not installed: cargo install --locked cargo-semver-checks"
+    cargo semver-checks check-release -p leyline-http || fail "cargo-semver-checks found breaking API changes"
+    ok "cargo-semver-checks clean"
+}
+
 g_kani() {
-    step "cargo kani: H1 framing, response state, ASCII/host utils, HPACK, HTTP/2 frames/flow, cookies, and download proofs"
+    step "cargo kani: H1 framing, response state, ASCII/host utils, HPACK, HTTP/2 frames/flow, cookies, downloads, and DNS wire proofs"
     command -v cargo-kani >/dev/null || fail "cargo-kani not installed: cargo install --locked kani-verifier && cargo kani setup"
-    (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing --jobs --output-format terse) \
+    (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing -Z unstable-options --harness-timeout 30s --jobs --output-format terse) \
         || fail "a Kani proof failed"
     ok "Kani proofs verified"
 }
@@ -387,7 +394,7 @@ g_publish() {
 
 gate_order=(
     fmt clippy features doc book links msrv test deny benches
-    subcrates package kani live release publish fuzz-timed
+    subcrates package kani semver live release publish fuzz-timed
 )
 quick_gates=(fmt clippy doc)
 full_gates=(fmt clippy features doc book links msrv test deny benches subcrates package)

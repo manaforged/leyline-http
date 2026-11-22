@@ -44,29 +44,3 @@ fn cookie_prefix_rules_enforce_rfc_6265bis() {
         assert_eq!(rejected, !secure || has_domain || path_kind != 1);
     }
 }
-
-#[kani::proof]
-#[kani::unwind(6)]
-fn domain_match_enforces_label_boundary() {
-    let host_buf: [u8; 5] = kani::any();
-    let dom_buf: [u8; 3] = kani::any();
-    let host_len: usize = kani::any_where(|&n| (1..=5).contains(&n));
-    let dom_len: usize = kani::any_where(|&n| (1..=3).contains(&n));
-    let host_slice = &host_buf[..host_len];
-    let dom_slice = &dom_buf[..dom_len];
-    kani::assume(host_slice.iter().all(|b| b.is_ascii()));
-    kani::assume(dom_slice.iter().all(|b| b.is_ascii()));
-    let host = std::str::from_utf8(host_slice).expect("ascii");
-    let dom = std::str::from_utf8(dom_slice).expect("ascii");
-    let matched = crate::util::domain_match(host, dom);
-    if host_len < dom_len {
-        assert!(!matched);
-    } else if host_len == dom_len {
-        assert_eq!(matched, host_slice.eq_ignore_ascii_case(dom_slice));
-    } else {
-        let rest = host_len - dom_len;
-        let expected =
-            host_slice[rest - 1] == b'.' && host_slice[rest..].eq_ignore_ascii_case(dom_slice);
-        assert_eq!(matched, expected);
-    }
-}

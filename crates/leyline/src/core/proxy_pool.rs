@@ -102,6 +102,33 @@ impl ProxyPool {
         self
     }
 
+    pub(crate) fn for_doh(&self) -> Self {
+        let entries: Arc<[Entry]> = self
+            .entries
+            .iter()
+            .map(|entry| Entry {
+                config: entry.config.clone(),
+                label: entry.label.clone(),
+                identity: None,
+            })
+            .collect();
+        Self {
+            state: Arc::new(Mutex::new(PoolState::new(entries.len()))),
+            entries,
+            settings: self.settings.clone(),
+            sessions: Arc::default(),
+        }
+    }
+
+    pub(crate) fn same_for_doh(&self, other: &Self) -> bool {
+        self.entries.len() == other.entries.len()
+            && self
+                .entries
+                .iter()
+                .zip(other.entries.iter())
+                .all(|(a, b)| a.config.same_for_doh(&b.config))
+    }
+
     fn from_entries(entries: impl Iterator<Item = Entry>) -> Self {
         let entries: Arc<[Entry]> = entries.collect();
         let state = PoolState::new(entries.len());

@@ -275,7 +275,7 @@ impl Proxy {
         }
     }
 
-    fn pooled(pool: ProxyPool) -> Self {
+    pub(crate) fn pooled(pool: ProxyPool) -> Self {
         Self {
             pool: Some(pool),
             ..Self::new()

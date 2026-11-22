@@ -165,6 +165,23 @@ pub mod internals {
                 .map(|base| crate::core::parse_links(header, &base))
                 .unwrap_or_default()
         }
+
+        /// Parses a DNS wire response packet and extracts addresses and SVCB/HTTPS ECH configs.
+        pub fn parse_dns_response(packet: &[u8]) {
+            drop(crate::net::dns_wire::parse_response(packet));
+            let _ = crate::net::dns_wire::extract_ech_from_svcb(packet);
+            if let Ok(text) = std::str::from_utf8(packet) {
+                drop(crate::net::dns_wire::encode_query(
+                    text,
+                    crate::net::dns_wire::TYPE_HTTPS,
+                ));
+            }
+        }
+
+        /// Parses a DER-encoded PKCS#12 archive with `password`.
+        pub fn parse_pkcs12(der: &[u8], password: &str) {
+            drop(leyline_bssl::pkcs12::parse(der, password));
+        }
     }
 
     /// The HTTP/2 client, codec, and HPACK.

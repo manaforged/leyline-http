@@ -428,3 +428,170 @@ async fn doh_does_not_leak_origin_pins_or_client_cert() {
         "origin mTLS client cert must never be presented to the DoH provider"
     );
 }
+
+#[tokio::test]
+async fn doh_routes_through_single_proxy_and_proxy_list() {
+    use leyline::Proxy;
+
+    let origin = Server::http(|_| Response::new(200).body("doh-via-proxy"))
+        .await
+        .unwrap();
+    let origin_addr = origin.addr();
+    let origin_port = origin_addr.port();
+
+    let (doh_cert, doh_key) = self_signed_dns_names(&["dns.proxied.test"]);
+    let doh_ca_pem = doh_cert.to_pem().unwrap();
+    let doh_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let doh_addr = doh_listener.local_addr().unwrap();
+    let mut doh_ctx = SslContextBuilder::new(SslMethod::tls()).unwrap();
+    doh_ctx.set_certificate(&doh_cert).unwrap();
+    doh_ctx.set_private_key(&doh_key).unwrap();
+    let doh_ctx = Arc::new(doh_ctx.build());
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = doh_listener.accept().await {
+            let ctx = Arc::clone(&doh_ctx);
+            tokio::spawn(async move {
+                let ssl = Ssl::new(&ctx).unwrap();
+                let Ok(mut stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await
+                else {
+                    return;
+                };
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 512];
+                loop {
+                    let Ok(n) = stream.read(&mut tmp).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = std::str::from_utf8(&buf[..head_end]).unwrap_or("");
+                    let content_len: usize = head
+                        .lines()
+                        .find_map(|line| {
+                            let (k, v) = line.split_once(':')?;
+                            k.eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse().ok())
+                                .flatten()
+                        })
+                        .unwrap_or(0);
+                    let total = head_end + 4 + content_len;
+                    if buf.len() < total {
+                        continue;
+                    }
+                    let body = &buf[head_end + 4..total];
+                    let Some((name, qtype)) = decode_qname_and_qtype(body) else {
+                        return;
+                    };
+                    let wire = if name == "app.proxied.test" && qtype == 1 {
+                        dns_response(body, 0, &[(1, 120, &[127, 0, 0, 1])])
+                    } else {
+                        dns_response(body, 0, &[])
+                    };
+                    let resp_head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\n\r\n",
+                        wire.len()
+                    );
+                    if stream.write_all(resp_head.as_bytes()).await.is_err()
+                        || stream.write_all(&wire).await.is_err()
+                    {
+                        return;
+                    }
+                    buf.drain(..total);
+                }
+            });
+        }
+    });
+
+    let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let proxy_addr = proxy_listener.local_addr().unwrap();
+    let doh_connects = Arc::new(AtomicUsize::new(0));
+    let doh_connects_bg = Arc::clone(&doh_connects);
+    tokio::spawn(async move {
+        while let Ok((mut client, _)) = proxy_listener.accept().await {
+            let doh_connects_bg = Arc::clone(&doh_connects_bg);
+            tokio::spawn(async move {
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 512];
+                loop {
+                    let Ok(n) = client.read(&mut tmp).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                let head = String::from_utf8_lossy(&buf);
+                let first = head.lines().next().unwrap_or("");
+                if first.starts_with("CONNECT dns.proxied.test:") {
+                    assert!(
+                        head.to_ascii_lowercase().contains("x-doh-proxy: yes"),
+                        "DoH CONNECT must carry proxy header: {head}"
+                    );
+                    doh_connects_bg.fetch_add(1, Ordering::SeqCst);
+                    let mut upstream = tokio::net::TcpStream::connect(doh_addr).await.unwrap();
+                    client
+                        .write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")
+                        .await
+                        .unwrap();
+                    drop(tokio::io::copy_bidirectional(&mut client, &mut upstream).await);
+                } else if first.starts_with("GET http://app.proxied.test:") {
+                    let mut upstream = tokio::net::TcpStream::connect(origin_addr).await.unwrap();
+                    upstream
+                        .write_all(b"GET /hello HTTP/1.1\r\nHost: app.proxied.test\r\nConnection: close\r\n\r\n")
+                        .await
+                        .unwrap();
+                    drop(tokio::io::copy_bidirectional(&mut client, &mut upstream).await);
+                }
+            });
+        }
+    });
+
+    let proxy_url = format!("http://{proxy_addr}");
+    let doh_url = format!("https://dns.proxied.test:{}/dns-query", doh_addr.port());
+    let tls = || {
+        Tls::new()
+            .system_roots(false)
+            .env_roots(false)
+            .ca_pem(doh_ca_pem.clone())
+    };
+
+    for proxy in [
+        Proxy::new()
+            .all(proxy_url.clone())
+            .no_proxy(["app.proxied.test"])
+            .header("x-doh-proxy", "yes"),
+        Proxy::list([Proxy::new()
+            .all(proxy_url.clone())
+            .no_proxy(["app.proxied.test"])])
+        .header("x-doh-proxy", "yes"),
+    ] {
+        let before = doh_connects.load(Ordering::SeqCst);
+        let session = Session::builder()
+            .doh(doh_url.clone())
+            .proxy(proxy)
+            .tls(tls())
+            .build()
+            .unwrap();
+        let body = session
+            .get(format!("http://app.proxied.test:{origin_port}/hello"))
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(body, "doh-via-proxy");
+        assert!(
+            doh_connects.load(Ordering::SeqCst) > before,
+            "DoH lookup must traverse the configured proxy/pool"
+        );
+    }
+}

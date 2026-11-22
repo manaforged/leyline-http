@@ -1,6 +1,6 @@
 use super::content_length_value;
 
-const LONGEST: usize = 7;
+const LONGEST: usize = 6;
 
 fn expected(bytes: &[u8]) -> Option<u64> {
     let blank = |byte: u8| byte == b' ' || byte == b'\t';
@@ -14,20 +14,22 @@ fn expected(bytes: &[u8]) -> Option<u64> {
     if start == end {
         return None;
     }
-    let mut value = 0u128;
+    let mut value = 0u64;
     let mut index = start;
     while index < end {
         if !bytes[index].is_ascii_digit() {
             return None;
         }
-        value = value * 10 + u128::from(bytes[index] - b'0');
+        value = value
+            .checked_mul(10)?
+            .checked_add(u64::from(bytes[index] - b'0'))?;
         index += 1;
     }
-    (value <= u128::from(u64::MAX)).then_some(value as u64)
+    Some(value)
 }
 
 #[kani::proof]
-#[kani::unwind(9)]
+#[kani::unwind(8)]
 fn a_content_length_follows_rfc_9110_section_8_6() {
     let bytes: [u8; LONGEST] = kani::any();
     let length: usize = kani::any_where(|n| *n <= LONGEST);

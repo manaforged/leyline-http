@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::core::doh::DohResolver;
+use crate::core::proxy_pool::ProxyPool;
 use crate::core::{Protocol, Proxy, Redirect, Session};
 use crate::error::{Error, Result};
 use crate::net::{Dialer, DnsConfig, Resolver, SocketOptions};
@@ -24,6 +25,7 @@ pub(super) struct PoolInputs<'a> {
     dns: &'a DnsConfig,
     doh: Option<&'a url::Url>,
     proxy: &'a Proxy,
+    proxy_pool: Option<&'a ProxyPool>,
     socket: &'a SocketOptions,
     tcp: Option<&'a TcpProfile>,
     ja4t: Option<&'a Ja4t>,
@@ -38,7 +40,13 @@ impl PartialEq for PoolInputs<'_> {
             && self.tls == other.tls
             && self.dns == other.dns
             && self.doh == other.doh
-            && (self.doh.is_none() || self.proxy.same_for_doh(other.proxy))
+            && (self.doh.is_none()
+                || (self.proxy.same_for_doh(other.proxy)
+                    && match (self.proxy_pool, other.proxy_pool) {
+                        (Some(a), Some(b)) => a.same_for_doh(b),
+                        (None, None) => true,
+                        _ => false,
+                    }))
             && self.socket == other.socket
             && self.tcp == other.tcp
             && self.ja4t == other.ja4t
@@ -50,9 +58,13 @@ impl PoolInputs<'_> {
     fn build_doh(&self, endpoint: &url::Url) -> Result<Arc<dyn Resolver>> {
         let mut trust = self.tls.clone();
         trust.clear_origin_identity();
+        let proxy = match self.proxy_pool {
+            Some(pool) => Proxy::pooled(pool.for_doh()),
+            None => self.proxy.clone(),
+        };
         let mut builder = Session::builder()
             .tls(trust)
-            .proxy(self.proxy.clone())
+            .proxy(proxy)
             .cookies(None)
             .cache(None)
             .redirect(Redirect::none());
@@ -113,6 +125,7 @@ impl SessionBuilder {
             dns: &self.dns_config,
             doh: self.doh_endpoint.as_ref(),
             proxy: &self.proxy_config,
+            proxy_pool: self.proxy_pool.as_ref(),
             socket: &self.socket_config,
             tcp: self.tcp_profile.as_ref(),
             ja4t: self.ja4t.as_ref(),

@@ -14,27 +14,25 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 
 ## Proved
 
-`cargo kani --no-default-features --lib -Z stubbing` runs 28 harnesses.
+`scripts/verify.sh --only kani` runs 29 harnesses (with a 30 s per-harness timeout). String and UTF-8 parser invariants run as bounded exhaustive unit tests in the library test suite.
 
 | Harness | Property |
 | --- | --- |
-| `a_chunk_size_follows_rfc_9112_section_7_1` | Chunk sizes up to 17 bytes parse as RFC 9112 section 7.1 defines, and overflow is an error |
-| `a_content_length_follows_rfc_9110_section_8_6` | Content-Length values up to 7 bytes parse as RFC 9110 section 8.6 defines |
+| `a_chunk_size_follows_rfc_9112_section_7_1` | Chunk sizes up to 9 bytes parse as RFC 9112 section 7.1 defines |
+| `a_chunk_size_overflow_is_exact_at_u64_max` | The largest accepted chunk size is `u64::MAX`, with leading-zero 17-byte forms accepted and overflow rejected |
+| `a_content_length_follows_rfc_9110_section_8_6` | Content-Length values up to 6 bytes parse as RFC 9110 section 8.6 defines |
 | `a_content_length_overflow_is_exact_at_u64_max` | The largest accepted Content-Length is `u64::MAX` |
 | `a_body_limit_admits_exactly_what_fits` | A body limit accepts a body exactly when it fits |
 | `a_body_limit_room_is_exactly_what_is_left` | The room a body limit reports is the exact remainder |
 | `non_ascii_content_length_is_always_rejected` | Non-ASCII bytes in `Content-Length` are always rejected |
 | `dual_content_length_and_transfer_encoding_is_always_rejected` | Responses with both `Content-Length` and `Transfer-Encoding` are always rejected |
 | `transfer_encoding_requires_chunked_once_and_final` | `Transfer-Encoding` is accepted iff `chunked` appears once and is the final coding |
-| `valid_framing_matches_check_framing` | `BodyHeaders::framing` agrees with `check_framing` on every accepted header pair |
 | `response_state_rejects_101_and_caps_informational_responses` | Response state machine rejects `101`, caps 1xx responses, and preserves state on error |
 | `response_state_data_trailers_and_finish_enforce_lifecycle` | Response `data`, `trailers`, and `finish` transitions follow the HTTP/2 and HTTP/3 lifecycle |
 | `has_ascii_uppercase_swar_matches_byte_scan` | SWAR `has_ascii_uppercase` matches byte-by-byte scan for all byte slices up to 16 bytes |
-| `parse_ascii_u64_and_delta_seconds_match_spec` | `parse_ascii_u64` and `delta_seconds` match strict ASCII-digit and trimming rules |
-| `bare_host_strips_only_matched_brackets` | `bare_host` strips `[` and `]` iff both ends match |
 | `every_hpack_integer_round_trips` | HPACK integers encode and decode to the same value |
 | `arbitrary_bytes_never_decode_past_the_hpack_limit` | No byte string decodes to an HPACK integer past the limit |
-| `size_update_tracks_min_and_final_within_bounds` | HPACK dynamic table size updates preserve minimum and final bounds |
+| `multiple_table_size_updates_track_minimum_and_latest` | HPACK dynamic table size updates preserve minimum and final bounds |
 | `a_frame_header_round_trips_and_ignores_the_reserved_bit` | HTTP/2 frame headers round-trip, and the reserved bit is ignored |
 | `padded_end_never_underflows_or_exceeds_payload` | HTTP/2 padding bounds never underflow or exceed the payload length |
 | `window_update_encode_masks_reserved_bits` | `WINDOW_UPDATE` encoding clears reserved high bits and preserves 31-bit values |
@@ -43,9 +41,12 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 | `a_flow_window_is_exact_and_never_passes_the_protocol_maximum` | Flow-control windows are exact and stay at or below 2^31 - 1 |
 | `zero_max_age_always_expires_at_unix_epoch` | `Max-Age=0` cookies always expire at the Unix epoch regardless of `Expires` |
 | `cookie_prefix_rules_enforce_rfc_6265bis` | `__Secure-` and `__Host-` cookie prefixes enforce RFC 6265bis attribute rules |
-| `domain_match_enforces_label_boundary` | Cookie domain matching requires exact match or dot-label boundary |
-| `download_strong_etag_rejects_weak_and_ctl` | Resumable download ETag check rejects weak tags and control bytes |
 | `download_content_range_requires_exact_offset_and_total` | Resumable download `Content-Range` parser enforces exact offset and non-overflowing total |
+| `skip_name_terminates_and_stays_in_bounds` | DNS wire name skipping always terminates within packet bounds and advances past start |
+| `skip_name_enforces_max_jumps_bound` | DNS compression pointer chains accept up to `MAX_JUMPS` hops and reject `MAX_JUMPS + 1` |
+| `extract_ech_from_svcb_never_panics` | SVCB/HTTPS ECH parameter extraction never panics and returns non-empty in-bounds ECH configs |
+| `parse_records_answer_rr_never_panics` | DNS answer resource record parsing never panics and bounds every RDATA slice |
+| `parse_records_question_never_panics` | DNS question parsing never panics, emits no records when `ancount == 0`, and rejects truncated headers |
 
 ## Model-checked
 
@@ -70,7 +71,7 @@ Each scenario fails when the stated invariant breaks.
 | Hostile HTTP/2 peers | `hostile-*`: PING, RST, SETTINGS, empty frame and CONTINUATION floods, zero window, huge headers | CPU or memory grows without bound, or one peer slows another host |
 | Real origin | `q28-nginx`: the edge workload through nginx | Any failure the origin did not cause |
 | Response parsing | `differential.py`: 61 cases from RFC 9112 section 6.3 | Leyline reads a case differently from the RFC |
-| Crashes | 11 fuzz targets, including `h2_session`, which drives the client with server frames | A crash or a hung request |
+| Crashes | 13 fuzz targets, including `h2_session`, `dns_wire`, and `pkcs12` | A crash or a hung request |
 
 Two defaults come from these scenarios:
 

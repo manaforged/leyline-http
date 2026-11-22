@@ -42,8 +42,8 @@ const RESPONSE: &[u8] =
     b"HTTP/1.1 200 OK\r\ncontent-length: 10\r\ncontent-type: text/plain\r\n\r\nok-10byte!";
 const WARM: u64 = 64;
 const MEASURED: u64 = 256;
-const ALLOCS_PER_REQUEST: u64 = 14;
-const BYTES_PER_REQUEST: u64 = 10_500;
+const ALLOCS_PER_REQUEST: u64 = 8;
+const BYTES_PER_REQUEST: u64 = 8_200;
 
 async fn origin() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");

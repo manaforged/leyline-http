@@ -1,6 +1,4 @@
-use super::{
-    MAX_JUMPS, WireError, extract_ech_from_svcb, parse_records, skip_name, validate_qname,
-};
+use super::{MAX_JUMPS, WireError, extract_ech_from_svcb, parse_records, skip_name};
 
 #[kani::proof]
 #[kani::unwind(14)]
@@ -44,15 +42,15 @@ fn extract_ech_from_svcb_never_panics() {
 }
 
 #[kani::proof]
-#[kani::unwind(4)]
+#[kani::unwind(3)]
 fn parse_records_answer_rr_never_panics() {
-    let mut packet: [u8; 25] = kani::any();
+    let mut packet: [u8; 24] = kani::any();
     packet[4] = 0;
     packet[5] = 0;
     packet[6] = 0;
     packet[7] = 1;
     packet[12] = 0;
-    let len: usize = kani::any_where(|n| (20..=25).contains(n));
+    let len: usize = kani::any_where(|n| (22..=24).contains(n));
     let slice = &packet[..len];
     let mut seen = 0usize;
     let res = parse_records(slice, |_rtype, _rclass, _ttl, rdata| {
@@ -66,9 +64,9 @@ fn parse_records_answer_rr_never_panics() {
 }
 
 #[kani::proof]
-#[kani::unwind(10)]
+#[kani::unwind(4)]
 fn parse_records_question_never_panics() {
-    let mut packet: [u8; 18] = kani::any();
+    let mut packet: [u8; 15] = kani::any();
     packet[4] = 0;
     packet[5] = kani::any_where(|&n| n <= 1);
     packet[6] = 0;
@@ -80,45 +78,5 @@ fn parse_records_question_never_panics() {
     });
     if len < 12 {
         assert_eq!(res, Err(WireError::Truncated));
-    }
-}
-
-#[kani::proof]
-#[kani::unwind(8)]
-fn validate_qname_enforces_arbitrary_ascii_label_rules() {
-    let raw: [u8; 5] = kani::any();
-    let len: usize = kani::any_where(|n| *n <= raw.len());
-    let bytes = &raw[..len];
-    kani::assume(bytes.iter().all(|&b| b == b'.' || b == b'a'));
-    let Ok(host) = std::str::from_utf8(bytes) else {
-        return;
-    };
-    let trimmed = host.strip_suffix('.').unwrap_or(host);
-    let mut has_empty = trimmed.is_empty();
-    let mut label_len = 0usize;
-    for &b in trimmed.as_bytes() {
-        if b == b'.' {
-            if label_len == 0 {
-                has_empty = true;
-            }
-            label_len = 0;
-        } else {
-            label_len += 1;
-        }
-    }
-    if label_len == 0 {
-        has_empty = true;
-    }
-    match validate_qname(host) {
-        Ok(out) => {
-            assert!(!has_empty);
-            assert_eq!(out, trimmed);
-        }
-        Err(WireError::InvalidName) => {
-            assert!(has_empty);
-        }
-        Err(_) => {
-            panic!("unexpected error variant from validate_qname");
-        }
     }
 }

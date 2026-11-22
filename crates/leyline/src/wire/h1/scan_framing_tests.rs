@@ -103,3 +103,49 @@ fn every_framing_header_set_follows_rfc_9112_section_6() {
         &wrong[..wrong.len().min(25)]
     );
 }
+
+#[test]
+fn valid_framing_matches_check_framing() {
+    use std::borrow::Cow;
+
+    use super::BodyHeaders;
+
+    let to_close = BodyHeaders {
+        lengths: 0,
+        length: None,
+        coding: None,
+    };
+    assert!(to_close.check_framing().is_ok());
+    assert!(matches!(to_close.framing(), BodyFraming::ToClose));
+
+    let fixed_zero = BodyHeaders {
+        lengths: 1,
+        length: Some(Cow::Borrowed(b"0")),
+        coding: None,
+    };
+    assert!(fixed_zero.check_framing().is_ok());
+    assert!(matches!(fixed_zero.framing(), BodyFraming::Fixed(0)));
+
+    let fixed_val = BodyHeaders {
+        lengths: 1,
+        length: Some(Cow::Borrowed(b"42")),
+        coding: None,
+    };
+    assert!(fixed_val.check_framing().is_ok());
+    assert!(matches!(fixed_val.framing(), BodyFraming::Fixed(42)));
+
+    let chunked = BodyHeaders {
+        lengths: 0,
+        length: None,
+        coding: Some(Cow::Borrowed(b"chunked")),
+    };
+    assert!(chunked.check_framing().is_ok());
+    assert!(matches!(chunked.framing(), BodyFraming::Chunked));
+
+    let bad = BodyHeaders {
+        lengths: 1,
+        length: Some(Cow::Borrowed(b"bad")),
+        coding: None,
+    };
+    assert!(bad.check_framing().is_err());
+}

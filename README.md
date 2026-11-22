@@ -8,12 +8,13 @@
 Leyline is a fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust, with batteries included for sessions, web crawling, proxies, resumable downloads, and browser TLS profiles.
 
 - HTTP/1.1, HTTP/2, and HTTP/3 over BoringSSL, with a thread-per-core mode (`run_per_core`)
-- Sessions with shared connections, cookies, and caching
+- Sessions with shared connections, cookies, caching, and optional blocking use
+- Encrypted DNS (RFC 8484 DoH) and TLS 1.3 Encrypted Client Hello (ECH) with automatic retry recovery
+- Enterprise networking: mTLS (PEM & PKCS#12), certificate pinning, Unix domain sockets, interface and local-IP binding, and rotating HTTP/HTTPS/SOCKS5 proxy pools with custom proxy headers
 - Browser tabs that track referers, links, and HTML forms
 - Site crawling with `robots.txt`, sitemaps, rate limits, and checkpoints
-- Retries, timeouts, redirects, and rotating HTTP, HTTPS, and SOCKS5 proxy pools
-- Resumable downloads, server-sent events (SSE), and WebSocket
-- Optional TLS (JA3/JA4), HTTP/2, and HTTP/3 profiles for Chrome, Firefox, Safari, Edge, Opera, and Brave
+- Retries, timeouts, redirects, resumable downloads, server-sent events (SSE), and WebSocket
+- Optional TLS (JA3/JA4), HTTP/2, HTTP/3, and TCP (JA4T) profiles for Chrome, Firefox, Safari, Edge, Opera, and Brave
 
 ## Example
 
@@ -114,12 +115,14 @@ times those of tls-client at 256 in flight.
 
 ## Documentation
 
-- [User guide](https://manaforged.github.io/leyline-http/)
-- [API reference](https://docs.rs/leyline-http)
-- [Upgrading from 0.1](UPGRADE.md)
-- [Changelog](CHANGELOG.md)
-- [Qualification](QUALIFICATION.md): what is proved, tested and measured under failure and load
-- [For coding agents](AGENTS.md)
+- [User guide](https://manaforged.github.io/leyline-http/) — task-by-task guides for sessions, TLS, proxies, crawling, and throughput
+- [API reference](https://docs.rs/leyline-http) — rustdoc for every public type and method
+- [For coding agents](AGENTS.md) — concise patterns and type map for AI coding agents
+- [Upgrade guide](UPGRADE.md) — 1-to-1 migration tables for breaking changes
+- [Changelog](CHANGELOG.md) — release notes, API stability status, and benchmark highlights
+- [Qualification](QUALIFICATION.md) — what is proved, tested, and measured under failure and load
+
+Before `1.0.0`, Leyline is working toward a stable API: breaking changes are only made for clear ergonomic or correctness reasons and are mapped 1-to-1 in [UPGRADE.md](UPGRADE.md).
 
 ## License
 

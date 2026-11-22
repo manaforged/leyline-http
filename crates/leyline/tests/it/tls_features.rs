@@ -485,3 +485,236 @@ async fn https_proxy_does_not_receive_origin_ech_config() {
     assert!(resp.ech_accepted());
     assert_eq!(resp.text().await.unwrap(), "proxied-ech=true");
 }
+
+#[cfg(feature = "http3")]
+#[tokio::test]
+async fn h3_danger_accept_invalid_hostnames_preserves_ca_and_pin_checks() {
+    use super::h3_support::{Limits, Reply, h3_server_with_tls};
+    use leyline::{Browser, Protocol};
+    use sha2::{Digest, Sha256};
+
+    let (cert, key) = self_signed_dns("actual.h3.test");
+    let pem = cert.to_pem().unwrap();
+    let pin: [u8; 32] = Sha256::digest(cert.to_der().unwrap()).into();
+    let server =
+        h3_server_with_tls(cert, key, |_| {}, vec![Reply::Body(5)], Limits::default()).await;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], server.port));
+    let url = format!("https://wrong.h3.test:{}/", server.port);
+
+    let base = || {
+        Session::builder()
+            .browser(Browser::Chrome154)
+            .protocol(Protocol::Http3)
+            .retry(0)
+            .resolve("wrong.h3.test", [addr])
+    };
+
+    let err = base()
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(pem.clone()),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err.kind(), Kind::Http3 | Kind::Tls),
+        "strict H3 must reject mismatched SAN: {err:?}"
+    );
+
+    let body = base()
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(pem.clone())
+                .danger_accept_invalid_hostnames(true),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "xxxxx");
+
+    let err = base()
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .danger_accept_invalid_hostnames(true),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err.kind(), Kind::Http3 | Kind::Tls),
+        "H3 hostname bypass must still reject untrusted CA: {err:?}"
+    );
+
+    let err = base()
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(pem.clone())
+                .pin_cert_sha256([0x42; 32])
+                .danger_accept_invalid_hostnames(true),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err.kind(), Kind::Http3 | Kind::Tls),
+        "H3 hostname bypass must still enforce pins: {err:?}"
+    );
+
+    let body = base()
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(pem)
+                .pin_cert_sha256(pin)
+                .danger_accept_invalid_hostnames(true),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "xxxxx");
+}
+
+#[cfg(feature = "http3")]
+#[tokio::test]
+async fn h3_client_cert_pkcs12_authenticates_mtls() {
+    use super::h3_support::{Limits, Reply, h3_server_with_tls};
+    use leyline::{Browser, Protocol};
+    use leyline_bssl::ssl::SslVerifyMode;
+
+    let (server_cert, server_key) = self_signed_dns("mtls.h3.test");
+    let server_pem = server_cert.to_pem().unwrap();
+    let (client_cert, client_key) = self_signed_dns("client.h3.test");
+    let p12 = leyline_bssl::pkcs12::create("h3-secret", "client", &client_key, &client_cert, None)
+        .unwrap();
+
+    let server = h3_server_with_tls(
+        server_cert,
+        server_key,
+        move |ctx| {
+            ctx.cert_store_mut().add_cert(client_cert).unwrap();
+            ctx.set_verify(SslVerifyMode::PEER | SslVerifyMode::FAIL_IF_NO_PEER_CERT);
+        },
+        vec![Reply::Body(4)],
+        Limits::default(),
+    )
+    .await;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], server.port));
+    let url = format!("https://mtls.h3.test:{}/", server.port);
+
+    let err = Session::builder()
+        .browser(Browser::Chrome154)
+        .protocol(Protocol::Http3)
+        .retry(0)
+        .resolve("mtls.h3.test", [addr])
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(server_pem.clone()),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(err.kind(), Kind::Http3 | Kind::Tls),
+        "H3 mTLS must fail without client cert: {err:?}"
+    );
+
+    let body = Session::builder()
+        .browser(Browser::Chrome154)
+        .protocol(Protocol::Http3)
+        .retry(0)
+        .resolve("mtls.h3.test", [addr])
+        .tls(
+            Tls::new()
+                .system_roots(false)
+                .env_roots(false)
+                .ca_pem(server_pem)
+                .client_cert_pkcs12(p12, "h3-secret"),
+        )
+        .build()
+        .unwrap()
+        .get(&url)
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "xxxx");
+}
+
+#[cfg(feature = "http3")]
+#[tokio::test]
+async fn h3_ech_config_list_encrypts_sni_and_recovers_from_stale_config() {
+    use super::h3_support::{Limits, Reply, h3_server_with_tls};
+    use leyline::{Browser, Protocol};
+
+    let (_live_hpke, live_list, server_keys) = build_ech_config_list(21, "outer.h3.test");
+    let (_stale_hpke, stale_list, _stale_keys) = build_ech_config_list(91, "outer.h3.test");
+    let (cert, key) = self_signed_dns_names(&["inner.h3.test", "outer.h3.test"]);
+    let ca_pem = cert.to_pem().unwrap();
+
+    let server = h3_server_with_tls(
+        cert,
+        key,
+        move |ctx| {
+            ctx.set_ech_keys(&server_keys).unwrap();
+        },
+        vec![Reply::Body(3)],
+        Limits::default(),
+    )
+    .await;
+    let addr = std::net::SocketAddr::from(([127, 0, 0, 1], server.port));
+    let url = format!("https://inner.h3.test:{}/", server.port);
+
+    for (label, list) in [("live", live_list), ("stale-retry", stale_list)] {
+        let resp = Session::builder()
+            .browser(Browser::Chrome154)
+            .protocol(Protocol::Http3)
+            .retry(0)
+            .resolve("inner.h3.test", [addr])
+            .tls(
+                Tls::new()
+                    .system_roots(false)
+                    .env_roots(false)
+                    .ca_pem(ca_pem.clone())
+                    .ech_config_list(list),
+            )
+            .build()
+            .unwrap()
+            .get(&url)
+            .await
+            .unwrap_or_else(|e| panic!("H3 ECH ({label}) failed: {e:?}"));
+        assert!(
+            resp.ech_accepted(),
+            "H3 ECH ({label}) must report ech_accepted"
+        );
+        assert_eq!(resp.text().await.unwrap(), "xxx");
+    }
+}
