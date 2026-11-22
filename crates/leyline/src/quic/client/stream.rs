@@ -26,7 +26,7 @@ impl H3Stream {
             resp_tx: Some(resp_tx),
             response: ResponseState::default(),
             status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
+            headers: crate::wire::Fields::default(),
             trailers: http::HeaderMap::new(),
             body: Vec::new(),
             mode,
@@ -111,7 +111,7 @@ impl H3Stream {
         Box::new(TransportResponse::new(
             http::Version::HTTP_3,
             self.status,
-            std::mem::take(&mut self.headers).into(),
+            std::mem::take(&mut self.headers),
             std::mem::take(&mut self.trailers),
             TransportBody::Buffered(body),
         ))

@@ -182,7 +182,7 @@ struct H3Stream {
     resp_tx: Option<oneshot::Sender<Result<Box<TransportResponse>, H3SendError>>>,
     response: ResponseState,
     status: http::StatusCode,
-    headers: http::HeaderMap,
+    headers: crate::wire::Fields,
     trailers: http::HeaderMap,
     body: Vec<u8>,
     stream_tx: Option<mpsc::Sender<Chunk>>,

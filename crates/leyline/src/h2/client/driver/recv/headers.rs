@@ -149,7 +149,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     fn respond(
         &mut self,
         h: &HeadersFrame,
-        head: Option<(http::StatusCode, HeaderMap, Option<u64>)>,
+        head: Option<(http::StatusCode, crate::wire::Fields, Option<u64>)>,
     ) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
         let Some(actor) = self.streams.get_mut(stream_id) else {

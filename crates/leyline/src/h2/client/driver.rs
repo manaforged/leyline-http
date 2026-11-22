@@ -151,7 +151,7 @@ struct StreamActor {
     response_tx: Option<ResponseSink>,
     status: http::StatusCode,
     response: ResponseState,
-    resp_headers: http::HeaderMap,
+    resp_headers: crate::wire::Fields,
     body: Vec<u8>,
     trailers: http::HeaderMap,
     head_request: bool,
@@ -181,7 +181,7 @@ impl StreamActor {
             response_tx: Some(sink),
             status: http::StatusCode::OK,
             response: ResponseState::default(),
-            resp_headers: http::HeaderMap::new(),
+            resp_headers: crate::wire::Fields::default(),
             body: Vec::new(),
             trailers: http::HeaderMap::new(),
             head_request,
@@ -205,7 +205,7 @@ impl StreamActor {
         Box::new(TransportResponse::new(
             http::Version::HTTP_2,
             self.status,
-            std::mem::take(&mut self.resp_headers).into(),
+            std::mem::take(&mut self.resp_headers),
             std::mem::take(&mut self.trailers),
             TransportBody::Buffered(body),
         ))

@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use bytes::Bytes;
-use http::{HeaderMap, HeaderName};
+use http::{HeaderMap, HeaderName, HeaderValue};
 
 use super::h1::{find_values, parse_head};
 use crate::util::has_token;
@@ -47,6 +47,18 @@ impl Fact {
 }
 
 impl Seen {
+    pub(crate) fn note_header(&mut self, name: &HeaderName) {
+        if *name == http::header::SET_COOKIE {
+            self.cookies = true;
+        } else if *name == http::header::STRICT_TRANSPORT_SECURITY {
+            self.hsts = true;
+        } else if *name == http::header::ALT_SVC {
+            self.alt_svc = true;
+        } else if *name == http::header::CONTENT_ENCODING {
+            self.encoded = true;
+        }
+    }
+
     pub(crate) fn note(&mut self, fact: Fact) {
         match fact {
             Fact::Cookies => self.cookies = true,
@@ -94,6 +106,11 @@ enum Repr {
         seen: Seen,
         map: OnceLock<Box<HeaderMap>>,
     },
+    List {
+        pairs: Vec<(HeaderName, HeaderValue)>,
+        seen: Seen,
+        map: OnceLock<Box<HeaderMap>>,
+    },
 }
 
 impl Fields {
@@ -105,11 +122,26 @@ impl Fields {
         })
     }
 
+    pub(crate) fn list(pairs: Vec<(HeaderName, HeaderValue)>, seen: Seen) -> Self {
+        Self(Repr::List {
+            pairs,
+            seen,
+            map: OnceLock::new(),
+        })
+    }
+
     /// Returns the fields as a header map, parsing them on the first call.
     pub fn map(&self) -> &HeaderMap {
         match &self.0 {
             Repr::Map(map) => map,
             Repr::Raw { head, map, .. } => map.get_or_init(|| Box::new(build(head))),
+            Repr::List { pairs, map, .. } => map.get_or_init(|| {
+                let mut out = HeaderMap::with_capacity(pairs.len());
+                for (name, value) in pairs {
+                    out.append(name.clone(), value.clone());
+                }
+                Box::new(out)
+            }),
         }
     }
 
@@ -120,6 +152,16 @@ impl Fields {
             Repr::Raw { head, map, .. } => {
                 map.into_inner().map_or_else(|| build(&head), |map| *map)
             }
+            Repr::List { pairs, map, .. } => map.into_inner().map_or_else(
+                || {
+                    let mut out = HeaderMap::with_capacity(pairs.len());
+                    for (name, value) in pairs {
+                        out.append(name, value);
+                    }
+                    out
+                },
+                |map| *map,
+            ),
         }
     }
 
@@ -132,13 +174,17 @@ impl Fields {
     pub(crate) fn seen(&self) -> Seen {
         match &self.0 {
             Repr::Map(map) => Seen::of(map),
-            Repr::Raw { seen, .. } => *seen,
+            Repr::Raw { seen, .. } | Repr::List { seen, .. } => *seen,
         }
     }
 
     pub(crate) fn any_value(&self, name: &HeaderName, mut hit: impl FnMut(&[u8]) -> bool) -> bool {
         match &self.0 {
             Repr::Raw { head, map, .. } if map.get().is_none() => find_values(head, name, hit),
+            Repr::List { pairs, map, .. } if map.get().is_none() => pairs
+                .iter()
+                .filter(|(k, _)| k == name)
+                .any(|(_, v)| hit(v.as_bytes())),
             _ => self.map().get_all(name).iter().any(|v| hit(v.as_bytes())),
         }
     }

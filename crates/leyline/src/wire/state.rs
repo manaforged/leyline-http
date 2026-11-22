@@ -1,5 +1,7 @@
 use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 
+use super::{Fields, Seen};
+
 /// The most informational (1xx) responses leyline reads before the final one.
 const MAX_INFORMATIONAL: usize = 16;
 
@@ -67,7 +69,7 @@ pub(crate) enum ResponseBlock {
     Informational,
     Final {
         status: StatusCode,
-        headers: HeaderMap,
+        headers: Fields,
         length: Option<u64>,
     },
     Trailers(HeaderMap),
@@ -87,7 +89,10 @@ pub(crate) struct BlockReader {
 impl BlockReader {
     pub(crate) fn new(state: ResponseState) -> Self {
         let collect = match state {
-            ResponseState::Initial(_) => Collect::Head(ResponseHead::default()),
+            ResponseState::Initial(_) => Collect::Head(ResponseHead {
+                headers: Vec::with_capacity(8),
+                ..ResponseHead::default()
+            }),
             ResponseState::Final | ResponseState::Trailers => Collect::Trailers(HeaderMap::new()),
         };
         Self {
@@ -152,7 +157,8 @@ impl BlockReader {
 struct ResponseHead {
     status: Option<StatusCode>,
     regular: bool,
-    headers: HeaderMap,
+    headers: Vec<(HeaderName, HeaderValue)>,
+    seen: Seen,
     length: Option<u64>,
 }
 
@@ -201,13 +207,14 @@ impl ResponseHead {
                     .ok_or("response has invalid content-length")?,
             );
         }
-        self.headers.append(name, value);
+        self.seen.note_header(&name);
+        self.headers.push((name, value));
         Ok(())
     }
 
-    fn finish(self) -> Result<(StatusCode, HeaderMap, Option<u64>), &'static str> {
+    fn finish(self) -> Result<(StatusCode, Fields, Option<u64>), &'static str> {
         self.status
-            .map(|status| (status, self.headers, self.length))
+            .map(|status| (status, Fields::list(self.headers, self.seen), self.length))
             .ok_or("response missing :status pseudo-header")
     }
 }
