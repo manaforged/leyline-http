@@ -105,7 +105,7 @@ impl NetError {
     }
 
     pub(crate) fn copy(&self) -> Self {
-        let io = |e: &io::Error| io::Error::new(e.kind(), e.to_string());
+        let io = crate::error::copy_io;
         match self {
             Self::TcpConnect(e) => Self::TcpConnect(io(e)),
             Self::Config(e) => Self::Config(io(e)),
@@ -150,7 +150,10 @@ impl Cause for NetError {
     fn is_transient(&self) -> bool {
         match self {
             Self::Proxy { status, source, .. } => {
-                source.is_some() || status.is_some_and(is_gateway_status)
+                source
+                    .as_ref()
+                    .is_some_and(|e| !crate::error::is_tls_record_error(e))
+                    || status.is_some_and(is_gateway_status)
             }
             Self::ProxyTargetUnreachable {
                 reply: ProxyReply::HttpStatus(code),

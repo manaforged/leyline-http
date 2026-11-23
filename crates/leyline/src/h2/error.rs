@@ -78,13 +78,7 @@ pub enum H2Error {
 }
 
 fn copy_io(io: &std::io::Error) -> std::io::Error {
-    if let Some(record) = io
-        .get_ref()
-        .and_then(|inner| inner.downcast_ref::<leyline_bssl_tokio::RecordError>())
-    {
-        return std::io::Error::new(io.kind(), record.clone());
-    }
-    std::io::Error::new(io.kind(), io.to_string())
+    crate::error::copy_io(io)
 }
 
 impl H2Error {

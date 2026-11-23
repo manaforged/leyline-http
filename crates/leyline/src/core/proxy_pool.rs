@@ -22,7 +22,7 @@ struct Entry {
     identity: Option<Identity>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Settings {
     sticky_for: Duration,
     ban_after: u32,
@@ -146,7 +146,8 @@ impl ProxyPool {
     }
 
     pub(crate) fn same_for_doh(&self, other: &Self) -> bool {
-        self.entries.len() == other.entries.len()
+        self.settings == other.settings
+            && self.entries.len() == other.entries.len()
             && self
                 .entries
                 .iter()

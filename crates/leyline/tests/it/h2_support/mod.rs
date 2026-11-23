@@ -251,3 +251,38 @@ impl Drop for Endless {
 pub fn endless(producer: &Arc<Producer>) -> leyline::Body {
     leyline::Body::stream(Endless(Arc::clone(producer)), None)
 }
+
+pub async fn spawn_h2_static_server(body: &'static [u8]) -> (u16, Vec<u8>) {
+    let (cert, key) = crate::tls_support::self_signed();
+    let der = cert.to_der().expect("cert der");
+    let port = crate::tls_support::tls_server_per_connection(
+        cert,
+        key,
+        Arc::new(AtomicUsize::new(0)),
+        |_| crate::tls_support::H2,
+        move |_, mut stream| async move {
+            read_preface(&mut stream).await;
+            write_server_settings(&mut stream).await;
+            loop {
+                let (hdr, _) = match tokio::time::timeout(
+                    std::time::Duration::from_secs(3),
+                    read_frame(&mut stream),
+                )
+                .await
+                {
+                    Ok(frame) => frame,
+                    Err(_) => break,
+                };
+                if hdr.frame_type == FrameType::Settings as u8 && hdr.flags & 0x1 == 0 {
+                    write_settings_ack(&mut stream).await;
+                } else if hdr.frame_type == FrameType::Headers as u8 {
+                    write_response(&mut stream, hdr.stream_id, body).await;
+                } else if hdr.frame_type == FrameType::GoAway as u8 {
+                    break;
+                }
+            }
+        },
+    )
+    .await;
+    (port, der)
+}

@@ -32,22 +32,29 @@ pub(crate) struct SocketOptions {
 }
 
 impl SocketOptions {
+    pub(crate) fn invalid_interface_name(name: &str) -> io::Error {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid network interface name `{name}`"),
+        )
+    }
+
     pub(crate) fn validate_interface_name(name: &str) -> io::Result<()> {
         if name.is_empty() || name.as_bytes().contains(&0) {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("invalid network interface name `{name}`"),
-            ));
+            return Err(Self::invalid_interface_name(name));
         }
         Ok(())
     }
 
     pub(crate) fn is_interface_config_error(&self, err: &io::Error) -> bool {
-        self.interface.is_some()
-            && matches!(
-                err.kind(),
-                io::ErrorKind::InvalidInput | io::ErrorKind::NotFound | io::ErrorKind::Unsupported
-            )
+        (self.strict && err.kind() == io::ErrorKind::Unsupported)
+            || (self.interface.is_some()
+                && matches!(
+                    err.kind(),
+                    io::ErrorKind::InvalidInput
+                        | io::ErrorKind::NotFound
+                        | io::ErrorKind::Unsupported
+                ))
     }
 }
 

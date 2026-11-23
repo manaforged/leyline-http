@@ -285,9 +285,11 @@ fn proxy_pool_same_for_doh_checks_len_and_each_entry() {
     let p2 = Proxy::new().all("http://127.0.0.1:8081");
     let one_a = ProxyPool::new([p1.clone()]);
     let one_a_copy = ProxyPool::new([p1.clone()]);
+    let one_a_ban = ProxyPool::new([p1.clone()]).ban_after(1);
     let one_b = ProxyPool::new([p2.clone()]);
     let two = ProxyPool::new([p1, p2]);
     assert!(one_a.same_for_doh(&one_a_copy));
+    assert!(!one_a.same_for_doh(&one_a_ban));
     assert!(!one_a.same_for_doh(&one_b));
     assert!(!one_a.same_for_doh(&two));
 }

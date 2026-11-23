@@ -43,7 +43,7 @@ impl<S> std::fmt::Debug for RecordStream<S> {
 
 /// A TLS 1.3 record-layer failure or fatal alert received after the handshake.
 #[derive(Debug, Clone)]
-pub struct RecordError(String);
+pub struct RecordError(pub(crate) String);
 
 impl std::fmt::Display for RecordError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

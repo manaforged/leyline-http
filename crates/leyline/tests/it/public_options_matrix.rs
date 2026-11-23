@@ -44,7 +44,7 @@ async fn pool_max_lifetime_evicts_aged_idle_connection() {
 
     let url = format!("http://{addr}/life");
     let session = Session::builder()
-        .pool_max_lifetime(Duration::from_millis(80))
+        .pool_max_lifetime(Duration::from_millis(250))
         .build()
         .unwrap();
     assert_eq!(session.get(&url).text().await.unwrap(), "ok");
@@ -55,7 +55,7 @@ async fn pool_max_lifetime_evicts_aged_idle_connection() {
         "fresh connection within pool_max_lifetime must be reused"
     );
 
-    tokio::time::sleep(Duration::from_millis(120)).await;
+    tokio::time::sleep(Duration::from_millis(320)).await;
     assert_eq!(session.get(&url).text().await.unwrap(), "ok");
     assert_eq!(
         accepts.load(Ordering::SeqCst),
@@ -66,13 +66,36 @@ async fn pool_max_lifetime_evicts_aged_idle_connection() {
 
 #[tokio::test]
 async fn host_limits_max_pending_rejects_excess_waiters_with_overloaded() {
-    let server = Server::http(|_| {
-        Response::new(200)
-            .delay(Duration::from_millis(120))
-            .body("ok")
-    })
-    .await
-    .unwrap();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let release_bg = Arc::clone(&release);
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let entered_bg = Arc::clone(&entered);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let mut first = true;
+        while let Ok((mut sock, _)) = listener.accept().await {
+            let release_bg = Arc::clone(&release_bg);
+            let entered_bg = Arc::clone(&entered_bg);
+            let hold = first;
+            first = false;
+            tokio::spawn(async move {
+                let mut req = [0u8; 512];
+                drop(sock.read(&mut req).await);
+                if hold {
+                    entered_bg.notify_one();
+                    release_bg.notified().await;
+                }
+                drop(
+                    sock.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    )
+                    .await,
+                );
+            });
+        }
+    });
 
     let session = Session::builder()
         .host_limits(HostLimits::new().max_in_flight(1).max_pending(1))
@@ -80,27 +103,32 @@ async fn host_limits_max_pending_rejects_excess_waiters_with_overloaded() {
         .build()
         .unwrap();
 
-    let mut handles = Vec::new();
-    for _ in 0..4 {
+    let url = format!("http://{addr}/slow");
+    let first = {
         let s = session.clone();
-        let url = server.url("/slow");
-        handles.push(tokio::spawn(async move { s.get(url).send().await }));
-    }
+        let u = url.clone();
+        tokio::spawn(async move { s.get(u).send().await })
+    };
+    entered.notified().await;
 
-    let mut ok = 0usize;
-    let mut overloaded = 0usize;
-    for handle in handles {
-        match handle.await.unwrap() {
-            Ok(resp) if resp.status().as_u16() == 200 => ok += 1,
-            Err(err) if err.kind() == Kind::Overloaded => overloaded += 1,
-            other => panic!("unexpected result under max_pending(1): {other:?}"),
-        }
-    }
-    assert_eq!(ok, 2, "1 active + 1 pending waiter must succeed");
+    let second = {
+        let s = session.clone();
+        let u = url.clone();
+        tokio::spawn(async move { s.get(u).send().await })
+    };
+    tokio::task::yield_now().await;
+    tokio::time::sleep(Duration::from_millis(20)).await;
+
+    let third = session.get(&url).send().await.unwrap_err();
     assert_eq!(
-        overloaded, 2,
-        "excess callers beyond max_pending(1) must fail fast with Kind::Overloaded"
+        third.kind(),
+        Kind::Overloaded,
+        "3rd caller beyond max_in_flight(1) + max_pending(1) must fail fast with Overloaded"
     );
+
+    release.notify_waiters();
+    assert_eq!(first.await.unwrap().unwrap().status().as_u16(), 200);
+    assert_eq!(second.await.unwrap().unwrap().status().as_u16(), 200);
 }
 
 #[tokio::test]
@@ -196,10 +224,10 @@ async fn all_websocket_tuning_options_enforced_on_wire() {
         .await
         .unwrap();
     let err = stream.next().await.unwrap().unwrap_err();
-    assert_ne!(
+    assert_eq!(
         err.kind(),
-        Kind::Config,
-        "128-byte frame must fail under websocket_max_frame_size(32): {err:?}"
+        Kind::Body,
+        "128-byte frame must fail with Kind::Body under websocket_max_frame_size(32): {err:?}"
     );
 }
 

@@ -3,6 +3,16 @@ use std::io;
 use super::BodyLimit;
 use super::{Cause, Error, Kind};
 
+pub(crate) fn is_peer_closed(kind: io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::BrokenPipe
+    )
+}
+
 impl Error {
     /// Returns true when a connect, read, or total timeout ended the request.
     pub fn is_timeout(&self) -> bool {
@@ -60,15 +70,10 @@ impl Error {
     }
 
     pub(crate) fn is_connection_closed(&self) -> bool {
-        if self.transport_io().is_some_and(|e| {
-            matches!(
-                e.kind(),
-                io::ErrorKind::UnexpectedEof
-                    | io::ErrorKind::ConnectionReset
-                    | io::ErrorKind::ConnectionAborted
-                    | io::ErrorKind::BrokenPipe
-            )
-        }) {
+        if self
+            .transport_io()
+            .is_some_and(|e| is_peer_closed(e.kind()))
+        {
             return true;
         }
         if self.facts().is_some_and(Cause::is_closed) || self.is_refused_stream() {

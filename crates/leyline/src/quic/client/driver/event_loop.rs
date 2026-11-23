@@ -27,6 +27,8 @@ pub(super) struct H3Loop {
     draining: bool,
 }
 
+type DatagramStop = (String, fn(String) -> H3SendError);
+
 impl H3Loop {
     pub(super) fn new(driver: H3Driver) -> Self {
         let EstablishedH3 {
@@ -126,8 +128,8 @@ impl H3Loop {
             cmd = self.command_rx.recv(), if self.accepting_commands() => self.on_command(cmd),
             chunk = self.body_chunk_rx.recv() => self.on_body_chunk(chunk),
             recv = self.socket.recv(&mut self.buf) => {
-                if let Err(reason) = self.on_datagram(recv) {
-                    return self.stop(reason, H3SendError::Closed);
+                if let Err((reason, kind)) = self.on_datagram(recv) {
+                    return self.stop(reason, kind);
                 }
             }
             _ = tokio::time::sleep(timeout) => self.conn.on_timeout(),
@@ -181,8 +183,9 @@ impl H3Loop {
         }
     }
 
-    fn on_datagram(&mut self, recv: io::Result<usize>) -> Result<(), String> {
-        let len = recv.map_err(|e| format!("udp recv: {e}"))?;
+    fn on_datagram(&mut self, recv: io::Result<usize>) -> Result<(), DatagramStop> {
+        let closed = |msg: String| (msg, H3SendError::Closed as fn(String) -> H3SendError);
+        let len = recv.map_err(|e| closed(format!("udp recv: {e}")))?;
         if len == 0 {
             return Ok(());
         }
@@ -190,9 +193,20 @@ impl H3Loop {
             from: self.peer_addr,
             to: self.local_addr,
         };
-        self.conn
-            .recv(&mut self.buf[..len], recv_info)
-            .map_err(|e| format!("quic recv: {e}"))?;
+        if let Err(e) = self.conn.recv(&mut self.buf[..len], recv_info) {
+            if matches!(e, quiche::Error::TlsFail)
+                || crate::quic::connection::is_crypto_close(&self.conn)
+            {
+                let stack = leyline_bssl::error::ErrorStack::get();
+                let reason = if stack.errors().is_empty() {
+                    format!("quic recv: {e}")
+                } else {
+                    format!("quic recv: {e}: {stack}")
+                };
+                return Err((reason, H3SendError::Tls));
+            }
+            return Err(closed(format!("quic recv: {e}")));
+        }
         let goaway = Drain {
             h3: &mut self.h3,
             conn: &mut self.conn,
@@ -201,7 +215,8 @@ impl H3Loop {
             admit: &mut self.admit_cap,
             draining: self.draining,
         }
-        .run()?;
+        .run()
+        .map_err(closed)?;
         if goaway {
             self.begin_draining();
         }

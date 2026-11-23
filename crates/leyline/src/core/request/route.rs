@@ -58,8 +58,10 @@ impl<'a> Route<'a> {
             Err(error) => error.set_proxy(used.as_deref()),
         }
         if let Some(lease) = lease {
-            let answered = result.as_ref().ok().and_then(|r| Origin::of(r.url()));
-            lease.record(&result, origin.as_ref(), answered.as_ref());
+            if used.is_some() {
+                let answered = result.as_ref().ok().and_then(|r| Origin::of(r.url()));
+                lease.record(&result, origin.as_ref(), answered.as_ref());
+            }
             self.last = Some(lease.index());
         }
         result

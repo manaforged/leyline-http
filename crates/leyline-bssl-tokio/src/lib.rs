@@ -51,11 +51,23 @@ where
     HandshakeFuture(Some(mid_handshake)).await
 }
 
+fn normalize_ssl_io(e: io::Error) -> io::Error {
+    let is_ssl = e
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<ssl::Error>())
+        .is_some_and(|err| err.ssl_error().is_some() || err.code() == ErrorCode::SSL);
+    if is_ssl {
+        io::Error::new(io::ErrorKind::InvalidData, RecordError(e.to_string()))
+    } else {
+        e
+    }
+}
+
 fn cvt<T>(r: io::Result<T>) -> Poll<io::Result<T>> {
     match r {
         Ok(v) => Poll::Ready(Ok(v)),
         Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => Poll::Pending,
-        Err(e) => Poll::Ready(Err(e)),
+        Err(e) => Poll::Ready(Err(normalize_ssl_io(e))),
     }
 }
 
@@ -206,7 +218,15 @@ where
                 return Poll::Pending;
             }
             Err(e) => {
-                return Poll::Ready(Err(e.into_io_error().unwrap_or_else(io::Error::other)));
+                let is_ssl = e.ssl_error().is_some() || e.code() == ErrorCode::SSL;
+                let err = e.into_io_error().unwrap_or_else(|err| {
+                    if is_ssl {
+                        io::Error::new(io::ErrorKind::InvalidData, RecordError(err.to_string()))
+                    } else {
+                        io::Error::other(err)
+                    }
+                });
+                return Poll::Ready(Err(normalize_ssl_io(err)));
             }
         }
 

@@ -16,8 +16,8 @@ mod marker;
 mod profile;
 
 pub(crate) use cause::Cause;
-pub(crate) use classify::{is_gateway_status, is_transient_status};
-pub(crate) use from::is_tls_record_error;
+pub(crate) use classify::{is_gateway_status, is_peer_closed, is_transient_status};
+pub(crate) use from::{copy_io, is_tls_record_error};
 pub(crate) use limit::BodyLimit;
 pub(crate) use profile::ProfileChanged;
 
@@ -70,7 +70,7 @@ impl Error {
         if let Some(copy) = self.facts().and_then(Cause::duplicate) {
             out.inner.source = Some(Source::Cause(copy));
         } else if let Some(io) = self.io() {
-            out = out.with_source(std::io::Error::new(io.kind(), io.to_string()));
+            out = out.with_source(copy_io(io));
         } else if let Some(source) = self.source() {
             out = out.with_source(source.to_string());
         } else {

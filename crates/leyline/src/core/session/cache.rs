@@ -59,6 +59,16 @@ impl Key {
         let proxy = request.proxy.map_or("", |proxy| proxy.url().as_str());
         hash.update((proxy.len() as u64).to_be_bytes());
         hash.update(proxy.as_bytes());
+        if let Some(proxy) = request.proxy {
+            for (name, value) in proxy.headers() {
+                hash.update((name.len() as u64).to_be_bytes());
+                for byte in name.as_bytes() {
+                    hash.update([byte.to_ascii_lowercase()]);
+                }
+                hash.update((value.len() as u64).to_be_bytes());
+                hash.update(value.as_bytes());
+            }
+        }
         for (name, value) in &request.headers {
             if [header::CACHE_CONTROL, header::PRAGMA]
                 .iter()
@@ -66,10 +76,13 @@ impl Key {
             {
                 continue;
             }
-            for bytes in [name.as_bytes(), value.as_str().as_bytes()] {
-                hash.update((bytes.len() as u64).to_be_bytes());
-                hash.update(bytes);
+            hash.update((name.len() as u64).to_be_bytes());
+            for byte in name.as_bytes() {
+                hash.update([byte.to_ascii_lowercase()]);
             }
+            let val = value.as_str().as_bytes();
+            hash.update((val.len() as u64).to_be_bytes());
+            hash.update(val);
         }
         Self {
             url: request.url[..url::Position::AfterQuery].to_owned(),

@@ -151,7 +151,7 @@ fn wire_to_io(err: WireError) -> io::Error {
 
 impl Resolver for DohResolver {
     fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {
-        if let Ok(ip) = host.parse::<IpAddr>() {
+        if let Ok(ip) = crate::util::bare_host(host).parse::<IpAddr>() {
             return Box::pin(async move { Ok(vec![SocketAddr::new(ip, port)]) });
         }
         let key = normalize_host(host);
@@ -189,7 +189,7 @@ impl Resolver for DohResolver {
     }
 
     fn resolve_ech<'a>(&'a self, host: &'a str, port: u16) -> EchFuture<'a> {
-        if host.parse::<IpAddr>().is_ok() {
+        if crate::util::bare_host(host).parse::<IpAddr>().is_ok() {
             return Box::pin(async { None });
         }
         let host = normalize_host(host);

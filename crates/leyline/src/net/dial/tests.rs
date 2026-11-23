@@ -118,4 +118,15 @@ async fn dns_timeout_and_config_errors_classify_through_net_error() {
         .with_resolver(std::sync::Arc::new(Failing(std::io::ErrorKind::Other)));
     let err = other_dialer.dial("other.test", 443).await.unwrap_err();
     assert_eq!(err.kind(), crate::error::Kind::Dns);
+
+    let tls_io = std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        leyline_bssl::error::ErrorStack::get(),
+    );
+    let proxy_tls = crate::error::Error::from(crate::net::NetError::proxy_io(tls_io));
+    assert_eq!(proxy_tls.kind(), crate::error::Kind::Proxy);
+    assert!(
+        !proxy_tls.is_retryable(),
+        "TLS alert on HTTPS proxy CONNECT must not be retryable"
+    );
 }

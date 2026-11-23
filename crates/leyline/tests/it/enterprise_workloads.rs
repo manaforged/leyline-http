@@ -373,11 +373,14 @@ async fn enterprise_proxy_pool_mixed_http_ws_failover_ban_expiry_and_bypass() {
     #[cfg(feature = "websocket")]
     {
         let ws_err = session
-            .get(format!("ws://target.fleet.test:{origin_port}/ws"))
+            .get(format!("wss://target.fleet.test:{origin_port}/ws"))
             .websocket()
             .await
             .unwrap_err();
-        assert_ne!(ws_err.kind(), Kind::Config);
+        assert!(
+            ws_err.is_proxy() || matches!(ws_err.kind(), Kind::Proxy | Kind::Tls | Kind::Io),
+            "wss:// through proxy pool must traverse proxy pool rather than fail at URL check: {ws_err:?}"
+        );
     }
 }
 
@@ -403,45 +406,7 @@ async fn enterprise_h1_h2_h3_concurrent_chaos_cancel_safety_and_graceful_shutdow
     .unwrap();
 
     #[cfg(feature = "bench-internals")]
-    let (h2_port, h2_ca_der) = {
-        use super::h2_support::{
-            read_frame, read_preface, write_response, write_server_settings, write_settings_ack,
-        };
-        use super::tls_support::{H2, self_signed, tls_server_per_connection};
-        use leyline::internals::h2::frame::FrameType;
-
-        let (cert, key) = self_signed();
-        let der = cert.to_der().unwrap();
-        let conns = Arc::new(AtomicUsize::new(0));
-        let port = tls_server_per_connection(
-            cert,
-            key,
-            conns,
-            |_| H2,
-            |_, mut stream| async move {
-                read_preface(&mut stream).await;
-                write_server_settings(&mut stream).await;
-                loop {
-                    let (hdr, _payload) =
-                        match tokio::time::timeout(Duration::from_secs(3), read_frame(&mut stream))
-                            .await
-                        {
-                            Ok(frame) => frame,
-                            Err(_) => break,
-                        };
-                    if hdr.frame_type == FrameType::Settings as u8 && hdr.flags & 0x1 == 0 {
-                        write_settings_ack(&mut stream).await;
-                    } else if hdr.frame_type == FrameType::Headers as u8 {
-                        write_response(&mut stream, hdr.stream_id, b"h2-ok").await;
-                    } else if hdr.frame_type == FrameType::GoAway as u8 {
-                        break;
-                    }
-                }
-            },
-        )
-        .await;
-        (port, der)
-    };
+    let (h2_port, h2_ca_der) = super::h2_support::spawn_h2_static_server(b"h2-ok").await;
 
     #[cfg(feature = "http3")]
     let h3 = super::h3_support::h3_server(
@@ -453,11 +418,6 @@ async fn enterprise_h1_h2_h3_concurrent_chaos_cancel_safety_and_graceful_shutdow
     let tls = leyline::Tls::new().system_roots(false).env_roots(false);
     #[cfg(feature = "bench-internals")]
     let tls = tls.ca_der(h2_ca_der);
-    #[cfg(feature = "http3")]
-    {
-        let h3_tls_session = h3.session();
-        drop(h3_tls_session);
-    }
     let session = Session::builder()
         .browser(Browser::Chrome154)
         .tls(tls)
@@ -541,7 +501,7 @@ async fn enterprise_h1_h2_h3_concurrent_chaos_cancel_safety_and_graceful_shutdow
         .send()
         .await
         .unwrap_err();
-    assert_ne!(post_err.kind(), Kind::Config);
+    assert_eq!(post_err.kind(), Kind::Io);
     assert_eq!(
         post_hits.load(Ordering::SeqCst),
         1,
@@ -553,7 +513,13 @@ async fn enterprise_h1_h2_h3_concurrent_chaos_cancel_safety_and_graceful_shutdow
     let inflight = tokio::spawn(async move { slow_s.get(slow_url).send().await });
     tokio::time::sleep(Duration::from_millis(20)).await;
     session.shutdown().await;
-    drop(inflight.await);
+    match inflight.await.unwrap() {
+        Ok(resp) => assert_eq!(resp.status().as_u16(), 200),
+        Err(err) => assert!(
+            err.is_shut_down(),
+            "in-flight request during shutdown must complete or report shut_down: {err:?}"
+        ),
+    }
 
     let after = session.get(h1.url("/fast")).send().await.unwrap_err();
     assert!(after.is_shut_down());

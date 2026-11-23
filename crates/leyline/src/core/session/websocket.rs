@@ -98,7 +98,9 @@ impl Session {
             WebSocket::connect_h1(&session.inner.connector, &handshake).await
         }
         .await;
-        if let Some(lease) = lease {
+        if proxy.is_some()
+            && let Some(lease) = &lease
+        {
             lease.record_handshake(&result, lease_origin.as_ref());
         }
         result

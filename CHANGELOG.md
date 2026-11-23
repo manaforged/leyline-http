@@ -53,7 +53,7 @@ custom proxy headers.
 - `RequestBuilder::protocol` forces the HTTP version for one request, and its WebSocket handshake, on the session's own connection pool and without the HTTP cache; it travels through `build` and `request_from` as a `Protocol` extension.
 - `Response::remote_addr` returns the socket address the connection was opened to, and `trace::Event::Connect` carries it as `addr`.
 - `Response::from_cache` tells whether the body came from the session's HTTP cache.
-- `Proxy::custom` chooses the proxy for each request and redirect hop with a closure over the URL; `None` sends the request with no proxy, and `no_proxy` on it still applies.
+- `Proxy::custom` chooses the proxy for each request and redirect hop with a closure over the URL; `None` sends the request with no proxy, and `no_proxy`, `header`, and `headers` on it still apply.
 - `SessionBuilder::build_blocking` builds a `blocking::Session`.
 - `None` turns off the cap or the cache in `SessionBuilder::cache`, `max_body_size`, and `max_error_body_size`, `RequestBuilder::max_body_size`, `Crawl::max_body_size`, and `Events::max_event_size`.
 - `bearer_auth`, `basic_auth`, and `digest_auth` take a `String` as well as a `&str`.

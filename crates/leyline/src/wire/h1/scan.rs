@@ -43,7 +43,7 @@ impl<'a, P: Pick<'a>> Sink<'a> for Fold<'a, P> {
         let Some(key) = self.pick.key(name) else {
             return Ok(());
         };
-        let value = trim_start(value);
+        let value = trim_end(trim_start(value));
         if !is_valid_header_value(value) {
             return Self::invalid(key);
         }

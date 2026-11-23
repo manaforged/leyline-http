@@ -122,6 +122,8 @@ pub(super) fn tungstenite_config(
 pub(super) fn wire_error(op: &'static str, e: WireError) -> Error {
     let kind = match &e {
         WireError::Capacity(_) | WireError::Protocol(_) | WireError::Utf8 => Kind::Body,
+        WireError::Io(io) if crate::error::is_tls_record_error(io) => Kind::Tls,
+        WireError::Io(io) if io.kind() == std::io::ErrorKind::TimedOut => Kind::Timeout,
         _ => Kind::Io,
     };
     let err = Error::new(kind).with_message(format!("{op}: {e}"));

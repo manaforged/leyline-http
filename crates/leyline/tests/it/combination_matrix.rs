@@ -161,44 +161,7 @@ async fn combo_proxy_list_with_before_send_cache_download_tab_crawl_and_h2_conne
     let (proxy_b, connect_b, forward_b) = spawn_connect_proxy().await;
 
     #[cfg(feature = "bench-internals")]
-    let (h2_port, h2_ca_der) = {
-        use super::h2_support::{
-            read_frame, read_preface, write_response, write_server_settings, write_settings_ack,
-        };
-        use super::tls_support::{H2, self_signed, tls_server_per_connection};
-        use leyline::internals::h2::frame::FrameType;
-
-        let (cert, key) = self_signed();
-        let der = cert.to_der().unwrap();
-        let port = tls_server_per_connection(
-            cert,
-            key,
-            Arc::new(AtomicUsize::new(0)),
-            |_| H2,
-            |_, mut stream| async move {
-                read_preface(&mut stream).await;
-                write_server_settings(&mut stream).await;
-                loop {
-                    let (hdr, _) =
-                        match tokio::time::timeout(Duration::from_secs(3), read_frame(&mut stream))
-                            .await
-                        {
-                            Ok(f) => f,
-                            Err(_) => break,
-                        };
-                    if hdr.frame_type == FrameType::Settings as u8 && hdr.flags & 0x1 == 0 {
-                        write_settings_ack(&mut stream).await;
-                    } else if hdr.frame_type == FrameType::Headers as u8 {
-                        write_response(&mut stream, hdr.stream_id, b"h2-via-connect").await;
-                    } else if hdr.frame_type == FrameType::GoAway as u8 {
-                        break;
-                    }
-                }
-            },
-        )
-        .await;
-        (port, der)
-    };
+    let (h2_port, h2_ca_der) = super::h2_support::spawn_h2_static_server(b"h2-via-connect").await;
 
     let tls = leyline::Tls::new().system_roots(false).env_roots(false);
     #[cfg(feature = "bench-internals")]

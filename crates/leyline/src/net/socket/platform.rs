@@ -133,14 +133,6 @@ pub(super) fn apply(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) -> io
 }
 
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
-fn invalid_interface_name(name: &str) -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidInput,
-        format!("invalid network interface name `{name}`"),
-    )
-}
-
-#[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
 pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::Result<()> {
     super::SocketOptions::validate_interface_name(name)?;
     socket.bind_device(Some(name.as_bytes())).map_err(|err| {
@@ -150,7 +142,7 @@ pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::R
                 format!("unknown network interface `{name}`"),
             )
         } else if err.raw_os_error() == Some(libc::EINVAL) {
-            invalid_interface_name(name)
+            super::SocketOptions::invalid_interface_name(name)
         } else {
             err
         }

@@ -28,6 +28,16 @@ pub(crate) fn is_tls_record_error(e: &io::Error) -> bool {
     })
 }
 
+pub(crate) fn copy_io(e: &io::Error) -> io::Error {
+    if let Some(record) = e
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<leyline_bssl_tokio::RecordError>())
+    {
+        return io::Error::new(e.kind(), record.clone());
+    }
+    io::Error::new(e.kind(), e.to_string())
+}
+
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         if let Some(limit) = BodyLimit::of_io(&e) {

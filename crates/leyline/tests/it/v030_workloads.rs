@@ -8,6 +8,16 @@ use leyline::{Body, Browser, Kind, Protocol, Proxy, Redirect, Session, Timeout, 
 
 use super::doh_and_ech::{decode_qname_and_qtype, dns_response};
 
+#[cfg(feature = "compression-gzip")]
+pub(super) fn gzip_bytes(data: &[u8]) -> Vec<u8> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use std::io::Write;
+    let mut enc = GzEncoder::new(Vec::new(), Compression::best());
+    enc.write_all(data).unwrap();
+    enc.finish().unwrap()
+}
+
 pub(super) struct TempDir(PathBuf);
 
 impl TempDir {
@@ -59,16 +69,10 @@ async fn realistic_api_client_pipeline_under_retries_redirects_cache_and_interop
         "/gzipped" => {
             #[cfg(feature = "compression-gzip")]
             {
-                use flate2::Compression;
-                use flate2::write::GzEncoder;
-                use std::io::Write;
-                let mut enc = GzEncoder::new(Vec::new(), Compression::default());
-                enc.write_all(b"decoded-stream-payload").unwrap();
-                let gz = enc.finish().unwrap();
                 Response::new(200)
                     .header("content-encoding", "gzip")
                     .header("content-type", "text/plain")
-                    .body(gz)
+                    .body(gzip_bytes(b"decoded-stream-payload"))
             }
             #[cfg(not(feature = "compression-gzip"))]
             Response::new(200).body("decoded-stream-payload")
@@ -198,11 +202,14 @@ fn realistic_per_core_doh_shared_cache_and_isolated_shutdown() {
         .build()
         .unwrap();
     let (origin_port, doh_url, doh_tls, _guards) = rt.block_on(async {
-        let origin = Server::http(|req| {
-            Response::new(200)
-                .header("cache-control", "max-age=60")
+        let origin = Server::http(|req| match req.target() {
+            "/shared" => Response::new(200)
                 .header("set-cookie", "core=shared; Path=/")
-                .body(format!("path={}", req.target()))
+                .body("path=/shared"),
+            "/cached" => Response::new(200)
+                .header("cache-control", "max-age=60")
+                .body("path=/cached"),
+            _ => Response::new(404),
         })
         .await
         .unwrap();
@@ -229,7 +236,9 @@ fn realistic_per_core_doh_shared_cache_and_isolated_shutdown() {
     });
 
     let core_index = Arc::new(AtomicUsize::new(0));
-    let url = format!("http://percore.doh.test:{origin_port}/shared");
+    let core0_done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seed_url = format!("http://percore.doh.test:{origin_port}/shared");
+    let cached_url = format!("http://percore.doh.test:{origin_port}/cached");
     let results = Session::builder()
         .doh(doh_url)
         .tls(doh_tls)
@@ -237,18 +246,32 @@ fn realistic_per_core_doh_shared_cache_and_isolated_shutdown() {
         .timeout(Duration::from_secs(5))
         .run_per_core(|session| {
             let idx = core_index.fetch_add(1, Ordering::SeqCst);
-            let url = url.clone();
+            let core0_done = Arc::clone(&core0_done);
+            let seed_url = seed_url.clone();
+            let cached_url = cached_url.clone();
             async move {
-                let first = session.get(&url).text().await.unwrap();
-                assert_eq!(first, "path=/shared");
                 if idx == 0 {
+                    assert_eq!(
+                        session.get(&seed_url).text().await.unwrap(),
+                        "path=/shared"
+                    );
+                    let warm = session.get(&cached_url).send().await.unwrap();
+                    assert!(!warm.from_cache());
+                    assert_eq!(warm.text().await.unwrap(), "path=/cached");
                     session.shutdown().await;
-                    let after = session.get(&url).send().await.unwrap_err();
+                    let after = session.get(&cached_url).send().await.unwrap_err();
                     assert!(after.is_shut_down());
+                    core0_done.store(true, Ordering::Release);
                 } else {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    let second = session.get(&url).text().await.unwrap();
-                    assert_eq!(second, "path=/shared");
+                    while !core0_done.load(Ordering::Acquire) {
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                    let second = session.get(&cached_url).send().await.unwrap();
+                    assert!(
+                        second.from_cache(),
+                        "shared cache must serve core 0's cached entry across cores after sibling shutdown"
+                    );
+                    assert_eq!(second.text().await.unwrap(), "path=/cached");
                 }
                 session.cookies().len()
             }
@@ -344,6 +367,35 @@ async fn doh_ttl_expiry_http_error_size_cap_and_pkcs12_negative_matrix() {
             .build()
             .unwrap_err();
         assert_eq!(err.kind(), Kind::Config);
+    }
+
+    if let Ok(v6_listener) = tokio::net::TcpListener::bind("[::1]:0").await {
+        let v6_port = v6_listener.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            if let Ok((mut sock, _)) = v6_listener.accept().await {
+                let mut req = [0u8; 512];
+                drop(sock.read(&mut req).await);
+                drop(
+                    sock.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nv6-ok",
+                    )
+                    .await,
+                );
+            }
+        });
+        let before_v6 = lookups.load(Ordering::SeqCst);
+        let body = session
+            .get(format!("http://[::1]:{v6_port}/"))
+            .text()
+            .await
+            .unwrap();
+        assert_eq!(body, "v6-ok");
+        assert_eq!(
+            lookups.load(Ordering::SeqCst),
+            before_v6,
+            "bracketed IPv6 literal must not trigger DoH queries"
+        );
     }
 }
 
@@ -520,9 +572,10 @@ async fn pkcs12_intermediate_ca_chain_verified_over_tcp_and_h3() {
             .ok_or(leyline_bssl::ssl::AlpnError::NOACK)
     });
     let ctx = Arc::new(ctx.build());
+    let tcp_ctx = Arc::clone(&ctx);
     tokio::spawn(async move {
         while let Ok((tcp, _)) = listener.accept().await {
-            let ctx = Arc::clone(&ctx);
+            let ctx = Arc::clone(&tcp_ctx);
             tokio::spawn(async move {
                 let ssl = Ssl::new(&ctx).unwrap();
                 if let Ok(stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
@@ -592,6 +645,66 @@ async fn pkcs12_intermediate_ca_chain_verified_over_tcp_and_h3() {
         "omitted intermediate CA must fail TLS verification on HTTP/2: {err_h2:?}"
     );
     assert!(!err_h2.is_retryable());
+
+    #[cfg(unix)]
+    {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = TempDir::new("sslstream-tls13-alert");
+        let sock_path = dir.path("mtls.sock");
+        let unix_listener = tokio::net::UnixListener::bind(&sock_path).unwrap();
+        let unix_ctx = Arc::clone(&ctx);
+        tokio::spawn(async move {
+            while let Ok((unix, _)) = unix_listener.accept().await {
+                let unix_ctx = Arc::clone(&unix_ctx);
+                tokio::spawn(async move {
+                    let ssl = Ssl::new(&unix_ctx).unwrap();
+                    if let Ok(mut stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, unix)
+                        .accept()
+                        .await
+                    {
+                        let mut buf = [0u8; 512];
+                        if stream.read(&mut buf).await.is_ok() {
+                            drop(
+                                stream
+                                    .write_all(
+                                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                                    )
+                                    .await,
+                            );
+                        }
+                    }
+                });
+            }
+        });
+
+        for proto in [Protocol::Http1, Protocol::Http2] {
+            let unix_missing = Session::builder()
+                .protocol(proto)
+                .unix_socket(&sock_path)
+                .retry(1)
+                .tls(
+                    Tls::new()
+                        .system_roots(false)
+                        .env_roots(false)
+                        .ca_pem(server_ca_pem.clone())
+                        .client_cert_pkcs12(p12_leaf_only.clone(), "chain-pass"),
+                )
+                .build()
+                .unwrap();
+            let err = unix_missing
+                .get("https://chain-mtls.local/unix")
+                .send()
+                .await
+                .unwrap_err();
+            assert_eq!(
+                err.kind(),
+                Kind::Tls,
+                "SslStream post-handshake TLS 1.3 alert must map to Kind::Tls ({proto:?}): {err:?}"
+            );
+            assert!(!err.is_retryable());
+            assert_eq!(err.attempts(), 1);
+        }
+    }
 
     #[cfg(feature = "http3")]
     {

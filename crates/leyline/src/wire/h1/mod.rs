@@ -85,7 +85,7 @@ impl Typed<'_> {
 impl<'a> Sink<'a> for Typed<'_> {
     fn field(&mut self, name: &'a [u8], value: &'a [u8]) -> Result<(), Error> {
         self.flush();
-        let value = self.head.slice_ref(trim_start(value));
+        let value = self.head.slice_ref(trim_end(trim_start(value)));
         let Ok(name) = http::HeaderName::from_bytes(name) else {
             return Ok(());
         };
@@ -435,6 +435,15 @@ mod chunk_tests {
         assert_eq!(trim_end(b"value\x0b"), b"value\x0b");
         assert_eq!(trim_start(b"\x0cvalue"), b"\x0cvalue");
         assert_eq!(trim_end(b"value\x0c"), b"value\x0c");
+
+        let (_, headers, _) = super::parse_h1_head(
+            b"HTTP/1.1 200 OK\r\nX-Trailing: bar \t \r\nContent-Length: 0\r\n\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            headers.get("x-trailing").map(|v| v.as_bytes()),
+            Some(b"bar".as_slice())
+        );
     }
 
     #[test]

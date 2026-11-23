@@ -13,14 +13,7 @@ use super::v030_workloads::TempDir;
 #[tokio::test]
 async fn enterprise_decompression_bomb_cap_slow_header_timeout_and_tab_form_flow() {
     #[cfg(feature = "compression-gzip")]
-    let bomb_gz = {
-        use flate2::Compression;
-        use flate2::write::GzEncoder;
-        use std::io::Write;
-        let mut enc = GzEncoder::new(Vec::new(), Compression::best());
-        enc.write_all(&vec![0u8; 4 * 1024 * 1024]).unwrap();
-        enc.finish().unwrap()
-    };
+    let bomb_gz = super::v030_workloads::gzip_bytes(&vec![0u8; 4 * 1024 * 1024]);
 
     let stall_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let stall_port = stall_listener.local_addr().unwrap().port();
@@ -144,7 +137,7 @@ async fn enterprise_decompression_bomb_cap_slow_header_timeout_and_tab_form_flow
 }
 
 #[test]
-fn enterprise_blocking_multithreaded_shared_session_and_resumable_crawl_under_429() {
+fn enterprise_blocking_multithreaded_sessions_and_resumable_crawl_under_429() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()

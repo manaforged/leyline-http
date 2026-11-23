@@ -183,6 +183,8 @@ impl Proxy {
 
     pub(crate) fn same_for_doh(&self, other: &Self) -> bool {
         self.use_env == other.use_env
+            && self.from_env == other.from_env
+            && self.rejected.is_some() == other.rejected.is_some()
             && self.no_proxy_explicit == other.no_proxy_explicit
             && self.no_proxy == other.no_proxy
             && self.headers == other.headers
@@ -250,7 +252,7 @@ impl Proxy {
         self.map_pool(|pool| pool.ban_for(duration))
     }
 
-    /// Calls `choose` once with the URL of each request and each redirect hop: `None` sends it with no proxy, and `Some` must hold one proxy, so a `Proxy::list`, `Proxy::identified` or `Proxy::custom` fails the request with `Kind::Config`; of the other setters only `no_proxy` applies.
+    /// Calls `choose` once with the URL of each request and each redirect hop: `None` sends it with no proxy, and `Some` must hold one proxy, so a `Proxy::list`, `Proxy::identified` or `Proxy::custom` fails the request with `Kind::Config`; `no_proxy`, `header`, and `headers` on this proxy also apply.
     pub fn custom<F>(choose: F) -> Self
     where
         F: Fn(&url::Url) -> Option<Proxy> + Send + Sync + 'static,
