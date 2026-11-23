@@ -2,9 +2,18 @@ use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
+use std::pin::Pin;
+use std::time::Instant;
+
+use tokio::sync::mpsc::error::TryRecvError;
 
 use super::*;
 use crate::quic::transport::DatagramTransport;
+
+const RECV_BATCH_PER_DRAIN: usize = 16;
+const RECV_DRAIN_ROUNDS: usize = 4;
+const CHANNEL_BATCH_LIMIT: usize = 64;
+const TIMER_RESET_SLACK: Duration = Duration::from_millis(1);
 
 pub(super) struct H3Loop {
     socket: DatagramTransport,
@@ -20,12 +29,16 @@ pub(super) struct H3Loop {
     open_streams: Arc<AtomicUsize>,
     last_idle: Arc<crate::pool::types::Stamp>,
     streams: HashMap<u64, H3Stream>,
-    out: Vec<u8>,
+    egress: EgressBatch,
     buf: Vec<u8>,
     pending: VecDeque<H3Command>,
     admit_cap: Option<usize>,
     commands_closed: bool,
     draining: bool,
+    sleep: Pin<Box<tokio::time::Sleep>>,
+    sleep_deadline: Option<tokio::time::Instant>,
+    last_cancel_sweep: Instant,
+    sweep_due: bool,
 }
 
 type DatagramStop = (String, fn(String) -> H3SendError);
@@ -56,12 +69,16 @@ impl H3Loop {
             open_streams: driver.open_streams,
             last_idle: driver.last_idle,
             streams: driver.streams,
-            out: vec![0u8; max_udp_payload],
+            egress: EgressBatch::new(max_udp_payload),
             buf: vec![0u8; crate::quic::connection::UDP_RECV_BUFFER],
             pending: VecDeque::new(),
             admit_cap: None,
             commands_closed: false,
             draining: false,
+            sleep: Box::pin(tokio::time::sleep(crate::quic::TIMER_FALLBACK)),
+            sleep_deadline: None,
+            last_cancel_sweep: Instant::now(),
+            sweep_due: false,
         }
     }
 
@@ -70,19 +87,26 @@ impl H3Loop {
         let len = self.streams.len();
         let prev = self.open_streams.swap(len, Ordering::Relaxed);
         if prev > 0 && len == 0 {
-            self.last_idle.touch(std::time::Instant::now());
+            self.last_idle.touch(Instant::now());
         }
         self.settle().await?;
         self.wait(backpressured).await
     }
 
     fn advance(&mut self) -> bool {
-        sweep_cancelled_streams(
-            &mut self.h3,
-            &mut self.conn,
-            &mut self.streams,
-            &mut self.pending,
-        );
+        if self.sweep_due
+            || !self.pending.is_empty()
+            || self.last_cancel_sweep.elapsed() >= CANCEL_SWEEP_INTERVAL
+        {
+            sweep_cancelled_streams(
+                &mut self.h3,
+                &mut self.conn,
+                &mut self.streams,
+                &mut self.pending,
+            );
+            self.sweep_due = false;
+            self.last_cancel_sweep = Instant::now();
+        }
         start_pending(
             &mut self.h3,
             &mut self.conn,
@@ -127,23 +151,39 @@ impl H3Loop {
         ControlFlow::Continue(())
     }
 
+    fn arm_sleep(&mut self, timeout: Duration) {
+        let target = tokio::time::Instant::now() + timeout;
+        let reset = self.sleep_deadline.is_none_or(|current| {
+            target < current || target.saturating_duration_since(current) >= TIMER_RESET_SLACK
+        });
+        if reset {
+            self.sleep.as_mut().reset(target);
+            self.sleep_deadline = Some(target);
+        }
+    }
+
     async fn wait(&mut self, backpressured: bool) -> ControlFlow<()> {
         let timeout = self.wake_timeout(backpressured);
+        self.arm_sleep(timeout);
         tokio::select! {
-            cmd = self.command_rx.recv(), if self.accepting_commands() => self.on_command(cmd),
-            chunk = self.body_chunk_rx.recv() => self.on_body_chunk(chunk),
+            cmd = self.command_rx.recv(), if self.accepting_commands() => self.on_command_batch(cmd),
+            chunk = self.body_chunk_rx.recv() => self.on_body_chunk_batch(chunk),
             recv = self.socket.recv(&mut self.buf) => {
-                if let Err((reason, kind)) = self.on_datagram(recv) {
+                if let Err((reason, kind)) = self.on_datagram_batch(recv) {
                     return self.stop(reason, kind);
                 }
             }
-            _ = tokio::time::sleep(timeout) => self.conn.on_timeout(),
+            _ = &mut self.sleep => {
+                self.sleep_deadline = None;
+                self.sweep_due = true;
+                self.conn.on_timeout();
+            }
         }
         ControlFlow::Continue(())
     }
 
     fn flush(&mut self) -> impl Future<Output = Result<(), crate::quic::error::QuicError>> {
-        flush_egress(&self.socket, &mut self.conn, &mut self.out)
+        flush_egress(&self.socket, &mut self.conn, &mut self.egress)
     }
 
     fn stop(&mut self, reason: String, stream_err: fn(String) -> H3SendError) -> ControlFlow<()> {
@@ -182,15 +222,52 @@ impl H3Loop {
         }
     }
 
+    fn on_command_batch(&mut self, first: Option<H3Command>) {
+        self.on_command(first);
+        if self.commands_closed {
+            return;
+        }
+        let extra = if self.draining {
+            CHANNEL_BATCH_LIMIT - 1
+        } else {
+            let bidi =
+                usize::try_from(self.conn.peer_streams_left_bidi()).unwrap_or(CHANNEL_BATCH_LIMIT);
+            let admit = self.admit_cap.map_or(CHANNEL_BATCH_LIMIT, |cap| {
+                cap.saturating_sub(self.streams.len())
+            });
+            bidi.min(admit)
+                .min(CHANNEL_BATCH_LIMIT)
+                .saturating_sub(self.pending.len())
+        };
+        for _ in 0..extra {
+            match self.command_rx.try_recv() {
+                Ok(cmd) => self.on_command(Some(cmd)),
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => {
+                    self.commands_closed = true;
+                    break;
+                }
+            }
+        }
+    }
+
     fn on_body_chunk(&mut self, chunk: Option<H3BodyChunk>) {
         if let Some(chunk) = chunk {
             on_request_body_chunk(&mut self.h3, &mut self.conn, &mut self.streams, chunk);
         }
     }
 
-    fn on_datagram(&mut self, recv: io::Result<usize>) -> Result<(), DatagramStop> {
-        let closed = |msg: String| (msg, H3SendError::Closed as fn(String) -> H3SendError);
-        let len = recv.map_err(|e| closed(format!("udp recv: {e}")))?;
+    fn on_body_chunk_batch(&mut self, first: Option<H3BodyChunk>) {
+        self.on_body_chunk(first);
+        for _ in 1..CHANNEL_BATCH_LIMIT {
+            match self.body_chunk_rx.try_recv() {
+                Ok(chunk) => self.on_body_chunk(Some(chunk)),
+                Err(_) => break,
+            }
+        }
+    }
+
+    fn ingest_datagram(&mut self, len: usize) -> Result<(), DatagramStop> {
         if len == 0 {
             return Ok(());
         }
@@ -210,8 +287,12 @@ impl H3Loop {
                 };
                 return Err((reason, H3SendError::Tls));
             }
-            return Err(closed(format!("quic recv: {e}")));
+            return Err((format!("quic recv: {e}"), H3SendError::Closed));
         }
+        Ok(())
+    }
+
+    fn drain_h3(&mut self) -> Result<(), DatagramStop> {
         let goaway = Drain {
             h3: &mut self.h3,
             conn: &mut self.conn,
@@ -221,9 +302,39 @@ impl H3Loop {
             draining: self.draining,
         }
         .run()
-        .map_err(closed)?;
+        .map_err(|msg| (msg, H3SendError::Closed as fn(String) -> H3SendError))?;
         if goaway {
             self.begin_draining();
+        }
+        Ok(())
+    }
+
+    fn on_datagram_batch(&mut self, first: io::Result<usize>) -> Result<(), DatagramStop> {
+        let closed = |msg: String| (msg, H3SendError::Closed as fn(String) -> H3SendError);
+        let len = first.map_err(|e| closed(format!("udp recv: {e}")))?;
+        self.ingest_datagram(len)?;
+        for round in 0..RECV_DRAIN_ROUNDS {
+            let mut drained_all = false;
+            let limit = RECV_BATCH_PER_DRAIN - usize::from(round == 0);
+            let mut pulled = 0;
+            while pulled < limit && !self.conn.is_closed() {
+                match self.socket.try_recv(&mut self.buf) {
+                    Ok(n) => {
+                        pulled += 1;
+                        self.ingest_datagram(n)?;
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        drained_all = true;
+                        break;
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => return Err(closed(format!("udp recv: {e}"))),
+                }
+            }
+            self.drain_h3()?;
+            if drained_all || self.conn.is_closed() {
+                break;
+            }
         }
         Ok(())
     }

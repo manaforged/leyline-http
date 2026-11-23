@@ -175,6 +175,56 @@ pub(super) fn bind_interface(socket: &Socket, name: &str, is_v6: bool) -> io::Re
     }
 }
 
+#[cfg(all(feature = "http3", target_os = "linux"))]
+pub(super) fn try_send_udp_batch(
+    socket: &tokio::net::UdpSocket,
+    buf: &[u8],
+    slot_len: usize,
+    lens: &[usize],
+) -> io::Result<usize> {
+    use std::os::fd::AsRawFd;
+
+    let count = lens.len().min(super::MAX_UDP_BATCH);
+    if count == 0 {
+        return Ok(0);
+    }
+    let mut iovecs = [libc::iovec {
+        iov_base: std::ptr::null_mut(),
+        iov_len: 0,
+    }; super::MAX_UDP_BATCH];
+    // SAFETY: libc::mmsghdr is a plain C struct where zero-initialization is a valid empty header.
+    let mut msgs: [libc::mmsghdr; super::MAX_UDP_BATCH] = unsafe { std::mem::zeroed() };
+    for (i, &len) in lens[..count].iter().enumerate() {
+        let offset = i * slot_len;
+        let slice = &buf[offset..offset + len];
+        iovecs[i] = libc::iovec {
+            iov_base: slice.as_ptr().cast_mut().cast::<libc::c_void>(),
+            iov_len: len,
+        };
+        msgs[i].msg_hdr.msg_iov = &raw mut iovecs[i];
+        msgs[i].msg_hdr.msg_iovlen = 1;
+    }
+    let n_msgs = u32::try_from(count).unwrap_or(u32::MAX);
+    socket.try_io(tokio::io::Interest::WRITABLE, || {
+        // SAFETY: fd is valid for this borrow, msgs[..count] and iovecs[..count] point to live slices in buf, and sendmmsg reads at most count entries.
+        let ret = unsafe {
+            libc::sendmmsg(
+                socket.as_raw_fd(),
+                msgs.as_mut_ptr(),
+                n_msgs,
+                libc::MSG_DONTWAIT,
+            )
+        };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if ret == 0 {
+            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+        }
+        Ok(usize::try_from(ret).unwrap_or(0))
+    })
+}
+
 #[cfg(not(any(
     target_os = "linux",
     target_os = "android",

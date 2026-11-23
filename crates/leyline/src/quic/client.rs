@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::error::BodyLimit;
 use crate::profile::PseudoOrder;
-use crate::quic::connection::{EstablishedH3, close_reason, flush_egress};
+use crate::quic::connection::{EgressBatch, EstablishedH3, close_reason, flush_egress};
 use crate::wire::BoxedStream;
 use crate::wire::ResponseMode;
 use crate::wire::{Chunk, Failure, TransportBody, TransportResponse, Upload};

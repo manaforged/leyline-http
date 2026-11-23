@@ -80,6 +80,14 @@ impl H3Stream {
                     self.terminal = None;
                 }
                 self.declared_len = length;
+                if !self.is_streaming()
+                    && crate::wire::has_body(self.head_request, status.as_u16())
+                    && let Some(len) = length
+                    && let Ok(cap) = usize::try_from(len)
+                {
+                    self.body
+                        .reserve(cap.min(self.body_limit.room(0)).min(1024 * 1024));
+                }
                 self.headers = headers;
             }
             ResponseBlock::Trailers(headers) => self.trailers = headers,

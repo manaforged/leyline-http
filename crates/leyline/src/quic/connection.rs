@@ -235,7 +235,7 @@ async fn handshake(
         peer_addr,
         local_addr,
     } = opening;
-    let mut out = vec![0u8; usize::from(h3_cfg.h3.max_udp_payload_size)];
+    let mut egress = EgressBatch::new(usize::from(h3_cfg.h3.max_udp_payload_size));
     let mut buf = vec![0u8; UDP_RECV_BUFFER];
     let mut iter = 0u32;
     loop {
@@ -250,7 +250,7 @@ async fn handshake(
                 None,
             ));
         }
-        flush_egress(socket, conn, &mut out)
+        flush_egress(socket, conn, &mut egress)
             .await
             .map_err(|e| (e, None))?;
         if conn.is_closed() {
@@ -265,7 +265,7 @@ async fn handshake(
         if conn.is_established() {
             let h3 = quiche::h3::Connection::with_transport(conn, &h3_config)
                 .map_err(|e| (QuicError::Protocol(format!("h3 with_transport: {e}")), None))?;
-            flush_egress(socket, conn, &mut out)
+            flush_egress(socket, conn, &mut egress)
                 .await
                 .map_err(|e| (e, None))?;
             return Ok(h3);
@@ -296,27 +296,130 @@ async fn handshake(
     }
 }
 
+pub(crate) struct EgressBatch {
+    buf: Vec<u8>,
+    lens: Vec<usize>,
+    slot_len: usize,
+    max_packets: usize,
+}
+
+impl EgressBatch {
+    pub(crate) fn new(max_udp_payload: usize) -> Self {
+        let slot_len = max_udp_payload.max(1);
+        let max_packets = (64 * 1024 / slot_len).clamp(1, crate::quic::transport::MAX_SENDMMSG);
+        Self {
+            buf: vec![0u8; slot_len * max_packets],
+            lens: Vec::with_capacity(max_packets),
+            slot_len,
+            max_packets,
+        }
+    }
+}
+
 pub(crate) async fn flush_egress(
     socket: &DatagramTransport,
     conn: &mut quiche::Connection,
-    out: &mut [u8],
+    batch: &mut EgressBatch,
 ) -> Result<(), QuicError> {
+    if !socket.supports_direct_batch() {
+        loop {
+            match conn.send(&mut batch.buf[..batch.slot_len]) {
+                Ok((n, _send_info)) => {
+                    socket
+                        .send(&batch.buf[..n])
+                        .await
+                        .map_err(|e| QuicError::Socket(format!("udp send: {e}")))?;
+                }
+                Err(quiche::Error::Done) => return Ok(()),
+                Err(quiche::Error::TlsFail) => {
+                    let stack = leyline_bssl::error::ErrorStack::get();
+                    return Err(QuicError::Tls(format!("quic tls: {stack}")));
+                }
+                Err(e) => return Err(QuicError::Protocol(format!("quic send: {e}"))),
+            }
+        }
+    }
     loop {
-        match conn.send(out) {
-            Ok((n, _send_info)) => {
+        batch.lens.clear();
+        let mut done = false;
+        while batch.lens.len() < batch.max_packets {
+            let offset = batch.lens.len() * batch.slot_len;
+            match conn.send(&mut batch.buf[offset..offset + batch.slot_len]) {
+                Ok((n, _send_info)) => batch.lens.push(n),
+                Err(quiche::Error::Done) => {
+                    done = true;
+                    break;
+                }
+                Err(quiche::Error::TlsFail) => {
+                    let stack = leyline_bssl::error::ErrorStack::get();
+                    return Err(QuicError::Tls(format!("quic tls: {stack}")));
+                }
+                Err(e) => return Err(QuicError::Protocol(format!("quic send: {e}"))),
+            }
+        }
+        if batch.lens.is_empty() {
+            return Ok(());
+        }
+        send_direct_batch(socket, batch).await?;
+        if done {
+            return Ok(());
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+async fn send_direct_batch(
+    socket: &DatagramTransport,
+    batch: &EgressBatch,
+) -> Result<(), QuicError> {
+    let mut sent = 0;
+    while sent < batch.lens.len() {
+        let rem = &batch.lens[sent..];
+        let base = sent * batch.slot_len;
+        let res = if rem.len() == 1 {
+            socket.try_send(&batch.buf[base..base + rem[0]]).map(|_| 1)
+        } else {
+            socket.try_send_batch(&batch.buf[base..], batch.slot_len, rem)
+        };
+        match res {
+            Ok(n) => sent += n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 socket
-                    .send(&out[..n])
+                    .writable()
                     .await
                     .map_err(|e| QuicError::Socket(format!("udp send: {e}")))?;
             }
-            Err(quiche::Error::Done) => return Ok(()),
-            Err(quiche::Error::TlsFail) => {
-                let stack = leyline_bssl::error::ErrorStack::get();
-                return Err(QuicError::Tls(format!("quic tls: {stack}")));
-            }
-            Err(e) => return Err(QuicError::Protocol(format!("quic send: {e}"))),
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(QuicError::Socket(format!("udp send: {e}"))),
         }
     }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn send_direct_batch(
+    socket: &DatagramTransport,
+    batch: &EgressBatch,
+) -> Result<(), QuicError> {
+    for (i, &len) in batch.lens.iter().enumerate() {
+        let offset = i * batch.slot_len;
+        let pkt = &batch.buf[offset..offset + len];
+        loop {
+            match socket.try_send(pkt) {
+                Ok(_) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    socket
+                        .send(pkt)
+                        .await
+                        .map_err(|e| QuicError::Socket(format!("udp send: {e}")))?;
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(QuicError::Socket(format!("udp send: {e}"))),
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> String {

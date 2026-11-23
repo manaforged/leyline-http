@@ -12,6 +12,19 @@ use crate::profile::TcpProfile;
 
 mod platform;
 
+#[cfg(feature = "http3")]
+pub(crate) const MAX_UDP_BATCH: usize = 32;
+
+#[cfg(all(feature = "http3", target_os = "linux"))]
+pub(crate) fn try_send_udp_batch(
+    socket: &tokio::net::UdpSocket,
+    buf: &[u8],
+    slot_len: usize,
+    lens: &[usize],
+) -> io::Result<usize> {
+    platform::try_send_udp_batch(socket, buf, slot_len, lens)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub(crate) struct SocketOptions {
