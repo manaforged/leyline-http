@@ -10,8 +10,7 @@ use tokio::sync::mpsc::error::TryRecvError;
 use super::*;
 use crate::quic::transport::DatagramTransport;
 
-const RECV_BATCH_PER_DRAIN: usize = 16;
-const RECV_DRAIN_ROUNDS: usize = 4;
+const RECV_BATCH_LIMIT: usize = 64;
 const CHANNEL_BATCH_LIMIT: usize = 64;
 const TIMER_RESET_SLACK: Duration = Duration::from_millis(1);
 
@@ -313,27 +312,19 @@ impl H3Loop {
         let closed = |msg: String| (msg, H3SendError::Closed as fn(String) -> H3SendError);
         let len = first.map_err(|e| closed(format!("udp recv: {e}")))?;
         self.ingest_datagram(len)?;
-        for round in 0..RECV_DRAIN_ROUNDS {
-            let mut drained_all = false;
-            let limit = RECV_BATCH_PER_DRAIN - usize::from(round == 0);
-            let mut pulled = 0;
-            while pulled < limit && !self.conn.is_closed() {
-                match self.socket.try_recv(&mut self.buf) {
-                    Ok(n) => {
-                        pulled += 1;
-                        self.ingest_datagram(n)?;
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        drained_all = true;
-                        break;
-                    }
-                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                    Err(e) => return Err(closed(format!("udp recv: {e}"))),
-                }
-            }
-            self.drain_h3()?;
-            if drained_all || self.conn.is_closed() {
+        self.drain_h3()?;
+        for _ in 1..RECV_BATCH_LIMIT {
+            if self.conn.is_closed() {
                 break;
+            }
+            match self.socket.try_recv(&mut self.buf) {
+                Ok(n) => {
+                    self.ingest_datagram(n)?;
+                    self.drain_h3()?;
+                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(closed(format!("udp recv: {e}"))),
             }
         }
         Ok(())
