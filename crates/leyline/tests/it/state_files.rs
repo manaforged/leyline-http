@@ -154,7 +154,7 @@ async fn audit_flags_a_header_the_echo_did_not_see() {
         .find(|(name, _)| name == "user-agent")
         .map(|(_, value)| value.clone())
         .unwrap();
-    let echoed = leyline::Fingerprint::from_json(&format!(
+    let echoed = leyline::profile::Fingerprint::from_json(&format!(
         r#"{{"http1":{{"headers":["User-Agent: {agent}"]}}}}"#
     ))
     .unwrap();
@@ -239,7 +239,7 @@ async fn audit_matches_a_cookie_split_across_fields() {
         .split("; ")
         .map(|pair| format!("\"Cookie: {pair}\""))
         .collect();
-    let echoed = leyline::Fingerprint::from_json(&format!(
+    let echoed = leyline::profile::Fingerprint::from_json(&format!(
         r#"{{"http1":{{"headers":[{}]}}}}"#,
         lines.join(",")
     ))

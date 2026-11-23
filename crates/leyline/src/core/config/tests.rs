@@ -306,7 +306,10 @@ fn a_padded_proxy_url_is_shown_as_parsed() {
         .proxy(" http://proxy.example:8080 ")
         .build()
         .unwrap();
-    assert_eq!(session.proxy(), Some("http://proxy.example:8080"));
+    assert_eq!(
+        session.proxy().map(url::Url::as_str),
+        Some("http://proxy.example:8080/")
+    );
 }
 
 #[test]

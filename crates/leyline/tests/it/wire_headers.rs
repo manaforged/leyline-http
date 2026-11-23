@@ -1,5 +1,6 @@
+use leyline::profile::RequestKind;
 use leyline::testing::{self, queue};
-use leyline::{Browser, RequestKind, Session, Tls};
+use leyline::{Browser, Session, Tls};
 
 fn browser_only(sent: &leyline::testing::Request) -> Vec<String> {
     sent.headers()

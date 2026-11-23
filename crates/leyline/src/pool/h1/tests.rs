@@ -201,7 +201,7 @@ async fn a_full_host_refuses_requests_past_the_pending_limit() {
     let session = crate::Session::builder()
         .protocol(crate::Protocol::Http1)
         .max_connections_per_host(1)
-        .max_pending_per_host(1)
+        .host_limits(crate::HostLimits::new().max_pending(1))
         .build()
         .expect("session");
 

@@ -84,6 +84,14 @@ impl TcpProfile {
         Self::default()
     }
 
+    /// Parses a JA4T string (`window_options_mss_scale`) into a TCP profile.
+    pub fn from_ja4t(raw: impl AsRef<str>) -> Result<Self> {
+        let ja4t = Ja4t::parse(raw.as_ref())?;
+        let mut tcp = Self::new();
+        ja4t.apply(&mut tcp);
+        Ok(tcp)
+    }
+
     /// Returns the IPv4 TTL or IPv6 hop limit; 0 leaves the OS default.
     #[must_use]
     pub fn ttl(&self) -> u32 {

@@ -193,7 +193,7 @@ async fn metrics_count_statuses_errors_and_attempts() {
     ]))
     .await
     .unwrap();
-    let metrics = leyline::trace::Metrics::new();
+    let metrics = Arc::new(leyline::trace::Metrics::new());
     let session = Session::builder()
         .trace(Arc::clone(&metrics))
         .build()
@@ -214,8 +214,8 @@ async fn each_trace_call_adds_a_hook() {
     let server = testing::Server::http(queue(vec![testing::Response::new(200).body("ok").close()]))
         .await
         .unwrap();
-    let first = leyline::trace::Metrics::new();
-    let second = leyline::trace::Metrics::new();
+    let first = Arc::new(leyline::trace::Metrics::new());
+    let second = Arc::new(leyline::trace::Metrics::new());
     let session = Session::builder()
         .trace(Arc::clone(&first))
         .trace(Arc::clone(&second))

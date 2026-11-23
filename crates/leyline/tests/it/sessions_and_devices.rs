@@ -163,8 +163,8 @@ fn a_device_keeps_the_proxy_password_out_of_its_file() {
 
     let reopened = Session::load(&path).unwrap().proxy(proxy).build().unwrap();
     let shown = reopened.proxy().unwrap();
-    assert!(shown.contains("proxy.example"), "{shown}");
-    assert!(!shown.contains("hunter2"), "{shown}");
+    assert!(shown.as_str().contains("proxy.example"), "{shown}");
+    assert!(!shown.as_str().contains("hunter2"), "{shown}");
     drop(std::fs::remove_dir_all(&dir));
 }
 

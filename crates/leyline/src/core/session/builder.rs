@@ -14,7 +14,6 @@ use crate::deadline::Timeout;
 use crate::net::{DnsConfig, Resolver, SocketOptions};
 use crate::pool::PoolConfig;
 use crate::profile::Encoding;
-use crate::profile::Ja4t;
 use crate::profile::TcpProfile;
 use crate::profile::{Browser, BrowserProfile, ChromiumBrand, FingerprintSpec, Platform};
 use crate::tls::trust::Tls;
@@ -72,7 +71,6 @@ pub struct SessionBuilder {
     pub(in crate::core::session) stores_cookies: bool,
     pub(in crate::core::session) before_send: Option<BeforeSend>,
     tcp_profile: Option<TcpProfile>,
-    ja4t: Option<Ja4t>,
     pub(in crate::core::session) protocol_policy: Protocol,
     #[cfg(feature = "http3")]
     protocol_explicit: bool,
@@ -119,7 +117,6 @@ impl SessionBuilder {
             stores_cookies: true,
             before_send: None,
             tcp_profile: None,
-            ja4t: None,
             protocol_policy: Protocol::Auto,
             #[cfg(feature = "http3")]
             protocol_explicit: false,
@@ -191,12 +188,6 @@ impl SessionBuilder {
         }
         self.pool_config.max_h1_conns_per_host = n;
         self.pool_config.max_h2_conns_per_host = Some(n);
-        self
-    }
-
-    /// Fails a request with `Kind::Overloaded` when this many HTTP/1.1 requests already wait for a connection to its host; 1024 by default, and `None` removes the limit.
-    pub fn max_pending_per_host(mut self, limit: impl Into<Option<usize>>) -> Self {
-        self.pool_config.max_h1_pending_per_host = limit.into();
         self
     }
 
@@ -329,15 +320,6 @@ impl SessionBuilder {
         self.fingerprint(|spec| spec.akamai(raw))
     }
 
-    /// Sets the TCP fingerprint from a JA4T string (`window_options_mss_scale`), layered over the platform or `tcp_profile` settings.
-    pub fn ja4t(mut self, raw: impl AsRef<str>) -> Self {
-        match Ja4t::parse(raw.as_ref()) {
-            Ok(ja4t) => self.ja4t = Some(ja4t),
-            Err(error) => self.reject(error),
-        }
-        self
-    }
-
     /// Sets the order of request header names, layered over the current profile.
     pub fn header_order<I, S>(self, order: I) -> Self
     where
@@ -438,10 +420,9 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the TCP fingerprint used for new connections, replacing any earlier `ja4t`.
-    pub fn tcp_profile(mut self, profile: TcpProfile) -> Self {
-        self.tcp_profile = Some(profile);
-        self.ja4t = None;
+    /// Sets the TCP fingerprint used for new connections.
+    pub fn tcp_profile(mut self, profile: impl Into<TcpProfile>) -> Self {
+        self.tcp_profile = Some(profile.into());
         self
     }
 

@@ -67,13 +67,13 @@ impl RequestBuilder {
     }
     /// Downloads atomically, retries a dropped transfer under the retry policy, and resumes a saved prefix only when a strong ETag still matches.
     pub async fn download_to(mut self, path: impl AsRef<Path>) -> Result<u64> {
-        let key = self.prepare_download()?;
         let options = self
             .draft
             .build
             .as_deref_mut()
             .and_then(|b| b.download.take())
             .unwrap_or_default();
+        let key = self.prepare_download()?;
         let target = path.as_ref().to_path_buf();
         let retry = self.draft.carry.take_retry_policy(&self.session);
         self.draft.carry.overrides_mut().retry_policy = Some(crate::core::retry::Retry::unset());

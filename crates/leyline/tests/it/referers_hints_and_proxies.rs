@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use leyline::profile::RequestKind;
 use leyline::testing::{self, queue};
-use leyline::{Browser, Protocol, RequestKind, Session, Timeout};
+use leyline::{Browser, Protocol, Session, Timeout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -103,7 +104,7 @@ async fn plain_session_advertises_only_enabled_codecs() {
     ]))
     .await
     .unwrap();
-    use leyline::Encoding::{Brotli, Deflate, Gzip, Zstd};
+    use leyline::profile::Encoding::{Brotli, Deflate, Gzip, Zstd};
     for codings in [
         vec![Gzip, Brotli, Deflate, Zstd],
         vec![Gzip, Deflate, Zstd],

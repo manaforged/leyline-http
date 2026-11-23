@@ -99,7 +99,8 @@ pub enum Respect {
     /// Obeys robots.txt rules and noindex directives.
     Robots,
     /// Obeys robots.txt and also skips pages that refuse AI training use.
-    AiTraining,
+    #[serde(alias = "AiTraining")]
+    AiTrain,
 }
 
 #[doc = include_str!("../../../docs/crawl.md")]
@@ -330,7 +331,7 @@ impl Crawl {
     fn purpose(&self) -> Option<Purpose> {
         match self.settings.respect? {
             Respect::Robots => None,
-            Respect::AiTraining => Some(Purpose::AiTrain),
+            Respect::AiTrain => Some(Purpose::AiTrain),
         }
     }
 

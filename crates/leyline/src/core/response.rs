@@ -21,7 +21,6 @@ pub use link::Link;
 #[cfg(feature = "bench-internals")]
 pub(crate) use link::parse_links;
 pub(crate) use prefix::StopReason;
-pub use relay::relay_headers;
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
@@ -50,7 +49,7 @@ pub(crate) struct Parts {
     pub(crate) audit_cache: OnceLock<crate::audit::Fingerprint>,
     pub(crate) compression: crate::core::BodyRules,
     pub(crate) attempts: u32,
-    pub(crate) proxy: Option<String>,
+    pub(crate) proxy: Option<Url>,
     pub(crate) block: Option<crate::core::block::Block>,
 }
 
@@ -124,13 +123,13 @@ impl Response {
         self.parts.attempts = attempts.max(1);
     }
 
-    /// Returns the redacted proxy address the response came through.
-    pub fn proxy(&self) -> Option<&str> {
-        self.parts.proxy.as_deref()
+    /// Returns the redacted proxy URL the response came through.
+    pub fn proxy(&self) -> Option<&Url> {
+        self.parts.proxy.as_ref()
     }
 
     pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
-        self.parts.proxy = proxy.map(redact);
+        self.parts.proxy = proxy.and_then(crate::util::redact_url);
     }
 
     /// Returns the block detected in the response, if any.
@@ -301,7 +300,7 @@ impl fmt::Debug for Response {
             )
             .field("timing", &self.parts.timing)
             .field("attempts", &self.parts.attempts)
-            .field("proxy", &self.parts.proxy)
+            .field("proxy", &self.parts.proxy.as_ref().map(Url::as_str))
             .finish_non_exhaustive()
     }
 }

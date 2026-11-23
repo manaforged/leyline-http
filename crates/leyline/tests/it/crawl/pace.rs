@@ -187,7 +187,7 @@ async fn crawls_of_one_session_keep_each_others_crawl_delay() {
     let session = brisk();
     let polite = session.crawl(server.url("/"));
     let fast = session.crawl(server.url("/b")).respect(None);
-    let drain = |mut crawl: leyline::Crawl| async move {
+    let drain = |mut crawl: leyline::crawl::Crawl| async move {
         while let Some(page) = crawl.next().await {
             page.unwrap();
         }

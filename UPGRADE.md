@@ -34,6 +34,19 @@ These changes clean up `0.2` API rough edges while keeping the same five core ty
 | `WebSocket::header` returning lossy UTF-8 for non-ASCII header bytes | returns `None` for non-ASCII header values (matching `Response::header` and `Page::header`) |
 | `Session::builder().retry(0)` / `.redirect(..)` / `.max_body_size(..)` ignored by `Crawl` and `Session::robots` | explicit session limits now carry into `Crawl` and `Session::robots` instead of being overridden by internal defaults |
 | `Session::load` on a 0.2.0 browser-profile `session.json` | saved JSON format is unchanged, but bundled browser `profile_id` digests updated with new brand entries (re-save browser sessions or strip `profile_id` to migrate) |
+| `leyline::{Crawl, Page, Respect, Scope, SkipReason, Purpose, Robots, RobotsSource}` | moved under `leyline::crawl::*` |
+| `leyline::{Event, Events}` | moved under `leyline::sse::*` |
+| `leyline::{Encoding, Fingerprint, HeaderPosition, RequestKind, TcpProfile}` | moved under `leyline::profile::*` |
+| `Respect::AiTraining` | `crawl::Respect::AiTrain` (saved checkpoints with `"AiTraining"` still load) |
+| `Tab::set_current(page)` | `Tab::page(page)` |
+| `RequestBuilder::sha256`, `progress`, or `resume` followed by `send()`, `text()`, `bytes()`, `pages()`, `events()`, or `websocket()` | now fails with `Kind::Config`; use `download_to(path)` |
+| `SessionBuilder::max_pending_per_host(limit)` | `HostLimits::new().max_pending(limit)` via `SessionBuilder::host_limits(..)` |
+| `Tls::tls12_min()`, `Tls::tls13_only()` | `Tls::min_version(TlsVersion::Tls12)`, `Tls::min_version(TlsVersion::Tls13)` |
+| `leyline::TlsMinVersion` | `leyline::TlsVersion` |
+| `leyline::relay_headers(&headers)` | `Response::relay_headers()` (the free function is now private) |
+| `trace::Metrics::new()` returning `Arc<Metrics>` | `Metrics::new()` returns `Metrics`; wrap in `Arc::new(Metrics::new())` to share with `.trace(..)` |
+| `Stats::in_flight(&str)`, `waiting(&str)`, `proxy_in_use(&str)`, `proxy_failures(&str)`, `proxy_banned_until(&str)` | now take `impl IntoUrl` (a URL string or `&Url`); `Stats::proxies()` yields `&Url` |
+| `Session::proxy()`, `Response::proxy()`, `Error::proxy()` returning `Option<&str>` | now return `Option<&Url>` (redacted); call `.map(Url::as_str)` for a string |
 
 ## Breaking changes in 0.2.0
 

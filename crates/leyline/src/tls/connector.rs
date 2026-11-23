@@ -10,7 +10,7 @@ use crate::net::{Dialer, NetError, ProxyUrl};
 use crate::profile::BrowserProfile;
 use crate::profile::TcpProfile;
 
-use crate::profile::TlsMinVersion;
+use crate::profile::TlsVersion;
 use crate::tls::AlpnPlan;
 use crate::tls::HelloOptions;
 use crate::tls::TlsStream;
@@ -25,7 +25,7 @@ mod handshake;
 #[cfg(test)]
 mod shared_tests;
 
-const TCP: Transport = Transport::Tcp(TlsMinVersion::Tls12);
+const TCP: Transport = Transport::Tcp(TlsVersion::Tls12);
 
 #[derive(Clone)]
 pub struct FingerprintConnector {

@@ -46,7 +46,7 @@ pub use request::{Event, Events, RequestBuilder};
 
 #[cfg(feature = "bench-internals")]
 pub(crate) use response::parse_links;
-pub use response::{Link, Response, relay_headers};
+pub use response::{Link, Response};
 pub use retry::Retry;
 pub use robots::{Purpose, Robots, RobotsSource};
 pub(crate) use session::Identity;

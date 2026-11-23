@@ -490,7 +490,7 @@ async fn enterprise_h1_h2_h3_concurrent_chaos_cancel_safety_and_graceful_shutdow
     }
     assert_eq!(session.get(h1.url("/fast")).text().await.unwrap(), "h1-ok");
     assert_eq!(
-        session.stats().in_flight("127.0.0.1"),
+        session.stats().in_flight(h1.url("/")),
         0,
         "cancelled requests must not leak in-flight permits"
     );

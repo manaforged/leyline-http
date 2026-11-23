@@ -59,7 +59,8 @@ async fn local_addresses_binds_ipv4_loopback() {
         Ipv4Addr::LOCALHOST
     };
     let session = Session::builder()
-        .local_addresses(bind_v4, Ipv6Addr::LOCALHOST)
+        .local_address(std::net::IpAddr::V4(bind_v4))
+        .local_address(std::net::IpAddr::V6(Ipv6Addr::LOCALHOST))
         .build()
         .unwrap();
     let body = session

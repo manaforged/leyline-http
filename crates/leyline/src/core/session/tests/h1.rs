@@ -1,7 +1,8 @@
 use super::super::{Session, SessionBuilder};
+use crate::Body;
 use crate::core::response::Response;
 use crate::error::Kind;
-use crate::{Body, Encoding};
+use crate::profile::Encoding;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 #[tokio::test]

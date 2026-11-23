@@ -71,6 +71,8 @@ pub struct HostLimits {
     #[serde(default)]
     max_pending: Option<usize>,
     #[serde(default)]
+    max_pending_unlimited: bool,
+    #[serde(default)]
     max_total_pending: Option<usize>,
     pause: Pause,
 }
@@ -103,6 +105,7 @@ impl Default for HostLimits {
             overrides: Vec::new(),
             max_total: None,
             max_pending: None,
+            max_pending_unlimited: false,
             max_total_pending: None,
             pause: Pause {
                 statuses: Vec::new(),
@@ -157,9 +160,10 @@ impl HostLimits {
         self
     }
 
-    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a `max_in_flight` slot on its host.
-    pub fn max_pending(mut self, n: usize) -> Self {
-        self.max_pending = Some(n);
+    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a slot or HTTP/1.1 connection on its host; `None` removes the limit.
+    pub fn max_pending(mut self, n: impl Into<Option<usize>>) -> Self {
+        self.max_pending = n.into();
+        self.max_pending_unlimited = self.max_pending.is_none();
         self
     }
 
@@ -221,6 +225,15 @@ impl HostLimits {
 
     pub(super) fn pending_limits(&self) -> (Option<usize>, Option<usize>) {
         (self.max_pending, self.max_total_pending)
+    }
+
+    pub(crate) fn h1_pending_limit(&self) -> Option<usize> {
+        if self.max_pending_unlimited {
+            None
+        } else {
+            self.max_pending
+                .or(Some(crate::pool::DEFAULT_MAX_H1_PENDING_PER_HOST))
+        }
     }
 
     pub(super) fn max_total(&self) -> Option<usize> {

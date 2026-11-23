@@ -47,8 +47,8 @@ fn proxy_url_shows_the_exit_without_its_password() {
         .build()
         .unwrap();
     let shown = bound.proxy().unwrap();
-    assert!(shown.contains("127.0.0.1:9000"), "{shown}");
-    assert!(!shown.contains(SECRET), "{shown}");
+    assert!(shown.as_str().contains("127.0.0.1:9000"), "{shown}");
+    assert!(!shown.as_str().contains(SECRET), "{shown}");
     let rebound = bound.to_builder().build().unwrap();
     assert_eq!(rebound.proxy(), Some(shown));
 }

@@ -29,8 +29,8 @@ fn session_reports_the_exit_it_is_bound_to() {
         .build()
         .unwrap();
     let shown = bound.proxy().unwrap();
-    assert!(shown.contains("127.0.0.1:9000"), "{shown}");
-    assert!(!shown.contains(":pw@"), "{shown}");
+    assert!(shown.as_str().contains("127.0.0.1:9000"), "{shown}");
+    assert!(!shown.as_str().contains(":pw@"), "{shown}");
 }
 
 #[tokio::test]

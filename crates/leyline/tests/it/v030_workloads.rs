@@ -531,12 +531,12 @@ async fn frozen_v020_session_and_crawl_json_round_trip_and_cookies_none_persiste
         });
         std::fs::write(&v020_crawl, serde_json::to_vec(&v020_crawl_json).unwrap()).unwrap();
         let resave_path = dir.path("v030-resaved-crawl.json");
-        let mut crawl = leyline::Crawl::load(&loaded, &v020_crawl)
+        let mut crawl = leyline::crawl::Crawl::load(&loaded, &v020_crawl)
             .unwrap()
             .redirect(Redirect::none())
             .max_body_size(1024 * 64);
         crawl.save(&resave_path).await.unwrap();
-        let mut reloaded_crawl = leyline::Crawl::load(&loaded, &resave_path)
+        let mut reloaded_crawl = leyline::crawl::Crawl::load(&loaded, &resave_path)
             .unwrap()
             .filter(|url| url.path() == "/page1");
         let page = reloaded_crawl.next().await.unwrap().unwrap();

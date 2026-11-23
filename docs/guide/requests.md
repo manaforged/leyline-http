@@ -76,7 +76,7 @@ Two methods override the order:
   `BeforeAcceptEncoding`.
 
 ```rust,no_run
-use leyline::HeaderPosition;
+use leyline::profile::HeaderPosition;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
@@ -214,7 +214,7 @@ navigation without one is a typed URL: `sec-fetch-site: none` and no
 `Referer`.
 
 ```rust,no_run
-use leyline::RequestKind;
+use leyline::profile::RequestKind;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::from(leyline::Browser::default());
@@ -274,12 +274,12 @@ The page changes after each navigation response, 4xx and 5xx included, to
 the final URL after redirects. A transport error leaves it unchanged.
 Relative URLs resolve against the current page, or else the base URL. A
 `.stream()` navigation changes the page when the response head arrives.
-`set_current(page)` sets the page by hand. A `fetch` on
+`page(url)` sets the page by hand. A `fetch` on
 a tab with no page fails with `Kind::Request` and sends nothing: open a page
 first.
 
 ```rust,no_run
-use leyline::RequestKind;
+use leyline::profile::RequestKind;
 
 # async fn run() -> leyline::Result<()> {
 let tab = leyline::Session::from(leyline::Browser::default()).tab();

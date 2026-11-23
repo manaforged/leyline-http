@@ -9,7 +9,6 @@ use crate::net::{Dialer, DnsConfig, Resolver, SocketOptions};
 use crate::pool::Io;
 use crate::pool::{Pool, PoolConfig};
 use crate::profile::BrowserProfile;
-use crate::profile::Ja4t;
 use crate::profile::TcpProfile;
 use crate::tls::FingerprintConnector;
 use crate::tls::trust::Tls;
@@ -28,7 +27,6 @@ pub(super) struct PoolInputs<'a> {
     proxy_pool: Option<&'a ProxyPool>,
     socket: &'a SocketOptions,
     tcp: Option<&'a TcpProfile>,
-    ja4t: Option<&'a Ja4t>,
     protocol: Protocol,
 }
 
@@ -49,7 +47,6 @@ impl PartialEq for PoolInputs<'_> {
                     }))
             && self.socket == other.socket
             && self.tcp == other.tcp
-            && self.ja4t == other.ja4t
             && self.protocol == other.protocol
     }
 }
@@ -120,7 +117,8 @@ impl PoolInputs<'_> {
 
 impl SessionBuilder {
     pub(super) fn pool_inputs(&self) -> PoolInputs<'_> {
-        let pool = self.pool_config;
+        let mut pool = self.pool_config;
+        pool.max_h1_pending_per_host = self.host_limits.h1_pending_limit();
         PoolInputs {
             pool,
             io: pool.io(self.timeouts.read_limit().or(self.timeouts.total_limit())),
@@ -132,13 +130,12 @@ impl SessionBuilder {
             proxy_pool: self.proxy_pool.as_ref(),
             socket: &self.socket_config,
             tcp: self.tcp_profile.as_ref(),
-            ja4t: self.ja4t.as_ref(),
             protocol: self.protocol_policy,
         }
     }
 
     pub(super) fn resolve_tcp_profile(&self) -> TcpProfile {
-        let mut tcp = self.tcp_profile.clone().unwrap_or_else(|| {
+        self.tcp_profile.clone().unwrap_or_else(|| {
             let mut tcp = self.platform.tcp_profile();
             if !self.impersonates() {
                 tcp.mss = 0;
@@ -146,10 +143,6 @@ impl SessionBuilder {
                 tcp.window_scale = 0;
             }
             tcp
-        });
-        if let Some(ja4t) = &self.ja4t {
-            ja4t.apply(&mut tcp);
-        }
-        tcp
+        })
     }
 }

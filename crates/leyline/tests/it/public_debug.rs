@@ -7,7 +7,7 @@ fn every_public_type_implements_debug() {
     debug::<leyline::SessionBuilder>();
     debug::<leyline::RequestBuilder>();
     debug::<leyline::trace::Event<'static>>();
-    debug::<leyline::Fingerprint>();
+    debug::<leyline::profile::Fingerprint>();
     #[cfg(feature = "multipart")]
     {
         debug::<leyline::multipart::Form>();

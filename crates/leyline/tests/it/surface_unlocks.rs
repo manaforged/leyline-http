@@ -11,8 +11,9 @@ use base64::engine::general_purpose::STANDARD;
 use bytes::Bytes;
 use leyline::cookie::{Cookie, Jar, SameSite};
 use leyline::http::StatusCode;
+use leyline::profile::TcpProfile;
 use leyline::testing::{self, Server};
-use leyline::{Body, Browser, Error, Kind, Platform, Retry, Session, TcpProfile, Tls};
+use leyline::{Body, Browser, Error, Kind, Platform, Retry, Session, Tls};
 
 type TestResult = Result<(), Box<dyn StdError>>;
 
@@ -167,7 +168,7 @@ fn assert_invalid_tcp_inputs_fail_with_config() -> TestResult {
         "64240_2_70000_8",
         "64240_2_1460_15",
     ] {
-        let Err(err) = Session::builder().ja4t(bad_ja4t).build() else {
+        let Err(err) = TcpProfile::from_ja4t(bad_ja4t) else {
             return Err(format!("invalid JA4T {bad_ja4t:?} succeeded").into());
         };
         assert_eq!(err.kind(), Kind::Config, "{bad_ja4t}");
@@ -179,7 +180,7 @@ async fn assert_ja4t_sessions_report_layered_fingerprints() -> TestResult {
     let server = Server::https(|_| testing::Response::new(200).body("ok")).await?;
     let before_platform = Session::builder()
         .tls(server.tls())
-        .ja4t("64240_2-4-8-1-3_1380_10")
+        .tcp_profile(TcpProfile::from_ja4t("64240_2-4-8-1-3_1380_10")?)
         .platform(Platform::Linux)
         .audit(true)
         .build()?;
@@ -189,7 +190,10 @@ async fn assert_ja4t_sessions_report_layered_fingerprints() -> TestResult {
         "64240_2-4-8-1-3_1380_10"
     );
 
-    let child = before_platform.to_builder().ja4t("32768__1200_7").build()?;
+    let child = before_platform
+        .to_builder()
+        .tcp_profile(TcpProfile::from_ja4t("32768__1200_7")?)
+        .build()?;
     let child_resp = child.get(server.url("/b")).send().await?;
     assert_eq!(
         child_resp.fingerprint().ok_or("audit enabled")?.ja4t(),
@@ -199,7 +203,7 @@ async fn assert_ja4t_sessions_report_layered_fingerprints() -> TestResult {
     let replaced = Session::builder()
         .tls(server.tls())
         .browser(Browser::Chrome154)
-        .ja4t("32768__1200_7")
+        .tcp_profile(TcpProfile::from_ja4t("32768__1200_7")?)
         .tcp_profile(Platform::Windows.tcp_profile())
         .audit(true)
         .build()?;
@@ -540,7 +544,7 @@ async fn crawl_page_retains_non_sensitive_headers_across_checkpoints() -> TestRe
     assert!(!raw_checkpoint.contains("top-secret-token"));
 
     let serialized = serde_json::to_string(&seed_page)?;
-    let restored_page: leyline::Page = serde_json::from_str(&serialized)?;
+    let restored_page: leyline::crawl::Page = serde_json::from_str(&serialized)?;
     assert_eq!(restored_page.header("etag"), Some("\"seed-v1\""));
     let restored_links = restored_page
         .headers()
@@ -553,12 +557,12 @@ async fn crawl_page_retains_non_sensitive_headers_across_checkpoints() -> TestRe
         vec!["</a.html>; rel=\"preload\"", "</b.html>; rel=\"alternate\""]
     );
 
-    let legacy_page: leyline::Page = serde_json::from_str(
+    let legacy_page: leyline::crawl::Page = serde_json::from_str(
         r#"{"url":"https://example.com/","depth":0,"status":200,"html":"<p>hi</p>","text":"hi"}"#,
     )?;
     assert!(legacy_page.headers().is_empty());
 
-    let latin1_page: leyline::Page = serde_json::from_str(
+    let latin1_page: leyline::crawl::Page = serde_json::from_str(
         r#"{"url":"https://example.com/","depth":0,"status":200,"headers":[["x-raw",[195,40]]],"html":"<p>hi</p>","text":"hi"}"#,
     )?;
     assert_eq!(latin1_page.header("x-raw"), None);
@@ -566,7 +570,7 @@ async fn crawl_page_retains_non_sensitive_headers_across_checkpoints() -> TestRe
         latin1_page.headers().get("x-raw").map(|v| v.as_bytes()),
         Some(&[195u8, 40][..])
     );
-    let roundtrip_latin1: leyline::Page =
+    let roundtrip_latin1: leyline::crawl::Page =
         serde_json::from_str(&serde_json::to_string(&latin1_page)?)?;
     assert_eq!(
         roundtrip_latin1
@@ -576,7 +580,7 @@ async fn crawl_page_retains_non_sensitive_headers_across_checkpoints() -> TestRe
         Some(&[195u8, 40][..])
     );
 
-    let mut resumed = leyline::Crawl::load(&session, &checkpoint)?
+    let mut resumed = leyline::crawl::Crawl::load(&session, &checkpoint)?
         .respect(None)
         .limit(None);
     let next = resumed.next().await.ok_or("resumed page")??;
@@ -586,16 +590,7 @@ async fn crawl_page_retains_non_sensitive_headers_across_checkpoints() -> TestRe
 }
 
 #[test]
-fn session_base_url_and_cookie_jar_inspection_match_rfc_send_order() -> TestResult {
-    assert!(Session::new().base_url().is_none());
-    let session = Session::builder()
-        .base_url("https://api.example.com/v1/")
-        .build()?;
-    assert_eq!(
-        session.base_url().map(leyline::Url::as_str),
-        Some("https://api.example.com/v1/")
-    );
-
+fn cookie_jar_inspection_matches_rfc_send_order() -> TestResult {
     let parsed = Cookie::parse(
         "https://app.example.com/shop/cart",
         "sid=abc; Domain=example.com; Path=/shop; Secure; HttpOnly; SameSite=Strict",

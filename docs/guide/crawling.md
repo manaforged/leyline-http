@@ -34,12 +34,13 @@ and each page's robots rules unless you call `respect(None)`. Every default
 limit and policy can be tuned or turned off:
 
 ```rust,no_run
-use leyline::{HostLimits, Respect, Scope, Session};
+use leyline::crawl::{Respect, Scope};
+use leyline::{HostLimits, Session};
 
 # async fn run() -> leyline::Result<()> {
 let mut crawl = Session::new()
     .crawl("https://docs.example/guide/")
-    .respect(Respect::AiTraining)
+    .respect(Respect::AiTrain)
     .scope(Scope::Prefix)
     .limit(500)
     .host_limits(HostLimits::new().max_in_flight(2).per_second(2.0));
@@ -56,7 +57,7 @@ println!("{} pages, {} errors", crawl.pages(), crawl.errors());
 
 | Setter | Default | Effect |
 | --- | --- | --- |
-| `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
+| `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTrain` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
 | `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; see [Filter the links to follow](#filter-the-links-to-follow). `Any`: any host |
 | `filter(keep)` | none | Follows a link only when the closure returns `true` for its URL, on top of the scope |
 | `limit(n)` or `limit(None)` | none | Stops after `n` kept pages, or removes the cap |
@@ -88,7 +89,7 @@ For each URL, in order, the crawl:
    goes out as written.
 2. Unless robots are ignored, skips a URL that robots.txt disallows, and uses the site's
    `Crawl-delay` as the least spacing between its requests, up to `max_crawl_delay` (30
-   seconds by default). With `Respect::AiTraining`, it skips a URL whose site refuses AI
+   seconds by default). With `Respect::AiTrain`, it skips a URL whose site refuses AI
    training in a `Content-Signal` line
    ([Cloudflare's format](https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/))
    or a `Content-Usage` line (the IETF
@@ -106,7 +107,7 @@ For each URL, in order, the crawl:
 5. Queues the page's links. Unless robots are ignored, it reads the page's directives
    with `html::Directives::read`, queues nothing from a `nofollow` page, and
    skips links marked `rel="nofollow"`.
-6. Unless robots are ignored, skips a `noindex` page. With `Respect::AiTraining`, it
+6. Unless robots are ignored, skips a `noindex` page. With `Respect::AiTrain`, it
    also skips a `noai` page and a page whose `Content-Usage` header refuses
    AI training, counted as `SkipReason::NoAi` and `SkipReason::Signal`. `noai` is a convention some sites use, not a standard. A
    page that names another in-scope page as its canonical URL waits until
@@ -157,7 +158,8 @@ and redirect target, and never to the seed. A rejected link counts under
 `SkipReason::Filter`.
 
 ```rust,no_run
-use leyline::{Scope, Session, SkipReason};
+use leyline::Session;
+use leyline::crawl::{Scope, SkipReason};
 
 # async fn run() -> leyline::Result<()> {
 let mut crawl = Session::new()
@@ -193,7 +195,7 @@ let proxies = Proxy::list([
 .sticky_for(Duration::from_secs(600))
 .ban_after(3)
 .ban_for(Duration::from_secs(120));
-let metrics = Metrics::new();
+let metrics = std::sync::Arc::new(Metrics::new());
 
 let session = Session::builder()
     .browser(Browser::default())
@@ -339,7 +341,8 @@ sides are compared with percent-encoding normalized. `/robots.txt` itself is
 always allowed.
 
 ```rust,no_run
-use leyline::{Purpose, Url};
+use leyline::Url;
+use leyline::crawl::Purpose;
 
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let robots = session.robots("https://shop.example/", "examplebot").await?;
@@ -528,7 +531,7 @@ async fn crawl_one(session: &Session, url: &str) -> Next {
                 "{url}: {} after {} attempts via {}",
                 err.kind(),
                 err.attempts(),
-                err.proxy().unwrap_or("direct"),
+                err.proxy().map(leyline::Url::as_str).unwrap_or("direct"),
             );
             return match err.kind() {
                 leyline::Kind::Timeout
@@ -603,8 +606,8 @@ A `.stream()` request logs its body end as a separate event with the same
 
 ## Count requests and watch the queues
 
-`trace::Metrics` counts what a session does. `Metrics::new()` returns an
-`Arc<Metrics>`; pass a clone to `trace`, which adds it beside any other
+`trace::Metrics` counts what a session does. Wrap `Metrics::new()` in an
+`Arc<Metrics>`, pass a clone to `trace`, which adds it beside any other
 hook, and keep one to read it:
 
 | Method | Count |
@@ -744,7 +747,8 @@ in memory or be dropped
 and loaded with a supplied session:
 
 ```rust,no_run
-use leyline::{Crawl, Session};
+use leyline::Session;
+use leyline::crawl::Crawl;
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::new();

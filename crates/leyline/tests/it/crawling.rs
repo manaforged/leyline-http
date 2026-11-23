@@ -156,7 +156,7 @@ async fn a_proxy_pool_bans_a_dead_proxy_and_keeps_crawling() {
     let stats = session.stats();
     let banned = stats
         .proxies()
-        .find(|proxy| proxy.contains(&dead[7..]))
+        .find(|proxy| proxy.as_str().contains(&dead[7..]))
         .unwrap();
     assert!(stats.proxy_banned_until(banned).is_some());
 }

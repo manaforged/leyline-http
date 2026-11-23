@@ -233,7 +233,7 @@ async fn combo_proxy_list_with_before_send_cache_download_tab_crawl_and_h2_conne
         let root_page = crawl.next().await.unwrap().unwrap();
         assert_eq!(root_page.url().path(), "/crawl/root");
         crawl.save(&ckpt).await.unwrap();
-        let mut resumed = leyline::Crawl::load(&session, &ckpt).unwrap();
+        let mut resumed = leyline::crawl::Crawl::load(&session, &ckpt).unwrap();
         let leaf_page = resumed.next().await.unwrap().unwrap();
         assert_eq!(leaf_page.url().path(), "/crawl/leaf");
         assert!(resumed.next().await.is_none());

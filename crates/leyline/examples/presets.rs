@@ -1,3 +1,4 @@
+use leyline::profile::RequestKind;
 use leyline::{Browser, Platform, Session};
 
 #[tokio::main]
@@ -12,7 +13,7 @@ async fn main() -> leyline::Result<()> {
 
     let js = session
         .get("https://example.com/app.js")
-        .kind(leyline::RequestKind::Script)
+        .kind(RequestKind::Script)
         .send()
         .await?;
     println!(
@@ -23,14 +24,14 @@ async fn main() -> leyline::Result<()> {
 
     let api = session
         .get("https://example.com/api/state")
-        .kind(leyline::RequestKind::Xhr)
+        .kind(RequestKind::Xhr)
         .send()
         .await?;
     println!("xhr get:  {}", api.status());
 
     let posted = session
         .post("https://example.com/api/items")
-        .kind(leyline::RequestKind::Xhr)
+        .kind(RequestKind::Xhr)
         .body("payload=p%3D1")
         .send()
         .await?;

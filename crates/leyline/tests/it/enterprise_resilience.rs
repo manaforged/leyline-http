@@ -237,7 +237,7 @@ fn enterprise_blocking_multithreaded_sessions_and_resumable_crawl_under_429() {
         assert_eq!(first.url().path(), "/start");
         crawl.save(&ckpt).await.unwrap();
 
-        let mut resumed = leyline::Crawl::load(&session, &ckpt).unwrap();
+        let mut resumed = leyline::crawl::Crawl::load(&session, &ckpt).unwrap();
         let mut paths = vec![first.url().path().to_owned()];
         while let Some(page) = resumed.next().await {
             paths.push(page.unwrap().url().path().to_owned());

@@ -96,6 +96,7 @@ impl RequestBuilder {
                 "events requires a GET request without a body",
             ));
         }
+        self.reject_download_options()?;
         self.prepare_in_place()?;
         self.draft.carry.stream_response = true;
         self.draft

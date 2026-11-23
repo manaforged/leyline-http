@@ -305,6 +305,12 @@ impl Proxy {
         self.primary().map(redact)
     }
 
+    pub(crate) fn shown_url(&self) -> Option<url::Url> {
+        self.primary_url()
+            .map(|p| crate::util::redact_url_value(p.url()))
+            .or_else(|| self.primary().and_then(crate::util::redact_url))
+    }
+
     pub(crate) fn summary(&self, pool: Option<&ProxyPool>) -> Option<String> {
         match pool.or(self.pool.as_ref()) {
             Some(pool) => Some(format!("pool({})", pool.len())),

@@ -278,7 +278,7 @@ async fn a_crawl_filter_keeps_a_path_prefix_and_drops_paged_urls() {
 
     let mut crawl = Session::new()
         .crawl(server.url("/docs/a"))
-        .scope(leyline::Scope::Host)
+        .scope(leyline::crawl::Scope::Host)
         .host_limits(unpaced())
         .dedup(false)
         .filter(|url| url.path().starts_with("/docs/") && url.query().is_none());
@@ -290,5 +290,5 @@ async fn a_crawl_filter_keeps_a_path_prefix_and_drops_paged_urls() {
     let kept = BTreeSet::from(["/docs/a", "/docs/deep/1", "/docs/deep/2"].map(str::to_owned));
     assert_eq!(visited, kept);
     assert_eq!(page_targets(&server).await, kept);
-    assert_eq!(crawl.skipped(leyline::SkipReason::Filter), 2);
+    assert_eq!(crawl.skipped(leyline::crawl::SkipReason::Filter), 2);
 }

@@ -53,7 +53,7 @@ impl SessionBuilder {
                 })
                 .collect(),
             cache: (self.cache > 0).then(|| Arc::new(Cache::new(self.cache))),
-            proxy_shown: self.proxy_config.shown(),
+            proxy_shown: self.proxy_config.shown_url(),
             connector,
             doh,
             h2_config: derived.h2_config,

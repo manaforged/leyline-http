@@ -1,5 +1,6 @@
+use leyline::profile::RequestKind;
 use leyline::testing::{self, queue};
-use leyline::{Browser, Protocol, RequestKind, Session};
+use leyline::{Browser, Protocol, Session};
 
 #[tokio::test]
 async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {

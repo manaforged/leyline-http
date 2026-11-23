@@ -168,10 +168,10 @@ presets, and returns at the response head.
 - The body streams decoded and capped at `max_body_size`. When Leyline
   decodes it, the response has no `content-encoding` and no
   `content-length`. Trailers are not exposed.
-- Every other upstream header stays, hop-by-hop headers included. Filter
-  them with `leyline::relay_headers(&headers)`: the headers already describe
-  the decoded body.
-- Request extensions set per-request policy: `RequestKind`, `Timeout`,
+- Every other upstream header stays, hop-by-hop headers included. Call
+  `Response::relay_headers()` before `into_http()` when relaying through a
+  service of your own.
+- Request extensions set per-request policy: `profile::RequestKind`, `Timeout`,
   `Retry`, `Redirect`, and `Proxy`. A `Proxy`
   bypasses the session's proxy list. `Session::execute` reads the same
   extensions and returns a buffered `Response`.
@@ -221,15 +221,15 @@ forward the response, keep the status and the body and filter the headers:
 # mod example {
 use leyline::http::{Request, Response};
 use leyline::{Body, Session};
-use tower_service::Service;
 
 pub async fn relay(
-    mut svc: Session,
+    session: Session,
     req: Request<Body>,
 ) -> leyline::Result<Response<Body>> {
-    let resp = svc.call(req).await?;
-    let (mut parts, body) = resp.into_parts();
-    parts.headers = leyline::relay_headers(&parts.headers);
+    let resp = session.request_from(req).stream().send().await?;
+    let headers = resp.relay_headers();
+    let (mut parts, body) = resp.into_http()?.into_parts();
+    parts.headers = headers;
     Ok(Response::from_parts(parts, body))
 }
 # }

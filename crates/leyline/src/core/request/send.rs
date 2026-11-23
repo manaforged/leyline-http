@@ -52,8 +52,24 @@ impl RequestBuilder {
     }
 
     fn respond(mut self) -> Result<impl Future<Output = Result<Response>> + Send + 'static> {
+        self.reject_download_options()?;
         let url = self.prepare()?;
         Ok(self.respond_prepared(url))
+    }
+
+    pub(super) fn reject_download_options(&self) -> Result<()> {
+        if self
+            .draft
+            .build
+            .as_deref()
+            .and_then(|b| b.download.as_ref())
+            .is_some()
+        {
+            return Err(Error::config(
+                "sha256, progress, and resume only apply to download_to",
+            ));
+        }
+        Ok(())
     }
 
     fn respond_prepared(

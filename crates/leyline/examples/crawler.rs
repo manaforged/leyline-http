@@ -66,7 +66,11 @@ async fn fetch(session: Session, index: usize, url: String) {
         Ok(resp) => resp,
         Err(e) => return report(&url, &e),
     };
-    let via = resp.proxy().unwrap_or("direct").to_owned();
+    let via = resp
+        .proxy()
+        .map(leyline::Url::as_str)
+        .unwrap_or("direct")
+        .to_owned();
     if let Some(block) = resp.block() {
         println!("{url} via {via}: {block:?}");
         return;
@@ -79,7 +83,7 @@ async fn fetch(session: Session, index: usize, url: String) {
 }
 
 fn report(url: &str, e: &leyline::Error) {
-    let via = e.proxy().unwrap_or("direct");
+    let via = e.proxy().map(leyline::Url::as_str).unwrap_or("direct");
     let attempts = e.attempts();
     match e.kind() {
         Kind::Proxy => {
@@ -96,7 +100,7 @@ async fn main() -> leyline::Result<()> {
         .sticky_for(Duration::from_secs(300))
         .ban_after(3)
         .ban_for(Duration::from_secs(120));
-    let metrics = Metrics::new();
+    let metrics = std::sync::Arc::new(Metrics::new());
 
     let session = Session::builder()
         .browser(Browser::default())

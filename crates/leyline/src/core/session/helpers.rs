@@ -42,17 +42,15 @@ impl Session {
 
     /// Returns the primary proxy URL with its credentials masked.
     #[must_use]
-    pub fn proxy(&self) -> Option<&str> {
-        self.inner.proxy_shown.as_deref()
+    pub fn proxy(&self) -> Option<&url::Url> {
+        self.inner.proxy_shown.as_ref()
     }
 
     fn proxy_summary(&self) -> Option<String> {
         self.inner.inputs.proxy_config.summary(self.proxy_pool())
     }
 
-    /// Returns the base URL that relative request URLs resolve against, when set.
-    #[must_use]
-    pub fn base_url(&self) -> Option<&url::Url> {
+    pub(crate) fn base_url(&self) -> Option<&url::Url> {
         self.inner.inputs.base_url.as_ref()
     }
 

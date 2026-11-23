@@ -3,7 +3,7 @@ use super::*;
 async fn kept_and_stats(
     server: &testing::Server,
     respect: Respect,
-) -> (BTreeSet<String>, leyline::Crawl) {
+) -> (BTreeSet<String>, leyline::crawl::Crawl) {
     let mut crawl = Session::new()
         .crawl(server.url("/"))
         .respect(respect)
@@ -38,7 +38,7 @@ async fn a_training_crawl_skips_a_noai_page_and_a_robots_crawl_keeps_it() {
     })
     .await
     .unwrap();
-    let (kept, stats) = kept_and_stats(&server, Respect::AiTraining).await;
+    let (kept, stats) = kept_and_stats(&server, Respect::AiTrain).await;
     assert_eq!(kept, BTreeSet::from(["/".to_owned()]));
     assert_eq!(stats.skipped(SkipReason::NoAi), 1);
     let (kept, _) = kept_and_stats(&server, Respect::Robots).await;

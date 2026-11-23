@@ -58,6 +58,6 @@ fn unknown_min_tls_version_is_a_profile_error() {
         tls.min_version()
     };
     declared(Some("1.1")).expect_err("expected Err");
-    assert_eq!(declared(Some("1.2")).unwrap(), Some(TlsMinVersion::Tls12));
+    assert_eq!(declared(Some("1.2")).unwrap(), Some(TlsVersion::Tls12));
     assert_eq!(declared(None).unwrap(), None);
 }

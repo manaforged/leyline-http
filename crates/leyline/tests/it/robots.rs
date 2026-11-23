@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use leyline::crawl::{Purpose, Robots, RobotsSource};
 use leyline::testing;
-use leyline::{Purpose, Robots, RobotsSource, Session, Url};
+use leyline::{Session, Url};
 
 const RFC_EXAMPLE: &str = "User-Agent: *
 Disallow: *.gif$

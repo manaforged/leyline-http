@@ -35,7 +35,9 @@ struct Template {
 impl RequestBuilder {
     /// Sends the request and follows each `Link: rel="next"` header, yielding one response per page.
     pub fn pages(mut self) -> impl Stream<Item = Result<Response>> + Send + Unpin + use<> {
-        let prepared = self.prepare_in_place();
+        let prepared = self
+            .reject_download_options()
+            .and_then(|()| self.prepare_in_place());
         let template = Template::of(&self);
         let visited = template.first.iter().cloned().collect();
         let pending: PageFuture = match prepared {

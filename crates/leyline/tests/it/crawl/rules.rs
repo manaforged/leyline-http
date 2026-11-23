@@ -79,7 +79,7 @@ async fn a_crawl_for_ai_training_obeys_content_signals() {
     let mut crawl = Session::new()
         .crawl(server.url("/"))
         .host_limits(unpaced())
-        .respect(Respect::AiTraining);
+        .respect(Respect::AiTrain);
     assert!(crawl.next().await.is_none());
     assert_eq!(crawl.skipped(SkipReason::Signal), 1);
     assert!(page_targets(&server).await.is_empty());
@@ -243,7 +243,7 @@ async fn a_crawl_for_ai_training_obeys_content_usage_by_path_and_header() {
     let mut crawl = Session::new()
         .crawl(server.url("/"))
         .host_limits(unpaced())
-        .respect(Respect::AiTraining);
+        .respect(Respect::AiTrain);
     let mut kept = BTreeSet::new();
     while let Some(page) = crawl.next().await {
         kept.insert(page.unwrap().url().path().to_owned());

@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 #[cfg(unix)]
 use std::path::Path;
 use std::time::Duration;
@@ -31,20 +31,6 @@ impl SessionBuilder {
                 s.local_ipv4 = None;
                 s.local_ipv6 = None;
             }
-        })
-    }
-
-    /// Binds new IPv4 and IPv6 connections to the given local addresses.
-    pub fn local_addresses(
-        self,
-        ipv4: impl Into<Option<Ipv4Addr>>,
-        ipv6: impl Into<Option<Ipv6Addr>>,
-    ) -> Self {
-        let ipv4 = ipv4.into();
-        let ipv6 = ipv6.into();
-        self.update_socket(|s| {
-            s.local_ipv4 = ipv4;
-            s.local_ipv6 = ipv6;
         })
     }
 

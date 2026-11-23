@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use super::identity::TrustKey;
-use crate::profile::TlsMinVersion;
+use crate::profile::TlsVersion;
 
 /// TLS trust settings: root stores, extra CAs, a client certificate, pins, ECH, and the minimum version.
 #[derive(Clone, PartialEq, Eq)]
@@ -18,7 +18,7 @@ pub struct Tls {
     pub(crate) accept_invalid_hostnames: bool,
     pub(crate) ech_config_list: Option<Vec<u8>>,
     pub(crate) auto_ech: bool,
-    pub(crate) min_tls_version: TlsMinVersion,
+    pub(crate) min_tls_version: TlsVersion,
 }
 
 impl std::fmt::Debug for Tls {
@@ -57,7 +57,7 @@ impl Default for Tls {
             accept_invalid_hostnames: false,
             ech_config_list: None,
             auto_ech: false,
-            min_tls_version: TlsMinVersion::Tls10,
+            min_tls_version: TlsVersion::Tls10,
         }
     }
 }
@@ -163,15 +163,9 @@ impl Tls {
         self
     }
 
-    /// Raises the minimum TLS version to 1.2 unless it is already higher.
-    pub fn tls12_min(mut self) -> Self {
-        self.min_tls_version = self.min_tls_version.max(TlsMinVersion::Tls12);
-        self
-    }
-
-    /// Sets the minimum TLS version to 1.3.
-    pub fn tls13_only(mut self) -> Self {
-        self.min_tls_version = TlsMinVersion::Tls13;
+    /// Sets the minimum TLS version accepted by handshakes.
+    pub fn min_version(mut self, version: TlsVersion) -> Self {
+        self.min_tls_version = version;
         self
     }
 

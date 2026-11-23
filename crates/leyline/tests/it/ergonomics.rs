@@ -2,9 +2,10 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use leyline::profile::RequestKind;
 use leyline::testing::{self, queue};
 use leyline::trace::{Event, Trace};
-use leyline::{Browser, Kind, Platform, Protocol, Proxy, RequestKind, Retry, Session};
+use leyline::{Browser, Kind, Platform, Protocol, Proxy, Retry, Session};
 
 fn gzip(data: &[u8]) -> Vec<u8> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());

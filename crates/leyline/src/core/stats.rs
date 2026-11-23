@@ -103,46 +103,52 @@ impl Stats {
         self.hosts.iter().map(HostStats::origin)
     }
 
-    /// Returns how many requests to `host` are in flight, 0 for an unknown host.
+    /// Returns how many requests to the origin of `url` are in flight, 0 for an unknown host.
     #[must_use]
-    pub fn in_flight(&self, host: &str) -> usize {
-        self.host(host).map_or(0, HostStats::in_flight)
+    pub fn in_flight(&self, url: impl crate::core::IntoUrl) -> usize {
+        self.host(url).map_or(0, HostStats::in_flight)
     }
 
-    /// Returns how many requests to `host` wait for a slot, 0 for an unknown host.
+    /// Returns how many requests to the origin of `url` wait for a slot, 0 for an unknown host.
     #[must_use]
-    pub fn waiting(&self, host: &str) -> usize {
-        self.host(host).map_or(0, HostStats::waiting)
+    pub fn waiting(&self, url: impl crate::core::IntoUrl) -> usize {
+        self.host(url).map_or(0, HostStats::waiting)
     }
 
-    /// Returns the redacted label of each proxy in the session's proxy list.
-    pub fn proxies(&self) -> impl Iterator<Item = &str> {
+    /// Returns the redacted URL of each proxy in the session's proxy list.
+    pub fn proxies(&self) -> impl Iterator<Item = &url::Url> {
         self.proxies.iter().map(ProxyHealth::proxy)
     }
 
     /// Returns how many requests hold `proxy` now, 0 for an unknown proxy.
     #[must_use]
-    pub fn proxy_in_use(&self, proxy: &str) -> u32 {
+    pub fn proxy_in_use(&self, proxy: impl crate::core::IntoUrl) -> u32 {
         self.proxy(proxy).map_or(0, ProxyHealth::in_use)
     }
 
     /// Returns the failure count of `proxy`, 0 for an unknown proxy.
     #[must_use]
-    pub fn proxy_failures(&self, proxy: &str) -> u32 {
+    pub fn proxy_failures(&self, proxy: impl crate::core::IntoUrl) -> u32 {
         self.proxy(proxy).map_or(0, ProxyHealth::failures)
     }
 
     /// Returns when the ban on `proxy` ends, or `None` when it is not banned.
     #[must_use]
-    pub fn proxy_banned_until(&self, proxy: &str) -> Option<Instant> {
+    pub fn proxy_banned_until(&self, proxy: impl crate::core::IntoUrl) -> Option<Instant> {
         self.proxy(proxy).and_then(ProxyHealth::banned_until)
     }
 
-    fn host(&self, host: &str) -> Option<&HostStats> {
-        self.hosts.iter().find(|stats| stats.origin() == host)
+    fn host(&self, url: impl crate::core::IntoUrl) -> Option<&HostStats> {
+        let url = url.into_url().ok()?;
+        let origin = crate::core::config::Origin::ascii(&url);
+        self.hosts.iter().find(|stats| stats.origin() == origin)
     }
 
-    fn proxy(&self, proxy: &str) -> Option<&ProxyHealth> {
-        self.proxies.iter().find(|health| health.proxy() == proxy)
+    fn proxy(&self, proxy: impl crate::core::IntoUrl) -> Option<&ProxyHealth> {
+        let url = proxy.into_url().ok()?;
+        let redacted = crate::util::redact_url_value(&url);
+        self.proxies
+            .iter()
+            .find(|health| health.proxy() == &redacted)
     }
 }

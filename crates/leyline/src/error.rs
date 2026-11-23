@@ -51,7 +51,7 @@ struct Inner {
     body: Option<Bytes>,
     headers: Option<HeaderMap>,
     attempts: u32,
-    proxy: Option<String>,
+    proxy: Option<Url>,
     policy_wait: Option<std::time::Duration>,
     retries_exhausted: bool,
     after_response: bool,
@@ -192,15 +192,15 @@ impl Error {
     }
 
     /// Returns the redacted URL of the proxy the last attempt used.
-    pub fn proxy(&self) -> Option<&str> {
-        self.inner.proxy.as_deref()
+    pub fn proxy(&self) -> Option<&Url> {
+        self.inner.proxy.as_ref()
     }
 
     pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
-        self.inner.proxy = proxy.map(crate::util::redact);
+        self.inner.proxy = proxy.and_then(crate::util::redact_url);
     }
 
-    pub(crate) fn with_trail(mut self, attempts: u32, proxy: Option<String>) -> Self {
+    pub(crate) fn with_trail(mut self, attempts: u32, proxy: Option<Url>) -> Self {
         self.inner.attempts = attempts;
         self.inner.proxy = proxy;
         self
@@ -344,7 +344,7 @@ impl fmt::Debug for Error {
             out.field("attempts", &self.inner.attempts);
         }
         if let Some(proxy) = &self.inner.proxy {
-            out.field("proxy", proxy);
+            out.field("proxy", &proxy.as_str());
         }
         if self.inner.retries_exhausted {
             out.field("retries_exhausted", &true);

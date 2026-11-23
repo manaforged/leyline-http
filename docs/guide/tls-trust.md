@@ -138,8 +138,8 @@ let session = leyline::Session::builder()
 
 ## Set a TLS version floor
 
-`tls12_min()` refuses TLS 1.0 and 1.1, and `tls13_only()` refuses everything
-below TLS 1.3. With neither, the floor is TLS 1.0. The handshake minimum is
+`min_version(TlsVersion::Tls12)` refuses TLS 1.0 and 1.1, and `min_version(TlsVersion::Tls13)` refuses everything
+below TLS 1.3. Without it, the floor is TLS 1.0. The handshake minimum is
 the higher of the profile's minimum and the floor. A profile that declares no minimum starts at TLS 1.2.
 
 ```rust,no_run
@@ -147,7 +147,7 @@ the higher of the profile's minimum and the floor. A profile that declares no mi
 let session = leyline::Session::builder()
     .browser(leyline::Browser::Safari18).platform(leyline::Platform::MacOS)
     .tls(
-        leyline::Tls::new().tls12_min(),
+        leyline::Tls::new().min_version(leyline::TlsVersion::Tls12),
     )
     .build()?;
 # let _ = session;

@@ -344,7 +344,7 @@ async fn a_saved_crawl_resumes_without_fetching_a_page_twice() {
     let path = scratch("crawl").join("crawl.json");
     crawl.save(&path).await.unwrap();
     drop(crawl);
-    let mut resumed = leyline::Crawl::load(&builder().build().unwrap(), &path).unwrap();
+    let mut resumed = leyline::crawl::Crawl::load(&builder().build().unwrap(), &path).unwrap();
     while let Some(page) = resumed.next().await {
         pages.push(page.unwrap().url().path().to_owned());
     }
@@ -374,7 +374,8 @@ async fn a_saved_crawl_resumes_without_fetching_a_page_twice() {
 #[cfg(feature = "html")]
 #[tokio::test]
 async fn a_saved_crawl_preserves_tunable_policies() {
-    use leyline::{HostLimits, Scope, SkipReason};
+    use leyline::HostLimits;
+    use leyline::crawl::{Scope, SkipReason};
 
     let external = Server::http(|request: &Request| match request.target() {
         "/ext" => Response::new(200)
@@ -425,7 +426,7 @@ async fn a_saved_crawl_preserves_tunable_policies() {
     drop(crawl);
 
     let mut resumed =
-        leyline::Crawl::load(&builder().build().expect("build resume session"), &path)
+        leyline::crawl::Crawl::load(&builder().build().expect("build resume session"), &path)
             .expect("load checkpoint");
     let mut pages = vec![first];
     while let Some(page) = resumed.next().await {

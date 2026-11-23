@@ -85,7 +85,7 @@ if let Err(err) = session.get("https://api.example/").error_for_status().send().
         "{} after {} attempts via {}: {err}",
         err.kind().as_str(),
         err.attempts(),
-        err.proxy().unwrap_or("direct"),
+        err.proxy().map(leyline::Url::as_str).unwrap_or("direct"),
     );
 }
 # }

@@ -67,7 +67,7 @@ impl TlsContext {
     /// Builds the TLS context `browser` uses, with `min_version` as the floor when its profile declares none.
     pub fn new(
         browser: crate::Browser,
-        min_version: crate::profile::TlsMinVersion,
+        min_version: crate::profile::TlsVersion,
     ) -> crate::Result<Self> {
         Ok(Self(builder::ssl_context(browser.profile(), min_version)?))
     }

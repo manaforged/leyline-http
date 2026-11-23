@@ -74,7 +74,7 @@ fn a_session_reopens_as_the_same_browser_and_refuses_drift() {
     assert_eq!(reopened.languages(), session.languages());
     let proxy = reopened.proxy();
     assert!(
-        proxy.is_some_and(|proxy| proxy.contains("proxy.example")),
+        proxy.is_some_and(|proxy| proxy.as_str().contains("proxy.example")),
         "{proxy:?}"
     );
 

@@ -283,7 +283,7 @@ let session = leyline::Session::builder()
 let resp = session.get("https://example.com/").send().await?;
 println!(
     "{} reused={} elapsed={:?} tls={:?}",
-    resp.proxy().unwrap_or("direct"),
+    resp.proxy().map(leyline::Url::as_str).unwrap_or("direct"),
     resp.reused(),
     resp.elapsed(),
     resp.tls_version(),

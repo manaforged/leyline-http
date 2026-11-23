@@ -130,13 +130,17 @@ async fn relay_keeps_content_encoding_on_a_body_that_was_not_decoded() {
     assert!(resp.bytes().await.unwrap().starts_with(b"\x1f\x8b"));
 }
 
-#[test]
-fn relay_drops_proxy_authentication_fields() {
-    let mut headers = leyline::http::HeaderMap::new();
-    headers.insert("proxy-authenticate", "Basic realm=x".parse().unwrap());
-    headers.insert("proxy-authorization", "Basic eDp5".parse().unwrap());
-    headers.insert("x-kept", "1".parse().unwrap());
-    let relayed = leyline::relay_headers(&headers);
+#[tokio::test]
+async fn relay_drops_proxy_authentication_fields() {
+    let server = testing::Server::http(queue([testing::Response::new(200)
+        .close()
+        .header("proxy-authenticate", "Basic realm=x")
+        .header("proxy-authorization", "Basic eDp5")
+        .header("x-kept", "1")]))
+    .await
+    .unwrap();
+    let resp = Session::new().get(server.url("/")).send().await.unwrap();
+    let relayed = resp.relay_headers();
     assert!(relayed.get("proxy-authenticate").is_none());
     assert!(relayed.get("proxy-authorization").is_none());
     assert!(relayed.get("x-kept").is_some());

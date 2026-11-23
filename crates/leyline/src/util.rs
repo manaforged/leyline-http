@@ -1,33 +1,53 @@
 #![forbid(unsafe_code)]
 /// Returns the URL with its credentials and query masked as `***` and its fragment removed.
 pub fn redact(raw: &str) -> String {
-    let Ok(mut parsed) = url::Url::parse(raw) else {
+    let Ok(parsed) = url::Url::parse(raw) else {
         return mask_userinfo(&mask_query(raw));
     };
-    let mut changed = if parsed.password().is_some() {
-        parsed.set_password(Some("***")).is_ok()
-    } else if !parsed.username().is_empty() {
-        parsed.set_username("***").is_ok()
+    let mut changed = parsed.password().is_some()
+        || !parsed.username().is_empty()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some();
+    let redacted = if changed {
+        let out = redact_url_value(&parsed);
+        changed = out.as_str() != parsed.as_str();
+        out
     } else {
-        false
+        parsed
     };
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        if parsed.query().is_some() {
-            parsed.set_query(Some("***"));
-        }
-        parsed.set_fragment(None);
-        changed = true;
-    }
     let shown = if changed {
-        parsed.to_string()
+        redacted.to_string()
     } else {
         raw.to_string()
     };
-    if parsed.has_host() {
+    if redacted.has_host() {
         shown
     } else {
         mask_userinfo(&shown)
     }
+}
+
+pub(crate) fn redact_url_value(url: &url::Url) -> url::Url {
+    let mut parsed = url.clone();
+    let redacted = if parsed.password().is_some() {
+        parsed.set_password(Some("***"))
+    } else if !parsed.username().is_empty() {
+        parsed.set_username("***")
+    } else {
+        Ok(())
+    };
+    if redacted.is_err() {
+        tracing::trace!("url cannot carry userinfo");
+    }
+    if parsed.query().is_some() {
+        parsed.set_query(Some("***"));
+    }
+    parsed.set_fragment(None);
+    parsed
+}
+
+pub(crate) fn redact_url(raw: &str) -> Option<url::Url> {
+    url::Url::parse(raw).ok().map(|u| redact_url_value(&u))
 }
 
 pub(crate) fn mask_query(text: &str) -> String {

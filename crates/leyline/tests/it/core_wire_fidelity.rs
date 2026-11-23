@@ -1,5 +1,6 @@
+use leyline::profile::{HeaderPosition, RequestKind};
 use leyline::testing::{self, queue};
-use leyline::{Browser, HeaderPosition, Platform, Protocol, RequestKind, Session};
+use leyline::{Browser, Platform, Protocol, Session};
 
 #[tokio::test]
 async fn caller_user_agent_replaces_no_preset_default() {

@@ -45,7 +45,7 @@ impl Tab {
     }
 
     /// Sets the page URL the tab treats as open, or clears it with `None`.
-    pub fn set_current(&self, page: impl Into<Option<Url>>) {
+    pub fn page(&self, page: impl Into<Option<Url>>) {
         *crate::util::lock(&self.page) = page.into();
     }
 
@@ -143,7 +143,7 @@ impl Tab {
 
     pub(crate) async fn navigate(&self, builder: RequestBuilder) -> Result<Response> {
         let response = builder.send().await?;
-        self.set_current(Some(response.url().clone()));
+        self.page(Some(response.url().clone()));
         Ok(response)
     }
 

@@ -399,14 +399,14 @@ async fn crawl_load_honors_post_load_redirect_setter() {
     assert_eq!(first.url().path(), "/seed");
     crawl.save(&checkpoint).await.unwrap();
 
-    let mut resumed = leyline::Crawl::load(&session, &checkpoint)
+    let mut resumed = leyline::crawl::Crawl::load(&session, &checkpoint)
         .unwrap()
         .redirect(Redirect::none());
     assert!(
         resumed.next().await.is_none(),
         "post-load Redirect::none() must block following /bounce -> /dest"
     );
-    assert_eq!(resumed.skipped(leyline::SkipReason::Redirects), 1);
+    assert_eq!(resumed.skipped(leyline::crawl::SkipReason::Redirects), 1);
     drop(std::fs::remove_dir_all(&dir));
 }
 
@@ -572,11 +572,11 @@ async fn before_send_empty_body_strips_content_length_and_shutdown_short_circuit
 #[test]
 fn tcp_profile_window_bounds_and_empty_interface_rejected_at_build() {
     let err = "window_size = 70000"
-        .parse::<leyline::TcpProfile>()
+        .parse::<leyline::profile::TcpProfile>()
         .unwrap_err();
     assert_eq!(err.kind(), Kind::Config);
     let ok = "window_size = 65535"
-        .parse::<leyline::TcpProfile>()
+        .parse::<leyline::profile::TcpProfile>()
         .unwrap();
     assert_eq!(ok.window_size(), 65535);
     let err = Session::builder().interface("").build().unwrap_err();
@@ -698,7 +698,7 @@ async fn crawl_load_invalid_host_limits_sends_zero_requests() {
     crawl.save(&checkpoint).await.unwrap();
     let before_count = server.requests().await.len();
 
-    let mut resumed = leyline::Crawl::load(&session, &checkpoint)
+    let mut resumed = leyline::crawl::Crawl::load(&session, &checkpoint)
         .unwrap()
         .host_limits(leyline::HostLimits::new().pause_on([9999]));
     let err = resumed.next().await.unwrap().unwrap_err();

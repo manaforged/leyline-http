@@ -18,7 +18,7 @@ const DEFAULT_BAN_FOR: Duration = Duration::from_secs(60);
 #[derive(Debug, Clone)]
 struct Entry {
     config: Proxy,
-    label: String,
+    url: Option<url::Url>,
     identity: Option<Identity>,
 }
 
@@ -39,14 +39,14 @@ pub(crate) struct ProxyPool {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProxyHealth {
-    proxy: String,
+    proxy: url::Url,
     in_use: u32,
     failures: u32,
     banned_until: Option<Instant>,
 }
 
 impl ProxyHealth {
-    pub(crate) fn proxy(&self) -> &str {
+    pub(crate) fn proxy(&self) -> &url::Url {
         &self.proxy
     }
 
@@ -152,7 +152,7 @@ impl ProxyPool {
             .iter()
             .map(|entry| Entry {
                 config: entry.config.clone(),
-                label: entry.label.clone(),
+                url: entry.url.clone(),
                 identity: None,
             })
             .collect();
@@ -210,11 +210,13 @@ impl ProxyPool {
         self.entries
             .iter()
             .zip(state.health())
-            .map(|(entry, health)| ProxyHealth {
-                proxy: entry.label.clone(),
-                in_use: health.in_use,
-                failures: health.failures,
-                banned_until: health.banned_until,
+            .filter_map(|(entry, health)| {
+                Some(ProxyHealth {
+                    proxy: entry.url.clone()?,
+                    in_use: health.in_use,
+                    failures: health.failures,
+                    banned_until: health.banned_until,
+                })
             })
             .collect()
     }
@@ -225,10 +227,10 @@ impl ProxyPool {
 }
 
 fn entry(config: Proxy, identity: Option<Identity>) -> Entry {
-    let label = config.shown().unwrap_or_default();
+    let url = config.shown_url();
     Entry {
         config,
-        label,
+        url,
         identity,
     }
 }

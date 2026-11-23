@@ -1,7 +1,7 @@
 use leyline_bssl::ssl::{SslContextBuilder, SslOptions, SslVersion};
 
 use crate::iana::{boring_curve_name, sigalg_id};
-use crate::profile::{CertCompression, TlsMinVersion, TlsProfile};
+use crate::profile::{CertCompression, TlsProfile, TlsVersion};
 use crate::tls::error::TlsError;
 
 #[cfg(feature = "compression-brotli")]
@@ -239,19 +239,19 @@ pub(super) fn versions(
     builder: &mut SslContextBuilder,
     tls: &TlsProfile,
     transport: Transport,
-    floor: TlsMinVersion,
+    floor: TlsVersion,
 ) -> Result<(), TlsError> {
     let base = match transport {
-        Transport::Quic => TlsMinVersion::Tls13,
+        Transport::Quic => TlsVersion::Tls13,
         Transport::Tcp(default_min) => tls
             .min_version()
             .map_err(TlsError::Profile)?
             .unwrap_or(default_min),
     };
     let min = match base.max(floor) {
-        TlsMinVersion::Tls10 => SslVersion::TLS1,
-        TlsMinVersion::Tls12 => SslVersion::TLS1_2,
-        TlsMinVersion::Tls13 => SslVersion::TLS1_3,
+        TlsVersion::Tls10 => SslVersion::TLS1,
+        TlsVersion::Tls12 => SslVersion::TLS1_2,
+        TlsVersion::Tls13 => SslVersion::TLS1_3,
     };
     builder
         .set_min_proto_version(Some(min))

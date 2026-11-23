@@ -30,8 +30,13 @@ custom proxy headers.
 - A request that sets `user-agent` no longer sends the browser profile's `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform` headers unless the request sets them.
 - `trace::Event::Head` carries `status: http::StatusCode` and `version: http::Version` (replacing `status: u16` and `protocol`), `trace::Event::Sent` renames `protocol` to `version`, and `trace::Event::Summary` carries `proxy: Option<&str>` instead of `Option<String>`.
 - `HeaderPosition` renames `BeforeCchUa`, `AfterCchUa`, `AfterCchUaMobile`, `AfterCchUaPlatform`, and `AfterFetchDest` to `BeforeSecChUa`, `AfterSecChUa`, `AfterSecChUaMobile`, `AfterSecChUaPlatform`, and `AfterSecFetchDest`.
-- `TcpProfile` deserialization now rejects unknown fields and out-of-range `ttl`, `mss`, and `window_scale` values.
+- `TcpProfile` deserialization now rejects unknown fields and out-of-range `ttl`, `mss`, `window_size`, and `window_scale` values.
 - `WebSocket::header` returns `None` for header values containing non-ASCII bytes (matching `Response::header` and `Page::header`).
+- Power-tier types move off the crate root into `crawl::*` (`Crawl`, `Page`, `Respect`, `Scope`, `SkipReason`, `Purpose`, `Robots`, `RobotsSource`), `sse::*` (`Event`, `Events`), and `profile::*` (`Encoding`, `Fingerprint`, `HeaderPosition`, `RequestKind`, `TcpProfile`).
+- `crawl::Respect::AiTraining` is renamed `crawl::Respect::AiTrain` (existing checkpoints with `"AiTraining"` still deserialize), and `Tab::set_current` is renamed `Tab::page`.
+- `SessionBuilder::max_pending_per_host` is merged into `HostLimits::max_pending(impl Into<Option<usize>>)` (the single owner of per-host request queuing), `Tls::tls12_min` and `Tls::tls13_only` are replaced by `Tls::min_version(TlsVersion)`, `TlsMinVersion` is renamed `TlsVersion`, `leyline::relay_headers` is removed in favor of `Response::relay_headers()`, and `trace::Metrics::new()` returns `Metrics` directly.
+- `Session::proxy()`, `Response::proxy()`, and `Error::proxy()` return redacted `Option<&Url>`, `Stats::proxies()` yields `&Url`, and `Stats::{in_flight, waiting, proxy_in_use, proxy_failures, proxy_banned_until}` accept `impl IntoUrl`.
+- Calling `send()`, `text()`, `bytes()`, `pages()`, `events()`, or `websocket()` with download-only options (`sha256`, `progress`, or `resume`) now fails with `Kind::Config` instead of silently ignoring them.
 
 ### Added
 
@@ -61,15 +66,15 @@ custom proxy headers.
 - `Scope::Any` follows links and sitemaps across any host while keeping `Authorization` and default `Cookie` headers scoped to the seed origin.
 - `Crawl::redirect`, `Crawl::max_depth`, `Crawl::max_url_size`, `Crawl::max_sitemaps`, `Crawl::max_crawl_delay`, `Crawl::robots_max_age`, `Crawl::dedup`, and `Crawl::dedup_min_words` configure or lift each built-in crawl bound while keeping polite defaults out of the box, and `Crawl::limit` now accepts `None` to clear an earlier cap.
 - `Error::request` builds a non-retryable `Kind::Request` error from a caller cause for `before_send` and `refresh_token` callbacks without misclassifying wrapped `std::io::Error` causes as transport timeouts or connection drops.
-- `TcpProfile` implements `Serialize`, `FromStr` (from TOML), `TcpProfile::new`, and `TcpProfile::ja4t`, and `SessionBuilder::ja4t` layers a JA4T TCP fingerprint string over the platform or `tcp_profile` settings.
+- `profile::TcpProfile` implements `Serialize`, `FromStr` (from TOML), `TcpProfile::new`, `TcpProfile::from_ja4t`, and `TcpProfile::ja4t`.
 - `Tls::ca_pem` trusts PEM-encoded CA certificates held in memory alongside `Tls::ca_der` and `Tls::ca_file`.
 - `Body::content_length` reports the known byte length of empty, buffered, file, and declared-length streamed bodies.
 - `WebSocket::version` and `WebSocket::headers` expose the negotiated handshake HTTP version and full `HeaderMap`.
-- `Page::headers` and `Page::header` expose the non-sensitive response headers of each crawled page and preserve them across `Crawl::save` and `Crawl::load`.
-- `Session::base_url`, `cookie::Cookie::parse`, and `cookie::Jar::{len, is_empty, cookies_for}` expose the session base URL, standalone `Set-Cookie` parsing, and RFC 6265 send-order cookie matching.
+- `crawl::Page::headers` and `Page::header` expose the non-sensitive response headers of each crawled page and preserve them across `Crawl::save` and `Crawl::load`.
+- `cookie::Cookie::parse`, and `cookie::Jar::{len, is_empty, cookies_for}` expose standalone `Set-Cookie` parsing and RFC 6265 send-order cookie matching.
 - `testing::Server::https_on` starts a local HTTPS test server on a pre-bound `std::net::TcpListener` without an active Tokio runtime on the calling thread.
 - A Firefox 160 profile, `Browser::Firefox160`, from captures of Firefox 160.0 on macOS, Linux, and Windows.
-- `SessionBuilder::local_addresses`, `SessionBuilder::interface`, and `SessionBuilder::unix_socket` (Unix) bind dual-stack source IPs, pin sockets to a named network interface, or route HTTP and HTTPS requests over a Unix domain socket.
+- `SessionBuilder::interface` and `SessionBuilder::unix_socket` (Unix) pin sockets to a named network interface or route HTTP and HTTPS requests over a Unix domain socket.
 - `Proxy::header` and `Proxy::headers` attach custom headers to plain-HTTP proxy requests and `CONNECT` tunnels, with values redacted in `Debug` output and framing headers rejected at `build()`.
 - `Tls::client_cert_pkcs12` loads a DER-encoded PKCS#12 client identity and password in memory, with both redacted in `Debug` output.
 - `Tls::danger_accept_invalid_hostnames` skips only hostname verification while keeping CA trust-chain and leaf-pin checks active across HTTP/1.1, HTTP/2, and HTTP/3.
@@ -85,8 +90,14 @@ custom proxy headers.
 - A link that `Crawl` drops because it is out of scope now counts under `SkipReason::Scope`.
 - A `leyline::blocking::Session` can reach a `testing::Server` started from the same thread; the server no longer needs the caller to drive its runtime, and `testing::Server::http_on` works from synchronous code.
 - `Crawl` and `Session::robots` now honor an explicit `SessionBuilder::retry(0)`, `SessionBuilder::redirect`, `SessionBuilder::max_body_size`, and `HostLimits` concurrency above 16 requests instead of clamping or overriding them with internal defaults, and untyped HTML pages enforce `max_body_size` instead of a fixed 10 MiB cap.
+- Redirect hops from a `no_proxy`-bypassed host to a non-bypassed host on a `Proxy::list` or `Proxy::identified` session now lease from the proxy pool instead of connecting direct.
+- Unclean TLS stream closes (without `close_notify`) now return `UnexpectedEof`, failing close-delimited HTTPS responses and downloads instead of returning truncated data.
+- `refresh_token` runs single-flight through `util::coalesce`, so a cancelled or timed-out caller no longer aborts an in-progress token renewal shared with concurrent requests.
+- Idle pool reaping now skips active HTTP/2 and HTTP/3 connections with open streams, `pool_idle_timeout` is enforced immediately on checkout, TLS resumption keys isolate proxy credentials and headers, and Digest nonce counters are scoped per session.
 
 ### Changed
+
+- Environment proxy loading reads `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY` independently with scheme-before-`ALL_PROXY` precedence, `no_proxy` matching is port-aware and rejects ports above 65535, and local `Kind::Body` stream failures are no longer retried as transport I/O errors.
 
 - `SessionBuilder::basic_auth` has the same scope as `bearer_auth`: with a `base_url` the credentials go only to that origin.
 - `Session::save` records that cookie storage is off, and `Session::load` restores it. The saved-file format stays compatible with 0.2.0; browser sessions saved under 0.2.0 have updated `profile_id` digests because bundled brand tables changed.

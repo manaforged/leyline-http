@@ -4,7 +4,7 @@
 )]
 use crate::tls_support;
 
-use leyline::{Browser, Platform, Session, Tls};
+use leyline::{Browser, Platform, Session, Tls, TlsVersion};
 use leyline_bssl::pkey::PKey;
 use leyline_bssl::ssl::{Ssl, SslContextBuilder, SslMethod, SslVersion};
 use leyline_bssl::x509::X509;
@@ -70,7 +70,10 @@ async fn a_tls_floor_refuses_a_server_below_it() {
     assert_eq!(open.tls_version(), Some("TLSv1.1"));
     assert!(open.tls_cipher().is_some());
     assert_eq!(open.peer_certificate(), Some(&der[..]));
-    for floor in [trust.clone().tls12_min(), trust.tls13_only()] {
+    for floor in [
+        trust.clone().min_version(TlsVersion::Tls12),
+        trust.min_version(TlsVersion::Tls13),
+    ] {
         let floored = safari(floor).get(&url).send().await;
         assert!(floored.is_err(), "{floored:?}");
     }

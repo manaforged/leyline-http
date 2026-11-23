@@ -52,7 +52,7 @@ let resp = session
     .label("listing")
     .send()
     .await?;
-println!("{} via {}", resp.status(), resp.proxy().unwrap_or("direct"));
+println!("{} via {}", resp.status(), resp.proxy().map(leyline::Url::as_str).unwrap_or("direct"));
 # Ok(())
 # }
 ```
@@ -138,7 +138,7 @@ let session = leyline::Session::builder()
 ```
 
 Each `trace` call adds a hook, and every hook sees every event.
-`trace::Metrics::new()` returns an `Arc<Metrics>` that counts them; pass a clone to `.trace(..)` and read its counters, such as `metrics.requests()`. See
+`trace::Metrics::new()` returns a `Metrics` counter; wrap it in an `Arc` to pass a clone to `.trace(..)` and read its counters, such as `metrics.requests()`. See
 [Count requests and watch the queues](crawling.md#count-requests-and-watch-the-queues).
 
 ## Streamed bodies

@@ -6,7 +6,7 @@ use leyline::{HostLimits, Kind, Redirect};
 
 use super::*;
 
-async fn collect_paths(crawl: &mut leyline::Crawl) -> Vec<String> {
+async fn collect_paths(crawl: &mut leyline::crawl::Crawl) -> Vec<String> {
     let mut paths = Vec::new();
     while let Some(page) = crawl.next().await {
         paths.push(page.expect("page succeeds").url().path().to_owned());

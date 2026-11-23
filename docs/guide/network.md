@@ -107,7 +107,6 @@ connects.
 | `tcp_user_timeout` | unset | `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged (Linux, Android) |
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
 | `local_address` | unset | Source IP to bind for that IP's address family; call it once per family |
-| `local_addresses` | unset | Bind both IPv4 and IPv6 source addresses in one call |
 | `interface` | unset | Bind sockets to a network interface (`SO_BINDTODEVICE` on Linux, `IP_BOUND_IF` on Apple) |
 | `unix_socket` | unset | Route all HTTP and HTTPS traffic over a Unix domain socket path (Unix) |
 | `strict_socket_options` | `false` | Fail when the platform does not support an option |
@@ -155,8 +154,7 @@ limits, and every limit applies to one pool.
 | Setter | Default | Effect |
 | --- | --- | --- |
 | `max_connections` | 2048 | Pool entries, one per host, port, scheme, proxy, and transport. Set it above the number of hosts you talk to. At the limit, a new entry replaces the least recently used entry in its shard |
-| `max_connections_per_host` | 256 | HTTP/1.1 connections per host, port, scheme, proxy, and transport. A request over the limit waits for a free slot. HTTP/2 and HTTP/3 share one connection per origin |
-| `max_pending_per_host` | 1024 | HTTP/1.1 requests that wait for a free slot on one host. A request over the limit fails at once with `Kind::Overloaded`, so a slow host cannot build a backlog. `None` removes the limit |
+| `max_connections_per_host` | 256 | HTTP/1.1 connections per host, port, scheme, proxy, and transport. A request over the limit waits for a free slot (bounded by `HostLimits::max_pending`, 1024 by default). HTTP/2 and HTTP/3 share one connection per origin |
 | `pool_idle_timeout` | 300 s | An idle connection closes after this time |
 | `pool_max_lifetime` | no limit | A connection is not reused after this time. In-flight requests finish. Set it so traffic follows a DNS or load balancer change |
 | `keep_alive` | `true` | Keep connections open for reuse |

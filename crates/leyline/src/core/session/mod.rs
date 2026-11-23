@@ -112,7 +112,7 @@ pub(crate) struct SessionInner {
     header_order: Option<Vec<String>>,
     default_headers: Vec<(String, HeaderStr)>,
     cache: Option<Arc<cache::Cache>>,
-    proxy_shown: Option<String>,
+    proxy_shown: Option<url::Url>,
     connector: FingerprintConnector,
     doh: Option<Arc<crate::core::doh::DohResolver>>,
     h2_config: H2Config,
