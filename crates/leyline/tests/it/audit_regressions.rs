@@ -429,10 +429,15 @@ async fn request_from_does_not_pin_inferred_navigate_preset() {
     let resp = session.request_from(req).send().await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let seen = server.requests().await;
-    assert_ne!(
+    assert_eq!(
         seen[0].header("sec-fetch-mode"),
-        Some("navigate"),
-        "mutated POST JSON request must not stay pinned to navigate"
+        Some("cors"),
+        "mutated POST JSON request must use Chrome Xhr sec-fetch-mode"
+    );
+    assert_eq!(seen[0].header("sec-fetch-dest"), Some("empty"));
+    assert_eq!(
+        seen[0].header("accept"),
+        Some("application/json, text/plain, */*")
     );
 }
 
@@ -587,9 +592,13 @@ fn tcp_profile_window_bounds_and_empty_interface_rejected_at_build() {
 
 #[tokio::test]
 async fn proxy_pool_no_proxy_stats_custom_headers_and_websocket_pool() {
-    let blocked = Server::http(|_| Response::new(429).body("rate-limited"))
-        .await
-        .unwrap();
+    let blocked = Server::http(|_| {
+        Response::new(403)
+            .header("cf-mitigated", "challenge")
+            .body("challenged")
+    })
+    .await
+    .unwrap();
     let pool_session = Session::builder()
         .proxy(
             leyline::Proxy::list(["http://127.0.0.1:1"])
@@ -599,7 +608,8 @@ async fn proxy_pool_no_proxy_stats_custom_headers_and_websocket_pool() {
         .build()
         .unwrap();
     let resp = pool_session.get(blocked.url("/direct")).await.unwrap();
-    assert_eq!(resp.status().as_u16(), 429);
+    assert_eq!(resp.status().as_u16(), 403);
+    assert!(resp.block().is_some());
     let stats = pool_session.stats();
     assert_eq!(stats.proxy_failures("http://127.0.0.1:1"), 0);
     assert_eq!(stats.proxy_in_use("http://127.0.0.1:1"), 0);
@@ -723,10 +733,15 @@ async fn before_send_method_change_updates_inferred_preset() {
     let resp = session.get(server.url("/mutated")).await.unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     let seen = server.requests().await;
-    assert_ne!(
+    assert_eq!(
         seen[0].header("sec-fetch-mode"),
-        Some("navigate"),
-        "before_send changing GET to POST JSON must refresh inferred preset"
+        Some("cors"),
+        "before_send changing GET to POST JSON must refresh inferred Chrome Xhr preset"
+    );
+    assert_eq!(seen[0].header("sec-fetch-dest"), Some("empty"));
+    assert_eq!(
+        seen[0].header("accept"),
+        Some("application/json, text/plain, */*")
     );
 }
 

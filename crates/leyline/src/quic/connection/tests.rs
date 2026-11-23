@@ -1,4 +1,4 @@
-use super::{resolve_peer, validate_connection_id_len};
+use super::{is_crypto_close, resolve_peer, validate_connection_id_len};
 use crate::error::BodyLimit;
 use crate::profile::BrowserProfile;
 use crate::quic::H3Config;
@@ -6,7 +6,7 @@ use crate::tls::trust::Tls;
 use leyline_bssl::asn1::Asn1Time;
 use leyline_bssl::bn::BigNum;
 use leyline_bssl::hash::MessageDigest;
-use leyline_bssl::pkey::PKey;
+use leyline_bssl::pkey::{PKey, Private};
 use leyline_bssl::rsa::Rsa;
 use leyline_bssl::ssl::{SslContextBuilder, SslMethod};
 use leyline_bssl::x509::extension::{BasicConstraints, ExtendedKeyUsage, SubjectAlternativeName};
@@ -14,11 +14,10 @@ use leyline_bssl::x509::{X509, X509NameBuilder};
 use leyline_quiche::test_utils::{Pipe, emit_flight, process_flight};
 use sha2::{Digest, Sha256};
 
-#[test]
-fn quic_verifier_checks_host_ca_and_pin() {
+fn self_signed_quic_cert(host: &str) -> (X509, PKey<Private>) {
     let key = PKey::from_rsa(Rsa::generate(2048).unwrap()).unwrap();
     let mut name = X509NameBuilder::new().unwrap();
-    name.append_entry_by_text("CN", "quic.tech").unwrap();
+    name.append_entry_by_text("CN", host).unwrap();
     let name = name.build();
     let mut certificate = X509::builder().unwrap();
     certificate.set_version(2).unwrap();
@@ -41,12 +40,17 @@ fn quic_verifier_checks_host_ca_and_pin() {
         .append_extension(&ExtendedKeyUsage::new().server_auth().build().unwrap())
         .unwrap();
     let san = SubjectAlternativeName::new()
-        .dns("quic.tech")
+        .dns(host)
         .build(&certificate.x509v3_context(None, None))
         .unwrap();
     certificate.append_extension(&san).unwrap();
     certificate.sign(&key, MessageDigest::sha256()).unwrap();
-    let certificate = certificate.build();
+    (certificate.build(), key)
+}
+
+#[test]
+fn quic_verifier_checks_host_ca_and_pin() {
+    let (certificate, key) = self_signed_quic_cert("quic.tech");
     let der = certificate.to_der().unwrap();
     let pin: [u8; 32] = Sha256::digest(&der).into();
     let profile =
@@ -152,4 +156,91 @@ fn body_budget_rejects_large_chunk_past_cap() {
 fn body_budget_saturates_on_usize_add_overflow() {
     let limit = BodyLimit::session(100 * 1024 * 1024);
     assert_eq!(limit.admit(usize::MAX, 1), Err(limit));
+}
+
+#[test]
+fn is_crypto_close_matches_only_transport_crypto_error_range() {
+    let (cert, key) = self_signed_quic_cert("quic.tech");
+    let der = cert.to_der().unwrap();
+    let profile =
+        BrowserProfile::from_toml(include_str!("../../../profiles/chrome/147.toml")).unwrap();
+    let cases = [
+        (false, 0x0100, true),
+        (false, 0x012a, true),
+        (false, 0x01ff, true),
+        (true, 0x0100, false),
+        (false, 0x0000, false),
+        (false, 0x00ff, false),
+        (false, 0x0200, false),
+    ];
+    for (is_app, code, expect_crypto) in cases {
+        let trust = Tls::new()
+            .env_roots(false)
+            .system_roots(false)
+            .ca_der(der.clone());
+        let mut client = H3Config::from_profile(&profile)
+            .unwrap()
+            .build_quic_config(&trust, "quic.tech")
+            .unwrap();
+        let mut server = SslContextBuilder::new(SslMethod::tls()).unwrap();
+        server.set_certificate(&cert).unwrap();
+        server.set_private_key(&key).unwrap();
+        let mut server = leyline_quiche::Config::with_boring_ssl_ctx_builder(
+            leyline_quiche::PROTOCOL_VERSION,
+            server,
+        )
+        .unwrap();
+        server
+            .set_application_protos(leyline_quiche::h3::APPLICATION_PROTOCOL)
+            .unwrap();
+        let mut pipe = Pipe::with_client_and_server_config(&mut client, &mut server).unwrap();
+        pipe.handshake().unwrap();
+        pipe.server.close(is_app, code, b"test-close").unwrap();
+        assert!(pipe.advance().is_ok() || pipe.client.is_closed());
+        assert_eq!(
+            is_crypto_close(&pipe.client),
+            expect_crypto,
+            "is_app={is_app} code=0x{code:x}"
+        );
+    }
+}
+
+#[test]
+fn quic_from_net_dns_preserves_timeout_config_and_message() {
+    use crate::error::{Error, Kind};
+    use crate::net::NetError;
+    use crate::quic::error::QuicError;
+
+    let timed_out = QuicError::from_net_dns(NetError::from_dns(std::io::Error::new(
+        std::io::ErrorKind::TimedOut,
+        "resolver timed out",
+    )));
+    assert_eq!(timed_out.kind(), Kind::Timeout);
+    assert_eq!(timed_out.to_string(), "dns: dns resolution");
+    let err = Error::from(timed_out);
+    assert_eq!(err.kind(), Kind::Timeout);
+    assert!(
+        err.to_string().contains("dns: dns resolution"),
+        "error message must not be empty: {err}"
+    );
+
+    let bad_cfg = QuicError::from_net_dns(NetError::from_dns(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        "bad dns config",
+    )));
+    assert_eq!(bad_cfg.kind(), Kind::Config);
+    assert_eq!(bad_cfg.to_string(), "dns: network configuration");
+    let err = Error::from(bad_cfg);
+    assert_eq!(err.kind(), Kind::Config);
+    assert!(
+        err.to_string().contains("dns: network configuration"),
+        "{err}"
+    );
+
+    let lookup = QuicError::from_net_dns(NetError::from_dns(std::io::Error::other("nxdomain")));
+    assert_eq!(lookup.kind(), Kind::Dns);
+    assert_eq!(lookup.to_string(), "dns: dns resolution");
+    let err = Error::from(lookup);
+    assert_eq!(err.kind(), Kind::Dns);
+    assert!(err.to_string().contains("dns: dns resolution"), "{err}");
 }

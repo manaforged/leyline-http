@@ -18,6 +18,7 @@ mod audit_regressions;
 mod body_cap;
 mod cfnetwork_live;
 mod claim_guard;
+mod combination_matrix;
 mod connect_timeout;
 #[cfg(feature = "bench-internals")]
 mod connection_stats;
@@ -151,6 +152,7 @@ mod proxy_rules;
 #[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
 mod proxy_wire_bytes;
 mod public_debug;
+mod public_options_matrix;
 mod read_until;
 mod recovery;
 mod redirect_host;

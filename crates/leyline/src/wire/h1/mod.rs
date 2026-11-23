@@ -138,9 +138,9 @@ pub(crate) fn trim_start(mut bytes: &[u8]) -> &[u8] {
 
 #[inline]
 pub(crate) fn trim_end(mut bytes: &[u8]) -> &[u8] {
-    while let Some(&b) = bytes.last() {
+    while let Some((&b, rest)) = bytes.split_last() {
         if b == b' ' || b == b'\t' {
-            bytes = &bytes[..bytes.len() - 1];
+            bytes = rest;
         } else {
             break;
         }
@@ -420,7 +420,22 @@ mod chunk_proofs;
 
 #[cfg(test)]
 mod chunk_tests {
-    use super::chunk_size_value;
+    use super::{chunk_size_value, trim_end, trim_start};
+
+    #[test]
+    fn trim_ows_only_strips_rfc9110_sp_and_htab() {
+        assert_eq!(trim_start(b""), b"");
+        assert_eq!(trim_end(b""), b"");
+        assert_eq!(trim_start(b" \t "), b"");
+        assert_eq!(trim_end(b" \t "), b"");
+        assert_eq!(trim_start(b" \t value"), b"value");
+        assert_eq!(trim_end(b"value \t "), b"value");
+        assert_eq!(trim_end(b"ab   "), b"ab");
+        assert_eq!(trim_start(b"\x0bvalue"), b"\x0bvalue");
+        assert_eq!(trim_end(b"value\x0b"), b"value\x0b");
+        assert_eq!(trim_start(b"\x0cvalue"), b"\x0cvalue");
+        assert_eq!(trim_end(b"value\x0c"), b"value\x0c");
+    }
 
     #[test]
     fn chunk_size_overflow_is_exact_at_u64_max() {

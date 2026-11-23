@@ -88,3 +88,34 @@ async fn an_address_that_keeps_refusing_moves_to_the_back() {
         vec![live_addr, dead]
     );
 }
+
+#[tokio::test]
+async fn dns_timeout_and_config_errors_classify_through_net_error() {
+    struct Failing(std::io::ErrorKind);
+    impl crate::net::resolver::Resolver for Failing {
+        fn resolve<'a>(
+            &'a self,
+            _host: &'a str,
+            _port: u16,
+        ) -> crate::net::resolver::ResolveFuture<'a> {
+            let kind = self.0;
+            Box::pin(async move { Err(std::io::Error::new(kind, "synthetic dns failure")) })
+        }
+    }
+
+    let timeout_dialer = super::Dialer::new(crate::Platform::Linux.tcp_profile())
+        .with_resolver(std::sync::Arc::new(Failing(std::io::ErrorKind::TimedOut)));
+    let err = timeout_dialer.dial("timeout.test", 443).await.unwrap_err();
+    assert_eq!(err.kind(), crate::error::Kind::Timeout);
+
+    let config_dialer = super::Dialer::new(crate::Platform::Linux.tcp_profile()).with_resolver(
+        std::sync::Arc::new(Failing(std::io::ErrorKind::InvalidInput)),
+    );
+    let err = config_dialer.dial("config.test", 443).await.unwrap_err();
+    assert_eq!(err.kind(), crate::error::Kind::Config);
+
+    let other_dialer = super::Dialer::new(crate::Platform::Linux.tcp_profile())
+        .with_resolver(std::sync::Arc::new(Failing(std::io::ErrorKind::Other)));
+    let err = other_dialer.dial("other.test", 443).await.unwrap_err();
+    assert_eq!(err.kind(), crate::error::Kind::Dns);
+}

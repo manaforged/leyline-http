@@ -209,3 +209,85 @@ fn a_padded_proxy_url_is_shown_as_parsed() {
         .unwrap();
     assert_eq!(session.proxy(), Some("http://proxy.example:8080"));
 }
+
+#[test]
+fn proxy_same_for_doh_checks_all_fields() {
+    let base = Proxy::new()
+        .all("http://proxy.example:8080")
+        .header("x-key", "1")
+        .no_proxy(["internal.local"]);
+    assert!(base.same_for_doh(&base.clone()));
+    assert!(
+        !base.same_for_doh(
+            &Proxy::new()
+                .all("http://other.example:8080")
+                .header("x-key", "1")
+                .no_proxy(["internal.local"])
+        )
+    );
+    assert!(
+        !base.same_for_doh(
+            &Proxy::new()
+                .all("http://proxy.example:8080")
+                .header("x-key", "2")
+                .no_proxy(["internal.local"])
+        )
+    );
+    assert!(
+        !base.same_for_doh(
+            &Proxy::new()
+                .all("http://proxy.example:8080")
+                .header("x-key", "1")
+                .no_proxy(["other.local"])
+        )
+    );
+    assert!(
+        !base.same_for_doh(
+            &Proxy::new()
+                .all("http://proxy.example:8080")
+                .header("x-key", "1")
+        )
+    );
+    assert!(!Proxy::new().env(false).same_for_doh(&Proxy::new()));
+
+    let custom_a = Proxy::custom(|_| None);
+    let custom_b = Proxy::custom(|_| None);
+    assert!(custom_a.same_for_doh(&custom_a.clone()));
+    assert!(!custom_a.same_for_doh(&custom_b));
+    assert!(!custom_a.same_for_doh(&Proxy::new()));
+}
+
+#[test]
+fn proxy_pool_bypasses_all_requires_non_empty_and_every_entry_bypassed() {
+    use crate::core::proxy_pool::ProxyPool;
+    let empty = ProxyPool::new(Vec::<Proxy>::new());
+    assert!(!empty.bypasses_all("example.com"));
+
+    let single = ProxyPool::new([Proxy::new()
+        .all("http://127.0.0.1:8080")
+        .no_proxy(["skip.local"])]);
+    assert!(single.bypasses_all("skip.local"));
+    assert!(!single.bypasses_all("keep.local"));
+
+    let mixed = ProxyPool::new([
+        Proxy::new()
+            .all("http://127.0.0.1:8080")
+            .no_proxy(["skip.local"]),
+        Proxy::new().all("http://127.0.0.1:8081"),
+    ]);
+    assert!(!mixed.bypasses_all("skip.local"));
+}
+
+#[test]
+fn proxy_pool_same_for_doh_checks_len_and_each_entry() {
+    use crate::core::proxy_pool::ProxyPool;
+    let p1 = Proxy::new().all("http://127.0.0.1:8080");
+    let p2 = Proxy::new().all("http://127.0.0.1:8081");
+    let one_a = ProxyPool::new([p1.clone()]);
+    let one_a_copy = ProxyPool::new([p1.clone()]);
+    let one_b = ProxyPool::new([p2.clone()]);
+    let two = ProxyPool::new([p1, p2]);
+    assert!(one_a.same_for_doh(&one_a_copy));
+    assert!(!one_a.same_for_doh(&one_b));
+    assert!(!one_a.same_for_doh(&two));
+}
