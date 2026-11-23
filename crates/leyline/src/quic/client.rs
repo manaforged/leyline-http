@@ -45,6 +45,7 @@ pub enum H3SendError {
     NotSent(String),
     Rejected(String),
     Closed(String),
+    Tls(String),
     Failed(String),
     BodyLimit(BodyLimit),
     RequestBody(std::io::Error),
@@ -56,6 +57,7 @@ impl H3SendError {
             H3SendError::NotSent(m)
             | H3SendError::Rejected(m)
             | H3SendError::Closed(m)
+            | H3SendError::Tls(m)
             | H3SendError::Failed(m) => Cow::Borrowed(m.as_str()),
             H3SendError::BodyLimit(limit) => Cow::Owned(limit.to_string()),
             H3SendError::RequestBody(error) => {
@@ -69,9 +71,10 @@ impl H3SendError {
             H3SendError::NotSent(_) => Failure::Unsent,
             H3SendError::Rejected(_) => Failure::Refused,
             H3SendError::Closed(_) => Failure::Connection,
-            H3SendError::Failed(_) | H3SendError::BodyLimit(_) | H3SendError::RequestBody(_) => {
-                Failure::Request
-            }
+            H3SendError::Tls(_)
+            | H3SendError::Failed(_)
+            | H3SendError::BodyLimit(_)
+            | H3SendError::RequestBody(_) => Failure::Request,
         }
     }
 }

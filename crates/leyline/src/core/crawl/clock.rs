@@ -136,7 +136,7 @@ impl Crawl {
         signalled || self.session.is_shut_down()
     }
 
-    fn halt(&mut self) {
+    pub(super) fn halt(&mut self) {
         self.frontier.clear();
         self.sitemaps.queue.clear();
         self.sitemaps.clear_in_flight();

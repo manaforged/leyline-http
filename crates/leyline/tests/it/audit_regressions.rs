@@ -584,3 +584,159 @@ fn tcp_profile_window_bounds_and_empty_interface_rejected_at_build() {
     let err = leyline::Body::file(std::env::temp_dir()).unwrap_err();
     assert_eq!(err.kind(), Kind::Io);
 }
+
+#[tokio::test]
+async fn proxy_pool_no_proxy_stats_custom_headers_and_websocket_pool() {
+    let blocked = Server::http(|_| Response::new(429).body("rate-limited"))
+        .await
+        .unwrap();
+    let pool_session = Session::builder()
+        .proxy(
+            leyline::Proxy::list(["http://127.0.0.1:1"])
+                .no_proxy(["127.0.0.1"])
+                .ban_after(1),
+        )
+        .build()
+        .unwrap();
+    let resp = pool_session.get(blocked.url("/direct")).await.unwrap();
+    assert_eq!(resp.status().as_u16(), 429);
+    let stats = pool_session.stats();
+    assert_eq!(stats.proxy_failures("http://127.0.0.1:1"), 0);
+    assert_eq!(stats.proxy_in_use("http://127.0.0.1:1"), 0);
+    assert!(stats.proxy_banned_until("http://127.0.0.1:1").is_none());
+
+    let fake_proxy = Server::http(|_| Response::new(200).body("via-custom-proxy"))
+        .await
+        .unwrap();
+    let proxy_url = format!("http://{}", fake_proxy.addr());
+    let custom_hdr_session = Session::builder()
+        .proxy(
+            leyline::Proxy::custom(move |_| Some(leyline::Proxy::from(proxy_url.as_str())))
+                .header("x-custom-proxy-token", "secret-42"),
+        )
+        .build()
+        .unwrap();
+    let body = custom_hdr_session
+        .get("http://origin.invalid/check")
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(body, "via-custom-proxy");
+    let seen = fake_proxy.requests().await;
+    assert_eq!(seen[0].header("x-custom-proxy-token"), Some("secret-42"));
+
+    #[cfg(feature = "websocket")]
+    {
+        let ws_origin = Server::https(|_| Response::new(200).body("direct-origin"))
+            .await
+            .unwrap();
+        let ws_pool_session = Session::builder()
+            .tls(ws_origin.tls())
+            .proxy(leyline::Proxy::list(["http://127.0.0.1:1"]))
+            .build()
+            .unwrap();
+        let ws_url = ws_origin.url("/ws").replacen("https://", "wss://", 1);
+        let ws_err = ws_pool_session.get(&ws_url).websocket().await.unwrap_err();
+        assert_eq!(
+            ws_err.kind(),
+            Kind::Proxy,
+            "WebSocket on Proxy::list session must dial the proxy, not direct: {ws_err:?}"
+        );
+        assert!(
+            ws_origin.requests().await.is_empty(),
+            "WebSocket on Proxy::list session must never connect direct to origin"
+        );
+    }
+}
+
+#[cfg(feature = "html")]
+#[tokio::test]
+async fn crawl_load_invalid_host_limits_sends_zero_requests() {
+    let server = Server::http(|req| match req.target() {
+        "/robots.txt" => Response::new(404),
+        "/seed" => Response::new(200)
+            .header("content-type", "text/html")
+            .body(r#"<a href="/next">next</a>"#),
+        _ => Response::new(200)
+            .header("content-type", "text/html")
+            .body("<p>next</p>"),
+    })
+    .await
+    .unwrap();
+
+    let dir = std::env::temp_dir().join(format!("leyline-crawl-badlim-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let checkpoint = dir.join("crawl.json");
+
+    let session = Session::builder().build().unwrap();
+    let mut crawl = session.crawl(server.url("/seed")).respect(None);
+    let _ = crawl.next().await.unwrap().unwrap();
+    crawl.save(&checkpoint).await.unwrap();
+    let before_count = server.requests().await.len();
+
+    let mut resumed = leyline::Crawl::load(&session, &checkpoint)
+        .unwrap()
+        .host_limits(leyline::HostLimits::new().pause_on([9999]));
+    let err = resumed.next().await.unwrap().unwrap_err();
+    assert_eq!(err.kind(), Kind::Config);
+    assert!(resumed.next().await.is_none());
+    assert_eq!(
+        server.requests().await.len(),
+        before_count,
+        "invalid post-load host_limits must not send any frontier requests"
+    );
+    drop(std::fs::remove_dir_all(&dir));
+}
+
+#[tokio::test]
+async fn before_send_method_change_updates_inferred_preset() {
+    let server = Server::http(|_| Response::new(200).body("ok"))
+        .await
+        .unwrap();
+    let session = Session::builder()
+        .browser(Browser::Chrome154)
+        .before_send(|req| {
+            *req.method_mut() = http::Method::POST;
+            req.headers_mut().insert(
+                http::header::CONTENT_TYPE,
+                http::HeaderValue::from_static("application/json"),
+            );
+            *req.body_mut() = leyline::Body::from(r#"{"x":1}"#);
+            Ok(())
+        })
+        .build()
+        .unwrap();
+    let resp = session.get(server.url("/mutated")).await.unwrap();
+    assert_eq!(resp.status().as_u16(), 200);
+    let seen = server.requests().await;
+    assert_ne!(
+        seen[0].header("sec-fetch-mode"),
+        Some("navigate"),
+        "before_send changing GET to POST JSON must refresh inferred preset"
+    );
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[tokio::test]
+async fn doh_config_error_is_non_retryable_config() {
+    let doh_server = Server::https(|_| Response::new(200)).await.unwrap();
+    let session = Session::builder()
+        .retry(2)
+        .doh(doh_server.url("/dns-query"))
+        .tls(doh_server.tls())
+        .interface("leyline-no-such-if99")
+        .build()
+        .unwrap();
+    let err = session
+        .get("http://bad-iface.doh.test/")
+        .send()
+        .await
+        .unwrap_err();
+    assert_eq!(
+        err.kind(),
+        Kind::Config,
+        "DoH bad-interface error must surface as Kind::Config, got {err:?}"
+    );
+    assert!(!err.is_retryable());
+    assert_eq!(err.attempts(), 1);
+}

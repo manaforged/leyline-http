@@ -88,13 +88,13 @@ impl ProxyPool {
         self.entries.iter().map(|entry| &entry.config)
     }
 
-    pub(crate) fn with_headers(mut self, headers: &[(String, String)]) -> Self {
+    fn map_entries(mut self, mut f: impl FnMut(&mut Entry)) -> Self {
         let entries: Arc<[Entry]> = self
             .entries
             .iter()
             .cloned()
             .map(|mut entry| {
-                entry.config.push_validated_headers(headers);
+                f(&mut entry);
                 entry
             })
             .collect();
@@ -102,18 +102,16 @@ impl ProxyPool {
         self
     }
 
-    pub(crate) fn with_no_proxy(mut self, no_proxy: &crate::core::config::NoProxy) -> Self {
-        let entries: Arc<[Entry]> = self
-            .entries
-            .iter()
-            .cloned()
-            .map(|mut entry| {
-                entry.config.set_no_proxy(no_proxy.clone());
-                entry
-            })
-            .collect();
-        self.entries = entries;
-        self
+    pub(crate) fn with_headers(self, headers: &[(String, String)]) -> Self {
+        self.map_entries(|entry| entry.config.push_validated_headers(headers))
+    }
+
+    pub(crate) fn with_no_proxy(self, no_proxy: &crate::core::config::NoProxy) -> Self {
+        self.map_entries(|entry| entry.config.set_no_proxy(no_proxy.clone()))
+    }
+
+    pub(crate) fn bypasses_all(&self, host: &str) -> bool {
+        !self.entries.is_empty() && self.entries.iter().all(|e| e.config.bypasses(host))
     }
 
     pub(crate) fn for_doh(&self) -> Self {

@@ -373,8 +373,11 @@ impl Crawl {
         let pace = match self.limits.take() {
             Some(limits) => match limits.validate() {
                 Err(error) => {
-                    self.ready.push_back(Err(error));
+                    self.halt();
                     self.seeds.clear();
+                    self.restored_pauses.clear();
+                    self.ready.clear();
+                    self.ready.push_back(Err(error));
                     return None;
                 }
                 Ok(()) => HostGates::new(limits),

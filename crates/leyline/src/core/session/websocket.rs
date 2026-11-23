@@ -43,17 +43,33 @@ impl Session {
                 "WebSocket handshakes are not supported over HTTP/3",
             ));
         }
-        let proxy = self.proxy_for(http_url, carry.proxy())?;
-        let extra_headers = self.websocket_headers(http_url, extra_headers);
+        let origin = Origin::of(http_url);
+        let lease = self
+            .proxy_pool()
+            .filter(|pool| {
+                carry.proxy().is_none() && !pool.bypasses_all(http_url.host_str().unwrap_or(""))
+            })
+            .and_then(|pool| pool.lease(origin.as_ref(), None));
+        let leased_session = match &lease {
+            Some(lease) => Some(lease.session(self)?),
+            None => None,
+        };
+        let session = leased_session.as_ref().unwrap_or(self);
+        let request_proxy = lease
+            .as_ref()
+            .map(crate::core::proxy_pool::Lease::config)
+            .or_else(|| carry.proxy());
+        let proxy = session.proxy_for(http_url, request_proxy)?;
+        let extra_headers = session.websocket_headers(http_url, extra_headers);
         let origin = Origin::ascii(http_url);
         let header_order = carry
             .header_order()
             .map(Cow::Borrowed)
-            .or_else(|| self.session_header_order());
+            .or_else(|| session.session_header_order());
         let handshake = Handshake {
             url: http_url,
             proxy: proxy.as_deref(),
-            user_agent: &self.inner.user_agent,
+            user_agent: &session.inner.user_agent,
             origin: &origin,
             extra_headers: &extra_headers,
             header_order: header_order.as_deref(),
@@ -64,9 +80,9 @@ impl Session {
             || (config.prefer_http2 && protocol.tcp_offers_h2());
         if try_h2 {
             if let Some(conn) = WebSocket::connect_h2(
-                &self.inner.pool,
-                &self.inner.connector,
-                &self.inner.h2_config,
+                &session.inner.pool,
+                &session.inner.connector,
+                &session.inner.h2_config,
                 &handshake,
             )
             .await?
@@ -80,7 +96,7 @@ impl Session {
             tracing::debug!("H2 extended CONNECT not available, falling back to H1 Upgrade");
         }
 
-        WebSocket::connect_h1(&self.inner.connector, &handshake).await
+        WebSocket::connect_h1(&session.inner.connector, &handshake).await
     }
 
     fn websocket_headers(&self, http_url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {

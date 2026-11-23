@@ -87,6 +87,7 @@ impl Session {
         let inner = std::sync::Arc::make_mut(&mut session.inner);
         inner.pool = std::sync::Arc::new(self.inner.pool.sibling());
         inner.shutdown = std::sync::Arc::default();
+        inner.writers = std::sync::Arc::default();
         inner.doh = self
             .inner
             .doh

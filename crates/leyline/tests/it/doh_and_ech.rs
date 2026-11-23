@@ -640,9 +640,10 @@ async fn doh_stalled_server_respects_connect_timeout_and_recovers() {
         .await
         .expect("stalled DoH server must fail within connect_timeout, not 300s")
         .unwrap_err();
-    assert!(
-        matches!(err.kind(), Kind::Dns | Kind::Timeout | Kind::Connect),
-        "unexpected error for stalled DoH: {err:?}"
+    assert_eq!(
+        err.kind(),
+        Kind::Timeout,
+        "stalled DoH must return Kind::Timeout: {err:?}"
     );
 
     stall.store(false, Ordering::SeqCst);

@@ -10,24 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use leyline::{Protocol, Session, Tls};
 use leyline_bssl_tokio::SslStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-
-async fn reply_ok(mut stream: SslStream<TcpStream>) {
-    let mut head = Vec::new();
-    let mut buf = [0u8; 1024];
-    while !head.windows(4).any(|window| window == b"\r\n\r\n") {
-        match stream.read(&mut buf).await {
-            Ok(0) | Err(_) => return,
-            Ok(read) => head.extend_from_slice(&buf[..read]),
-        }
-    }
-    drop(
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
-            .await,
-    );
-}
 
 struct EnvRestore(&'static str);
 
@@ -56,7 +39,7 @@ async fn a_saved_tls_session_does_not_resume_after_environment_roots_change() {
                 if stream.ssl().session_reused() {
                     counter.fetch_add(1, Ordering::SeqCst);
                 }
-                reply_ok(stream).await;
+                tls_support::serve_h1_ok(stream, "ok").await;
             }
         },
     )

@@ -78,11 +78,13 @@ impl Dialer {
     }
 
     pub(crate) async fn dial(&self, host: &str, port: u16) -> Result<TcpStream, NetError> {
-        let addrs = self
-            .resolver
-            .resolve(host, port)
-            .await
-            .map_err(NetError::Dns)?;
+        let addrs = self.resolver.resolve(host, port).await.map_err(|err| {
+            if err.kind() == io::ErrorKind::InvalidInput {
+                NetError::Config(err)
+            } else {
+                NetError::Dns(err)
+            }
+        })?;
         trace::dns(host, port, addrs.len());
 
         if addrs.is_empty() {

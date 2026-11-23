@@ -378,7 +378,13 @@ impl Proxy {
                  Proxy::identified or Proxy::custom",
             ));
         }
-        Ok(chosen.rule_for(url)?.cloned().map(Cow::Owned))
+        let Some(mut proxy) = chosen.rule_for(url)?.cloned() else {
+            return Ok(None);
+        };
+        for (k, v) in &self.headers {
+            proxy.push_header(k.clone(), v.clone());
+        }
+        Ok(Some(Cow::Owned(proxy)))
     }
 
     fn rule_for(&self, url: &url::Url) -> crate::error::Result<Option<&ProxyUrl>> {
@@ -397,7 +403,7 @@ impl Proxy {
         winner.proxy().map(Some)
     }
 
-    fn bypasses(&self, host: &str) -> bool {
+    pub(crate) fn bypasses(&self, host: &str) -> bool {
         (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches(host)
     }
 }

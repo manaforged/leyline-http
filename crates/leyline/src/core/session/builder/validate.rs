@@ -36,10 +36,8 @@ impl SessionBuilder {
         let Some(name) = self.socket_config.interface.as_deref() else {
             return Ok(());
         };
-        if name.is_empty() || name.contains('\0') {
-            return Err(Error::config("invalid network interface name"));
-        }
-        Ok(())
+        crate::net::SocketOptions::validate_interface_name(name)
+            .map_err(|err| Error::config(err.to_string()))
     }
 
     #[cfg(unix)]

@@ -10,6 +10,8 @@ pub(crate) enum QuicError {
     Config(String),
     /// The host name did not resolve.
     Dns(String),
+    /// Name resolution timed out.
+    Timeout(String),
     /// The proxy cannot carry QUIC or refused the relay.
     Proxy(String),
     /// The UDP socket failed.
@@ -25,6 +27,7 @@ impl QuicError {
         match self {
             Self::Config(_) => Kind::Config,
             Self::Dns(_) => Kind::Dns,
+            Self::Timeout(_) => Kind::Timeout,
             Self::Proxy(_) => Kind::Proxy,
             Self::Socket(_) => Kind::Connect,
             Self::Tls(_) => Kind::Tls,
@@ -36,6 +39,7 @@ impl QuicError {
         match self {
             Self::Config(m)
             | Self::Dns(m)
+            | Self::Timeout(m)
             | Self::Proxy(m)
             | Self::Socket(m)
             | Self::Tls(m)
@@ -62,6 +66,7 @@ impl From<H3SendError> for Error {
         match e {
             H3SendError::BodyLimit(limit) => limit.error(),
             H3SendError::RequestBody(io) => Error::from_request_body(io),
+            H3SendError::Tls(message) => Error::new(Kind::Tls).with_message(message),
             H3SendError::NotSent(_) | H3SendError::Rejected(_) | H3SendError::Closed(_) => {
                 let message = e.message().into_owned();
                 Error::new(Kind::Http3).with_message(message).with_cause(e)

@@ -530,9 +530,10 @@ async fn h3_danger_accept_invalid_hostnames_preserves_ca_and_pin_checks() {
         .send()
         .await
         .unwrap_err();
-    assert!(
-        matches!(err.kind(), Kind::Http3 | Kind::Tls),
-        "strict H3 must reject mismatched SAN: {err:?}"
+    assert_eq!(
+        err.kind(),
+        Kind::Tls,
+        "strict H3 must reject mismatched SAN as Kind::Tls: {err:?}"
     );
 
     let body = base()
@@ -564,9 +565,10 @@ async fn h3_danger_accept_invalid_hostnames_preserves_ca_and_pin_checks() {
         .send()
         .await
         .unwrap_err();
-    assert!(
-        matches!(err.kind(), Kind::Http3 | Kind::Tls),
-        "H3 hostname bypass must still reject untrusted CA: {err:?}"
+    assert_eq!(
+        err.kind(),
+        Kind::Tls,
+        "H3 hostname bypass must still reject untrusted CA as Kind::Tls: {err:?}"
     );
 
     let err = base()
@@ -584,9 +586,10 @@ async fn h3_danger_accept_invalid_hostnames_preserves_ca_and_pin_checks() {
         .send()
         .await
         .unwrap_err();
-    assert!(
-        matches!(err.kind(), Kind::Http3 | Kind::Tls),
-        "H3 hostname bypass must still enforce pins: {err:?}"
+    assert_eq!(
+        err.kind(),
+        Kind::Tls,
+        "H3 hostname bypass must still enforce pins as Kind::Tls: {err:?}"
     );
 
     let body = base()
@@ -651,9 +654,10 @@ async fn h3_client_cert_pkcs12_authenticates_mtls() {
         .send()
         .await
         .unwrap_err();
-    assert!(
-        matches!(err.kind(), Kind::Http3 | Kind::Tls),
-        "H3 mTLS must fail without client cert: {err:?}"
+    assert_eq!(
+        err.kind(),
+        Kind::Tls,
+        "H3 mTLS must fail without client cert as Kind::Tls: {err:?}"
     );
 
     let body = Session::builder()
@@ -743,8 +747,9 @@ async fn h3_ech_config_list_encrypts_sni_and_recovers_from_stale_config() {
         .send()
         .await
         .unwrap_err();
-    assert!(
-        matches!(err.kind(), Kind::Http3 | Kind::Tls),
-        "H3 ECH with untrusted CA must return error cleanly without aborting: {err:?}"
+    assert_eq!(
+        err.kind(),
+        Kind::Tls,
+        "H3 ECH with untrusted CA must return Kind::Tls cleanly without aborting: {err:?}"
     );
 }

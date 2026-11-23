@@ -84,6 +84,9 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), NetEr
     }
 
     let head = &buf[..end_idx];
+    if matches!(h1::scan_header_end(head), h1::HeaderEnd::BareLf) {
+        return Err(NetError::proxy("proxy CONNECT response has a bare LF"));
+    }
     let response = std::str::from_utf8(head)
         .map_err(|e| NetError::proxy(format!("proxy CONNECT response is not UTF-8: {e}")))?;
     let status_line = response.split("\r\n").next().unwrap_or("");

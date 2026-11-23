@@ -151,9 +151,7 @@ fn invalid_interface_name(name: &str) -> io::Error {
 
 #[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
 pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::Result<()> {
-    if name.is_empty() || name.as_bytes().contains(&0) {
-        return Err(invalid_interface_name(name));
-    }
+    super::SocketOptions::validate_interface_name(name)?;
     socket.bind_device(Some(name.as_bytes())).map_err(|err| {
         if err.raw_os_error() == Some(libc::ENODEV) {
             io::Error::new(
@@ -176,9 +174,7 @@ pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::R
     target_os = "visionos"
 ))]
 pub(super) fn bind_interface(socket: &Socket, name: &str, is_v6: bool) -> io::Result<()> {
-    if name.is_empty() {
-        return Err(invalid_interface_name(name));
-    }
+    super::SocketOptions::validate_interface_name(name)?;
     let c_name = std::ffi::CString::new(name)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
     // SAFETY: `c_name` is a valid NUL-terminated C string for the duration of this call.

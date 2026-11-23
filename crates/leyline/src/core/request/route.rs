@@ -37,7 +37,7 @@ impl<'a> Route<'a> {
             return Err(crate::error::Error::shut_down());
         }
         if let Some(hook) = self.session.before_send() {
-            this.hooked(hook)?;
+            this.hooked(self.session, hook)?;
         }
         self.last_method = Some(this.method.clone());
         let origin = self.pool.and(this.url()).and_then(Origin::of);
@@ -67,7 +67,13 @@ impl<'a> Route<'a> {
     }
 
     fn lease(&self, this: &mut Draft, origin: Option<&Origin>) -> Option<Box<Lease>> {
-        let lease = Box::new(self.pool?.lease(origin, self.last)?);
+        let pool = self.pool?;
+        if let Some(host) = this.url().and_then(url::Url::host_str)
+            && pool.bypasses_all(host)
+        {
+            return None;
+        }
+        let lease = Box::new(pool.lease(origin, self.last)?);
         this.carry.overrides_mut().proxy = Some(lease.config().clone());
         Some(lease)
     }

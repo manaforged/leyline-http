@@ -194,6 +194,24 @@ impl Draft {
     pub(crate) fn deadline(&self) -> &Deadline {
         &self.deadline
     }
+    pub(super) fn refresh_inferred_preset(&mut self, session: &Session) {
+        if self.carry.preset_user || !session.impersonates() {
+            return;
+        }
+        self.carry.preset = default_preset(session, &self.method);
+        if !crate::wire::has_body_by_default(&self.method) {
+            return;
+        }
+        let Some(ct) = self.headers.get("content-type") else {
+            return;
+        };
+        let ct = String::from_utf8_lossy(ct.as_bytes()).to_ascii_lowercase();
+        if ct.starts_with("application/json") {
+            self.carry.preset = Some(RequestKind::Xhr);
+        } else if ct.starts_with("application/x-www-form-urlencoded") {
+            self.carry.preset = Some(RequestKind::Form);
+        }
+    }
 }
 
 impl RequestBuilder {
@@ -262,21 +280,7 @@ impl RequestBuilder {
     }
 
     fn infer_from_content_type(&mut self) {
-        if self.draft.carry.preset_user || !self.session.impersonates() {
-            return;
-        }
-        if !crate::wire::has_body_by_default(&self.draft.method) {
-            return;
-        }
-        let Some(ct) = self.draft.headers.get("content-type") else {
-            return;
-        };
-        let ct = String::from_utf8_lossy(ct.as_bytes()).to_ascii_lowercase();
-        if ct.starts_with("application/json") {
-            self.draft.carry.preset = Some(RequestKind::Xhr);
-        } else if ct.starts_with("application/x-www-form-urlencoded") {
-            self.draft.carry.preset = Some(RequestKind::Form);
-        }
+        self.draft.refresh_inferred_preset(&self.session);
     }
 
     /// Sets the timeouts for this request, overriding the session timeouts.

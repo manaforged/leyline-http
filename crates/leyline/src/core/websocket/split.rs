@@ -39,7 +39,7 @@ impl Sink<Message> for WsSink {
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
         Pin::new(&mut self.inner)
             .poll_close(cx)
-            .map_err(|e| wire_error("ws send", e))
+            .map_err(|e| wire_error("ws close", e))
     }
 }
 

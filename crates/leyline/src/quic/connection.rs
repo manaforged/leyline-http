@@ -254,10 +254,13 @@ async fn handshake(
             .await
             .map_err(|e| (e, None))?;
         if conn.is_closed() {
-            return Err((
-                QuicError::Protocol(close_reason("h3 handshake", iter, conn)),
-                None,
-            ));
+            let detail = close_reason("h3 handshake", iter, conn);
+            let err = if is_crypto_close(conn) {
+                QuicError::Tls(detail)
+            } else {
+                QuicError::Protocol(detail)
+            };
+            return Err((err, None));
         }
         if conn.is_established() {
             let h3 = quiche::h3::Connection::with_transport(conn, &h3_config)
@@ -337,6 +340,12 @@ pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> S
     )
 }
 
+pub(crate) fn is_crypto_close(conn: &quiche::Connection) -> bool {
+    conn.peer_error()
+        .or_else(|| conn.local_error())
+        .is_some_and(|e| !e.is_app && (0x0100..=0x01ff).contains(&e.error_code))
+}
+
 pub(super) async fn resolve_peer(
     resolver: &dyn Resolver,
     host: &str,
@@ -345,7 +354,11 @@ pub(super) async fn resolve_peer(
     let addrs = resolver
         .resolve(host, port)
         .await
-        .map_err(|e| QuicError::Dns(format!("dns: {e}")))?;
+        .map_err(|e| match e.kind() {
+            std::io::ErrorKind::TimedOut => QuicError::Timeout(format!("dns: {e}")),
+            std::io::ErrorKind::InvalidInput => QuicError::Config(format!("dns: {e}")),
+            _ => QuicError::Dns(format!("dns: {e}")),
+        })?;
     addrs
         .iter()
         .find(|a| a.is_ipv4())

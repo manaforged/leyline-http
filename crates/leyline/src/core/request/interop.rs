@@ -19,7 +19,7 @@ use crate::wire::Body;
 struct Layout(Vec<(http::HeaderName, Option<HeaderPosition>)>);
 
 impl Draft {
-    pub(super) fn hooked(&mut self, hook: &BeforeSend) -> Result<()> {
+    pub(super) fn hooked(&mut self, session: &Session, hook: &BeforeSend) -> Result<()> {
         let layout = Layout::of(&self.headers);
         let mut request = self.as_http()?;
         let sent = request.uri().clone();
@@ -34,6 +34,7 @@ impl Draft {
             http_scheme(&url)?;
             self.url = Some(url);
         }
+        self.refresh_inferred_preset(session);
         Ok(())
     }
 

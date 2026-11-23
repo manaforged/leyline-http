@@ -95,12 +95,20 @@ impl H3Loop {
     }
 
     async fn settle(&mut self) -> ControlFlow<()> {
-        if let Err(reason) = self.flush().await {
-            return self.stop(reason.to_string());
+        if let Err(err) = self.flush().await {
+            return if matches!(err, crate::quic::error::QuicError::Tls(_)) {
+                self.stop_tls(err.to_string())
+            } else {
+                self.stop(err.to_string())
+            };
         }
         if self.conn.is_closed() {
             let reason = close_reason("h3", 0, &self.conn);
-            return self.stop(reason);
+            return if crate::quic::connection::is_crypto_close(&self.conn) {
+                self.stop_tls(reason)
+            } else {
+                self.stop(reason)
+            };
         }
         if self.commands_closed && self.streams.is_empty() && self.pending.is_empty() {
             self.closed.store(true, Ordering::Release);
@@ -136,6 +144,20 @@ impl H3Loop {
             &mut self.command_rx,
             &self.closed,
             reason,
+        );
+        self.open_streams.store(0, Ordering::Relaxed);
+        ControlFlow::Break(())
+    }
+
+    fn stop_tls(&mut self, reason: String) -> ControlFlow<()> {
+        super::fail_all_with(
+            &mut self.streams,
+            &mut self.pending,
+            &mut self.command_rx,
+            &self.closed,
+            reason,
+            H3SendError::Tls,
+            H3SendError::Tls,
         );
         self.open_streams.store(0, Ordering::Relaxed);
         ControlFlow::Break(())
