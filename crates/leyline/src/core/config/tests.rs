@@ -63,6 +63,57 @@ fn no_proxy_does_not_match_unrelated_ipv6() {
     );
 }
 
+#[test]
+fn no_proxy_port_and_ipv6_canonicalization_and_ipv4_suffix_guard() {
+    let url_match = url::Url::parse("http://localhost:8080/a").unwrap();
+    let url_other = url::Url::parse("http://localhost:9999/a").unwrap();
+    let np = NoProxy::from_string("localhost:8080,[2001:0db8::1]:8443,2.1").unwrap();
+    assert!(np.matches_url(&url_match));
+    assert!(!np.matches_url(&url_other));
+
+    let v6_canonical = url::Url::parse("https://[2001:db8::1]:8443/").unwrap();
+    let v6_other_port = url::Url::parse("https://[2001:db8::1]:443/").unwrap();
+    assert!(np.matches_url(&v6_canonical));
+    assert!(!np.matches_url(&v6_other_port));
+
+    let v4 = url::Url::parse("http://192.0.2.1/").unwrap();
+    assert!(!np.matches_url(&v4));
+
+    assert_eq!(crate::net::normalize_host("[2001:0db8::1]"), "2001:db8::1");
+    assert_eq!(crate::net::normalize_host("[0:0:0:0:0:0:0:1]"), "::1");
+    assert!(!crate::util::domain_match("192.0.2.1", "2.1"));
+}
+
+#[test]
+fn proxy_scheme_rules_override_all_and_replace_prior_scheme() {
+    let http_url = url::Url::parse("http://example.com/").unwrap();
+    let https_url = url::Url::parse("https://example.com/").unwrap();
+
+    let p = Proxy::new()
+        .all("http://all:1")
+        .https("http://tls:2")
+        .http("http://old:3")
+        .http("http://new:4");
+    assert_eq!(
+        p.proxy_for(&http_url).unwrap().unwrap().url().as_str(),
+        "http://new:4/"
+    );
+    assert_eq!(
+        p.proxy_for(&https_url).unwrap().unwrap().url().as_str(),
+        "http://tls:2/"
+    );
+
+    let p2 = Proxy::new().all("http://all:1").https("http://tls:2");
+    assert_eq!(
+        p2.proxy_for(&http_url).unwrap().unwrap().url().as_str(),
+        "http://all:1/"
+    );
+    assert_eq!(
+        p2.proxy_for(&https_url).unwrap().unwrap().url().as_str(),
+        "http://tls:2/"
+    );
+}
+
 fn cfg_with_env_no_proxy(patterns: &str) -> Proxy {
     Proxy {
         no_proxy: NoProxy::from_string(patterns).unwrap(),

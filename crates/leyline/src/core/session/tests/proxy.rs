@@ -138,3 +138,66 @@ fn env_proxy_under_cgi_still_honours_lowercase_http_proxy() {
     let v = env_proxy_from(mock_env(pairs), mock_env_has(pairs)).map(|p| p.value);
     assert_eq!(v, Some("http://user.example:3128".to_string()));
 }
+
+#[test]
+fn apply_env_proxy_routes_http_https_and_all_independently() {
+    use super::super::proxy::InvalidEnvProxy;
+    use crate::core::config::Proxy;
+
+    let pairs = &[
+        ("ALL_PROXY", "http://all.example:1080"),
+        ("HTTP_PROXY", "http://plain.example:3128"),
+        ("HTTPS_PROXY", "http://secure.example:8443"),
+        ("NO_PROXY", "127.0.0.1:8080,.internal.test"),
+    ];
+    let proxy = Proxy::new()
+        .apply_env_proxy_from(
+            InvalidEnvProxy::FailBuild,
+            mock_env(pairs),
+            mock_env_has(pairs),
+        )
+        .unwrap();
+
+    let http_url = url::Url::parse("http://api.example/v1").unwrap();
+    let https_url = url::Url::parse("https://api.example/v1").unwrap();
+    let bypassed_port = url::Url::parse("http://127.0.0.1:8080/ok").unwrap();
+    let other_port = url::Url::parse("http://127.0.0.1:9090/ok").unwrap();
+
+    assert_eq!(
+        proxy.proxy_for(&http_url).unwrap().unwrap().url().as_str(),
+        "http://plain.example:3128/"
+    );
+    assert_eq!(
+        proxy.proxy_for(&https_url).unwrap().unwrap().url().as_str(),
+        "http://secure.example:8443/"
+    );
+    assert!(proxy.proxy_for(&bypassed_port).unwrap().is_none());
+    assert_eq!(
+        proxy
+            .proxy_for(&other_port)
+            .unwrap()
+            .unwrap()
+            .url()
+            .as_str(),
+        "http://plain.example:3128/"
+    );
+}
+
+#[test]
+fn apply_env_proxy_fails_closed_when_any_scheme_var_is_invalid() {
+    use super::super::proxy::InvalidEnvProxy;
+    use crate::core::config::Proxy;
+
+    let pairs = &[
+        ("HTTPS_PROXY", "http://good.example:3128"),
+        ("HTTP_PROXY", "http://[::1"),
+    ];
+    let err = Proxy::new()
+        .apply_env_proxy_from(
+            InvalidEnvProxy::FailBuild,
+            mock_env(pairs),
+            mock_env_has(pairs),
+        )
+        .unwrap_err();
+    assert_eq!(err.kind(), crate::error::Kind::Config);
+}

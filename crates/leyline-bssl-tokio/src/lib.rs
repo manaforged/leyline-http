@@ -14,6 +14,8 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 mod async_callbacks;
 mod bridge;
 mod records;
+#[cfg(test)]
+mod tests;
 
 use self::bridge::AsyncStreamBridge;
 

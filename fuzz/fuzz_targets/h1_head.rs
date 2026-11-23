@@ -11,5 +11,10 @@ fuzz_target!(|data: &[u8]| {
             !(headers.contains_key("content-length") && headers.contains_key("transfer-encoding"))
         );
         assert!(headers.get_all("content-length").iter().count() <= 1);
+        for (_, value) in &headers {
+            let bytes = value.as_bytes();
+            assert!(!matches!(bytes.first(), Some(b' ' | b'\t')));
+            assert!(!matches!(bytes.last(), Some(b' ' | b'\t')));
+        }
     }
 });

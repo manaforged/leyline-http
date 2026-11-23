@@ -23,6 +23,8 @@ mod connect_timeout;
 #[cfg(feature = "bench-internals")]
 mod connection_stats;
 mod content_encoding;
+mod contract_proxy_and_retry;
+mod contract_transport_matrix;
 mod cookie_lifetime;
 mod core_digest;
 #[cfg(feature = "multipart")]
@@ -146,6 +148,7 @@ mod profile_and_builder_checks;
 mod profile_builtin;
 #[cfg(feature = "bench-internals")]
 mod profile_validation;
+mod property_invariants;
 mod proxy_identity;
 mod proxy_rebind;
 mod proxy_rules;

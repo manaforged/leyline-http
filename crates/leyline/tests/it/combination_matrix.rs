@@ -11,7 +11,7 @@ use tokio::net::{TcpListener, TcpStream};
 use super::doh_and_ech::{decode_qname_and_qtype, dns_response};
 use super::v030_workloads::TempDir;
 
-async fn spawn_connect_proxy() -> (String, Arc<AtomicUsize>, Arc<AtomicUsize>) {
+pub(super) async fn spawn_connect_proxy() -> (String, Arc<AtomicUsize>, Arc<AtomicUsize>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let connect_hits = Arc::new(AtomicUsize::new(0));
