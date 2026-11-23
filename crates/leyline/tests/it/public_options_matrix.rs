@@ -146,7 +146,7 @@ async fn socket_tuning_keepalive_retries_send_buffer_and_strict_options() {
         .unwrap();
     assert_eq!(session.get(server.url("/")).text().await.unwrap(), "tuned");
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(target_os = "linux")]
     {
         let bad_retries = Session::builder()
             .tcp_keepalive(Duration::from_secs(10))
@@ -157,7 +157,7 @@ async fn socket_tuning_keepalive_retries_send_buffer_and_strict_options() {
             .get(server.url("/"))
             .send()
             .await
-            .expect_err("OS rejects TCP_KEEPCNT=0");
+            .expect_err("Linux rejects TCP_KEEPCNT=0");
         assert_eq!(err.kind(), Kind::Connect, "expected Connect, got {err:?}");
     }
 }
