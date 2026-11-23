@@ -1,0 +1,27 @@
+1 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
+
+seq    lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
+       leyline              54636    3.8%      35397          -       9.30     11.8      4     -
+       wreq                 35499    0.3%      91826          -      23.49      8.4      3     -
+       tlsclient            29780    3.0%     259269          -      32.68     18.8      3     -
+
+1c64   lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
+       leyline             185103    3.1%      31315          -       7.44     14.3      4     1
+       wreq                155240    4.1%      74512          -      20.33     16.8      3     1
+       tlsclient            45167    5.5%     341265          -      43.85     22.3      3     1
+
+8c8    lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
+       leyline             288901    3.2%      35833          -      10.01     13.2      4     8
+       wreq                219870    3.3%      83758          -      26.61     11.0      3     8
+       tlsclient           115725    3.6%     364681          -      55.22     24.1      3     8
+
+8c256  lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
+       leyline            1116276    3.0%      27885          -       5.94     24.9      4     8
+       wreq                721434    0.4%      67731          -      15.66     26.8      3     8
+       tlsclient           188552    5.6%     341796          -      52.06     31.3      3     8
+
+geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
+seq    leyline           vs wreq       req/s 1.534 [1.449, 1.624] ahead; CPU/req 0.398 [0.368, 0.430] less CPU; single-run, 3 rounds
+1c64   leyline           vs wreq       req/s 1.177 [1.146, 1.209] ahead; CPU/req 0.358 [0.341, 0.376] less CPU; single-run, 3 rounds
+8c8    leyline           vs wreq       req/s 1.321 [1.261, 1.384] ahead; CPU/req 0.373 [0.370, 0.376] less CPU; single-run, 3 rounds
+8c256  leyline           vs wreq       req/s 1.536 [1.473, 1.602] ahead; CPU/req 0.377 [0.363, 0.391] less CPU; single-run, 3 rounds

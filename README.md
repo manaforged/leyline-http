@@ -76,25 +76,26 @@ better.
 
 | Client | Sequential | 8 connections, 256 in flight |
 | --- | ---: | ---: |
-| **Leyline** | **68,412** | **1,486,667** |
-| hyper-util | 55,780 | 1,143,841 |
-| libcurl | 54,911 | 928,490 |
-| reqwest | 41,829 | 925,090 |
-| Go net/http | 47,551 | 780,005 |
+| **Leyline** | **57,985** | **1,430,815** |
+| hyper-util | 45,010 | 1,120,042 |
+| reqwest | 36,318 | 898,811 |
+| libcurl | 46,682 | 786,210 |
+| Go net/http | 41,835 | 619,826 |
 
 Leyline also uses less client CPU per request than each of them in all four
 measured HTTP/2 workloads (and fewer user-space instructions per request than
 the bare `h2` crate). At a fixed offered rate of 50,000 HTTP/2 requests per
-second, its p99 latency is 120 µs at 7.29 µs client CPU/req, against 146 µs
-(13.12 µs CPU) for hyper-util and 149 µs (19.10 µs CPU) for reqwest; libcurl
-measures 104 µs p99 at 10.51 µs CPU. [BENCHMARKS.md](BENCHMARKS.md) has every
-workload, HTTP/1.1, confidence intervals, and the commands to reproduce them.
+second, its p99 latency is 120 µs at 8.18 µs client CPU/req, against 134 µs
+(12.29 µs CPU) for libcurl, 154 µs (13.82 µs CPU) for hyper-util, and 159 µs
+(19.92 µs CPU) for reqwest. [BENCHMARKS.md](BENCHMARKS.md) has every workload,
+HTTP/1.1, confidence intervals, and the commands to reproduce them.
 
 For the highest request rate, `SessionBuilder::run_per_core` runs one runtime
 per CPU core; the cores share cookies, cache and tokens and keep their own
-connections. In that layout Leyline reaches 1.08M HTTP/1.1 req/s (ahead of
-fasthttp at 8 and 64 workers in the long runs) and leads the bare `h2` crate at
-8 and 256 requests in flight over eight HTTP/2 connections.
+connections. In that layout Leyline reaches 912k HTTP/1.1 req/s in the long
+64-worker runs (ahead of fasthttp at 8 workers and tied at 64, at 0.79–0.83×
+CPU) and leads the bare `h2` crate at 8 and 256 requests in flight over eight
+HTTP/2 connections.
 
 ## Browser profiles
 
@@ -111,9 +112,9 @@ let session = Session::builder().browser(Browser::Chrome154).build()?;
 # }
 ```
 
-Profiles send larger headers, so they cost 5% to 21% of throughput. With
-profiles on, Leyline handles 1.55 times the requests per second of wreq and 5.58
-times those of tls-client at 256 in flight, using 0.37× and 0.12× their client
+Profiles send larger headers, so they cost 4% to 21% of throughput. With
+profiles on, Leyline handles 1.57 times the requests per second of wreq and 5.92
+times those of tls-client at 256 in flight, using 0.38× and 0.11× their client
 CPU per request.
 
 ## Documentation

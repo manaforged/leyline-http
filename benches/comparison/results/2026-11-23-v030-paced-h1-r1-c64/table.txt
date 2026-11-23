@@ -1,0 +1,21 @@
+
+open-loop cells: latency from the scheduled send time when the worker was behind it (coordinated omission), else from the send; first second left out; CPU per request at the same offered rate; medians over runs and rounds; lower is better
+
+c64      lib                 rate achieved   p50_us   p99_us  p999_us cpu_us/req  rss_MiB rounds
+         curl               20000    1.000       24       38       48      19.80     19.1      3
+         fasthttp           20000    1.000       29       49       58      13.69     25.3      3
+         ureq               20000    1.000       26       51       59      24.49     43.6      3
+         leyline            20000    1.000       33       61       72      11.75     15.7      3
+         hyper              20000    1.000       35       65       77      14.10     13.3      3
+         reqwest            20000    1.000       38       66       80      19.97     14.7      3
+         wreq               20000    1.000       38       66       79      19.16     15.8      3
+         nethttp            20000    1.000       33      209      321      29.59     20.4      3
+
+open-loop paired ratio, leyline over rival (same run, same round); 95% t-interval on log ratio; below 1 means leyline is lower
+c64      leyline           vs hyper      p99 0.943 [0.923, 0.965] lower; CPU/req 0.859 [0.739, 0.997] less CPU; single-run, 3 rounds
+c64      leyline           vs reqwest    p99 0.924 [0.890, 0.960] lower; CPU/req 0.604 [0.532, 0.685] less CPU; single-run, 3 rounds
+c64      leyline           vs wreq       p99 0.863 [0.644, 1.158] tie; CPU/req 0.611 [0.596, 0.626] less CPU; single-run, 3 rounds
+c64      leyline           vs ureq       p99 1.224 [0.971, 1.542] tie; CPU/req 0.497 [0.341, 0.723] less CPU; single-run, 3 rounds
+c64      leyline           vs curl       p99 1.620 [1.559, 1.683] higher; CPU/req 0.611 [0.565, 0.660] less CPU; single-run, 3 rounds
+c64      leyline           vs nethttp    p99 0.293 [0.273, 0.315] lower; CPU/req 0.410 [0.357, 0.471] less CPU; single-run, 3 rounds
+c64      leyline           vs fasthttp   p99 1.237 [1.201, 1.273] higher; CPU/req 0.864 [0.852, 0.877] less CPU; single-run, 3 rounds

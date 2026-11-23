@@ -780,7 +780,7 @@ def render_social_html(
       <section class="highlights">
         <div class="hl-row">
           <div class="hl-k">{fmt_rate(h1_cores_rps)} H1</div>
-          <div class="hl-v"><strong>run_per_core</strong> leads fasthttp at 8 &amp; 64w (0.74–0.79×&nbsp;CPU)</div>
+          <div class="hl-v"><strong>run_per_core</strong> leads fasthttp at 8w, ties at 64w (0.79–0.83×&nbsp;CPU)</div>
         </div>
         <div class="hl-row">
           <div class="hl-k">{ley_pcpu:.2f} µs CPU</div>

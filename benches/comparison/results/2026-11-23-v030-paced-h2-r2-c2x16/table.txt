@@ -1,0 +1,17 @@
+
+open-loop cells: latency from the scheduled send time when the worker was behind it (coordinated omission), else from the send; first second left out; CPU per request at the same offered rate; medians over runs and rounds; lower is better
+
+c2x16    lib                 rate achieved   p50_us   p99_us  p999_us cpu_us/req  rss_MiB rounds
+         curl                2000    1.000       23       51       66      18.74      8.3      3
+         leyline             2000    1.000       29       57       69      13.69     10.5      3
+         h2                  2000    1.000       26       57       70      14.09      6.3      3
+         hyper               2000    1.000       34       62       71      16.20      7.3      3
+         reqwest             2000    1.000       30       64       80      20.04      7.6      3
+         wreq                2000    1.000       31       67       78      19.28      8.8      3
+
+open-loop paired ratio, leyline over rival (same run, same round); 95% t-interval on log ratio; below 1 means leyline is lower
+c2x16    leyline           vs hyper      p99 0.920 [0.857, 0.986] lower; CPU/req 0.818 [0.761, 0.879] less CPU; single-run, 3 rounds
+c2x16    leyline           vs reqwest    p99 0.891 [0.855, 0.928] lower; CPU/req 0.681 [0.610, 0.760] less CPU; single-run, 3 rounds
+c2x16    leyline           vs wreq       p99 0.859 [0.790, 0.935] lower; CPU/req 0.704 [0.650, 0.763] less CPU; single-run, 3 rounds
+c2x16    leyline           vs curl       p99 1.244 [0.783, 1.975] tie; CPU/req 0.721 [0.632, 0.822] less CPU; single-run, 3 rounds
+c2x16    leyline           vs h2         p99 1.000 [0.958, 1.044] tie; CPU/req 0.955 [0.855, 1.066] same CPU; single-run, 3 rounds

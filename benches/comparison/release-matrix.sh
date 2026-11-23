@@ -136,6 +136,6 @@ if [ "$RENDER_CHARTS" = 1 ]; then
     --h2 "$C/results/${TAG_PREFIX}-clients-h2-r1/pooled.txt" \
     --browser "$C/results/${TAG_PREFIX}-browser-h2-r1/pooled.txt" \
     --paced "$C/results/${TAG_PREFIX}-paced-h2-pooled.txt" \
-    --h1 "$C/results/${TAG_PREFIX}-clients-h1-r1/pooled.txt" \
+    --h1 "$C/results/${TAG_PREFIX}-h1-long-r1/pooled.txt" \
     --out-dir "$ROOT/docs/assets"
 fi
