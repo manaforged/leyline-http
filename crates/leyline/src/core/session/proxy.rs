@@ -37,7 +37,7 @@ impl Proxy {
     }
 
     pub(super) fn apply_env_proxy_from<F, G>(
-        self,
+        mut self,
         on_invalid: InvalidEnvProxy,
         get_var: F,
         has_var: G,
@@ -49,24 +49,41 @@ impl Proxy {
         if !self.rules().is_empty() || !self.uses_env() {
             return Ok(self);
         }
-        let Some(EnvProxy { variable, value }) = env_proxy_from(&get_var, &has_var) else {
+        let in_cgi = detect_cgi(&has_var);
+        let https = read_env_group(&HTTPS_PROXY_VARS, in_cgi, &get_var);
+        let http = read_env_group(&HTTP_PROXY_VARS, in_cgi, &get_var);
+        let all = read_env_group(&ALL_PROXY_VARS, in_cgi, &get_var);
+        if https.is_none() && http.is_none() && all.is_none() {
             return Ok(self);
-        };
-        if ProxyUrl::parse(&value).is_ok() {
-            let no_proxy = get_var("NO_PROXY").or_else(|| get_var("no_proxy"));
-            return Ok(self
-                .all(value)
-                .set_from_env()
-                .env_no_proxy(no_proxy.as_deref()));
         }
-        let config = self.reject_env(variable);
-        match (on_invalid, config.rejection(Kind::Config)) {
-            (InvalidEnvProxy::FailBuild, Some(error)) => Err(error),
-            _ => Ok(config),
+        for entry in [&https, &http, &all].into_iter().flatten() {
+            if ProxyUrl::parse(&entry.value).is_err() {
+                let config = self.reject_env(entry.variable);
+                return match (on_invalid, config.rejection(Kind::Config)) {
+                    (InvalidEnvProxy::FailBuild, Some(error)) => Err(error),
+                    _ => Ok(config),
+                };
+            }
         }
+        if let Some(entry) = all {
+            self = self.all(entry.value);
+        }
+        if let Some(entry) = http {
+            self = self.http(entry.value);
+        }
+        if let Some(entry) = https {
+            self = self.https(entry.value);
+        }
+        let no_proxy = get_var("NO_PROXY").or_else(|| get_var("no_proxy"));
+        Ok(self.set_from_env().env_no_proxy(no_proxy.as_deref()))
     }
 }
 
+const HTTPS_PROXY_VARS: [&str; 2] = ["HTTPS_PROXY", "https_proxy"];
+const HTTP_PROXY_VARS: [&str; 2] = ["HTTP_PROXY", "http_proxy"];
+const ALL_PROXY_VARS: [&str; 2] = ["ALL_PROXY", "all_proxy"];
+
+#[cfg(test)]
 const ENV_PROXY_VARS: [&str; 6] = [
     "HTTPS_PROXY",
     "https_proxy",
@@ -76,23 +93,25 @@ const ENV_PROXY_VARS: [&str; 6] = [
     "all_proxy",
 ];
 
-pub(crate) fn env_proxy_from<F, G>(get_var: F, has_var: G) -> Option<EnvProxy>
-where
-    F: Fn(&str) -> Option<String>,
-    G: Fn(&str) -> bool,
-{
+fn detect_cgi<G: Fn(&str) -> bool>(has_var: &G) -> bool {
     let in_cgi = CGI_SIGNAL_ENV_VARS.iter().any(|k| has_var(k));
-
     if in_cgi && has_var("HTTP_PROXY") {
         tracing::warn!(
             target: "leyline::env_proxy::cgi",
             "CGI environment detected — ignoring HTTP_PROXY (httpoxy mitigation)"
         );
     }
+    in_cgi
+}
 
-    for variable in ENV_PROXY_VARS
-        .into_iter()
-        .filter(|&variable| !(in_cgi && variable == "HTTP_PROXY"))
+fn read_env_group<F: Fn(&str) -> Option<String>>(
+    vars: &[&'static str],
+    in_cgi: bool,
+    get_var: &F,
+) -> Option<EnvProxy> {
+    for &variable in vars
+        .iter()
+        .filter(|&&variable| !(in_cgi && variable == "HTTP_PROXY"))
     {
         if let Some(val) = get_var(variable) {
             let trimmed = val.trim();
@@ -105,4 +124,14 @@ where
         }
     }
     None
+}
+
+#[cfg(test)]
+pub(crate) fn env_proxy_from<F, G>(get_var: F, has_var: G) -> Option<EnvProxy>
+where
+    F: Fn(&str) -> Option<String>,
+    G: Fn(&str) -> bool,
+{
+    let in_cgi = detect_cgi(&has_var);
+    read_env_group(&ENV_PROXY_VARS, in_cgi, &get_var)
 }

@@ -339,6 +339,10 @@ pub(crate) fn bare_host(host: &str) -> &str {
         .unwrap_or(host)
 }
 
+pub(crate) fn parse_ip_host(host: &str) -> Option<std::net::IpAddr> {
+    bare_host(host.trim()).parse().ok()
+}
+
 #[cfg(feature = "http3")]
 pub(crate) fn unspecified_for(peer: std::net::SocketAddr) -> std::net::SocketAddr {
     let ip: std::net::IpAddr = match peer {
@@ -384,6 +388,9 @@ pub(crate) fn delta_seconds(value: &str) -> Option<u64> {
 }
 
 pub(crate) fn domain_match(host: &str, domain: &str) -> bool {
+    if parse_ip_host(host).is_some() {
+        return host.eq_ignore_ascii_case(domain);
+    }
     let Some(rest) = host.len().checked_sub(domain.len()) else {
         return false;
     };

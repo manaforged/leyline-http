@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::io;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -35,7 +35,7 @@ pub(crate) struct SystemResolver;
 
 impl Resolver for SystemResolver {
     fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {
-        if let Ok(ip) = host.parse::<IpAddr>() {
+        if let Some(ip) = crate::util::parse_ip_host(host) {
             let addr = SocketAddr::new(ip, port);
             return Box::pin(async move { Ok(vec![addr]) });
         }

@@ -19,29 +19,48 @@ impl Pool {
             .map(|(conn, tls, _)| (conn, tls))
     }
 
+    fn past_idle(&self, since: Instant, now: Instant) -> bool {
+        now.saturating_duration_since(since) >= self.config.idle_timeout
+    }
+
+    fn mux_stale(&self, entry: &MuxEntry, now: Instant) -> Option<Counter> {
+        if entry.is_dead() || self.past_lifetime(entry.opened, now) {
+            Some(Counter::EvictionsDead)
+        } else if entry.handle.open_streams() == 0 && self.past_idle(entry.last_use.get(), now) {
+            Some(Counter::EvictionsIdle)
+        } else {
+            None
+        }
+    }
+
     pub(crate) fn checkout_mux_idle<C: MuxClient>(
         &self,
         key: &PoolKey,
         now: Instant,
     ) -> Option<(C, TlsInfo, Duration)> {
-        let mut dead = false;
+        let mut stale_counter = None;
         let shard = self.conns.shards.of(key);
         let hit = match read(&shard.entries).mux.get(key) {
-            Some(entry) if entry.is_dead() || self.past_lifetime(entry.opened, now) => {
-                dead = true;
-                None
-            }
-            Some(entry) => C::in_handle(&entry.handle)
-                .map(|conn| (conn.clone(), entry.tls.clone(), entry.last_use.touch(now))),
+            Some(entry) => match self.mux_stale(entry, now) {
+                Some(counter) => {
+                    stale_counter = Some(counter);
+                    None
+                }
+                None => C::in_handle(&entry.handle)
+                    .map(|conn| (conn.clone(), entry.tls.clone(), entry.last_use.touch(now))),
+            },
             None => None,
         };
-        if dead {
+        if stale_counter.is_some() {
             let mut entries = write(&shard.entries);
-            let stale = |entry: &MuxEntry| entry.is_dead() || self.past_lifetime(entry.opened, now);
-            if entries.mux.get(key).is_some_and(stale) {
+            if let Some(counter) = entries
+                .mux
+                .get(key)
+                .and_then(|entry| self.mux_stale(entry, now))
+            {
                 entries.mux.remove(key);
                 self.conns.shards.removed(1);
-                self.conns.counters.add(Counter::EvictionsDead, 1);
+                self.conns.counters.add(counter, 1);
             }
         }
         hit
@@ -53,10 +72,12 @@ impl Pool {
         handle: C,
         tls: TlsInfo,
     ) -> (C, TlsInfo) {
+        let now = Instant::now();
         let shard = self.conns.shards.of(&key);
         let mut entries = write(&shard.entries);
         if let Some(existing) = entries.mux.get(&key)
             && !existing.is_dead()
+            && !self.past_lifetime(existing.opened, now)
             && let Some(conn) = C::in_handle(&existing.handle)
         {
             return (conn.clone(), existing.tls.clone());
@@ -75,7 +96,7 @@ impl Pool {
             key,
             MuxEntry {
                 handle: handle.into_handle(),
-                opened: Instant::now(),
+                opened: now,
                 last_use: Stamp::now(),
                 tls,
             },
@@ -91,11 +112,17 @@ impl Pool {
     pub(crate) fn checkout_h1(&self, key: &PoolKey, now: Instant) -> Option<(H1Slot, TlsInfo)> {
         let mut entries = write(&self.conns.shards.of(key).entries);
         let hit = entries.h1.get_mut(key).and_then(|entry| {
-            while let Some((slot, tls, _returned_at)) = entry.idle.queue().pop_back() {
-                if !self.past_lifetime(slot.opened_at, now) {
-                    entry.last_use = now;
-                    return Some((slot, tls));
+            while let Some((slot, tls, returned_at)) = entry.idle.queue().pop_back() {
+                if self.past_lifetime(slot.opened_at, now) {
+                    self.conns.counters.add(Counter::EvictionsDead, 1);
+                    continue;
                 }
+                if self.past_idle(returned_at, now) {
+                    self.conns.counters.add(Counter::EvictionsIdle, 1);
+                    continue;
+                }
+                entry.last_use = now;
+                return Some((slot, tls));
             }
             None
         });

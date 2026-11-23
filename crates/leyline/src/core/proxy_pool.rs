@@ -110,8 +110,13 @@ impl ProxyPool {
         self.map_entries(|entry| entry.config.set_no_proxy(no_proxy.clone()))
     }
 
+    #[cfg(test)]
     pub(crate) fn bypasses_all(&self, host: &str) -> bool {
         !self.entries.is_empty() && self.entries.iter().all(|e| e.config.bypasses(host))
+    }
+
+    pub(crate) fn bypasses_all_url(&self, url: &url::Url) -> bool {
+        !self.entries.is_empty() && self.entries.iter().all(|e| e.config.bypasses_url(url))
     }
 
     pub(crate) fn lease_for(
@@ -119,7 +124,7 @@ impl ProxyPool {
         url: &url::Url,
         last: Option<usize>,
     ) -> Option<(Option<crate::core::config::Origin>, Lease)> {
-        if self.bypasses_all(url.host_str().unwrap_or("")) {
+        if self.bypasses_all_url(url) {
             return None;
         }
         let origin = crate::core::config::Origin::of(url);

@@ -36,7 +36,7 @@ pub(crate) enum TrustFailure {
 
 fn needs_verifier(trust: &Tls, host: Option<&str>, transport: Transport) -> bool {
     let unchecked_ip = transport == Transport::Quic
-        && host.is_some_and(|host| host.parse::<std::net::IpAddr>().is_ok());
+        && host.is_some_and(|h| crate::util::parse_ip_host(h).is_some());
     !trust.accept_invalid_certs
         && (trust.accept_invalid_hostnames
             || !trust.pinned_leaf_sha256.is_empty()
@@ -155,9 +155,9 @@ fn verify(
 ) -> Result<(), TrustFailure> {
     let cert = ssl.peer_certificate().ok_or(TrustFailure::Certificate)?;
     if check_hostname {
-        let hostname_matches = match host.parse::<std::net::IpAddr>() {
-            Ok(_) => cert.check_ip_asc(host),
-            Err(_) => cert.check_host(host),
+        let hostname_matches = match crate::util::parse_ip_host(host) {
+            Some(_) => cert.check_ip_asc(crate::util::bare_host(host)),
+            None => cert.check_host(host),
         }
         .map_err(|error| rejected(&error, TrustFailure::Hostname))?;
         if !hostname_matches {

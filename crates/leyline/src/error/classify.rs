@@ -143,7 +143,10 @@ impl Error {
     }
 
     fn transport_io(&self) -> Option<&io::Error> {
-        if matches!(self.inner.kind, Kind::Request | Kind::Config | Kind::Url) {
+        if matches!(
+            self.inner.kind,
+            Kind::Request | Kind::Config | Kind::Url | Kind::Body
+        ) {
             return None;
         }
         self.io()

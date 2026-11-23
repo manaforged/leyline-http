@@ -123,6 +123,9 @@ impl Journey {
     }
 
     pub(super) fn strips_credentials(&self) -> bool {
+        if self.tainted {
+            return true;
+        }
         match &self.trusted_origin {
             Some(trusted) => !Origin::same(trusted, &self.url),
             None => !self.chain.is_empty() && !Origin::same(&self.original, &self.url),
@@ -144,10 +147,12 @@ impl Journey {
         status: u16,
         location: &str,
         replay: Option<Body>,
+        upgrade: impl Fn(&Arc<Url>) -> Arc<Url>,
     ) -> Result<()> {
         self.chain.push(hop);
         let from = Origin::ascii(&self.url).into_owned();
-        self.url = Arc::new(self.url.join(location).map_err(Error::from)?);
+        let next = Arc::new(self.url.join(location).map_err(Error::from)?);
+        self.url = upgrade(&next);
         let to = Origin::ascii(&self.url).into_owned();
         self.tainted |= from != to && self.original_origin() != to;
         self.retarget_referer(&to)?;

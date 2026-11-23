@@ -85,15 +85,24 @@ impl RequestBuilder {
                 .next_transfer()
                 .transfer_to(target.clone(), key, options.clone())
                 .await;
-            let Err(error) = result else {
-                return result;
+            let failed = match result {
+                Ok(written) => return Ok(written),
+                Err(TransferFailure::Status(response)) => Ok(response),
+                Err(TransferFailure::Error(error)) => Err(error),
             };
-            let failed = Err(error);
             match retry.plan(&failed, attempt) {
                 RetryPlan::Backoff(wait) if wait < deadline.remaining() => {
                     super::send::sleep_backoff(&self.session, &deadline, wait).await?;
                 }
-                _ => return failed.map(|_| 0),
+                _ => {
+                    return match failed {
+                        Ok(response) => {
+                            response.error_for_status()?;
+                            Err(bad_range())
+                        }
+                        Err(error) => Err(error),
+                    };
+                }
             }
             attempt += 1;
         }
@@ -113,16 +122,20 @@ impl RequestBuilder {
         target: std::path::PathBuf,
         key: [u8; 32],
         options: Box<Download>,
-    ) -> Result<u64> {
+    ) -> std::result::Result<u64, TransferFailure> {
         let resume = options.resume;
-        let partial =
-            Arc::new(atomic::blocking(move |_| Partial::open(target, key, resume)).await?);
+        let partial = Arc::new(
+            atomic::blocking(move |_| Partial::open(target, key, resume))
+                .await
+                .map_err(TransferFailure::Error)?,
+        );
         let old = partial.metadata();
         let offset = old.as_ref().map_or(0, |metadata| metadata.offset);
         if offset > self.draft.carry.body_rules.max_body_size as u64 {
-            return Err(limit());
+            return Err(TransferFailure::Error(limit()));
         }
-        self.resume_headers(old.as_ref())?;
+        self.resume_headers(old.as_ref())
+            .map_err(TransferFailure::Error)?;
         let part = Arc::clone(&partial);
         let checksum = options.checksum.is_some() && offset > 0;
         let hashing = async move {
@@ -132,19 +145,28 @@ impl RequestBuilder {
                 Ok(Sha256::new())
             }
         };
-        let (response, digest) = tokio::try_join!(self.send(), hashing)?;
-        let (metadata, append) = metadata(&response, key, old.as_ref())?;
+        let (response, digest) =
+            tokio::try_join!(self.send(), hashing).map_err(TransferFailure::Error)?;
+        let (metadata, append) = match metadata(&response, key, old.as_ref()) {
+            Ok(meta) => meta,
+            Err(MetadataFailure::Status) => return Err(TransferFailure::Status(response)),
+            Err(MetadataFailure::Error(error)) => return Err(TransferFailure::Error(error)),
+        };
         if metadata
             .total
             .is_some_and(|total| total > response.parts.compression.max_body_size as u64)
         {
-            return Err(limit());
+            return Err(TransferFailure::Error(limit()));
         }
         let copy = metadata.clone();
         let part = Arc::clone(&partial);
-        atomic::blocking(move |_| part.begin(copy, append)).await?;
+        atomic::blocking(move |_| part.begin(copy, append))
+            .await
+            .map_err(TransferFailure::Error)?;
         let digest = if append { digest } else { Sha256::new() };
-        transfer(response, partial, (metadata, digest), options).await
+        transfer(response, partial, (metadata, digest), options)
+            .await
+            .map_err(TransferFailure::Error)
     }
 
     fn prepare_download(&mut self) -> Result<[u8; 32]> {
@@ -283,14 +305,31 @@ async fn verify_checksum(
     Ok(())
 }
 
+enum TransferFailure {
+    Status(Response),
+    Error(Error),
+}
+
+enum MetadataFailure {
+    Status,
+    Error(Error),
+}
+
 fn metadata(
     response: &Response,
     key: [u8; 32],
     old: Option<&Metadata>,
-) -> Result<(Metadata, bool)> {
+) -> std::result::Result<(Metadata, bool), MetadataFailure> {
+    if (response.status().is_client_error() || response.status().is_server_error())
+        && !(response.status() == StatusCode::RANGE_NOT_SATISFIABLE
+            && complete_prefix(old, response).is_some())
+    {
+        return Err(MetadataFailure::Status);
+    }
     if !response.content_coding().is_identity() {
-        return Err(Error::new(Kind::Body)
-            .with_message("resumable download requires identity content encoding"));
+        return Err(MetadataFailure::Error(Error::new(Kind::Body).with_message(
+            "resumable download requires identity content encoding",
+        )));
     }
     let mut etag = response
         .header(header::ETAG.as_str())
@@ -301,21 +340,22 @@ fn metadata(
             (response.content_length(), false)
         }
         StatusCode::NOT_MODIFIED => {
-            let old = saved(old, response, &etag, |old| old.total == Some(old.offset))?;
+            let old = saved(old, response, &etag, |old| old.total == Some(old.offset))
+                .map_err(MetadataFailure::Error)?;
             (old.total, true)
         }
         StatusCode::PARTIAL_CONTENT => {
-            let old = saved(old, response, &etag, |_| true)?;
-            (Some(remainder(response, old)?), true)
+            let old = saved(old, response, &etag, |_| true).map_err(MetadataFailure::Error)?;
+            (
+                Some(remainder(response, old).map_err(MetadataFailure::Error)?),
+                true,
+            )
         }
         StatusCode::RANGE_NOT_SATISFIABLE if let Some(old) = complete_prefix(old, response) => {
             etag.clone_from(&old.etag);
             (Some(old.offset), true)
         }
-        _ => {
-            response.error_for_status()?;
-            return Err(bad_range());
-        }
+        _ => return Err(MetadataFailure::Error(bad_range())),
     };
     Ok((
         Metadata {

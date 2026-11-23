@@ -196,6 +196,10 @@ impl Retry {
         wait <= self.max_wait
     }
 
+    pub(crate) fn max_wait_limit(&self) -> Duration {
+        self.max_wait
+    }
+
     /// Adds a header, checked before `Retry-After`, whose value is delay-seconds, a Unix timestamp in seconds, or an HTTP date.
     pub fn wait_header(self, name: impl Into<String>) -> Self {
         self.push_wait_header(name.into(), WaitFormat::Delay)

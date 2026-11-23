@@ -1,5 +1,5 @@
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, SocketAddr};
 
 use tokio::net::{TcpStream, UdpSocket};
 
@@ -13,7 +13,8 @@ async fn udp_associate(
     proxy: &url::Url,
 ) -> Result<(TcpStream, SocketAddr), NetError> {
     let mut control = open_control(dialer, proxy).await?;
-    let unspecified = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0));
+    let peer = control.peer_addr().map_err(NetError::proxy_io)?;
+    let unspecified = crate::util::unspecified_for(peer);
     let (atyp, body) = request(
         &mut control,
         CMD_UDP_ASSOCIATE,
@@ -21,10 +22,7 @@ async fn udp_associate(
     )
     .await?;
     let relay = match decode_bound(atyp, &body) {
-        Bound::Ip(addr) if addr.ip().is_unspecified() => {
-            let proxy_ip = control.peer_addr().map_err(NetError::proxy_io)?.ip();
-            SocketAddr::new(proxy_ip, addr.port())
-        }
+        Bound::Ip(addr) if addr.ip().is_unspecified() => SocketAddr::new(peer.ip(), addr.port()),
         Bound::Ip(addr) => addr,
         Bound::Domain => {
             return Err(NetError::proxy(
@@ -32,6 +30,9 @@ async fn udp_associate(
             ));
         }
     };
+    if relay.port() == 0 {
+        return Err(NetError::proxy("socks5: UDP ASSOCIATE returned port 0"));
+    }
     Ok((control, relay))
 }
 

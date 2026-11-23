@@ -70,7 +70,9 @@ impl Session {
     }
 
     pub(super) fn note_hsts(&self, url: &Url, resp_headers: &http::HeaderMap) {
-        if self.inner.inputs.tls_trust.accepts_invalid_certs() {
+        if self.inner.inputs.tls_trust.accepts_invalid_certs()
+            || self.inner.inputs.tls_trust.accepts_invalid_hostnames()
+        {
             return;
         }
         let values: Vec<&str> =

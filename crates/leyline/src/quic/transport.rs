@@ -71,7 +71,7 @@ impl DatagramTransport {
             .await
             .map_err(|e| match e {
                 crate::net::NetError::Config(err) => QuicError::Config(format!("h3 proxy: {err}")),
-                other => QuicError::Proxy(format!("h3 proxy: {other}")),
+                other => QuicError::ProxyNet(Box::new(other)),
             })?;
         Ok((Self::Socks5(relay), relay_addr))
     }

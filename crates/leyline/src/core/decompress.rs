@@ -17,6 +17,7 @@ use http::HeaderMap;
 pub(crate) struct Decoder {
     stages: Vec<Stage>,
     fed: bool,
+    raw_read: usize,
     produced: usize,
     cap: Cap,
 }
@@ -70,6 +71,7 @@ impl Decoder {
         Self {
             stages,
             fed: false,
+            raw_read: 0,
             produced: 0,
             cap,
         }
@@ -79,6 +81,11 @@ impl Decoder {
         if chunk.is_empty() {
             return Ok(());
         }
+        self.cap
+            .wire_limit
+            .admit(self.raw_read, chunk.len())
+            .map_err(BodyLimit::error)?;
+        self.raw_read += chunk.len();
         self.fed = true;
         let mut data = chunk.to_vec();
         for stage in &mut self.stages {
@@ -169,13 +176,9 @@ pub(crate) async fn buffer_decoded(
         ));
     };
     let mut bs = bs;
-    let limit = BodyLimit::session(config.max_body_size);
-    let mut read = 0usize;
     let mut out = Vec::new();
     while let Some(chunk) = bs.next().await {
         let chunk = chunk.map_err(Error::from)?;
-        limit.admit(read, chunk.len()).map_err(BodyLimit::error)?;
-        read += chunk.len();
         decoder.feed(&chunk, &mut out)?;
     }
     decoder.finish(&mut out)?;

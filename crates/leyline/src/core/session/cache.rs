@@ -59,15 +59,15 @@ impl Key {
         let proxy = request.proxy.map_or("", |proxy| proxy.url().as_str());
         hash.update((proxy.len() as u64).to_be_bytes());
         hash.update(proxy.as_bytes());
-        if let Some(proxy) = request.proxy {
-            for (name, value) in proxy.headers() {
-                hash.update((name.len() as u64).to_be_bytes());
-                for byte in name.as_bytes() {
-                    hash.update([byte.to_ascii_lowercase()]);
-                }
-                hash.update((value.len() as u64).to_be_bytes());
-                hash.update(value.as_bytes());
+        let proxy_headers = request.proxy.map_or(&[][..], crate::net::ProxyUrl::headers);
+        hash.update((proxy_headers.len() as u64).to_be_bytes());
+        for (name, value) in proxy_headers {
+            hash.update((name.len() as u64).to_be_bytes());
+            for byte in name.as_bytes() {
+                hash.update([byte.to_ascii_lowercase()]);
             }
+            hash.update((value.len() as u64).to_be_bytes());
+            hash.update(value.as_bytes());
         }
         for (name, value) in &request.headers {
             if [header::CACHE_CONTROL, header::PRAGMA]

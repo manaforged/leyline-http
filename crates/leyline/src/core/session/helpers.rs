@@ -153,6 +153,12 @@ impl Session {
         })
     }
 
+    pub(crate) fn share_shutdown(&self, base: &Self) -> Self {
+        self.changed(|inner| {
+            inner.shutdown = std::sync::Arc::clone(&base.inner.shutdown);
+        })
+    }
+
     pub(crate) fn downgrade(&self) -> std::sync::Weak<super::SessionInner> {
         std::sync::Arc::downgrade(&self.inner)
     }

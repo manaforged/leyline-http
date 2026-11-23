@@ -39,7 +39,8 @@ impl IdentitySessions {
             .identity(identity)
             .cookies(base.stores_cookies().then(Jar::new))
             .build()?
-            .without_proxy_pool();
+            .without_proxy_pool()
+            .share_shutdown(base);
         Ok(self.insert(base, index, session))
     }
 

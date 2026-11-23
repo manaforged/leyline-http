@@ -10,21 +10,21 @@ pub(super) struct Parser {
     event: String,
     id: String,
     pub(super) last_id: String,
-    pub(super) wait: Duration,
+    pub(super) wait: Option<Duration>,
     pub(super) max: usize,
     first: bool,
     cr: bool,
 }
 
 impl Parser {
-    pub(super) fn new(id: String, max: usize, wait: Duration) -> Self {
+    pub(super) fn new(id: String, max: usize) -> Self {
         Self {
             line: Vec::new(),
             data: String::new(),
             event: String::new(),
             id: id.clone(),
             last_id: id,
-            wait,
+            wait: None,
             max,
             first: true,
             cr: false,
@@ -116,7 +116,7 @@ impl Parser {
             "id" if !value.contains('\0') => self.id = value.into(),
             "retry" => {
                 if let Some(ms) = crate::util::parse_ascii_u64(value) {
-                    self.wait = Duration::from_millis(ms);
+                    self.wait = Some(Duration::from_millis(ms));
                 }
             }
             _ => {}

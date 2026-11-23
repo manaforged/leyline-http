@@ -52,9 +52,13 @@ impl RequestBuilder {
 
 impl Template {
     fn of(first: &RequestBuilder) -> Self {
+        let first_url = first
+            .draft
+            .url()
+            .map(|u| Url::clone(&first.session.hsts_upgrade(&std::sync::Arc::new(u.clone()))));
         Self {
             session: first.session.clone(),
-            first: first.draft.url().cloned(),
+            first: first_url,
             headers: first.draft.headers.clone(),
             carry: first.draft.carry.clone(),
         }
@@ -89,9 +93,9 @@ impl Template {
             if let Some(overrides) = next.draft.carry.overrides.as_deref_mut() {
                 overrides.digest_auth = None;
             }
-            next.draft
-                .headers
-                .remove_where(|name| cross_origin_header(name.as_str()));
+            next.draft.headers.remove_where(|name| {
+                cross_origin_header(name.as_str()) || name.as_str().eq_ignore_ascii_case("referer")
+            });
         }
         next.trusting(self.first.clone())
     }
@@ -103,7 +107,7 @@ impl Pages {
         let Some(url) = response.link(NEXT) else {
             return;
         };
-        if self.template.downgrades(&url) {
+        if self.template.downgrades(&url) || Origin::downgrades(response.url(), &url) {
             return;
         }
         if self.visited.insert(url.clone()) {

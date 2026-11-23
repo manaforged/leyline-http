@@ -149,9 +149,10 @@ impl Session {
                 redirect_policy,
             };
             let prev_url = std::sync::Arc::clone(&journey.url);
-            if next.take(&mut journey, digest.as_mut(), replay_body)? {
+            if next.take(&mut journey, digest.as_mut(), replay_body, |u| {
+                self.hsts_upgrade(u)
+            })? {
                 drop(leg.body);
-                journey.url = self.hsts_upgrade(&journey.url);
                 if journey.url != prev_url {
                     hop_proxy = None;
                 }
@@ -272,12 +273,13 @@ impl Turn<'_> {
         journey: &mut Journey,
         digest: Option<&mut DigestLeg>,
         replay_body: Option<Body>,
+        upgrade: impl Fn(&std::sync::Arc<Url>) -> std::sync::Arc<Url>,
     ) -> Result<bool> {
         if is_redirect_status(self.code)
             && let Some(location) = redirect_target(self.code, self.headers.map())
             && let Some(hop) = journey.approved_hop(self.redirect_policy, self.code, &location)
         {
-            journey.follow(hop, self.code, &location, replay_body)?;
+            journey.follow(hop, self.code, &location, replay_body, upgrade)?;
             self.redirect_policy.check_hops(journey.chain.len())?;
             if let Some(digest) = digest {
                 journey.authorized = digest.next_hop(journey)?;

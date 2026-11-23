@@ -84,7 +84,8 @@ async fn reap(conns: Weak<Conns>, idle_timeout: Duration, max_lifetime: Option<D
         conns,
         retired: false,
     };
-    let period = (idle_timeout / 2).max(POOL_REAP_INTERVAL);
+    let bound = max_lifetime.map_or(idle_timeout, |lifetime| idle_timeout.min(lifetime));
+    let period = (bound / 2).max(POOL_REAP_INTERVAL);
     loop {
         tokio::time::sleep(period).await;
         let Some(conns) = reaping.conns.upgrade() else {

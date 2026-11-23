@@ -10,7 +10,9 @@ use crate::profile::{Browser, Platform};
 use crate::util::redact;
 use crate::wire::Scheme;
 
+#[cfg(test)]
 use super::host::pattern_matches;
+use super::host::pattern_matches_port;
 use crate::net::normalize_host;
 
 type Chooser = dyn Fn(&url::Url) -> Option<Proxy> + Send + Sync;
@@ -96,35 +98,28 @@ impl Proxy {
         Self::default()
     }
 
+    fn set_rule(&mut self, scheme: ProxyRuleScheme, proxy_url: impl Into<String>) {
+        self.rules.retain(|r| r.scheme != scheme);
+        self.rules
+            .push(ProxyRule::new(scheme, proxy_url, &self.headers));
+        self.from_env = false;
+    }
+
     /// Sets one proxy URL for every scheme, with any username and password inside it as in `http://user:pass@host:8080`, replacing any earlier all-scheme proxy.
     pub fn all(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules.retain(|r| r.scheme != ProxyRuleScheme::All);
-        self.rules.push(ProxyRule::new(
-            ProxyRuleScheme::All,
-            proxy_url,
-            &self.headers,
-        ));
-        self.from_env = false;
+        self.set_rule(ProxyRuleScheme::All, proxy_url);
         self
     }
 
-    /// Adds a proxy for `http` URLs.
+    /// Sets a proxy for `http` URLs, replacing any earlier `http` proxy.
     pub fn http(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules.push(ProxyRule::new(
-            ProxyRuleScheme::Http,
-            proxy_url,
-            &self.headers,
-        ));
+        self.set_rule(ProxyRuleScheme::Http, proxy_url);
         self
     }
 
-    /// Adds a proxy for `https` URLs.
+    /// Sets a proxy for `https` URLs, replacing any earlier `https` proxy.
     pub fn https(mut self, proxy_url: impl Into<String>) -> Self {
-        self.rules.push(ProxyRule::new(
-            ProxyRuleScheme::Https,
-            proxy_url,
-            &self.headers,
-        ));
+        self.set_rule(ProxyRuleScheme::Https, proxy_url);
         self
     }
 
@@ -366,7 +361,7 @@ impl Proxy {
         let Some(choose) = &self.custom else {
             return Ok(self.rule_for(url)?.map(Cow::Borrowed));
         };
-        if self.bypasses(url.host_str().unwrap_or("")) {
+        if self.bypasses_url(url) {
             return Ok(None);
         }
         let Some(chosen) = (choose.0)(url) else {
@@ -390,19 +385,32 @@ impl Proxy {
         if let Some(rejected) = self.rejected {
             return Err(rejected.error(Kind::Proxy));
         }
-        let host = url.host_str().unwrap_or("");
         let scheme = Scheme::of(url);
-        let Some(winner) = self.rules.iter().find(|rule| rule.matches(scheme)) else {
+        let Some(winner) = self
+            .rules
+            .iter()
+            .find(|rule| rule.scheme != ProxyRuleScheme::All && rule.matches(scheme))
+            .or_else(|| {
+                self.rules
+                    .iter()
+                    .find(|rule| rule.scheme == ProxyRuleScheme::All && rule.matches(scheme))
+            })
+        else {
             return Ok(None);
         };
-        if self.bypasses(host) {
+        if self.bypasses_url(url) {
             return Ok(None);
         }
         winner.proxy().map(Some)
     }
 
+    #[cfg(test)]
     pub(crate) fn bypasses(&self, host: &str) -> bool {
         (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches(host)
+    }
+
+    pub(crate) fn bypasses_url(&self, url: &url::Url) -> bool {
+        (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches_url(url)
     }
 }
 
@@ -524,8 +532,17 @@ impl NoProxy {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn matches(&self, host: &str) -> bool {
         let host = normalize_host(host);
         self.patterns.iter().any(|raw| pattern_matches(&host, raw))
+    }
+
+    pub(crate) fn matches_url(&self, url: &url::Url) -> bool {
+        let host = normalize_host(url.host_str().unwrap_or(""));
+        let port = url.port_or_known_default();
+        self.patterns
+            .iter()
+            .any(|raw| pattern_matches_port(&host, port, raw))
     }
 }

@@ -7,8 +7,16 @@ pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
         limit: pump.drain_limit,
         wait: pump.pool.drain_wait(),
     };
-    let drained_clean =
-        stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, drain).await;
+    let inline = matches!(pump.pool.io(), crate::pool::Io::Blocking(_));
+    let drained_clean = stream_body_into(
+        pump.io.as_mut(),
+        pump.framing,
+        initial,
+        &pump.tx,
+        drain,
+        inline,
+    )
+    .await;
     if drained_clean
         && pump.reusable
         && !excess
@@ -33,12 +41,13 @@ pub(super) async fn stream_body_into(
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
     drain: Drain,
+    inline: bool,
 ) -> bool {
     let result = match framing {
         BodyFraming::None => Ok(true),
-        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx, drain).await,
-        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx).await,
-        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx).await,
+        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx, drain, inline).await,
+        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx, inline).await,
+        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx, inline).await,
     };
     match result {
         Ok(clean) => clean,
@@ -47,6 +56,16 @@ pub(super) async fn stream_body_into(
             false
         }
     }
+}
+
+async fn send_chunk(tx: &mpsc::Sender<io::Result<Bytes>>, piece: Bytes, inline: bool) -> bool {
+    if tx.send(Ok(piece)).await.is_err() {
+        return false;
+    }
+    if inline {
+        tokio::task::yield_now().await;
+    }
+    true
 }
 async fn until_closed<T>(
     tx: &mpsc::Sender<io::Result<Bytes>>,
@@ -70,15 +89,11 @@ pub(super) async fn stream_fixed_into(
     len: u64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
     drain: Drain,
+    inline: bool,
 ) -> io::Result<bool> {
     let take = (initial.len() as u64).min(len) as usize;
     let mut remaining = len - take as u64;
-    if take > 0
-        && tx
-            .send(Ok(Bytes::copy_from_slice(&initial[..take])))
-            .await
-            .is_err()
-    {
+    if take > 0 && !send_chunk(tx, Bytes::copy_from_slice(&initial[..take]), inline).await {
         return Ok(drain_fixed(stream, remaining, drain).await);
     }
     let mut buf = initial;
@@ -93,11 +108,7 @@ pub(super) async fn stream_fixed_into(
             return Err(cut_short().into_error().into_io());
         }
         remaining -= n as u64;
-        if tx
-            .send(Ok(Bytes::copy_from_slice(&buf[..n])))
-            .await
-            .is_err()
-        {
+        if !send_chunk(tx, Bytes::copy_from_slice(&buf[..n]), inline).await {
             return Ok(drain_fixed(stream, remaining, drain).await);
         }
     }
@@ -125,8 +136,9 @@ pub(super) async fn stream_to_close_into(
     stream: &mut dyn H1Io,
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    inline: bool,
 ) -> io::Result<bool> {
-    if !initial.is_empty() && tx.send(Ok(Bytes::from(initial))).await.is_err() {
+    if !initial.is_empty() && !send_chunk(tx, Bytes::from(initial), inline).await {
         return Ok(false);
     }
     let mut buf = Vec::new();
@@ -139,11 +151,7 @@ pub(super) async fn stream_to_close_into(
         if n == 0 {
             return Ok(true);
         }
-        if tx
-            .send(Ok(Bytes::copy_from_slice(&buf[..n])))
-            .await
-            .is_err()
-        {
+        if !send_chunk(tx, Bytes::copy_from_slice(&buf[..n]), inline).await {
             return Ok(false);
         }
     }
@@ -162,6 +170,7 @@ pub(super) async fn stream_chunked_into(
     stream: &mut dyn H1Io,
     mut buf: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    inline: bool,
 ) -> io::Result<bool> {
     let mut chunked = Chunked::new();
     loop {
@@ -173,7 +182,7 @@ pub(super) async fn stream_chunked_into(
             Step::Data(n) => {
                 let piece = Bytes::copy_from_slice(&buf[..n]);
                 buf.drain(..n);
-                if tx.send(Ok(piece)).await.is_err() {
+                if !send_chunk(tx, piece, inline).await {
                     return Ok(false);
                 }
             }

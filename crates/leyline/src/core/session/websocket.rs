@@ -22,7 +22,6 @@ impl Session {
             let conn = self
                 .websocket_with_options(&http_url, headers, carry)
                 .await?;
-            self.store_cookies(conn.headers(), &http_url);
             Ok::<_, Error>(conn)
         };
         self.unless_shut_down(self.deadline(carry.timeouts()).total(handshake))
@@ -102,6 +101,9 @@ impl Session {
             && let Some(lease) = &lease
         {
             lease.record_handshake(&result, lease_origin.as_ref());
+        }
+        if let Ok(conn) = &result {
+            session.store_cookies(conn.headers(), http_url);
         }
         result
     }
