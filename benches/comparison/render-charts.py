@@ -340,6 +340,16 @@ def parse_paired_ratios(path: pathlib.Path, target_cell: str) -> dict[str, tuple
     return out
 
 
+def count_kani_proofs(repo_root: pathlib.Path) -> int:
+    src = repo_root / "crates" / "leyline" / "src"
+    if not src.is_dir():
+        return 0
+    return sum(
+        p.read_text(errors="ignore").count("#[kani::proof]")
+        for p in src.rglob("*.rs")
+    )
+
+
 def render_social_html(
     version: str,
     h2_full: dict[str, tuple[int, float]],
@@ -348,6 +358,7 @@ def render_social_html(
     browser_ratios: dict[str, tuple[float, float]],
     paced_full: dict[str, tuple[int, float, float]],
     h1_full: dict[str, tuple[int, float]],
+    kani_proofs: int,
 ) -> str:
     h2_ley_rps, h2_ley_cpu = h2_full["leyline"]
     h2_hyper_cpu_ratio = (
@@ -769,7 +780,7 @@ def render_social_html(
       <section class="highlights">
         <div class="hl-row">
           <div class="hl-k">{fmt_rate(h1_cores_rps)} H1</div>
-          <div class="hl-v"><strong>run_per_core</strong> leads fasthttp at 8 &amp; 64 workers (0.74×&nbsp;CPU)</div>
+          <div class="hl-v"><strong>run_per_core</strong> leads fasthttp at 8 &amp; 64w (0.74–0.79×&nbsp;CPU)</div>
         </div>
         <div class="hl-row">
           <div class="hl-k">{ley_pcpu:.2f} µs CPU</div>
@@ -777,7 +788,7 @@ def render_social_html(
         </div>
         <div class="hl-row">
           <div class="hl-k">DoH + ECH</div>
-          <div class="hl-v">RFC 8484 DoH, TLS 1.3 ECH + retry, PKCS#12, Unix sockets, <strong>28&nbsp;Kani&nbsp;proofs</strong></div>
+          <div class="hl-v">RFC 8484 DoH, TLS 1.3 ECH + retry, PKCS#12, Unix sockets, <strong>{kani_proofs}&nbsp;Kani&nbsp;proofs</strong></div>
         </div>
       </section>
     </div>
@@ -802,7 +813,11 @@ def main() -> None:
     parser.add_argument("--out-dir", type=pathlib.Path, default=pathlib.Path("docs/assets"))
     parser.add_argument("--social-html", type=pathlib.Path, help="Optional 1200x675 social benchmark card HTML")
     parser.add_argument("--version", default="v0.3.0", help="Version badge on the social card")
+    parser.add_argument("--kani-proofs", type=int, help="Kani proof count (defaults to counting #[kani::proof] in crates/leyline/src)")
     args = parser.parse_args()
+
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    kani_proofs = args.kani_proofs if args.kani_proofs is not None else count_kani_proofs(repo_root)
 
     h2_full = parse_throughput_full(args.h2, "8c256")
     h2_ratios = parse_paired_ratios(args.h2, "8c256")
@@ -833,6 +848,7 @@ def main() -> None:
                 browser_ratios,
                 paced_full,
                 h1_full,
+                kani_proofs,
             )
         )
         print(f"wrote {args.social_html}")

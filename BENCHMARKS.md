@@ -5,15 +5,14 @@ to its raw results and identifies the configuration under measurement.
 
 ## v0.3.0 measurements
 
-All v0.3.0 suites below ran on 2026-11-22 against an isolated loopback network
-namespace on a Ryzen 9 9950X3D with the CPU frequency governor set to
-`performance`, the origin pinned to CPUs `3-7,19-23` (CCD 0), clients pinned to
-CPUs `8-15,24-31` (CCD 1), verified TLS 1.3 (AES-128-GCM, X25519) against a
-local test CA, a 10-byte response, and a 30-second request timeout. The
-measured core is commit `14ea34f1` (`leyline_source_hash` `0c994244` in every
-receipt); peers are hyper-util 0.1.21, hyper 1.12.0, reqwest 0.13.5, h2 0.4.20,
-wreq 0.16.3, libcurl 8.22.0, ureq 3.5.0, Go 1.27.1 `net/http`, fasthttp 1.77.0,
-and tls-client 1.16.0.
+All v0.3.0 suites below ran on 2026-11-22 over loopback on a Ryzen 9 9950X3D
+with the CPU frequency governor set to `performance`, the origin pinned to CPUs
+`3-7,19-23` (CCD 0), clients pinned to CPUs `8-15,24-31` (CCD 1), verified TLS
+1.3 (AES-128-GCM, X25519) against a local test CA, a 10-byte response, and a
+30-second request timeout. The measured core is commit `14ea34f1`
+(`leyline_source_hash` `0c994244` in every receipt); peers are hyper-util
+0.1.21, hyper 1.12.0, reqwest 0.13.5, h2 0.4.20, wreq 0.16.3, libcurl 8.22.0,
+ureq 3.5.0, Go 1.27.1 `net/http`, fasthttp 1.77.0, and tls-client 1.16.0.
 
 ### Browser profiles over HTTP/2
 
