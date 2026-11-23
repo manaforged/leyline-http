@@ -18,6 +18,7 @@ pub(super) struct H3Loop {
     body_chunk_rx: mpsc::Receiver<H3BodyChunk>,
     closed: Arc<AtomicBool>,
     open_streams: Arc<AtomicUsize>,
+    last_idle: Arc<crate::pool::types::Stamp>,
     streams: HashMap<u64, H3Stream>,
     out: Vec<u8>,
     buf: Vec<u8>,
@@ -53,6 +54,7 @@ impl H3Loop {
             body_chunk_rx: driver.body_chunk_rx,
             closed: driver.closed,
             open_streams: driver.open_streams,
+            last_idle: driver.last_idle,
             streams: driver.streams,
             out: vec![0u8; max_udp_payload],
             buf: vec![0u8; crate::quic::connection::UDP_RECV_BUFFER],
@@ -65,8 +67,11 @@ impl H3Loop {
 
     pub(super) async fn turn(&mut self) -> ControlFlow<()> {
         let backpressured = self.advance();
-        self.open_streams
-            .store(self.streams.len(), Ordering::Relaxed);
+        let len = self.streams.len();
+        let prev = self.open_streams.swap(len, Ordering::Relaxed);
+        if prev > 0 && len == 0 {
+            self.last_idle.touch(std::time::Instant::now());
+        }
         self.settle().await?;
         self.wait(backpressured).await
     }

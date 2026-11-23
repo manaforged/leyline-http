@@ -318,7 +318,12 @@ async fn doh_ttl_expiry_http_error_size_cap_and_pkcs12_negative_matrix() {
             lookups_bg.fetch_add(1, Ordering::SeqCst);
         }
         match mode_bg.load(Ordering::SeqCst) {
-            1 => Response::new(500).body("doh down"),
+            1 => {
+                let valid_wire = dns_response(body, 0, &[(1, 120, &[127, 0, 0, 1])]);
+                Response::new(500)
+                    .header("content-type", "application/dns-message")
+                    .body(valid_wire)
+            }
             2 => Response::new(200)
                 .header("content-type", "application/dns-message")
                 .body(vec![0u8; 70_000]),

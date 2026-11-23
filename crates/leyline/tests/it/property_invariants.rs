@@ -263,15 +263,9 @@ fn prop_cookie_jar_security_prefixes_and_persistence_roundtrip() {
 
 #[tokio::test]
 async fn prop_proxy_pool_state_machine_invariants() {
-    let origin = Server::http(|req| {
-        if req.target().starts_with("/fail") {
-            Response::new(503).body("busy")
-        } else {
-            Response::new(200).body("direct")
-        }
-    })
-    .await
-    .unwrap();
+    let origin = Server::http(|_| Response::new(200).body("direct"))
+        .await
+        .expect("start direct origin");
     let origin_port = origin.addr().port();
 
     let proxy_a_hits = Arc::new(AtomicUsize::new(0));
@@ -287,7 +281,7 @@ async fn prop_proxy_pool_state_machine_invariants() {
         }
     })
     .await
-    .unwrap();
+    .expect("start proxy A");
 
     let proxy_b_hits = Arc::new(AtomicUsize::new(0));
     let pb = Arc::clone(&proxy_b_hits);
@@ -296,42 +290,95 @@ async fn prop_proxy_pool_state_machine_invariants() {
         Response::new(200).body("via-b")
     })
     .await
-    .unwrap();
+    .expect("start proxy B");
 
+    let proxy_a_url = format!("http://{}", proxy_a.addr());
+    let proxy_b_url = format!("http://{}", proxy_b.addr());
     let session = Session::builder()
         .browser(Browser::Chrome154)
         .proxy(
             Proxy::list([
-                Proxy::from(format!("http://{}", proxy_a.addr()))
-                    .no_proxy([format!("127.0.0.1:{origin_port}")]),
-                Proxy::from(format!("http://{}", proxy_b.addr()))
-                    .no_proxy([format!("127.0.0.1:{origin_port}")]),
+                Proxy::from(proxy_a_url.as_str()).no_proxy([format!("127.0.0.1:{origin_port}")]),
+                Proxy::from(proxy_b_url.as_str()).no_proxy([format!("127.0.0.1:{origin_port}")]),
             ])
             .ban_after(2)
-            .ban_for(Duration::from_millis(60)),
+            .ban_for(Duration::from_millis(80)),
         )
         .build()
-        .unwrap();
+        .expect("build pooled session");
 
-    let mut rng = SplitMix64::new(0x0b00_1e55_4455_6677);
-    for step in 0..24 {
-        if step % 3 == 0 {
-            let text = session.get(origin.url("/direct")).text().await.unwrap();
-            assert_eq!(text, "direct");
-        } else {
-            let path = if rng.range(3) == 0 { "/boom" } else { "/ok" };
-            let resp = session
-                .get(format!("http://127.0.0.1:1{path}"))
-                .send()
-                .await
-                .unwrap();
-            assert!(matches!(resp.status().as_u16(), 200 | 403));
-        }
-        let stats = session.stats();
-        for p in stats.proxies() {
-            assert_eq!(stats.proxy_in_use(p), 0, "in_use leaked after step {step}");
+    let mut boom_a_hits = 0usize;
+    while boom_a_hits < 2 {
+        let resp = session
+            .get("http://127.0.0.1:1/boom")
+            .send()
+            .await
+            .expect("pooled request succeeds");
+        if resp.status().as_u16() == 403 {
+            assert!(resp.block().is_some());
+            boom_a_hits += 1;
         }
     }
-    assert!(proxy_a_hits.load(Ordering::SeqCst) > 0);
-    assert!(proxy_b_hits.load(Ordering::SeqCst) > 0);
+
+    let stats = session.stats();
+    assert!(
+        stats.proxy_banned_until(&proxy_a_url).is_some(),
+        "proxy A must be banned after ban_after=2 block responses"
+    );
+    assert_eq!(stats.proxy_failures(&proxy_a_url), 0);
+    assert!(stats.proxy_banned_until(&proxy_b_url).is_none());
+
+    let a_before_failover = proxy_a_hits.load(Ordering::SeqCst);
+    let b_before_failover = proxy_b_hits.load(Ordering::SeqCst);
+    for _ in 0..4 {
+        let body = session
+            .get("http://127.0.0.1:1/ok")
+            .text()
+            .await
+            .expect("failover to healthy proxy B");
+        assert_eq!(body, "via-b");
+    }
+    assert_eq!(
+        proxy_a_hits.load(Ordering::SeqCst),
+        a_before_failover,
+        "banned proxy A must not receive traffic during ban window"
+    );
+    assert_eq!(
+        proxy_b_hits.load(Ordering::SeqCst),
+        b_before_failover + 4,
+        "all failover requests must route through healthy proxy B"
+    );
+
+    let a_before_bypass = proxy_a_hits.load(Ordering::SeqCst);
+    let b_before_bypass = proxy_b_hits.load(Ordering::SeqCst);
+    for _ in 0..3 {
+        let body = session
+            .get(origin.url("/direct"))
+            .text()
+            .await
+            .expect("no_proxy origin bypass");
+        assert_eq!(body, "direct");
+    }
+    assert_eq!(proxy_a_hits.load(Ordering::SeqCst), a_before_bypass);
+    assert_eq!(proxy_b_hits.load(Ordering::SeqCst), b_before_bypass);
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let a_before_recovery = proxy_a_hits.load(Ordering::SeqCst);
+    for _ in 0..4 {
+        let body = session
+            .get("http://127.0.0.1:1/ok")
+            .text()
+            .await
+            .expect("post-ban request");
+        assert!(body == "via-a" || body == "via-b");
+    }
+    assert!(
+        proxy_a_hits.load(Ordering::SeqCst) > a_before_recovery,
+        "proxy A must recover and receive traffic after ban_for expires"
+    );
+
+    let final_stats = session.stats();
+    for p in final_stats.proxies() {
+        assert_eq!(final_stats.proxy_in_use(p), 0, "in_use leaked");
+    }
 }

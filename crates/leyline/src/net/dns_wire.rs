@@ -404,4 +404,68 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn prop_encode_and_parse_roundtrip_random_a_and_aaaa_packets() {
+        let mut state: u64 = 0x1234_5678_9abc_def0;
+        let mut next_u64 = || {
+            state = state.wrapping_add(0x9e37_79b9_7f4a_7c15);
+            let mut z = state;
+            z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+            z ^ (z >> 31)
+        };
+        for case in 0..200u32 {
+            let labels = 1 + (next_u64() as usize % 4);
+            let mut host = String::new();
+            for l in 0..labels {
+                if l > 0 {
+                    host.push('.');
+                }
+                let len = 1 + (next_u64() as usize % 10);
+                for _ in 0..len {
+                    let ch = b'a' + (next_u64() as u8 % 26);
+                    host.push(ch as char);
+                }
+            }
+            let query = encode_query(&host, TYPE_A).expect("valid random host");
+            let mut pkt = query.clone();
+            pkt[2] = 0x81;
+            pkt[3] = 0x80;
+            let count = 1 + (next_u64() as usize % 4);
+            pkt[6..8].copy_from_slice(&(count as u16).to_be_bytes());
+            let mut expected_ips = Vec::with_capacity(count);
+            let mut expected_min_ttl = u32::MAX;
+            for _ in 0..count {
+                let ttl = 1 + (next_u64() as u32 % 3600);
+                expected_min_ttl = expected_min_ttl.min(ttl);
+                pkt.extend_from_slice(&[0xc0, 0x0c]);
+                if next_u64() & 1 == 0 {
+                    let octets = [192, 0, 2, 1 + (next_u64() as u8 % 250)];
+                    expected_ips.push(IpAddr::V4(Ipv4Addr::from(octets)));
+                    pkt.extend_from_slice(&TYPE_A.to_be_bytes());
+                    pkt.extend_from_slice(&1u16.to_be_bytes());
+                    pkt.extend_from_slice(&ttl.to_be_bytes());
+                    pkt.extend_from_slice(&4u16.to_be_bytes());
+                    pkt.extend_from_slice(&octets);
+                } else {
+                    let mut octets = [0u8; 16];
+                    octets[0] = 0x20;
+                    octets[1] = 0x01;
+                    octets[2] = 0x0d;
+                    octets[3] = 0xb8;
+                    octets[15] = 1 + (next_u64() as u8 % 250);
+                    expected_ips.push(IpAddr::V6(Ipv6Addr::from(octets)));
+                    pkt.extend_from_slice(&TYPE_AAAA.to_be_bytes());
+                    pkt.extend_from_slice(&1u16.to_be_bytes());
+                    pkt.extend_from_slice(&ttl.to_be_bytes());
+                    pkt.extend_from_slice(&16u16.to_be_bytes());
+                    pkt.extend_from_slice(&octets);
+                }
+            }
+            let parsed = parse_response(&pkt).unwrap_or_else(|e| panic!("case {case}: {e:?}"));
+            assert_eq!(parsed.addrs, expected_ips, "case {case} IPs");
+            assert_eq!(parsed.min_ttl, Some(expected_min_ttl), "case {case} TTL");
+        }
+    }
 }

@@ -145,6 +145,21 @@ async fn socket_tuning_keepalive_retries_send_buffer_and_strict_options() {
         .build()
         .unwrap();
     assert_eq!(session.get(server.url("/")).text().await.unwrap(), "tuned");
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let bad_retries = Session::builder()
+            .tcp_keepalive(Duration::from_secs(10))
+            .tcp_keepalive_retries(0)
+            .build()
+            .expect("builder with invalid OS keepalive retries builds");
+        let err = bad_retries
+            .get(server.url("/"))
+            .send()
+            .await
+            .expect_err("OS rejects TCP_KEEPCNT=0");
+        assert_eq!(err.kind(), Kind::Connect, "expected Connect, got {err:?}");
+    }
 }
 
 #[cfg(feature = "websocket")]
@@ -200,7 +215,7 @@ async fn all_websocket_tuning_options_enforced_on_wire() {
         )
         .websocket_http2(false)
         .websocket_max_frame_size(32)
-        .websocket_max_message_size(32)
+        .websocket_max_message_size(64 * 1024)
         .websocket_read_buffer_size(4096)
         .websocket_write_buffer_size(4096)
         .websocket_max_write_buffer_size(16 * 1024)

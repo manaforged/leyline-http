@@ -92,6 +92,7 @@ pub struct H3Client {
     tx: mpsc::Sender<H3Command>,
     closed: Arc<AtomicBool>,
     open_streams: Arc<AtomicUsize>,
+    last_idle: Arc<crate::pool::types::Stamp>,
     pseudo_order: [PseudoOrder; 4],
 }
 
@@ -103,6 +104,10 @@ impl H3Client {
 
     pub fn open_streams(&self) -> usize {
         self.open_streams.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn last_idle(&self) -> std::time::Instant {
+        self.last_idle.get()
     }
 
     #[expect(
@@ -212,6 +217,7 @@ struct H3Driver {
     body_chunk_rx: mpsc::Receiver<H3BodyChunk>,
     closed: Arc<AtomicBool>,
     open_streams: Arc<AtomicUsize>,
+    last_idle: Arc<crate::pool::types::Stamp>,
     streams: HashMap<u64, H3Stream>,
 }
 

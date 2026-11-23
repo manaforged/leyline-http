@@ -23,6 +23,7 @@ mod connect_timeout;
 #[cfg(feature = "bench-internals")]
 mod connection_stats;
 mod content_encoding;
+mod contract_audit_fixes;
 mod contract_proxy_and_retry;
 mod contract_transport_matrix;
 mod cookie_lifetime;

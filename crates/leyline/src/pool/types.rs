@@ -252,6 +252,14 @@ impl MuxHandle {
             MuxHandle::H3(handle) => handle.open_streams(),
         }
     }
+
+    pub(crate) fn last_idle(&self) -> std::time::Instant {
+        match self {
+            MuxHandle::H2(handle) => handle.last_idle(),
+            #[cfg(feature = "http3")]
+            MuxHandle::H3(handle) => handle.last_idle(),
+        }
+    }
 }
 
 pub(crate) trait MuxClient: Clone {

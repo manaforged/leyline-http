@@ -34,7 +34,11 @@ pub(super) fn mux_stale_for(
     if entry.is_dead() || is_past_lifetime(entry.opened, max_lifetime, now) {
         Some(Counter::EvictionsDead)
     } else if entry.handle.open_streams() == 0
-        && is_past_idle(entry.last_use.get(), idle_timeout, now)
+        && is_past_idle(
+            entry.last_use.get().max(entry.handle.last_idle()),
+            idle_timeout,
+            now,
+        )
     {
         Some(Counter::EvictionsIdle)
     } else {

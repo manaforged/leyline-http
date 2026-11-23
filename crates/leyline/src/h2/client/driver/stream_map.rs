@@ -49,7 +49,11 @@ impl StreamMap {
     }
 
     fn publish(&self) {
-        self.open.open.store(self.inner.len(), Ordering::Relaxed);
+        let len = self.inner.len();
+        let prev = self.open.open.swap(len, Ordering::Relaxed);
+        if prev > 0 && len == 0 {
+            self.open.last_idle.touch(std::time::Instant::now());
+        }
     }
 
     pub(super) fn set_capacity(&self, capacity: usize) {
