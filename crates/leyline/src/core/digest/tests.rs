@@ -98,23 +98,23 @@ fn quoted_values_escape_backslash_and_quote() {
 
 #[test]
 fn nonce_count_increments_per_nonce() {
-    let _serial = reset_nonce_cache_for_test();
-    let n1 = next_nc_for_nonce("nonce-A");
-    let n2 = next_nc_for_nonce("nonce-A");
-    let n3 = next_nc_for_nonce("nonce-B");
+    let nonces = DigestNonces::default();
+    let n1 = nonces.next_nc("nonce-A");
+    let n2 = nonces.next_nc("nonce-A");
+    let n3 = nonces.next_nc("nonce-B");
     assert!(n2 > n1, "monotonic within the same nonce");
     assert_eq!(n3, 1, "fresh nonce starts at 1");
 }
 
 #[test]
 fn nonce_cache_lru_evicts_beyond_cap() {
-    let _serial = reset_nonce_cache_for_test();
+    let nonces = DigestNonces::default();
     for i in 0..DIGEST_NONCE_CACHE_CAP + 16 {
         let nonce = format!("lru-test-{i}");
-        let n = next_nc_for_nonce(&nonce);
+        let n = nonces.next_nc(&nonce);
         assert_eq!(n, 1);
     }
-    let restart = next_nc_for_nonce("lru-test-0");
+    let restart = nonces.next_nc("lru-test-0");
     assert_eq!(
         restart, 1,
         "LRU-evicted nonce restarts at 1; server would see stale=true and re-challenge"
@@ -135,12 +135,4 @@ fn reports_missing_nonce() {
     let err = parse_challenge(hdr).unwrap_err();
     let msg = format!("{err}");
     assert!(msg.contains("nonce"), "{msg}");
-}
-
-static NONCE_CACHE_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-fn reset_nonce_cache_for_test() -> std::sync::MutexGuard<'static, ()> {
-    let serial = crate::util::lock(&NONCE_CACHE_TESTS);
-    crate::util::lock(nonce_cache()).clear();
-    serial
 }

@@ -117,31 +117,39 @@ impl Conns {
         now: Instant,
         retire_when_empty: bool,
     ) -> bool {
-        let alive = |opened: Instant| {
-            max_lifetime.is_none_or(|lifetime| now.duration_since(opened) < lifetime)
-        };
         let mut idle_evicted = 0u64;
+        let mut dead_evicted = 0u64;
         let mut empty = true;
         for shard in self.shards.iter() {
             let mut entries = write(&shard.entries);
             let before = entries.len();
             entries.h1.retain(|_, entry| {
                 let idle = entry.idle.queue();
-                let before = idle.len();
                 idle.retain(|(slot, _, returned_at)| {
-                    now.duration_since(*returned_at) < idle_timeout && alive(slot.opened_at)
+                    if slots::is_past_lifetime(slot.opened_at, max_lifetime, now) {
+                        dead_evicted += 1;
+                        return false;
+                    }
+                    if slots::is_past_idle(*returned_at, idle_timeout, now) {
+                        idle_evicted += 1;
+                        return false;
+                    }
+                    true
                 });
-                idle_evicted += (before - idle.len()) as u64;
-                !idle.is_empty() || now.duration_since(entry.last_use) < idle_timeout
+                !idle.is_empty() || !slots::is_past_idle(entry.last_use, idle_timeout, now)
             });
             entries.mux.retain(|_, entry| {
-                let keep = !entry.is_dead()
-                    && now.duration_since(entry.last_use.get()) < idle_timeout
-                    && alive(entry.opened);
-                if !keep {
-                    idle_evicted += 1;
+                match slots::mux_stale_for(entry, idle_timeout, max_lifetime, now) {
+                    None => true,
+                    Some(Counter::EvictionsIdle) => {
+                        idle_evicted += 1;
+                        false
+                    }
+                    Some(_) => {
+                        dead_evicted += 1;
+                        false
+                    }
                 }
-                keep
             });
             self.shards.removed(before - entries.len());
             empty &= entries.h1.is_empty() && entries.mux.is_empty();
@@ -150,6 +158,9 @@ impl Conns {
         }
         if idle_evicted > 0 {
             self.counters.add(Counter::EvictionsIdle, idle_evicted);
+        }
+        if dead_evicted > 0 {
+            self.counters.add(Counter::EvictionsDead, dead_evicted);
         }
         empty && retire_when_empty && self.retire()
     }
@@ -494,7 +505,11 @@ impl Pool {
 }
 
 fn origin_proxy_key(host: &str, port: u16, proxy: Option<&crate::net::ProxyUrl>) -> OriginProxyKey {
-    (host.to_string(), port, proxy.map(|p| p.as_str().to_owned()))
+    (
+        host.to_string(),
+        port,
+        proxy.map(crate::net::ProxyUrl::identity),
+    )
 }
 
 #[cfg(any(test, feature = "bench-internals"))]

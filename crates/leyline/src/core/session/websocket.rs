@@ -42,14 +42,15 @@ impl Session {
                 "WebSocket handshakes are not supported over HTTP/3",
             ));
         }
-        let (lease_origin, lease) = self
+        let (lease_origin, lease, leased_session) = match self
             .proxy_pool()
             .filter(|_| carry.proxy().is_none())
-            .and_then(|pool| pool.lease_for(http_url, None))
-            .map_or((None, None), |(origin, lease)| (origin, Some(lease)));
-        let leased_session = match &lease {
-            Some(lease) => Some(lease.session(self)?),
-            None => None,
+            .map(|pool| pool.acquire_session(self, http_url, None))
+            .transpose()?
+            .flatten()
+        {
+            Some((origin, lease, session)) => (origin, Some(lease), Some(session)),
+            None => (None, None, None),
         };
         let session = leased_session.as_ref().unwrap_or(self);
         let request_proxy = lease

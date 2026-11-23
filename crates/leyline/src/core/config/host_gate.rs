@@ -87,12 +87,14 @@ impl Room {
     }
 }
 
+const MAX_CRAWL_FLOORS: usize = 1024;
+
 #[derive(Debug)]
 struct Gates {
     by_origin: Mutex<HashMap<Origin, Arc<HostGate>>>,
     total: Option<Arc<Semaphore>>,
     total_waiting: Arc<AtomicUsize>,
-    floors: Mutex<HashMap<Origin, Duration>>,
+    floors: Mutex<lru::LruCache<Origin, Duration>>,
     floored: AtomicBool,
     room: Arc<Room>,
     #[cfg(feature = "html")]
@@ -105,7 +107,9 @@ impl Gates {
             by_origin: Mutex::default(),
             total: max_total.map(|n| Arc::new(Semaphore::new(n))),
             total_waiting: Arc::default(),
-            floors: Mutex::default(),
+            floors: Mutex::new(lru::LruCache::new(
+                std::num::NonZeroUsize::new(MAX_CRAWL_FLOORS).expect("non-zero cap"),
+            )),
             floored: AtomicBool::new(false),
             room: Arc::default(),
             #[cfg(feature = "html")]
@@ -115,7 +119,7 @@ impl Gates {
 
     fn floor(&self, origin: &Origin) -> Option<Duration> {
         let floors = crate::util::lock(&self.floors);
-        floors.get(origin).copied()
+        floors.peek(origin).copied()
     }
 
     fn has_floors(&self) -> bool {
@@ -127,10 +131,10 @@ impl Gates {
         let mut floors = crate::util::lock(&self.floors);
         match gap {
             Some(gap) => {
-                floors.insert(origin, gap);
+                floors.put(origin, gap);
             }
             None => {
-                floors.remove(&origin);
+                floors.pop(&origin);
             }
         }
         self.floored.store(!floors.is_empty(), Ordering::Release);
@@ -144,7 +148,7 @@ impl Gates {
         let now = Instant::now();
         let floors = crate::util::lock(&self.floors);
         map.retain(|kept, gate| {
-            Arc::strong_count(gate) > 1 || gate.busy_after(now, floors.get(kept).copied())
+            Arc::strong_count(gate) > 1 || gate.busy_after(now, floors.peek(kept).copied())
         });
         drop(floors);
         let gate = Arc::new(HostGate::new(max_in_flight, Arc::clone(&self.room)));

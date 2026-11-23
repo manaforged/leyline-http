@@ -10,7 +10,7 @@ use crate::error::{Kind, Result};
 use crate::profile::Encoding;
 
 #[cfg(feature = "compression-zstd")]
-const ZSTD_WINDOW_LOG_MAX: u32 = 23;
+pub(crate) const ZSTD_WINDOW_LOG_MAX: u32 = 23;
 
 pub(super) enum Stage {
     #[cfg(feature = "compression-gzip")]

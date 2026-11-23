@@ -57,7 +57,8 @@ impl Session {
             .unwrap_or(self.inner.inputs.protocol_policy);
         let header_order = attempt.carry.header_order();
 
-        let mut digest = digest_auth.map(DigestLeg::new);
+        let mut digest = digest_auth
+            .map(|auth| DigestLeg::new(auth, std::sync::Arc::clone(&self.inner.digest_nonces)));
         let mut pass = None;
         let mut answered = false;
         let mut refreshed = false;
@@ -65,23 +66,32 @@ impl Session {
         loop {
             drop(pass.take());
             pass = self.admit_host(&journey.url).await?;
-            let refresh = self
-                .refresh_version(&journey, digest.as_ref())
-                .filter(|_| !refreshed);
-            let headers = self.leg_headers(&journey, attempt.carry.preset, header_order);
-            journey.authorized = None;
-            let audit_headers = self.audit_copy(&headers);
 
-            let step_body = std::mem::take(&mut journey.body);
-            let replay_body = step_body.try_clone();
-
+            let mut hop_leased: Option<(
+                Option<crate::core::config::Origin>,
+                crate::core::proxy_pool::Lease,
+                Session,
+            )> = None;
             let proxy = match &hop_proxy {
                 Some(chosen) => chosen.as_ref().map(std::borrow::Cow::Borrowed),
                 None => {
-                    let chosen = self
-                        .proxy_for(&journey.url, request_proxy)
-                        .map_err(leg_error(answered))?
-                        .map(std::borrow::Cow::into_owned);
+                    let chosen = if request_proxy.is_none()
+                        && let Some(pool) = self.proxy_pool()
+                        && let Some((origin, lease, leased_session)) = pool
+                            .acquire_session(self, &journey.url, None)
+                            .map_err(leg_error(answered))?
+                    {
+                        let p = leased_session
+                            .proxy_for(&journey.url, Some(lease.config()))
+                            .map_err(leg_error(answered))?
+                            .map(std::borrow::Cow::into_owned);
+                        hop_leased = Some((origin, lease, leased_session));
+                        p
+                    } else {
+                        self.proxy_for(&journey.url, request_proxy)
+                            .map_err(leg_error(answered))?
+                            .map(std::borrow::Cow::into_owned)
+                    };
                     hop_proxy = Some(chosen);
                     hop_proxy
                         .as_ref()
@@ -90,6 +100,18 @@ impl Session {
                         .map(std::borrow::Cow::Borrowed)
                 }
             };
+            let leg_session = hop_leased.as_ref().map_or(self, |(_, _, s)| s);
+
+            let refresh = leg_session
+                .refresh_version(&journey, digest.as_ref())
+                .filter(|_| !refreshed);
+            let headers = leg_session.leg_headers(&journey, attempt.carry.preset, header_order);
+            journey.authorized = None;
+            let audit_headers = leg_session.audit_copy(&headers);
+
+            let step_body = std::mem::take(&mut journey.body);
+            let replay_body = step_body.try_clone();
+
             let leg = {
                 let prepared = Prepared {
                     method: &journey.method,
@@ -103,23 +125,41 @@ impl Session {
                     ),
                     stale_resend: !attempt.carry.retrying,
                 };
-                let send = std::pin::pin!(self.send_with_policy(prepared, protocol));
+                let send = std::pin::pin!(leg_session.send_with_policy(prepared, protocol));
                 attempt.deadline.response_header(send).await
             }
-            .map_err(leg_error(answered))?;
+            .map_err(leg_error(answered));
+            if let Some((origin, lease, _)) = &hop_leased
+                && proxy.is_some()
+            {
+                let outcome = match &leg {
+                    Ok(leg) => Ok(leg.status),
+                    Err(err) => Err(err),
+                };
+                lease.record_status(outcome, origin.as_ref());
+            }
+            let leg = match leg {
+                Ok(leg) => leg,
+                Err(mut err) => {
+                    if hop_leased.is_some() && err.proxy().is_none() {
+                        err.set_proxy(proxy.as_deref().map(|p| p.url().as_str()));
+                    }
+                    return Err(err);
+                }
+            };
             answered |= leg.status != http::StatusCode::UNAUTHORIZED;
             journey.timing.add_leg(&leg.timing);
 
             let seen = leg.headers.seen();
             if seen.cookies {
-                self.store_cookies(leg.headers.map(), &journey.url);
+                leg_session.store_cookies(leg.headers.map(), &journey.url);
             }
             if seen.hsts {
-                self.note_hsts(&journey.url, leg.headers.map());
+                leg_session.note_hsts(&journey.url, leg.headers.map());
             }
             #[cfg(feature = "http3")]
             if seen.alt_svc {
-                self.note_alt_svc(&journey.url, leg.headers.map());
+                leg_session.note_alt_svc(&journey.url, leg.headers.map());
             }
             #[cfg(not(feature = "http3"))]
             let _ = seen.alt_svc;
@@ -159,7 +199,7 @@ impl Session {
                 continue;
             }
 
-            let mut response = self
+            let mut response = leg_session
                 .assemble_response(
                     leg,
                     journey,
@@ -169,6 +209,9 @@ impl Session {
                     &attempt.deadline,
                 )
                 .await?;
+            if hop_leased.is_some() {
+                response.set_proxy(proxy.as_deref().map(|p| p.url().as_str()));
+            }
             if let ResponseBody::Streaming(body) = &mut response.parts.body {
                 body.hold(pass.take());
             }

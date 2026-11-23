@@ -219,7 +219,7 @@ impl FingerprintConnector {
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
         let started = Instant::now();
-        let session_key = SessionCache::key(host, port, proxy.map(ProxyUrl::url));
+        let session_key = SessionCache::key(host, port, proxy);
         #[cfg(unix)]
         let unix_path = proxy.is_none().then(|| self.dialer.unix_socket()).flatten();
         let mut ech_override = {

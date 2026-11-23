@@ -43,7 +43,7 @@ impl<'a, P: Pick<'a>> Sink<'a> for Fold<'a, P> {
         let Some(key) = self.pick.key(name) else {
             return Ok(());
         };
-        let value = trim_end(trim_start(value));
+        let value = trim_ows(value);
         if !is_valid_header_value(value) {
             return Self::invalid(key);
         }
@@ -55,7 +55,7 @@ impl<'a, P: Pick<'a>> Sink<'a> for Fold<'a, P> {
         let Some((key, value)) = self.last.as_mut() else {
             return Ok(());
         };
-        let line = trim_end(trim_start(line));
+        let line = trim_ows(line);
         if is_valid_header_value(line) {
             let joined = value.to_mut();
             joined.push(b' ');

@@ -251,6 +251,13 @@ fn realistic_per_core_doh_shared_cache_and_isolated_shutdown() {
             let cached_url = cached_url.clone();
             async move {
                 if idx == 0 {
+                    struct SignalOnDrop(Arc<std::sync::atomic::AtomicBool>);
+                    impl Drop for SignalOnDrop {
+                        fn drop(&mut self) {
+                            self.0.store(true, Ordering::Release);
+                        }
+                    }
+                    let _signal = SignalOnDrop(Arc::clone(&core0_done));
                     assert_eq!(
                         session.get(&seed_url).text().await.unwrap(),
                         "path=/shared"
@@ -261,9 +268,13 @@ fn realistic_per_core_doh_shared_cache_and_isolated_shutdown() {
                     session.shutdown().await;
                     let after = session.get(&cached_url).send().await.unwrap_err();
                     assert!(after.is_shut_down());
-                    core0_done.store(true, Ordering::Release);
                 } else {
+                    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
                     while !core0_done.load(Ordering::Acquire) {
+                        assert!(
+                            tokio::time::Instant::now() < deadline,
+                            "core 0 did not finish before timeout"
+                        );
                         tokio::time::sleep(Duration::from_millis(5)).await;
                     }
                     let second = session.get(&cached_url).send().await.unwrap();

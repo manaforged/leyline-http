@@ -52,7 +52,11 @@ impl Proxy {
         let in_cgi = detect_cgi(&has_var);
         let https = read_env_group(&HTTPS_PROXY_VARS, in_cgi, &get_var);
         let http = read_env_group(&HTTP_PROXY_VARS, in_cgi, &get_var);
-        let all = read_env_group(&ALL_PROXY_VARS, in_cgi, &get_var);
+        let all = if https.is_some() && http.is_some() {
+            None
+        } else {
+            read_env_group(&ALL_PROXY_VARS, in_cgi, &get_var)
+        };
         if https.is_none() && http.is_none() && all.is_none() {
             return Ok(self);
         }
@@ -82,16 +86,6 @@ impl Proxy {
 const HTTPS_PROXY_VARS: [&str; 2] = ["HTTPS_PROXY", "https_proxy"];
 const HTTP_PROXY_VARS: [&str; 2] = ["HTTP_PROXY", "http_proxy"];
 const ALL_PROXY_VARS: [&str; 2] = ["ALL_PROXY", "all_proxy"];
-
-#[cfg(test)]
-const ENV_PROXY_VARS: [&str; 6] = [
-    "HTTPS_PROXY",
-    "https_proxy",
-    "HTTP_PROXY",
-    "http_proxy",
-    "ALL_PROXY",
-    "all_proxy",
-];
 
 fn detect_cgi<G: Fn(&str) -> bool>(has_var: &G) -> bool {
     let in_cgi = CGI_SIGNAL_ENV_VARS.iter().any(|k| has_var(k));
@@ -124,14 +118,4 @@ fn read_env_group<F: Fn(&str) -> Option<String>>(
         }
     }
     None
-}
-
-#[cfg(test)]
-pub(crate) fn env_proxy_from<F, G>(get_var: F, has_var: G) -> Option<EnvProxy>
-where
-    F: Fn(&str) -> Option<String>,
-    G: Fn(&str) -> bool,
-{
-    let in_cgi = detect_cgi(&has_var);
-    read_env_group(&ENV_PROXY_VARS, in_cgi, &get_var)
 }

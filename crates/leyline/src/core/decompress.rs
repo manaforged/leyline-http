@@ -6,6 +6,8 @@ mod stage;
 use crate::error::BodyLimit;
 use limit::{Cap, Overflow};
 use stage::Stage;
+#[cfg(feature = "compression-zstd")]
+pub(crate) use stage::ZSTD_WINDOW_LOG_MAX;
 
 use crate::core::BodyRules;
 use crate::core::config::{Codings, MAX_CODINGS};

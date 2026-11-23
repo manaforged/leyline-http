@@ -118,6 +118,7 @@ pub(crate) struct SessionInner {
     h2_config: H2Config,
     pool: Arc<Pool>,
     hsts: Arc<std::sync::Mutex<crate::core::hsts::HstsStore>>,
+    digest_nonces: Arc<crate::core::digest::DigestNonces>,
     shutdown: Arc<crate::core::shutdown::Shutdown>,
     writers: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
     audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,

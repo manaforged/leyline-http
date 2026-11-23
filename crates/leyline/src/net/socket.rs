@@ -56,6 +56,19 @@ impl SocketOptions {
                         | io::ErrorKind::Unsupported
                 ))
     }
+
+    pub(crate) fn map_io_error<E>(
+        &self,
+        err: io::Error,
+        config: impl FnOnce(io::Error) -> E,
+        other: impl FnOnce(io::Error) -> E,
+    ) -> E {
+        if self.is_interface_config_error(&err) {
+            config(err)
+        } else {
+            other(err)
+        }
+    }
 }
 
 impl Default for SocketOptions {

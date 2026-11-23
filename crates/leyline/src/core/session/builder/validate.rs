@@ -161,9 +161,9 @@ impl SessionBuilder {
 
     #[cfg(feature = "http3")]
     fn check_h3_proxy(&self) -> Result<()> {
-        if self.proxy_config.proxies_every_url()
-            && matches!(self.protocol_policy, Protocol::Http3)
-            && !crate::quic::proxy_carries_h3(self.proxy_config.primary_url())
+        if matches!(self.protocol_policy, Protocol::Http3)
+            && let Some(proxy) = self.proxy_config.https_proxy_for_all_hosts()
+            && !crate::quic::proxy_carries_h3(proxy)
         {
             return Err(Error::config(
                 "HTTP/3 needs a socks5:// or socks5h:// proxy with UDP ASSOCIATE; http and \

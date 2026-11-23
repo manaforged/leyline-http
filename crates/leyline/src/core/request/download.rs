@@ -320,7 +320,7 @@ fn metadata(
     key: [u8; 32],
     old: Option<&Metadata>,
 ) -> std::result::Result<(Metadata, bool), MetadataFailure> {
-    if (response.status().is_client_error() || response.status().is_server_error())
+    if crate::wire::is_error_status(response.status().as_u16())
         && !(response.status() == StatusCode::RANGE_NOT_SATISFIABLE
             && complete_prefix(old, response).is_some())
     {

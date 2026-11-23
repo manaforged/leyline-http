@@ -236,7 +236,7 @@ impl Source {
         if response.status() == StatusCode::NO_CONTENT {
             return Ok(false);
         }
-        if response.status().is_client_error() || response.status().is_server_error() {
+        if crate::wire::is_error_status(response.status().as_u16()) {
             return Err(ReadFailure::Status(response));
         }
         if response.status() != StatusCode::OK

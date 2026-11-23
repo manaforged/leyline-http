@@ -361,21 +361,25 @@ where
         assert!(C::CAN_COMPRESS);
     }
 
-    // SAFETY: boring provides valid inputs.
-    let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: boring provides valid inputs.
+        let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
 
-    let ssl_context = ssl.ssl_context();
-    let compressor = ssl_context
-        .ex_data(SslContext::cached_ex_index::<C>())
-        .expect("BUG: certificate compression missed");
+        let ssl_context = ssl.ssl_context();
+        let Some(compressor) = ssl_context.ex_data(SslContext::cached_ex_index::<C>()) else {
+            return 0;
+        };
 
-    let input_slice = unsafe { std::slice::from_raw_parts(input, input_len) };
-    let mut writer = CryptoByteBuilder::from_ptr(out);
-    if compressor.compress(input_slice, &mut writer).is_err() {
-        return 0;
-    }
+        // SAFETY: boring passes a valid buffer of `input_len` bytes.
+        let input_slice = unsafe { std::slice::from_raw_parts(input, input_len) };
+        let mut writer = CryptoByteBuilder::from_ptr(out);
+        if compressor.compress(input_slice, &mut writer).is_err() {
+            return 0;
+        }
 
-    1
+        1
+    }))
+    .unwrap_or(0)
 }
 
 pub(super) unsafe extern "C" fn raw_ssl_cert_decompress<C>(
@@ -392,33 +396,39 @@ where
         assert!(C::CAN_DECOMPRESS);
     }
 
-    // SAFETY: boring provides valid inputs.
-    let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        // SAFETY: boring provides valid inputs.
+        let ssl = unsafe { SslRef::from_ptr_mut(ssl) };
 
-    let ssl_context = ssl.ssl_context();
-    let compressor = ssl_context
-        .ex_data(SslContext::cached_ex_index::<C>())
-        .expect("BUG: certificate compression missed");
+        let ssl_context = ssl.ssl_context();
+        let Some(compressor) = ssl_context.ex_data(SslContext::cached_ex_index::<C>()) else {
+            return 0;
+        };
 
-    let Ok(mut decompression_buffer) = CryptoBufferBuilder::with_capacity(uncompressed_len) else {
-        return 0;
-    };
+        let Ok(mut decompression_buffer) = CryptoBufferBuilder::with_capacity(uncompressed_len)
+        else {
+            return 0;
+        };
 
-    let input_slice = unsafe { std::slice::from_raw_parts(input, input_len) };
+        // SAFETY: boring passes a valid buffer of `input_len` bytes.
+        let input_slice = unsafe { std::slice::from_raw_parts(input, input_len) };
 
-    if compressor
-        .decompress(input_slice, decompression_buffer.as_writer())
-        .is_err()
-    {
-        return 0;
-    }
+        if compressor
+            .decompress(input_slice, decompression_buffer.as_writer())
+            .is_err()
+        {
+            return 0;
+        }
 
-    let Ok(crypto_buffer) = decompression_buffer.build() else {
-        return 0;
-    };
+        let Ok(crypto_buffer) = decompression_buffer.build() else {
+            return 0;
+        };
 
-    unsafe { *out = crypto_buffer };
-    1
+        // SAFETY: boring provides a valid out pointer.
+        unsafe { *out = crypto_buffer };
+        1
+    }))
+    .unwrap_or(0)
 }
 
 struct CryptoByteBuilder<'a>(*mut ffi::CBB, std::marker::PhantomData<&'a [u8]>);

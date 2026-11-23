@@ -6,60 +6,108 @@ use super::proxy::NoProxy;
 use super::*;
 use crate::profile::Encoding;
 
+fn url_for(host: &str) -> url::Url {
+    url::Url::parse(&format!("http://{host}/")).unwrap()
+}
+
 #[test]
 fn no_proxy_matches_domains_and_literals() {
     let no_proxy = NoProxy::from_string(".example.com,127.0.0.1,[::1]:8080").unwrap();
-    assert!(no_proxy.matches("api.example.com"));
-    assert!(no_proxy.matches("127.0.0.1"));
-    assert!(no_proxy.matches("[::1]"));
-    assert!(!no_proxy.matches("other.test"));
+    assert!(no_proxy.matches_url(&url_for("api.example.com")));
+    assert!(no_proxy.matches_url(&url_for("127.0.0.1")));
+    assert!(no_proxy.matches_url(&url_for("[::1]:8080")));
+    assert!(!no_proxy.matches_url(&url_for("[::1]:9090")));
+    assert!(!no_proxy.matches_url(&url_for("other.test")));
 }
 
 #[test]
 fn no_proxy_ipv6_literal_matches_bare_host() {
-    assert!(NoProxy::from_string("::1").unwrap().matches("::1"));
-    assert!(NoProxy::from_string("[::1]").unwrap().matches("::1"));
-    assert!(NoProxy::from_string("[::1]:8080").unwrap().matches("::1"));
-    assert!(NoProxy::from_string("fe80::1").unwrap().matches("fe80::1"));
+    assert!(
+        NoProxy::from_string("::1")
+            .unwrap()
+            .matches_url(&url_for("[::1]"))
+    );
+    assert!(
+        NoProxy::from_string("[::1]")
+            .unwrap()
+            .matches_url(&url_for("[::1]"))
+    );
+    assert!(
+        NoProxy::from_string("[::1]:8080")
+            .unwrap()
+            .matches_url(&url_for("[::1]:8080"))
+    );
+    assert!(
+        NoProxy::from_string("fe80::1")
+            .unwrap()
+            .matches_url(&url_for("[fe80::1]"))
+    );
     assert!(
         NoProxy::from_string("2001:db8::1,192.0.2.0")
             .unwrap()
-            .matches("2001:db8::1")
+            .matches_url(&url_for("[2001:db8::1]"))
     );
 }
 
 #[test]
 fn no_proxy_ipv6_bracketed_host_matches_pattern() {
-    assert!(NoProxy::from_string("::1").unwrap().matches("[::1]"));
-    assert!(NoProxy::from_string("[::1]").unwrap().matches("[::1]"));
+    assert!(
+        NoProxy::from_string("::1")
+            .unwrap()
+            .matches_url(&url_for("[::1]"))
+    );
+    assert!(
+        NoProxy::from_string("[::1]")
+            .unwrap()
+            .matches_url(&url_for("[::1]"))
+    );
 }
 
 #[test]
-fn no_proxy_ipv4_port_stripping_still_works() {
+fn no_proxy_port_matching_and_overflow_rejection() {
     assert!(
         NoProxy::from_string("192.0.2.1:8080")
             .unwrap()
-            .matches("192.0.2.1")
+            .matches_url(&url_for("192.0.2.1:8080"))
+    );
+    assert!(
+        !NoProxy::from_string("192.0.2.1:8080")
+            .unwrap()
+            .matches_url(&url_for("192.0.2.1:9090"))
+    );
+    assert!(
+        !NoProxy::from_string("127.0.0.1:99999")
+            .unwrap()
+            .matches_url(&url_for("127.0.0.1:8080"))
+    );
+    assert!(
+        !NoProxy::from_string("[::1]:99999")
+            .unwrap()
+            .matches_url(&url_for("[::1]:8080"))
     );
     assert!(
         NoProxy::from_string("example.com:443")
             .unwrap()
-            .matches("example.com")
+            .matches_url(&url::Url::parse("https://example.com/").unwrap())
     );
     assert!(
         NoProxy::from_string(".example.com:443")
             .unwrap()
-            .matches("sub.example.com")
+            .matches_url(&url::Url::parse("https://sub.example.com/").unwrap())
     );
 }
 
 #[test]
 fn no_proxy_does_not_match_unrelated_ipv6() {
-    assert!(!NoProxy::from_string("::1").unwrap().matches("::2"));
+    assert!(
+        !NoProxy::from_string("::1")
+            .unwrap()
+            .matches_url(&url_for("[::2]"))
+    );
     assert!(
         !NoProxy::from_string("2001:db8::1")
             .unwrap()
-            .matches("2001:db8::2")
+            .matches_url(&url_for("[2001:db8::2]"))
     );
 }
 
@@ -312,13 +360,13 @@ fn proxy_same_for_doh_checks_all_fields() {
 fn proxy_pool_bypasses_all_requires_non_empty_and_every_entry_bypassed() {
     use crate::core::proxy_pool::ProxyPool;
     let empty = ProxyPool::new(Vec::<Proxy>::new());
-    assert!(!empty.bypasses_all("example.com"));
+    assert!(!empty.bypasses_all_url(&url_for("example.com")));
 
     let single = ProxyPool::new([Proxy::new()
         .all("http://127.0.0.1:8080")
         .no_proxy(["skip.local"])]);
-    assert!(single.bypasses_all("skip.local"));
-    assert!(!single.bypasses_all("keep.local"));
+    assert!(single.bypasses_all_url(&url_for("skip.local")));
+    assert!(!single.bypasses_all_url(&url_for("keep.local")));
 
     let mixed = ProxyPool::new([
         Proxy::new()
@@ -326,7 +374,7 @@ fn proxy_pool_bypasses_all_requires_non_empty_and_every_entry_bypassed() {
             .no_proxy(["skip.local"]),
         Proxy::new().all("http://127.0.0.1:8081"),
     ]);
-    assert!(!mixed.bypasses_all("skip.local"));
+    assert!(!mixed.bypasses_all_url(&url_for("skip.local")));
 }
 
 #[test]

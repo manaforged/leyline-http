@@ -1,20 +1,24 @@
+use std::sync::Arc;
+
 use super::super::helpers::header_values;
 use super::journey::Journey;
-use crate::core::digest::{self, Challenge, DigestAuth};
+use crate::core::digest::{self, Challenge, DigestAuth, DigestNonces};
 use crate::core::headers::HeaderList;
 use crate::error::{Error, Kind, Result};
 use crate::util::request_target;
 
 pub(super) struct DigestLeg {
     auth: DigestAuth,
+    nonces: Arc<DigestNonces>,
     answers: u8,
     challenge: Option<Challenge>,
 }
 
 impl DigestLeg {
-    pub(super) fn new(auth: DigestAuth) -> Self {
+    pub(super) fn new(auth: DigestAuth, nonces: Arc<DigestNonces>) -> Self {
         Self {
             auth,
+            nonces,
             answers: 0,
             challenge: None,
         }
@@ -70,7 +74,7 @@ impl DigestLeg {
 
     fn authorized_headers(&self, journey: &Journey, challenge: &Challenge) -> Result<HeaderList> {
         let cnonce = crate::util::random_hex_token(8);
-        let nc = digest::next_nc_for_nonce(&challenge.nonce);
+        let nc = self.nonces.next_nc(&challenge.nonce);
         let header = challenge
             .build_auth_header(
                 &self.auth,

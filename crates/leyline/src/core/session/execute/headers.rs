@@ -55,7 +55,7 @@ impl Session {
             add_referer(&mut headers, referer);
         }
 
-        set_content_length(&mut headers, current_body);
+        set_content_length(&mut headers, current_method, current_body);
 
         self.add_jar_cookie(&mut headers, current_url, &request.site, current_method);
 
@@ -311,9 +311,12 @@ fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
     }
 }
 
-fn set_content_length(headers: &mut Vec<HeaderPair>, body: &Body) {
+fn set_content_length(headers: &mut Vec<HeaderPair>, method: &Method, body: &Body) {
     if matches!(body.0, BodyKind::Empty) {
         headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+        if matches!(*method, Method::POST | Method::PUT | Method::PATCH) {
+            headers.insert(0, ("content-length".into(), HeaderStr::from_static("0")));
+        }
     } else if let Some(len) = body.len_hint() {
         headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
         headers.insert(

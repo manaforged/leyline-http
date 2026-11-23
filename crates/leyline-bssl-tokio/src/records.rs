@@ -45,6 +45,13 @@ impl<S> std::fmt::Debug for RecordStream<S> {
 #[derive(Debug, Clone)]
 pub struct RecordError(pub(crate) String);
 
+impl RecordError {
+    /// Creates a record-layer TLS error with `message`.
+    pub fn new(message: impl Into<String>) -> Self {
+        Self(message.into())
+    }
+}
+
 impl std::fmt::Display for RecordError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.0)
@@ -249,8 +256,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for RecordStream<S> {
             match this.poll_fill(cx)? {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(0) if this.start == this.end => {
-                    this.eof = true;
-                    return Poll::Ready(Ok(()));
+                    return Poll::Ready(Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        "TLS peer closed connection without close_notify",
+                    )));
                 }
                 Poll::Ready(0) => {
                     return Poll::Ready(Err(io::Error::new(

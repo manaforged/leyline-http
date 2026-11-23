@@ -103,11 +103,8 @@ impl Dialer {
         })
         .await
         .map_err(|err| {
-            if self.socket.is_interface_config_error(&err) {
-                NetError::Config(err)
-            } else {
-                NetError::TcpConnect(err)
-            }
+            self.socket
+                .map_io_error(err, NetError::Config, NetError::TcpConnect)
         })?;
         trace::connect(host, port, false, Some(addr));
         Ok(tcp_stream)

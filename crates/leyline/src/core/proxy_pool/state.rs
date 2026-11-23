@@ -173,6 +173,19 @@ impl Lease {
         self.record_outcome(strike, origin, answered);
     }
 
+    pub(crate) fn record_status(
+        &self,
+        result: std::result::Result<http::StatusCode, &crate::error::Error>,
+        origin: Option<&Origin>,
+    ) {
+        let strike = match result {
+            Err(err) if err.is_proxy() => true,
+            Ok(_) => false,
+            Err(_) => return,
+        };
+        self.record_outcome(strike, origin, origin);
+    }
+
     #[cfg(feature = "websocket")]
     pub(crate) fn record_handshake<T>(&self, result: &Result<T>, origin: Option<&Origin>) {
         let strike = match result {

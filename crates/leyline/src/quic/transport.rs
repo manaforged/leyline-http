@@ -47,11 +47,11 @@ impl DatagramTransport {
         let peer_addr = resolve_peer(connector.dialer().resolver(), host, port).await?;
         let options = connector.dialer().socket_options();
         let socket = crate::net::bind_udp(peer_addr, options).map_err(|e| {
-            if options.is_interface_config_error(&e) {
-                QuicError::Config(format!("udp bind: {e}"))
-            } else {
-                QuicError::Socket(format!("udp bind: {e}"))
-            }
+            options.map_io_error(
+                e,
+                |e| QuicError::Config(format!("udp bind: {e}")),
+                |e| QuicError::Socket(format!("udp bind: {e}")),
+            )
         })?;
         socket
             .connect(peer_addr)

@@ -145,7 +145,14 @@ impl H3Stream {
         message: String,
     ) {
         if self.head_sent {
-            self.deliver_terminal(std::io::Error::other(message));
+            let error = match before_head(message) {
+                H3SendError::Tls(msg) => std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    leyline_bssl_tokio::RecordError::new(msg),
+                ),
+                other => std::io::Error::other(other.message().into_owned()),
+            };
+            self.deliver_terminal(error);
         } else {
             self.reply(Err(before_head(message)));
         }

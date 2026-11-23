@@ -244,12 +244,19 @@ async fn ssl_stream_and_record_stream_never_classify_abrupt_eof_as_record_error(
         drop(server);
 
         let mut buf = [0u8; 16];
-        if let Err(err) = client.read(&mut buf).await {
-            assert!(
-                !is_record_error(&err),
-                "{mode:?}: abrupt EOF must not be classified as RecordError: {err:?}"
-            );
-        }
+        let err = client
+            .read(&mut buf)
+            .await
+            .expect_err("unclean TLS close without close_notify must error");
+        assert_eq!(
+            err.kind(),
+            io::ErrorKind::UnexpectedEof,
+            "{mode:?}: expected UnexpectedEof on abrupt close, got {err:?}"
+        );
+        assert!(
+            !is_record_error(&err),
+            "{mode:?}: abrupt EOF must not be classified as RecordError: {err:?}"
+        );
     }
 }
 

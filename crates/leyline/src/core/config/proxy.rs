@@ -10,8 +10,6 @@ use crate::profile::{Browser, Platform};
 use crate::util::redact;
 use crate::wire::Scheme;
 
-#[cfg(test)]
-use super::host::pattern_matches;
 use super::host::pattern_matches_port;
 use crate::net::normalize_host;
 
@@ -328,21 +326,34 @@ impl Proxy {
             .and_then(|rule| rule.parsed.as_ref().ok())
     }
 
+    fn rule_for_scheme(&self, scheme: Option<Scheme>) -> Option<&ProxyRule> {
+        self.rules
+            .iter()
+            .find(|rule| rule.scheme != ProxyRuleScheme::All && rule.matches(scheme))
+            .or_else(|| {
+                self.rules
+                    .iter()
+                    .find(|rule| rule.scheme == ProxyRuleScheme::All && rule.matches(scheme))
+            })
+    }
+
     fn primary_rule(&self) -> Option<&ProxyRule> {
         if self.is_custom() {
             return None;
         }
-        self.rules
-            .iter()
-            .find(|r| r.scheme == ProxyRuleScheme::All)
-            .or_else(|| self.rules.first())
+        self.rule_for_scheme(Some(Scheme::Https))
+            .or_else(|| self.rule_for_scheme(Some(Scheme::Http)))
     }
 
     #[cfg(feature = "http3")]
-    pub(crate) fn proxies_every_url(&self) -> bool {
+    pub(crate) fn https_proxy_for_all_hosts(&self) -> Option<Option<&ProxyUrl>> {
         let bypass =
             (self.no_proxy_explicit || self.from_env) && !self.no_proxy.patterns.is_empty();
-        !bypass && self.rules.iter().any(|r| r.scheme == ProxyRuleScheme::All)
+        if bypass {
+            return None;
+        }
+        self.rule_for_scheme(Some(Scheme::Https))
+            .map(|rule| rule.parsed.as_ref().ok())
     }
 
     pub(crate) fn uses_env(&self) -> bool {
@@ -385,28 +396,13 @@ impl Proxy {
         if let Some(rejected) = self.rejected {
             return Err(rejected.error(Kind::Proxy));
         }
-        let scheme = Scheme::of(url);
-        let Some(winner) = self
-            .rules
-            .iter()
-            .find(|rule| rule.scheme != ProxyRuleScheme::All && rule.matches(scheme))
-            .or_else(|| {
-                self.rules
-                    .iter()
-                    .find(|rule| rule.scheme == ProxyRuleScheme::All && rule.matches(scheme))
-            })
-        else {
+        let Some(winner) = self.rule_for_scheme(Scheme::of(url)) else {
             return Ok(None);
         };
         if self.bypasses_url(url) {
             return Ok(None);
         }
         winner.proxy().map(Some)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn bypasses(&self, host: &str) -> bool {
-        (self.no_proxy_explicit || self.from_env) && self.no_proxy.matches(host)
     }
 
     pub(crate) fn bypasses_url(&self, url: &url::Url) -> bool {
@@ -530,12 +526,6 @@ impl NoProxy {
         Self {
             patterns: patterns.into_iter().map(Into::into).collect(),
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn matches(&self, host: &str) -> bool {
-        let host = normalize_host(host);
-        self.patterns.iter().any(|raw| pattern_matches(&host, raw))
     }
 
     pub(crate) fn matches_url(&self, url: &url::Url) -> bool {

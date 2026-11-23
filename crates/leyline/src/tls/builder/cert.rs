@@ -71,8 +71,8 @@ impl CertificateCompressor for Zstd {
     const CAN_DECOMPRESS: bool = true;
 
     fn decompress<W: std::io::Write>(&self, input: &[u8], output: &mut W) -> std::io::Result<()> {
-        output.write_all(&read_limited_cert(zstd::stream::read::Decoder::new(
-            input,
-        )?)?)
+        let mut decoder = zstd::stream::read::Decoder::new(input)?;
+        decoder.window_log_max(crate::core::decompress::ZSTD_WINDOW_LOG_MAX)?;
+        output.write_all(&read_limited_cert(decoder)?)
     }
 }

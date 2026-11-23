@@ -6,6 +6,12 @@ use crate::core::retry::Retry;
 use crate::core::session::Session;
 use crate::error::Result;
 
+struct Leased {
+    origin: Option<Origin>,
+    lease: Box<Lease>,
+    session: Session,
+}
+
 pub(super) struct Route<'a> {
     session: &'a Session,
     pool: Option<&'a ProxyPool>,
@@ -40,42 +46,51 @@ impl<'a> Route<'a> {
             this.hooked(self.session, hook)?;
         }
         self.last_method = Some(this.method.clone());
-        let (origin, lease) = self.lease(&mut this);
+        let leased = self.acquire(&mut this)?;
         let used = self.used_proxy(&mut this)?;
         crate::trace::note_proxy(used.as_deref());
-        let leased = match &lease {
-            Some(lease) => Some(lease.session(self.session)?),
-            None => None,
-        };
-        let session = leased.as_ref().unwrap_or(self.session);
+        let session = leased.as_ref().map_or(self.session, |l| &l.session);
         crate::trace::note_browser(|| session.browser());
         let mut result = session.attempt(this).await;
         match result.as_mut() {
             Ok(response) => {
-                response.set_proxy(used.as_deref());
+                if response.proxy().is_none() {
+                    response.set_proxy(used.as_deref());
+                }
                 self.observe(response);
             }
-            Err(error) => error.set_proxy(used.as_deref()),
+            Err(error) => {
+                if error.proxy().is_none() {
+                    error.set_proxy(used.as_deref());
+                }
+            }
         }
-        if let Some(lease) = lease {
+        if let Some(leased) = leased {
             if used.is_some() {
                 let answered = result.as_ref().ok().and_then(|r| Origin::of(r.url()));
-                lease.record(&result, origin.as_ref(), answered.as_ref());
+                leased
+                    .lease
+                    .record(&result, leased.origin.as_ref(), answered.as_ref());
             }
-            self.last = Some(lease.index());
+            self.last = Some(leased.lease.index());
         }
         result
     }
 
-    fn lease(&self, this: &mut Draft) -> (Option<Origin>, Option<Box<Lease>>) {
+    fn acquire(&self, this: &mut Draft) -> Result<Option<Leased>> {
         let Some((pool, url)) = self.pool.zip(this.url()) else {
-            return (None, None);
+            return Ok(None);
         };
-        let Some((origin, lease)) = pool.lease_for(url, self.last) else {
-            return (None, None);
+        let Some((origin, lease, session)) = pool.acquire_session(self.session, url, self.last)?
+        else {
+            return Ok(None);
         };
         this.carry.overrides_mut().proxy = Some(lease.config().clone());
-        (origin, Some(Box::new(lease)))
+        Ok(Some(Leased {
+            origin,
+            lease: Box::new(lease),
+            session,
+        }))
     }
 
     fn observe(&self, response: &Response) {

@@ -6,7 +6,7 @@ mod body_stream;
 mod config;
 #[cfg(feature = "html")]
 mod crawl;
-mod decompress;
+pub(crate) mod decompress;
 mod digest;
 pub(crate) mod doh;
 

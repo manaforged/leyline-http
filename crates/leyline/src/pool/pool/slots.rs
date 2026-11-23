@@ -13,6 +13,35 @@ use crate::pool::types::{
 use crate::util::{read, write};
 use crate::wire::TlsInfo;
 
+pub(super) fn is_past_lifetime(
+    opened: Instant,
+    max_lifetime: Option<Duration>,
+    now: Instant,
+) -> bool {
+    max_lifetime.is_some_and(|lifetime| now.saturating_duration_since(opened) >= lifetime)
+}
+
+pub(super) fn is_past_idle(since: Instant, idle_timeout: Duration, now: Instant) -> bool {
+    now.saturating_duration_since(since) >= idle_timeout
+}
+
+pub(super) fn mux_stale_for(
+    entry: &MuxEntry,
+    idle_timeout: Duration,
+    max_lifetime: Option<Duration>,
+    now: Instant,
+) -> Option<Counter> {
+    if entry.is_dead() || is_past_lifetime(entry.opened, max_lifetime, now) {
+        Some(Counter::EvictionsDead)
+    } else if entry.handle.open_streams() == 0
+        && is_past_idle(entry.last_use.get(), idle_timeout, now)
+    {
+        Some(Counter::EvictionsIdle)
+    } else {
+        None
+    }
+}
+
 impl Pool {
     pub(crate) fn checkout_mux<C: MuxClient>(&self, key: &PoolKey) -> Option<(C, TlsInfo)> {
         self.checkout_mux_idle(key, Instant::now())
@@ -20,17 +49,16 @@ impl Pool {
     }
 
     fn past_idle(&self, since: Instant, now: Instant) -> bool {
-        now.saturating_duration_since(since) >= self.config.idle_timeout
+        is_past_idle(since, self.config.idle_timeout, now)
     }
 
     fn mux_stale(&self, entry: &MuxEntry, now: Instant) -> Option<Counter> {
-        if entry.is_dead() || self.past_lifetime(entry.opened, now) {
-            Some(Counter::EvictionsDead)
-        } else if entry.handle.open_streams() == 0 && self.past_idle(entry.last_use.get(), now) {
-            Some(Counter::EvictionsIdle)
-        } else {
-            None
-        }
+        mux_stale_for(
+            entry,
+            self.config.idle_timeout,
+            self.config.max_lifetime,
+            now,
+        )
     }
 
     pub(crate) fn checkout_mux_idle<C: MuxClient>(
@@ -199,9 +227,7 @@ impl Pool {
     }
 
     fn past_lifetime(&self, opened: Instant, now: Instant) -> bool {
-        self.config
-            .max_lifetime
-            .is_some_and(|lifetime| now.duration_since(opened) >= lifetime)
+        is_past_lifetime(opened, self.config.max_lifetime, now)
     }
 
     fn evict_for_new_entry(&self, entries: &mut Entries) -> Vec<Evicted> {

@@ -225,33 +225,33 @@ pub(crate) fn pick_supported_qop(qop: &str) -> Option<&'static str> {
 
 pub(crate) const DIGEST_NONCE_CACHE_CAP: usize = 4096;
 
-fn nonce_cache() -> &'static std::sync::Mutex<lru::LruCache<String, u32>> {
-    use lru::LruCache;
-    use std::num::NonZeroUsize;
-    use std::sync::{Mutex, OnceLock};
-    static CACHE: OnceLock<Mutex<LruCache<String, u32>>> = OnceLock::new();
-    CACHE.get_or_init(|| {
-        Mutex::new(LruCache::new(
-            NonZeroUsize::new(DIGEST_NONCE_CACHE_CAP).expect("cap is non-zero"),
-        ))
-    })
+pub(crate) struct DigestNonces(std::sync::Mutex<lru::LruCache<String, u32>>);
+
+impl Default for DigestNonces {
+    fn default() -> Self {
+        Self(std::sync::Mutex::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(DIGEST_NONCE_CACHE_CAP).expect("cap is non-zero"),
+        )))
+    }
 }
 
-pub(crate) fn next_nc_for_nonce(nonce: &str) -> u32 {
-    let mut guard = crate::util::lock(nonce_cache());
-    if let Some(existing) = guard.get(nonce)
-        && *existing >= u32::MAX - 1
-    {
-        guard.pop(nonce);
-    }
-    match guard.get_mut(nonce) {
-        Some(counter) => {
-            *counter = counter.saturating_add(1);
-            *counter
+impl DigestNonces {
+    pub(crate) fn next_nc(&self, nonce: &str) -> u32 {
+        let mut guard = crate::util::lock(&self.0);
+        if let Some(existing) = guard.get(nonce)
+            && *existing >= u32::MAX - 1
+        {
+            guard.pop(nonce);
         }
-        None => {
-            guard.put(nonce.to_string(), 1);
-            1
+        match guard.get_mut(nonce) {
+            Some(counter) => {
+                *counter = counter.saturating_add(1);
+                *counter
+            }
+            None => {
+                guard.put(nonce.to_string(), 1);
+                1
+            }
         }
     }
 }

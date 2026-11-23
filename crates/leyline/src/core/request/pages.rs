@@ -107,6 +107,12 @@ impl Pages {
         let Some(url) = response.link(NEXT) else {
             return;
         };
+        let url = Url::clone(
+            &self
+                .template
+                .session
+                .hsts_upgrade(&std::sync::Arc::new(url)),
+        );
         if self.template.downgrades(&url) || Origin::downgrades(response.url(), &url) {
             return;
         }

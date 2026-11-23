@@ -175,7 +175,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the maximum number of open connections in the pool, and fails the build on zero.
+    /// Sets the maximum number of pool entries kept across all hosts, and fails the build on zero.
     pub fn max_connections(mut self, n: usize) -> Self {
         if n == 0 {
             self.reject(Error::config("max_connections must be at least 1"));

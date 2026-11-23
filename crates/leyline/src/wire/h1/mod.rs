@@ -85,7 +85,7 @@ impl Typed<'_> {
 impl<'a> Sink<'a> for Typed<'_> {
     fn field(&mut self, name: &'a [u8], value: &'a [u8]) -> Result<(), Error> {
         self.flush();
-        let value = self.head.slice_ref(trim_end(trim_start(value)));
+        let value = self.head.slice_ref(trim_ows(value));
         let Ok(name) = http::HeaderName::from_bytes(name) else {
             return Ok(());
         };
@@ -104,7 +104,7 @@ impl<'a> Sink<'a> for Typed<'_> {
         };
         let mut joined = value.as_bytes().to_vec();
         joined.push(b' ');
-        joined.extend_from_slice(trim_end(trim_start(line)));
+        joined.extend_from_slice(trim_ows(line));
         if let Ok(folded) = http::HeaderValue::from_maybe_shared(Bytes::from(joined)) {
             *value = folded;
             return Ok(());
@@ -284,6 +284,10 @@ fn chunk_size_value(line: &[u8]) -> Option<u64> {
 
 pub(crate) fn contains_header<K: AsRef<str>, V>(headers: &[(K, V)], name: &str) -> bool {
     crate::util::header_position(headers, name).is_some()
+}
+
+pub(crate) fn trim_ows(bytes: &[u8]) -> &[u8] {
+    trim_end(trim_start(bytes))
 }
 
 pub(crate) fn is_valid_token(s: &str) -> bool {

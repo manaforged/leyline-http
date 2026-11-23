@@ -3,16 +3,17 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 
 use crate::core::headers;
-use crate::error::{Error, Result};
+use crate::error::{Error, Kind, Result};
 use crate::header_str::HeaderStr;
+use crate::util::coalesce::Coalesce;
 use crate::util::lock;
 
 pub(in crate::core::session) type Callback =
     Arc<dyn Fn() -> Pin<Box<dyn Future<Output = Result<String>> + Send>> + Send + Sync>;
 
 pub(in crate::core::session) struct Refresh {
-    state: Mutex<Token>,
-    gate: tokio::sync::Mutex<()>,
+    state: Arc<Mutex<Token>>,
+    running: Coalesce<u64, std::result::Result<(), Arc<Error>>>,
     callback: Callback,
 }
 
@@ -25,12 +26,12 @@ struct Token {
 impl Refresh {
     pub(super) fn new(value: String, callback: Callback) -> Self {
         Self {
-            state: Mutex::new(Token {
+            state: Arc::new(Mutex::new(Token {
                 value: value.into(),
                 version: 0,
                 failure: None,
-            }),
-            gate: tokio::sync::Mutex::new(()),
+            })),
+            running: Coalesce::default(),
             callback,
         }
     }
@@ -48,28 +49,56 @@ impl Refresh {
     }
 
     pub(super) async fn renew(&self, version: u64) -> Result<()> {
-        let _gate = self.gate.lock().await;
         {
             let state = lock(&self.state);
             if state.version != version {
                 return outcome(state.failure.as_ref());
             }
         }
-        let result = (self.callback)().await.and_then(|token| {
-            let value = crate::util::bearer_credentials(&token);
-            headers::value(value.as_str())?;
-            Ok(HeaderStr::from(value))
-        });
-        let mut state = lock(&self.state);
-        state.version = state.version.wrapping_add(1);
-        match result {
-            Ok(value) => {
-                state.value = value;
-                state.failure = None;
-            }
-            Err(error) => state.failure = Some(Arc::new(error)),
-        }
-        outcome(state.failure.as_ref())
+        let state = Arc::clone(&self.state);
+        let callback = Arc::clone(&self.callback);
+        let joined = self
+            .running
+            .join_or_spawn(
+                &version,
+                move || async move {
+                    {
+                        let current = lock(&state);
+                        if current.version != version {
+                            return match &current.failure {
+                                None => Ok(()),
+                                Some(err) => Err(Arc::clone(err)),
+                            };
+                        }
+                    }
+                    let result = (callback)().await.and_then(|token| {
+                        let value = crate::util::bearer_credentials(&token);
+                        headers::value(value.as_str())?;
+                        Ok(HeaderStr::from(value))
+                    });
+                    let mut current = lock(&state);
+                    current.version = current.version.wrapping_add(1);
+                    match result {
+                        Ok(value) => {
+                            current.value = value;
+                            current.failure = None;
+                            Ok(())
+                        }
+                        Err(error) => {
+                            let error = Arc::new(error);
+                            current.failure = Some(Arc::clone(&error));
+                            Err(error)
+                        }
+                    }
+                },
+                |join_err| {
+                    Err(Arc::new(Error::new(Kind::Request).with_message(format!(
+                        "token refresh task failed: {join_err}"
+                    ))))
+                },
+            )
+            .await;
+        outcome(joined.err().as_ref())
     }
 }
 

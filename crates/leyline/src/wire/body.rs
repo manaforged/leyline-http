@@ -179,14 +179,21 @@ impl Body {
 
     /// Streams the file at `path` as a body whose `content-length` is the file size read now, and fails when the file cannot be opened or is not a regular file.
     pub fn file(path: impl AsRef<Path>) -> crate::error::Result<Self> {
-        let file = std::fs::File::open(path.as_ref())?;
-        let meta = file.metadata()?;
+        let path = path.as_ref();
+        let meta = std::fs::metadata(path)?;
         if !meta.is_file() {
             return Err(
                 io::Error::new(io::ErrorKind::InvalidInput, "body path is not a file").into(),
             );
         }
-        let length = meta.len();
+        let file = std::fs::File::open(path)?;
+        let opened_meta = file.metadata()?;
+        if !opened_meta.is_file() {
+            return Err(
+                io::Error::new(io::ErrorKind::InvalidInput, "body path is not a file").into(),
+            );
+        }
+        let length = opened_meta.len();
         let stream = tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
         Ok(Self::stream(stream, Some(length)))
     }

@@ -115,5 +115,5 @@ async fn saved_state_never_holds_the_proxy_password() {
     );
     assert!(!saved.contains("hunter2secret"), "{saved}");
     assert!(!saved.contains("alice"), "{saved}");
-    assert!(saved.contains("#proxy-credentials="), "{saved}");
+    assert!(saved.contains("#proxy-identity="), "{saved}");
 }

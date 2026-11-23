@@ -1,11 +1,6 @@
 use crate::net::normalize_host;
 use crate::util::domain_match;
 
-#[cfg(test)]
-pub(super) fn pattern_matches(host: &str, raw: &str) -> bool {
-    pattern_matches_port(host, None, raw)
-}
-
 pub(super) fn pattern_matches_port(host: &str, port: Option<u16>, raw: &str) -> bool {
     let mut pat = raw.trim().to_string();
     if pat.is_empty() {
@@ -19,7 +14,10 @@ pub(super) fn pattern_matches_port(host: &str, port: Option<u16>, raw: &str) -> 
         if let Some(end) = pat.find("]:") {
             let suffix = &pat[end + 2..];
             if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) {
-                pat_port = suffix.parse::<u16>().ok();
+                let Ok(parsed) = suffix.parse::<u16>() else {
+                    return false;
+                };
+                pat_port = Some(parsed);
                 pat.truncate(end + 1);
             }
         }
@@ -28,7 +26,10 @@ pub(super) fn pattern_matches_port(host: &str, port: Option<u16>, raw: &str) -> 
         && !pat[idx + 1..].is_empty()
         && pat[idx + 1..].bytes().all(|b| b.is_ascii_digit())
     {
-        pat_port = pat[idx + 1..].parse::<u16>().ok();
+        let Ok(parsed) = pat[idx + 1..].parse::<u16>() else {
+            return false;
+        };
+        pat_port = Some(parsed);
         pat.truncate(idx);
     }
     if let (Some(want), Some(actual)) = (pat_port, port)

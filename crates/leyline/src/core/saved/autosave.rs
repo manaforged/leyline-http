@@ -104,14 +104,21 @@ impl WriteOrder {
 
 impl Guard {
     async fn save(&mut self) -> Result<()> {
+        self.save_or_join_failed().await.unwrap_or_else(Err)
+    }
+
+    async fn save_or_join_failed(&mut self) -> std::result::Result<Result<()>, Error> {
         let Some(write) = self.begin() else {
-            return Ok(());
+            return Ok(Ok(()));
         };
-        let written = tokio::task::spawn_blocking(self.order.order(write))
-            .await
-            .map_err(|e| stopped().with_source(e.to_string()))
-            .and_then(|out| out);
-        self.end(written)
+        match tokio::task::spawn_blocking(self.order.order(write)).await {
+            Ok(written) => Ok(self.end(written)),
+            Err(e) => {
+                let err = stopped().with_source(e.to_string());
+                drop(self.end(Err(stopped().with_source(e.to_string()))));
+                Err(err)
+            }
+        }
     }
 
     fn save_now(&mut self) -> Result<()> {
@@ -258,9 +265,10 @@ async fn deadline(due: Option<Instant>) {
 }
 
 async fn handle(command: Option<Command>, guard: &mut Guard) {
-    let saved = match guard.save().await {
+    let saved = match guard.save_or_join_failed().await {
+        Ok(saved) => saved,
         Err(_) if guard.dirty => guard.save_now(),
-        saved => saved,
+        Err(err) => Err(err),
     };
     if let Some(Command::Shutdown(reply)) = command {
         drop(reply.send(saved));

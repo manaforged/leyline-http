@@ -59,6 +59,7 @@ impl SessionBuilder {
             h2_config: derived.h2_config,
             pool,
             hsts: Arc::default(),
+            digest_nonces: Arc::default(),
             shutdown: Arc::default(),
             writers: Arc::default(),
             audit_tls: derived.audit_tls,

@@ -95,6 +95,33 @@ impl ProxyUrl {
         &self.headers
     }
 
+    pub(crate) fn identity(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut bare = self.url.clone();
+        let has_creds = !self.url.username().is_empty() || self.url.password().is_some();
+        let stripped = bare.set_username("").is_ok() && bare.set_password(None).is_ok();
+        if (!stripped || !has_creds) && self.headers.is_empty() {
+            return bare.to_string();
+        }
+        let mut hash = Sha256::new();
+        hash.update(self.url.username().as_bytes());
+        hash.update(b":");
+        hash.update(self.url.password().unwrap_or("").as_bytes());
+        if !self.headers.is_empty() {
+            hash.update((self.headers.len() as u64).to_be_bytes());
+            for (name, value) in &self.headers {
+                hash.update((name.len() as u64).to_be_bytes());
+                for b in name.as_bytes() {
+                    hash.update([b.to_ascii_lowercase()]);
+                }
+                hash.update((value.len() as u64).to_be_bytes());
+                hash.update(value.as_bytes());
+            }
+        }
+        let digest = hex::encode(hash.finalize());
+        format!("{bare}#proxy-identity={digest}")
+    }
+
     pub(crate) fn basic_auth_header(&self) -> Option<String> {
         let custom_auth = self
             .headers

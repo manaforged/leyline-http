@@ -129,7 +129,7 @@ impl Chunked {
         let Some(colon) = memchr::memchr(b':', line) else {
             return;
         };
-        let value = trim_end(trim_start(&line[colon + 1..]));
+        let value = crate::wire::h1::trim_ows(&line[colon + 1..]);
         if let (Ok(name), Ok(value)) = (
             HeaderName::from_bytes(&line[..colon]),
             HeaderValue::from_bytes(value),
