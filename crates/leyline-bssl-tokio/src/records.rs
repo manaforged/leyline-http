@@ -41,12 +41,24 @@ impl<S> std::fmt::Debug for RecordStream<S> {
     }
 }
 
-fn invalid(error: ErrorStack) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, error)
+/// A TLS 1.3 record-layer failure or fatal alert received after the handshake.
+#[derive(Debug, Clone)]
+pub struct RecordError(String);
+
+impl std::fmt::Display for RecordError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
 }
 
-fn protocol(message: &str) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, message)
+impl std::error::Error for RecordError {}
+
+fn invalid(error: ErrorStack) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, RecordError(error.to_string()))
+}
+
+fn protocol(message: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, RecordError(message.into()))
 }
 
 impl<S> RecordStream<S> {
@@ -131,7 +143,7 @@ impl<S> RecordStream<S> {
                 [_, 0] => self.eof = true,
                 [_, USER_CANCELED] => {}
                 [_, code] => {
-                    return Err(protocol(&format!("TLS peer sent fatal alert {code}")));
+                    return Err(protocol(format!("TLS peer sent fatal alert {code}")));
                 }
                 _ => return Err(protocol("TLS alert record has the wrong length")),
             },

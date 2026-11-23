@@ -18,7 +18,7 @@ mod records;
 use self::bridge::AsyncStreamBridge;
 
 pub use crate::async_callbacks::SslContextBuilderExt;
-pub use crate::records::RecordStream;
+pub use crate::records::{RecordError, RecordStream};
 pub use leyline_bssl::ssl::{
     AsyncPrivateKeyMethod, AsyncPrivateKeyMethodError, AsyncSelectCertError, BoxGetSessionFinish,
     BoxGetSessionFuture, BoxPrivateKeyMethodFinish, BoxPrivateKeyMethodFuture, BoxSelectCertFinish,

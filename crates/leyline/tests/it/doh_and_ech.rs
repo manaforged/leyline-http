@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 
 use super::tls_support::{build_ech_config_list, self_signed_dns_names, serve_h1_ok};
 
-fn decode_qname_and_qtype(query: &[u8]) -> Option<(String, u16)> {
+pub(super) fn decode_qname_and_qtype(query: &[u8]) -> Option<(String, u16)> {
     if query.len() < 17 {
         return None;
     }
@@ -31,7 +31,7 @@ fn decode_qname_and_qtype(query: &[u8]) -> Option<(String, u16)> {
     Some((labels.join("."), qtype))
 }
 
-fn dns_response(query: &[u8], rcode: u8, answers: &[(u16, u32, &[u8])]) -> Vec<u8> {
+pub(super) fn dns_response(query: &[u8], rcode: u8, answers: &[(u16, u32, &[u8])]) -> Vec<u8> {
     let mut out = Vec::with_capacity(64);
     out.extend_from_slice(&query[..2]);
     let flags: u16 = 0x8180 | u16::from(rcode & 0x0F);
@@ -60,6 +60,79 @@ fn svcb_ech_rdata(priority: u16, ech_list: &[u8]) -> Vec<u8> {
     rdata.extend_from_slice(&(ech_list.len() as u16).to_be_bytes());
     rdata.extend_from_slice(ech_list);
     rdata
+}
+
+fn spawn_doh_tls_server<F, A>(
+    listener: TcpListener,
+    ctx: Arc<leyline_bssl::ssl::SslContext>,
+    on_accept: A,
+    answer: F,
+) where
+    A: Fn(&leyline_bssl::ssl::SslRef) + Send + Sync + 'static,
+    F: Fn(&[u8], &str, u16) -> Vec<u8> + Send + Sync + 'static,
+{
+    let on_accept = Arc::new(on_accept);
+    let answer = Arc::new(answer);
+    tokio::spawn(async move {
+        while let Ok((tcp, _)) = listener.accept().await {
+            let ctx = Arc::clone(&ctx);
+            let on_accept = Arc::clone(&on_accept);
+            let answer = Arc::clone(&answer);
+            tokio::spawn(async move {
+                let ssl = Ssl::new(&ctx).unwrap();
+                let Ok(mut stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
+                    .accept()
+                    .await
+                else {
+                    return;
+                };
+                on_accept(stream.ssl());
+                let mut buf = Vec::new();
+                let mut tmp = [0u8; 4096];
+                loop {
+                    let Ok(n) = stream.read(&mut tmp).await else {
+                        return;
+                    };
+                    if n == 0 {
+                        return;
+                    }
+                    buf.extend_from_slice(&tmp[..n]);
+                    let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&buf[..head_end]);
+                    let content_len: usize = head
+                        .lines()
+                        .find_map(|line| {
+                            let (k, v) = line.split_once(':')?;
+                            k.eq_ignore_ascii_case("content-length")
+                                .then(|| v.trim().parse().ok())
+                                .flatten()
+                        })
+                        .unwrap_or(0);
+                    let total = head_end + 4 + content_len;
+                    if buf.len() < total {
+                        continue;
+                    }
+                    let body = &buf[head_end + 4..total];
+                    let Some((name, qtype)) = decode_qname_and_qtype(body) else {
+                        return;
+                    };
+                    let wire = answer(body, &name, qtype);
+                    let resp_head = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\n\r\n",
+                        wire.len()
+                    );
+                    if stream.write_all(resp_head.as_bytes()).await.is_err()
+                        || stream.write_all(&wire).await.is_err()
+                    {
+                        return;
+                    }
+                    buf.drain(..total);
+                }
+            });
+        }
+    });
 }
 
 #[test]
@@ -189,72 +262,20 @@ async fn doh_auto_ech_fetches_https_record_and_encrypts_sni() {
     doh_ctx.set_certificate(&origin_cert).unwrap();
     doh_ctx.set_private_key(&origin_key).unwrap();
     let doh_ctx = Arc::new(doh_ctx.build());
-
-    tokio::spawn(async move {
-        while let Ok((tcp, _)) = doh_listener.accept().await {
-            let ctx = Arc::clone(&doh_ctx);
-            let records = Arc::clone(&records);
-            let https_queries_bg = Arc::clone(&https_queries_bg);
-            tokio::spawn(async move {
-                let ssl = Ssl::new(&ctx).unwrap();
-                let Ok(mut stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
-                    .accept()
-                    .await
-                else {
-                    return;
-                };
-                let mut buf = Vec::new();
-                let mut tmp = [0u8; 4096];
-                loop {
-                    let Ok(n) = stream.read(&mut tmp).await else {
-                        return;
-                    };
-                    if n == 0 {
-                        return;
-                    }
-                    buf.extend_from_slice(&tmp[..n]);
-                    let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
-                        continue;
-                    };
-                    let head = String::from_utf8_lossy(&buf[..head_end]);
-                    let content_len: usize = head
-                        .lines()
-                        .find_map(|line| {
-                            let (k, v) = line.split_once(':')?;
-                            k.eq_ignore_ascii_case("content-length")
-                                .then(|| v.trim().parse().ok())
-                                .flatten()
-                        })
-                        .unwrap_or(0);
-                    let total = head_end + 4 + content_len;
-                    if buf.len() < total {
-                        continue;
-                    }
-                    let body = &buf[head_end + 4..total];
-                    let Some((name, qtype)) = decode_qname_and_qtype(body) else {
-                        return;
-                    };
-                    if qtype == 65 {
-                        https_queries_bg.fetch_add(1, Ordering::SeqCst);
-                    }
-                    let wire = match records.get(&(name, qtype)) {
-                        Some(rdata) => dns_response(body, 0, &[(qtype, 120, rdata)]),
-                        None => dns_response(body, 0, &[]),
-                    };
-                    let resp_head = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\n\r\n",
-                        wire.len()
-                    );
-                    if stream.write_all(resp_head.as_bytes()).await.is_err()
-                        || stream.write_all(&wire).await.is_err()
-                    {
-                        return;
-                    }
-                    buf.drain(..total);
-                }
-            });
-        }
-    });
+    spawn_doh_tls_server(
+        doh_listener,
+        doh_ctx,
+        |_| {},
+        move |body, name, qtype| {
+            if qtype == 65 {
+                https_queries_bg.fetch_add(1, Ordering::SeqCst);
+            }
+            match records.get(&(name.to_owned(), qtype)) {
+                Some(rdata) => dns_response(body, 0, &[(qtype, 120, rdata)]),
+                None => dns_response(body, 0, &[]),
+            }
+        },
+    );
 
     let session = Session::builder()
         .resolve("dns.local", [doh_addr])
@@ -336,71 +357,22 @@ async fn doh_does_not_leak_origin_pins_or_client_cert() {
     doh_ctx.set_private_key(&doh_key).unwrap();
     doh_ctx.set_verify(leyline_bssl::ssl::SslVerifyMode::PEER);
     let doh_ctx = Arc::new(doh_ctx.build());
-    tokio::spawn(async move {
-        while let Ok((tcp, _)) = doh_listener.accept().await {
-            let ctx = Arc::clone(&doh_ctx);
-            let doh_saw_bg = Arc::clone(&doh_saw_bg);
-            tokio::spawn(async move {
-                let ssl = Ssl::new(&ctx).unwrap();
-                let Ok(mut stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
-                    .accept()
-                    .await
-                else {
-                    return;
-                };
-                if stream.ssl().peer_certificate().is_some() {
-                    doh_saw_bg.fetch_add(1, Ordering::SeqCst);
-                }
-                let mut buf = Vec::new();
-                let mut tmp = [0u8; 4096];
-                loop {
-                    let Ok(n) = stream.read(&mut tmp).await else {
-                        return;
-                    };
-                    if n == 0 {
-                        return;
-                    }
-                    buf.extend_from_slice(&tmp[..n]);
-                    let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
-                        continue;
-                    };
-                    let head = String::from_utf8_lossy(&buf[..head_end]);
-                    let content_len: usize = head
-                        .lines()
-                        .find_map(|line| {
-                            let (k, v) = line.split_once(':')?;
-                            k.eq_ignore_ascii_case("content-length")
-                                .then(|| v.trim().parse().ok())
-                                .flatten()
-                        })
-                        .unwrap_or(0);
-                    let total = head_end + 4 + content_len;
-                    if buf.len() < total {
-                        continue;
-                    }
-                    let body = &buf[head_end + 4..total];
-                    let Some((name, qtype)) = decode_qname_and_qtype(body) else {
-                        return;
-                    };
-                    let wire = if name == "pinned.doh.test" && qtype == 1 {
-                        dns_response(body, 0, &[(1, 120, &[127, 0, 0, 1])])
-                    } else {
-                        dns_response(body, 0, &[])
-                    };
-                    let resp_head = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\n\r\n",
-                        wire.len()
-                    );
-                    if stream.write_all(resp_head.as_bytes()).await.is_err()
-                        || stream.write_all(&wire).await.is_err()
-                    {
-                        return;
-                    }
-                    buf.drain(..total);
-                }
-            });
-        }
-    });
+    spawn_doh_tls_server(
+        doh_listener,
+        doh_ctx,
+        move |ssl| {
+            if ssl.peer_certificate().is_some() {
+                doh_saw_bg.fetch_add(1, Ordering::SeqCst);
+            }
+        },
+        |body, name, qtype| {
+            if name == "pinned.doh.test" && qtype == 1 {
+                dns_response(body, 0, &[(1, 120, &[127, 0, 0, 1])])
+            } else {
+                dns_response(body, 0, &[])
+            }
+        },
+    );
 
     let session = Session::builder()
         .resolve("dns.local", [doh_addr])
@@ -447,75 +419,29 @@ async fn doh_routes_through_single_proxy_and_proxy_list() {
     doh_ctx.set_certificate(&doh_cert).unwrap();
     doh_ctx.set_private_key(&doh_key).unwrap();
     let doh_ctx = Arc::new(doh_ctx.build());
-    tokio::spawn(async move {
-        while let Ok((tcp, _)) = doh_listener.accept().await {
-            let ctx = Arc::clone(&doh_ctx);
-            tokio::spawn(async move {
-                let ssl = Ssl::new(&ctx).unwrap();
-                let Ok(mut stream) = leyline_bssl_tokio::SslStreamBuilder::new(ssl, tcp)
-                    .accept()
-                    .await
-                else {
-                    return;
-                };
-                let mut buf = Vec::new();
-                let mut tmp = [0u8; 512];
-                loop {
-                    let Ok(n) = stream.read(&mut tmp).await else {
-                        return;
-                    };
-                    if n == 0 {
-                        return;
-                    }
-                    buf.extend_from_slice(&tmp[..n]);
-                    let Some(head_end) = buf.windows(4).position(|w| w == b"\r\n\r\n") else {
-                        continue;
-                    };
-                    let head = std::str::from_utf8(&buf[..head_end]).unwrap_or("");
-                    let content_len: usize = head
-                        .lines()
-                        .find_map(|line| {
-                            let (k, v) = line.split_once(':')?;
-                            k.eq_ignore_ascii_case("content-length")
-                                .then(|| v.trim().parse().ok())
-                                .flatten()
-                        })
-                        .unwrap_or(0);
-                    let total = head_end + 4 + content_len;
-                    if buf.len() < total {
-                        continue;
-                    }
-                    let body = &buf[head_end + 4..total];
-                    let Some((name, qtype)) = decode_qname_and_qtype(body) else {
-                        return;
-                    };
-                    let wire = if name == "app.proxied.test" && qtype == 1 {
-                        dns_response(body, 0, &[(1, 120, &[127, 0, 0, 1])])
-                    } else {
-                        dns_response(body, 0, &[])
-                    };
-                    let resp_head = format!(
-                        "HTTP/1.1 200 OK\r\nContent-Type: application/dns-message\r\nContent-Length: {}\r\n\r\n",
-                        wire.len()
-                    );
-                    if stream.write_all(resp_head.as_bytes()).await.is_err()
-                        || stream.write_all(&wire).await.is_err()
-                    {
-                        return;
-                    }
-                    buf.drain(..total);
-                }
-            });
-        }
-    });
+    spawn_doh_tls_server(
+        doh_listener,
+        doh_ctx,
+        |_| {},
+        |body, name, qtype| {
+            if name == "app.proxied.test" && qtype == 1 {
+                dns_response(body, 0, &[(1, 120, &[127, 0, 0, 1])])
+            } else {
+                dns_response(body, 0, &[])
+            }
+        },
+    );
 
     let proxy_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let proxy_addr = proxy_listener.local_addr().unwrap();
     let doh_connects = Arc::new(AtomicUsize::new(0));
+    let doh_header_hits = Arc::new(AtomicUsize::new(0));
     let doh_connects_bg = Arc::clone(&doh_connects);
+    let doh_header_hits_bg = Arc::clone(&doh_header_hits);
     tokio::spawn(async move {
         while let Ok((mut client, _)) = proxy_listener.accept().await {
             let doh_connects_bg = Arc::clone(&doh_connects_bg);
+            let doh_header_hits_bg = Arc::clone(&doh_header_hits_bg);
             tokio::spawn(async move {
                 let mut buf = Vec::new();
                 let mut tmp = [0u8; 512];
@@ -534,10 +460,9 @@ async fn doh_routes_through_single_proxy_and_proxy_list() {
                 let head = String::from_utf8_lossy(&buf);
                 let first = head.lines().next().unwrap_or("");
                 if first.starts_with("CONNECT dns.proxied.test:") {
-                    assert!(
-                        head.to_ascii_lowercase().contains("x-doh-proxy: yes"),
-                        "DoH CONNECT must carry proxy header: {head}"
-                    );
+                    if head.to_ascii_lowercase().contains("x-doh-proxy: yes") {
+                        doh_header_hits_bg.fetch_add(1, Ordering::SeqCst);
+                    }
                     doh_connects_bg.fetch_add(1, Ordering::SeqCst);
                     let mut upstream = tokio::net::TcpStream::connect(doh_addr).await.unwrap();
                     client
@@ -577,6 +502,7 @@ async fn doh_routes_through_single_proxy_and_proxy_list() {
         .header("x-doh-proxy", "yes"),
     ] {
         let before = doh_connects.load(Ordering::SeqCst);
+        let before_hdr = doh_header_hits.load(Ordering::SeqCst);
         let session = Session::builder()
             .doh(doh_url.clone())
             .proxy(proxy)
@@ -592,6 +518,10 @@ async fn doh_routes_through_single_proxy_and_proxy_list() {
         assert!(
             doh_connects.load(Ordering::SeqCst) > before,
             "DoH lookup must traverse the configured proxy/pool"
+        );
+        assert!(
+            doh_header_hits.load(Ordering::SeqCst) > before_hdr,
+            "DoH CONNECT must carry x-doh-proxy: yes header"
         );
     }
 }

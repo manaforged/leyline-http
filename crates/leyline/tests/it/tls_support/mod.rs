@@ -31,13 +31,23 @@ pub fn self_signed_dns_names(hosts: &[&str]) -> (X509, PKey<Private>) {
     self_signed_for(hosts, false)
 }
 
-fn self_signed_for(subjects: &[&str], is_ip: bool) -> (X509, PKey<Private>) {
-    let key = PKey::from_ec_key(
+fn generate_ec_key() -> PKey<Private> {
+    PKey::from_ec_key(
         EcKey::generate(&EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap()).unwrap(),
     )
-    .unwrap();
+    .unwrap()
+}
+
+fn build_cert(
+    cn: &str,
+    issuer: Option<(&X509, &PKey<Private>)>,
+    is_ca: bool,
+    san_subjects: &[&str],
+    is_ip: bool,
+) -> (X509, PKey<Private>) {
+    let key = generate_ec_key();
     let mut name = X509NameBuilder::new().unwrap();
-    name.append_entry_by_text("CN", subjects[0]).unwrap();
+    name.append_entry_by_text("CN", cn).unwrap();
     let name = name.build();
     let mut cert = X509::builder().unwrap();
     cert.set_version(2).unwrap();
@@ -46,26 +56,62 @@ fn self_signed_for(subjects: &[&str], is_ip: bool) -> (X509, PKey<Private>) {
     cert.set_serial_number(&serial.to_asn1_integer().unwrap())
         .unwrap();
     cert.set_subject_name(&name).unwrap();
-    cert.set_issuer_name(&name).unwrap();
+    if let Some((issuer_cert, _)) = issuer {
+        cert.set_issuer_name(issuer_cert.subject_name()).unwrap();
+    } else {
+        cert.set_issuer_name(&name).unwrap();
+    }
     cert.set_pubkey(&key).unwrap();
     cert.set_not_before(&Asn1Time::days_from_now(0).unwrap())
         .unwrap();
     cert.set_not_after(&Asn1Time::days_from_now(1).unwrap())
         .unwrap();
-    cert.append_extension(&BasicConstraints::new().critical().ca().build().unwrap())
-        .unwrap();
-    let mut san = SubjectAlternativeName::new();
-    for subject in subjects {
-        if is_ip {
-            san.ip(subject);
-        } else {
-            san.dns(subject);
+    let bc = if is_ca {
+        BasicConstraints::new().critical().ca().build().unwrap()
+    } else {
+        BasicConstraints::new().critical().build().unwrap()
+    };
+    cert.append_extension(&bc).unwrap();
+    if !san_subjects.is_empty() {
+        let mut san = SubjectAlternativeName::new();
+        for subject in san_subjects {
+            if is_ip {
+                san.ip(subject);
+            } else {
+                san.dns(subject);
+            }
         }
+        let san = san
+            .build(&cert.x509v3_context(issuer.map(|(c, _)| c.as_ref()), None))
+            .unwrap();
+        cert.append_extension(&san).unwrap();
     }
-    let san = san.build(&cert.x509v3_context(None, None)).unwrap();
-    cert.append_extension(&san).unwrap();
-    cert.sign(&key, MessageDigest::sha256()).unwrap();
+    let sign_key = issuer.map_or(&key, |(_, k)| k);
+    cert.sign(sign_key, MessageDigest::sha256()).unwrap();
     (cert.build(), key)
+}
+
+fn self_signed_for(subjects: &[&str], is_ip: bool) -> (X509, PKey<Private>) {
+    build_cert(subjects[0], None, true, subjects, is_ip)
+}
+
+pub fn ca_signed_chain(leaf_subject: &str, is_ip: bool) -> (X509, X509, X509, PKey<Private>) {
+    let (root_cert, root_key) = build_cert("leyline-test-root-ca", None, true, &[], false);
+    let (inter_cert, inter_key) = build_cert(
+        "leyline-test-inter-ca",
+        Some((&root_cert, &root_key)),
+        true,
+        &[],
+        false,
+    );
+    let (leaf_cert, leaf_key) = build_cert(
+        leaf_subject,
+        Some((&inter_cert, &inter_key)),
+        false,
+        &[leaf_subject],
+        is_ip,
+    );
+    (root_cert, inter_cert, leaf_cert, leaf_key)
 }
 
 pub fn build_ech_config_list(

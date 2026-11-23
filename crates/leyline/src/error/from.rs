@@ -21,10 +21,20 @@ impl From<url::ParseError> for Error {
     }
 }
 
+pub(crate) fn is_tls_record_error(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| {
+        inner.is::<leyline_bssl_tokio::RecordError>()
+            || inner.is::<leyline_bssl::error::ErrorStack>()
+    })
+}
+
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         if let Some(limit) = BodyLimit::of_io(&e) {
             return limit.error();
+        }
+        if is_tls_record_error(&e) {
+            return Error::new(Kind::Tls).with_source(e);
         }
         if !e.get_ref().is_some_and(|inner| inner.is::<Error>()) {
             let kind = match e.kind() {

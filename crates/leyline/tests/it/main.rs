@@ -39,6 +39,8 @@ mod devices;
 mod digest_redirects;
 mod doh_and_ech;
 mod echo;
+mod enterprise_resilience;
+mod enterprise_workloads;
 mod ergonomics;
 mod error_body_budget;
 #[cfg(feature = "bench-internals")]
@@ -184,6 +186,7 @@ mod tls_pinning_hostname;
 mod tls_system_trust_live;
 mod trace_unwind;
 mod transport_features;
+mod v030_workloads;
 mod websocket_messages;
 #[cfg(feature = "websocket")]
 mod websocket_subprotocol;

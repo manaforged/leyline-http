@@ -16,22 +16,6 @@ use leyline_bssl_tokio::SslStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-async fn reply_ok(mut stream: SslStream<TcpStream>) {
-    let mut head = Vec::new();
-    let mut buf = [0u8; 1024];
-    while !head.windows(4).any(|window| window == b"\r\n\r\n") {
-        match stream.read(&mut buf).await {
-            Ok(0) | Err(_) => return,
-            Ok(read) => head.extend_from_slice(&buf[..read]),
-        }
-    }
-    drop(
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
-            .await,
-    );
-}
-
 async fn self_signed_server() -> (u16, Vec<u8>) {
     let (cert, key) = tls_support::self_signed();
     let der = cert.to_der().unwrap();
@@ -40,7 +24,7 @@ async fn self_signed_server() -> (u16, Vec<u8>) {
         key,
         Arc::new(AtomicUsize::new(0)),
         |_| tls_support::HTTP11,
-        |_, stream| reply_ok(stream),
+        |_, stream| tls_support::serve_h1_ok(stream, "ok"),
     )
     .await;
     (port, der)
@@ -179,7 +163,7 @@ async fn resuming_server() -> ResumingServer {
                 if stream.ssl().session_reused() {
                     counter.fetch_add(1, Ordering::SeqCst);
                 }
-                reply_ok(stream).await;
+                tls_support::serve_h1_ok(stream, "ok").await;
             }
         },
     )
@@ -356,7 +340,7 @@ async fn the_server_receives_the_client_leaf_and_its_chain_in_order() {
             .map(|chain| chain.iter().map(|c| c.to_der().unwrap()).collect())
             .unwrap_or_default();
         seen_tx.send((leaf, chain)).unwrap();
-        reply_ok(stream).await;
+        tls_support::serve_h1_ok(stream, "ok").await;
     });
 
     let (leaf, leaf_key) = tls_support::self_signed();

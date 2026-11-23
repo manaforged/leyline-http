@@ -173,6 +173,7 @@ impl Lease {
         self.record_outcome(strike, origin, answered);
     }
 
+    #[cfg(feature = "websocket")]
     pub(crate) fn record_handshake<T>(&self, result: &Result<T>, origin: Option<&Origin>) {
         let strike = match result {
             Err(err) if err.is_proxy() => true,

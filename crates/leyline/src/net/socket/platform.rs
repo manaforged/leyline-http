@@ -132,16 +132,7 @@ pub(super) fn apply(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) -> io
     Ok(())
 }
 
-#[cfg(any(
-    target_os = "linux",
-    target_os = "android",
-    target_os = "fuchsia",
-    target_os = "macos",
-    target_os = "ios",
-    target_os = "tvos",
-    target_os = "watchos",
-    target_os = "visionos"
-))]
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
 fn invalid_interface_name(name: &str) -> io::Error {
     io::Error::new(
         io::ErrorKind::InvalidInput,

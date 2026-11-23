@@ -90,7 +90,7 @@ One Ryzen 9 9950X3D. Client and origin run on separate L3 caches, each scenario 
 | 10,000 slow readers on large bodies | 0 failures, 295 KiB per reader |
 | 1 GiB download and upload | 316 KiB RSS growth |
 | Graceful shutdown under 2,000 streams | Quiet in 2 ms, 0 wrong digests |
-| Fuzzing | 676 million executions across the 11 pre-0.3.0 targets, 0 crashes (`dns_wire` and `pkcs12` targets compile and await their first soak) |
+| Fuzzing | 680 million executions across all 13 targets, 0 crashes (676 million across the 11 pre-0.3.0 targets, 3.6 million on `dns_wire`, 528,000 on `pkcs12`) |
 | Parser differential | 0 of 61 RFC cases read wrongly |
 
 ## Not claimed

@@ -78,6 +78,12 @@ pub enum H2Error {
 }
 
 fn copy_io(io: &std::io::Error) -> std::io::Error {
+    if let Some(record) = io
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<leyline_bssl_tokio::RecordError>())
+    {
+        return std::io::Error::new(io.kind(), record.clone());
+    }
     std::io::Error::new(io.kind(), io.to_string())
 }
 
@@ -108,14 +114,14 @@ impl H2Error {
 
     /// Returns true when the error ends the whole connection, not one stream.
     pub(crate) fn connection_failed(&self) -> bool {
-        matches!(
-            self,
+        match self {
+            Self::Io(io) => !crate::error::is_tls_record_error(io),
             Self::Connection { .. }
-                | Self::NotSent
-                | Self::Io(_)
-                | Self::Hpack(_)
-                | Self::FrameTooLarge { .. }
-        )
+            | Self::NotSent
+            | Self::Hpack(_)
+            | Self::FrameTooLarge { .. } => true,
+            _ => false,
+        }
     }
 
     /// Returns true when the peer never processed the request, so it is safe to send again.
@@ -145,6 +151,9 @@ impl From<H2Error> for Error {
         match e {
             H2Error::BodyLimit(limit) => limit.error(),
             H2Error::RequestBody(io) => Error::from_request_body(io),
+            H2Error::Io(io) if crate::error::is_tls_record_error(&io) => {
+                Error::new(Kind::Tls).with_source(io)
+            }
             other => Error::new(Kind::Http2).with_cause(other),
         }
     }
@@ -154,11 +163,13 @@ impl Cause for H2Error {
     fn is_closed(&self) -> bool {
         matches!(
             self,
-            Self::Io(_)
-                | Self::Connection {
-                    code: ErrorCode::NoError,
-                    ..
-                }
+            Self::Io(io) if !crate::error::is_tls_record_error(io)
+        ) || matches!(
+            self,
+            Self::Connection {
+                code: ErrorCode::NoError,
+                ..
+            }
         )
     }
 
