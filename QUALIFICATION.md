@@ -73,7 +73,7 @@ Each scenario fails when the stated invariant breaks.
 
 Two defaults come from these scenarios:
 
-- A host accepts 1,024 waiting HTTP/1.1 requests; the next request fails with `Overloaded`. `SessionBuilder::max_pending_per_host(None)` removes the limit.
+- A host accepts 1,024 waiting HTTP/1.1 requests; the next request fails with `Overloaded`. `SessionBuilder::host_limits(HostLimits::new().max_pending(None))` removes the limit.
 - An address that fails to connect 5 times in a row moves to the back of the dial order for 30 seconds times the number of times it was ejected, up to 300 seconds. A successful connection clears its record.
 
 ## Measured

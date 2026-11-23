@@ -120,7 +120,7 @@ tab.page(account.page);
 # }
 ```
 
-`tab.set_current(page)` starts the tab on the saved page, so the next request carries it as its `Referer`. `autosave` writes only the session; write your struct yourself.
+`tab.page(page)` starts the tab on the saved page, so the next request carries it as its `Referer`. `autosave` writes only the session; write your struct yourself.
 
 The optional [HTTP cache](api-clients.md#cache-responses) lives in memory and is not saved with the account. Leyline keeps no `localStorage`, `sessionStorage`, IndexedDB, or service workers, because it runs no scripts.
 
