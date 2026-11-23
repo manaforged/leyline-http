@@ -237,6 +237,7 @@ pub(super) fn sweep_cancelled_streams(
     }
 }
 
+#[cfg(test)]
 pub(super) fn fail_all(
     streams: &mut HashMap<u64, H3Stream>,
     pending: &mut VecDeque<H3Command>,
@@ -251,7 +252,6 @@ pub(super) fn fail_all(
         closed,
         reason,
         H3SendError::Closed,
-        H3SendError::NotSent,
     );
 }
 
@@ -262,7 +262,6 @@ pub(super) fn fail_all_with(
     closed: &AtomicBool,
     reason: String,
     active_err: fn(String) -> H3SendError,
-    pending_err: fn(String) -> H3SendError,
 ) {
     closed.store(true, Ordering::Release);
     commands.close();
@@ -281,8 +280,7 @@ pub(super) fn fail_all_with(
         }
     }
     for cmd in pending.drain(..) {
-        let H3Command::Request { resp_tx, .. } = cmd;
-        drop(resp_tx.send(Err(pending_err(reason.clone()))));
+        reject_unsent(cmd, reason.clone());
     }
 }
 

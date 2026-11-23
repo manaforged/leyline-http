@@ -40,8 +40,7 @@ impl<'a> Route<'a> {
             this.hooked(self.session, hook)?;
         }
         self.last_method = Some(this.method.clone());
-        let origin = self.pool.and(this.url()).and_then(Origin::of);
-        let lease = self.lease(&mut this, origin.as_ref());
+        let (origin, lease) = self.lease(&mut this);
         let used = self.used_proxy(&mut this)?;
         crate::trace::note_proxy(used.as_deref());
         let leased = match &lease {
@@ -66,16 +65,15 @@ impl<'a> Route<'a> {
         result
     }
 
-    fn lease(&self, this: &mut Draft, origin: Option<&Origin>) -> Option<Box<Lease>> {
-        let pool = self.pool?;
-        if let Some(host) = this.url().and_then(url::Url::host_str)
-            && pool.bypasses_all(host)
-        {
-            return None;
-        }
-        let lease = Box::new(pool.lease(origin, self.last)?);
+    fn lease(&self, this: &mut Draft) -> (Option<Origin>, Option<Box<Lease>>) {
+        let Some((pool, url)) = self.pool.zip(this.url()) else {
+            return (None, None);
+        };
+        let Some((origin, lease)) = pool.lease_for(url, self.last) else {
+            return (None, None);
+        };
         this.carry.overrides_mut().proxy = Some(lease.config().clone());
-        Some(lease)
+        (origin, Some(Box::new(lease)))
     }
 
     fn observe(&self, response: &Response) {

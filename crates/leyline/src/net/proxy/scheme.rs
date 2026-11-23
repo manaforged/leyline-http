@@ -113,8 +113,8 @@ impl ProxyUrl {
         crate::util::masked(headers.iter().map(|(k, _)| (k.as_str(), &b"***"[..])))
     }
 
-    pub(crate) fn push_header(&mut self, name: String, value: String) {
-        self.headers.push((name, value));
+    pub(crate) fn extend_headers(&mut self, headers: &[(String, String)]) {
+        self.headers.extend(headers.iter().cloned());
     }
 
     pub(crate) fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {

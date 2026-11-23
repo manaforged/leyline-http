@@ -170,6 +170,19 @@ impl Lease {
             Ok(resp) => resp.block().is_some(),
             Err(_) => return,
         };
+        self.record_outcome(strike, origin, answered);
+    }
+
+    pub(crate) fn record_handshake<T>(&self, result: &Result<T>, origin: Option<&Origin>) {
+        let strike = match result {
+            Err(err) if err.is_proxy() => true,
+            Ok(_) => false,
+            Err(_) => return,
+        };
+        self.record_outcome(strike, origin, origin);
+    }
+
+    fn record_outcome(&self, strike: bool, origin: Option<&Origin>, answered: Option<&Origin>) {
         let mut state = self.pool.lock();
         if !strike {
             state.health[self.index].failures = 0;

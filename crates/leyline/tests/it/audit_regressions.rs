@@ -632,7 +632,7 @@ async fn proxy_pool_no_proxy_stats_custom_headers_and_websocket_pool() {
             .unwrap();
         let ws_pool_session = Session::builder()
             .tls(ws_origin.tls())
-            .proxy(leyline::Proxy::list(["http://127.0.0.1:1"]))
+            .proxy(leyline::Proxy::list(["http://127.0.0.1:1", "http://127.0.0.1:2"]).ban_after(1))
             .build()
             .unwrap();
         let ws_url = ws_origin.url("/ws").replacen("https://", "wss://", 1);
@@ -641,6 +641,20 @@ async fn proxy_pool_no_proxy_stats_custom_headers_and_websocket_pool() {
             ws_err.kind(),
             Kind::Proxy,
             "WebSocket on Proxy::list session must dial the proxy, not direct: {ws_err:?}"
+        );
+        let ws_stats = ws_pool_session.stats();
+        assert!(
+            ws_stats.proxy_banned_until("http://127.0.0.1:1").is_some(),
+            "dead proxy used for WebSocket handshake must be struck and banned"
+        );
+        let ws_err2 = ws_pool_session.get(&ws_url).websocket().await.unwrap_err();
+        assert_eq!(ws_err2.kind(), Kind::Proxy);
+        assert!(
+            ws_pool_session
+                .stats()
+                .proxy_banned_until("http://127.0.0.1:2")
+                .is_some(),
+            "second WebSocket handshake must rotate past banned proxy to the next entry"
         );
         assert!(
             ws_origin.requests().await.is_empty(),

@@ -43,13 +43,11 @@ impl Session {
                 "WebSocket handshakes are not supported over HTTP/3",
             ));
         }
-        let origin = Origin::of(http_url);
-        let lease = self
+        let (lease_origin, lease) = self
             .proxy_pool()
-            .filter(|pool| {
-                carry.proxy().is_none() && !pool.bypasses_all(http_url.host_str().unwrap_or(""))
-            })
-            .and_then(|pool| pool.lease(origin.as_ref(), None));
+            .filter(|_| carry.proxy().is_none())
+            .and_then(|pool| pool.lease_for(http_url, None))
+            .map_or((None, None), |(origin, lease)| (origin, Some(lease)));
         let leased_session = match &lease {
             Some(lease) => Some(lease.session(self)?),
             None => None,
@@ -76,27 +74,34 @@ impl Session {
             options: &config,
         };
 
-        let try_h2 = matches!(protocol, super::Protocol::Http2)
-            || (config.prefer_http2 && protocol.tcp_offers_h2());
-        if try_h2 {
-            if let Some(conn) = WebSocket::connect_h2(
-                &session.inner.pool,
-                &session.inner.connector,
-                &session.inner.h2_config,
-                &handshake,
-            )
-            .await?
-            {
-                return Ok(conn);
+        let result = async {
+            let try_h2 = matches!(protocol, super::Protocol::Http2)
+                || (config.prefer_http2 && protocol.tcp_offers_h2());
+            if try_h2 {
+                if let Some(conn) = WebSocket::connect_h2(
+                    &session.inner.pool,
+                    &session.inner.connector,
+                    &session.inner.h2_config,
+                    &handshake,
+                )
+                .await?
+                {
+                    return Ok(conn);
+                }
+                if matches!(protocol, super::Protocol::Http2) {
+                    return Err(Error::new(crate::error::Kind::Http2)
+                        .with_message("HTTP/2 extended CONNECT is not offered by the server"));
+                }
+                tracing::debug!("H2 extended CONNECT not available, falling back to H1 Upgrade");
             }
-            if matches!(protocol, super::Protocol::Http2) {
-                return Err(Error::new(crate::error::Kind::Http2)
-                    .with_message("HTTP/2 extended CONNECT is not offered by the server"));
-            }
-            tracing::debug!("H2 extended CONNECT not available, falling back to H1 Upgrade");
-        }
 
-        WebSocket::connect_h1(&session.inner.connector, &handshake).await
+            WebSocket::connect_h1(&session.inner.connector, &handshake).await
+        }
+        .await;
+        if let Some(lease) = lease {
+            lease.record_handshake(&result, lease_origin.as_ref());
+        }
+        result
     }
 
     fn websocket_headers(&self, http_url: &url::Url, caller: &HeaderList) -> Vec<(String, String)> {

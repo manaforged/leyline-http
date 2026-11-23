@@ -354,11 +354,7 @@ pub(super) async fn resolve_peer(
     let addrs = resolver
         .resolve(host, port)
         .await
-        .map_err(|e| match e.kind() {
-            std::io::ErrorKind::TimedOut => QuicError::Timeout(format!("dns: {e}")),
-            std::io::ErrorKind::InvalidInput => QuicError::Config(format!("dns: {e}")),
-            _ => QuicError::Dns(format!("dns: {e}")),
-        })?;
+        .map_err(|e| QuicError::from_net_dns(crate::net::NetError::from_dns(e)))?;
     addrs
         .iter()
         .find(|a| a.is_ipv4())

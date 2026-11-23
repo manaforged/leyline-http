@@ -114,6 +114,19 @@ impl ProxyPool {
         !self.entries.is_empty() && self.entries.iter().all(|e| e.config.bypasses(host))
     }
 
+    pub(crate) fn lease_for(
+        &self,
+        url: &url::Url,
+        last: Option<usize>,
+    ) -> Option<(Option<crate::core::config::Origin>, Lease)> {
+        if self.bypasses_all(url.host_str().unwrap_or("")) {
+            return None;
+        }
+        let origin = crate::core::config::Origin::of(url);
+        let lease = self.lease(origin.as_ref(), last)?;
+        Some((origin, lease))
+    }
+
     pub(crate) fn for_doh(&self) -> Self {
         let entries: Arc<[Entry]> = self
             .entries

@@ -157,14 +157,12 @@ impl Proxy {
     }
 
     pub(crate) fn push_validated_headers(&mut self, headers: &[(String, String)]) {
-        for (k, v) in headers {
-            for rule in &mut self.rules {
-                if let Ok(proxy) = &mut rule.parsed {
-                    proxy.push_header(k.clone(), v.clone());
-                }
+        for rule in &mut self.rules {
+            if let Ok(proxy) = &mut rule.parsed {
+                proxy.extend_headers(headers);
             }
-            self.headers.push((k.clone(), v.clone()));
         }
+        self.headers.extend(headers.iter().cloned());
         if let Some(pool) = self.pool.take() {
             self.pool = Some(pool.with_headers(headers));
         }
@@ -381,9 +379,7 @@ impl Proxy {
         let Some(mut proxy) = chosen.rule_for(url)?.cloned() else {
             return Ok(None);
         };
-        for (k, v) in &self.headers {
-            proxy.push_header(k.clone(), v.clone());
-        }
+        proxy.extend_headers(&self.headers);
         Ok(Some(Cow::Owned(proxy)))
     }
 

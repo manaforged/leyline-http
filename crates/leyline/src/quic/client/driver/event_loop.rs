@@ -96,19 +96,21 @@ impl H3Loop {
 
     async fn settle(&mut self) -> ControlFlow<()> {
         if let Err(err) = self.flush().await {
-            return if matches!(err, crate::quic::error::QuicError::Tls(_)) {
-                self.stop_tls(err.to_string())
+            let kind = if matches!(err, crate::quic::error::QuicError::Tls(_)) {
+                H3SendError::Tls
             } else {
-                self.stop(err.to_string())
+                H3SendError::Closed
             };
+            return self.stop(err.to_string(), kind);
         }
         if self.conn.is_closed() {
             let reason = close_reason("h3", 0, &self.conn);
-            return if crate::quic::connection::is_crypto_close(&self.conn) {
-                self.stop_tls(reason)
+            let kind = if crate::quic::connection::is_crypto_close(&self.conn) {
+                H3SendError::Tls
             } else {
-                self.stop(reason)
+                H3SendError::Closed
             };
+            return self.stop(reason, kind);
         }
         if self.commands_closed && self.streams.is_empty() && self.pending.is_empty() {
             self.closed.store(true, Ordering::Release);
@@ -125,7 +127,7 @@ impl H3Loop {
             chunk = self.body_chunk_rx.recv() => self.on_body_chunk(chunk),
             recv = self.socket.recv(&mut self.buf) => {
                 if let Err(reason) = self.on_datagram(recv) {
-                    return self.stop(reason);
+                    return self.stop(reason, H3SendError::Closed);
                 }
             }
             _ = tokio::time::sleep(timeout) => self.conn.on_timeout(),
@@ -137,27 +139,14 @@ impl H3Loop {
         flush_egress(&self.socket, &mut self.conn, &mut self.out)
     }
 
-    fn stop(&mut self, reason: String) -> ControlFlow<()> {
-        fail_all(
-            &mut self.streams,
-            &mut self.pending,
-            &mut self.command_rx,
-            &self.closed,
-            reason,
-        );
-        self.open_streams.store(0, Ordering::Relaxed);
-        ControlFlow::Break(())
-    }
-
-    fn stop_tls(&mut self, reason: String) -> ControlFlow<()> {
+    fn stop(&mut self, reason: String, stream_err: fn(String) -> H3SendError) -> ControlFlow<()> {
         super::fail_all_with(
             &mut self.streams,
             &mut self.pending,
             &mut self.command_rx,
             &self.closed,
             reason,
-            H3SendError::Tls,
-            H3SendError::Tls,
+            stream_err,
         );
         self.open_streams.store(0, Ordering::Relaxed);
         ControlFlow::Break(())

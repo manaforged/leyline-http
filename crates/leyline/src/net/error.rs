@@ -51,8 +51,17 @@ pub enum NetError {
 }
 
 impl NetError {
+    pub(crate) fn from_dns(err: io::Error) -> Self {
+        if err.kind() == io::ErrorKind::InvalidInput {
+            Self::Config(err)
+        } else {
+            Self::Dns(err)
+        }
+    }
+
     pub(crate) fn kind(&self) -> Kind {
         match self {
+            Self::Dns(e) if e.kind() == io::ErrorKind::TimedOut => Kind::Timeout,
             Self::Dns(_) => Kind::Dns,
             Self::TcpConnect(_) => Kind::Connect,
             Self::Config(_) => Kind::Config,

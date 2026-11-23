@@ -23,6 +23,15 @@ pub(crate) enum QuicError {
 }
 
 impl QuicError {
+    pub(crate) fn from_net_dns(err: crate::net::NetError) -> Self {
+        let msg = format!("dns: {err}");
+        match err.kind() {
+            Kind::Timeout => Self::Timeout(msg),
+            Kind::Config => Self::Config(msg),
+            _ => Self::Dns(msg),
+        }
+    }
+
     pub(crate) const fn kind(&self) -> Kind {
         match self {
             Self::Config(_) => Kind::Config,
