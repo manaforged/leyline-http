@@ -96,10 +96,10 @@ H2_PACED_ROWS=()
 for run in $(seq 1 "$RUNS"); do
   run_suite "${TAG_PREFIX}-paced-h2-r$run-c2x16" \
     MODE=paced PACED_SECONDS="${PACED_LOW_SECONDS:-10}" PROFILE=bare PROTO=h2 ROUNDS="$PACED_ROUNDS" \
-    CELLS="c2x16:2:16:2000" LIBS="leyline hyper reqwest wreq curl h2"
+    CELLS="c2x16:2:16:2000" LIBS="leyline leyline-cores hyper reqwest wreq curl h2"
   run_suite "${TAG_PREFIX}-paced-h2-r$run-c8x256" \
     MODE=paced PACED_SECONDS="${PACED_HIGH_SECONDS:-5}" PROFILE=bare PROTO=h2 ROUNDS="$PACED_ROUNDS" \
-    CELLS="c8x256:8:256:50000" LIBS="leyline hyper reqwest wreq curl h2"
+    CELLS="c8x256:8:256:50000" LIBS="leyline leyline-cores hyper reqwest wreq curl h2"
   mkdir -p "$C/results/${TAG_PREFIX}-paced-h2-r$run"
   cat "$C/results/${TAG_PREFIX}-paced-h2-r$run-c2x16/rows.txt" \
       "$C/results/${TAG_PREFIX}-paced-h2-r$run-c8x256/rows.txt" \
@@ -116,10 +116,10 @@ H1_PACED_ROWS=()
 for run in $(seq 1 "$RUNS"); do
   run_suite "${TAG_PREFIX}-paced-h1-r$run-c8" \
     MODE=paced PACED_SECONDS="${PACED_LOW_SECONDS:-10}" PROFILE=bare PROTO=h1 ROUNDS="$PACED_ROUNDS" \
-    CELLS="c8:1:8:2000" LIBS="leyline hyper reqwest wreq ureq curl nethttp fasthttp"
+    CELLS="c8:1:8:2000" LIBS="leyline leyline-cores hyper reqwest wreq ureq curl nethttp fasthttp"
   run_suite "${TAG_PREFIX}-paced-h1-r$run-c64" \
     MODE=paced PACED_SECONDS="${PACED_HIGH_SECONDS:-5}" PROFILE=bare PROTO=h1 ROUNDS="$PACED_ROUNDS" \
-    CELLS="c64:64:64:20000" LIBS="leyline hyper reqwest wreq ureq curl nethttp fasthttp"
+    CELLS="c64:64:64:20000" LIBS="leyline leyline-cores hyper reqwest wreq ureq curl nethttp fasthttp"
   mkdir -p "$C/results/${TAG_PREFIX}-paced-h1-r$run"
   cat "$C/results/${TAG_PREFIX}-paced-h1-r$run-c8/rows.txt" \
       "$C/results/${TAG_PREFIX}-paced-h1-r$run-c64/rows.txt" \

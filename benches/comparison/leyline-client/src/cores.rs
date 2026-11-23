@@ -1,8 +1,11 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Barrier};
+use std::sync::{Arc, Barrier, OnceLock};
 use std::time::Instant;
 
 use leyline::Session;
+
+use crate::paced::{Batch, Plan};
+use crate::paced_tokio;
 
 /// Returns the runtime count `CMP_CORES` asks for, capped at the connection count for HTTP/2.
 pub fn threads(connections: usize) -> Option<usize> {
@@ -146,4 +149,116 @@ async fn fetch(session: &Session, url: &str, expected: &[u8]) {
         resp.bytes().await.expect("body") == expected,
         "response body mismatch"
     );
+}
+
+async fn run_paced_core(
+    session: Session,
+    index: usize,
+    threads: usize,
+    plan: Plan,
+    start: Arc<OnceLock<Instant>>,
+    ready: Arc<Barrier>,
+    go: Arc<Barrier>,
+    url: String,
+    expected: Arc<[u8]>,
+) -> Option<Batch> {
+    let mine: Vec<usize> = (index..plan.workers).step_by(threads).collect();
+    if !mine.is_empty() {
+        fetch(&session, &url, &expected).await;
+    }
+    ready.wait();
+    go.wait();
+    if mine.is_empty() {
+        return None;
+    }
+    let start = *start.get().expect("paced start");
+    let mut set = tokio::task::JoinSet::new();
+    for worker in mine {
+        let (s, u, e) = (session.clone(), url.clone(), Arc::clone(&expected));
+        set.spawn(async move {
+            paced_tokio::run_worker(plan, start, worker, move |_| {
+                let (s, u, e) = (s.clone(), u.clone(), Arc::clone(&e));
+                async move { fetch(&s, &u, &e).await }
+            })
+            .await
+        });
+    }
+    let mut batches = Vec::new();
+    while let Some(part) = set.join_next().await {
+        batches.push(part.expect("paced worker join"));
+    }
+    Some(Batch::merge(batches.into_iter()))
+}
+
+/// Runs an open-loop paced schedule across `threads` single-threaded runtimes.
+pub fn run_paced(
+    threads: usize,
+    plan: Plan,
+    url: &str,
+    ca: Option<&[u8]>,
+    expected: &Arc<[u8]>,
+) -> Batch {
+    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
+    let ready = Arc::new(Barrier::new(threads + 1));
+    let go = Arc::new(Barrier::new(threads + 1));
+    let start = Arc::new(OnceLock::new());
+    if threads == cores && leyline_cmp_client::h1() {
+        let next = Arc::new(AtomicUsize::new(0));
+        let builder = leyline_cmp_client::session_builder(ca);
+        let (url, expected) = (url.to_owned(), Arc::clone(expected));
+        let (r, g, st) = (Arc::clone(&ready), Arc::clone(&go), Arc::clone(&start));
+        let runner = std::thread::spawn(move || {
+            builder
+                .run_per_core(|session| {
+                    let index = next.fetch_add(1, Ordering::Relaxed);
+                    run_paced_core(
+                        session,
+                        index,
+                        threads,
+                        plan,
+                        Arc::clone(&st),
+                        Arc::clone(&r),
+                        Arc::clone(&g),
+                        url.clone(),
+                        Arc::clone(&expected),
+                    )
+                })
+                .expect("per-core sessions build")
+        });
+        ready.wait();
+        let _ = start.set(plan.start());
+        go.wait();
+        return Batch::merge(
+            runner
+                .join()
+                .expect("per-core runner")
+                .into_iter()
+                .flatten(),
+        );
+    }
+    let handles: Vec<_> = (0..threads)
+        .map(|index| {
+            let (url, ca, expected) =
+                (url.to_owned(), ca.map(<[u8]>::to_vec), Arc::clone(expected));
+            let (r, g, st) = (Arc::clone(&ready), Arc::clone(&go), Arc::clone(&start));
+            std::thread::spawn(move || {
+                let runtime = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("runtime");
+                runtime.block_on(async move {
+                    let session = crate::build(ca.as_deref(), None);
+                    run_paced_core(session, index, threads, plan, st, r, g, url, expected).await
+                })
+            })
+        })
+        .collect();
+    ready.wait();
+    let _ = start.set(plan.start());
+    go.wait();
+    Batch::merge(
+        handles
+            .into_iter()
+            .filter_map(|h| h.join().expect("core paced thread")),
+    )
 }
