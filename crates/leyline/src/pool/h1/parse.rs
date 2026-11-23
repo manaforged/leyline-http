@@ -165,6 +165,7 @@ where
     S: AsyncRead + Unpin + ?Sized,
 {
     limit.admit(0, len).map_err(BodyLimit::error)?;
+    body.reserve(len.saturating_sub(body.len()).min(1024 * 1024));
     read_fixed_into(stream, &mut body, len).await?;
     body.truncate(len);
     Ok(body)

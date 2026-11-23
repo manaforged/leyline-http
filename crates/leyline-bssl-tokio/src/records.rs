@@ -12,6 +12,7 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 const INBOUND: usize = HEADER_LEN + MAX_BODY;
 const INBOUND_START: usize = 4 * 1024;
+const INBOUND_MAX: usize = 64 * 1024;
 const MAX_HANDSHAKE: usize = 64 * 1024;
 const RECORDS_PER_WRITE: usize = 4;
 const CLOSE_NOTIFY: [u8; 2] = [1, 0];
@@ -31,6 +32,7 @@ pub struct RecordStream<S> {
     sent: usize,
     eof: bool,
     closing: bool,
+    grow_inbound: bool,
 }
 
 impl<S> std::fmt::Debug for RecordStream<S> {
@@ -85,6 +87,7 @@ impl<S> RecordStream<S> {
             sent: 0,
             eof: false,
             closing: false,
+            grow_inbound: false,
         }
     }
 
@@ -115,6 +118,7 @@ impl<S> RecordStream<S> {
             sent: self.sent,
             eof: self.eof,
             closing: self.closing,
+            grow_inbound: self.grow_inbound,
         })
     }
 
@@ -208,15 +212,27 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RecordStream<S> {
             self.end -= self.start;
             self.start = 0;
         }
-        if self.end == self.inbound.len() {
-            let mut grown = vec![0; INBOUND.max(2 * self.inbound.len())].into_boxed_slice();
-            grown[..self.end].copy_from_slice(&self.inbound[..self.end]);
-            self.inbound = grown;
+        if self.end == self.inbound.len() || self.grow_inbound {
+            self.grow_inbound = false;
+            let next = if self.end == self.inbound.len() {
+                INBOUND.max(2 * self.inbound.len())
+            } else {
+                (2 * self.inbound.len()).max(INBOUND).min(INBOUND_MAX)
+            };
+            if next > self.inbound.len() {
+                let mut grown = vec![0; next].into_boxed_slice();
+                grown[..self.end].copy_from_slice(&self.inbound[..self.end]);
+                self.inbound = grown;
+            }
         }
+        let avail = self.inbound.len() - self.end;
         let mut buf = ReadBuf::new(&mut self.inbound[self.end..]);
         std::task::ready!(Pin::new(&mut self.stream).poll_read(cx, &mut buf))?;
         let n = buf.filled().len();
         self.end += n;
+        if n == avail && self.inbound.len() < INBOUND_MAX {
+            self.grow_inbound = true;
+        }
         Poll::Ready(Ok(n))
     }
 }

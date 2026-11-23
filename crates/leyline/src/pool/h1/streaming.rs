@@ -83,9 +83,23 @@ pub(super) struct Drain {
     wait: Duration,
 }
 
+async fn read_into_bytes_mut<S>(
+    stream: &mut S,
+    buf: &mut bytes::BytesMut,
+    max: usize,
+) -> io::Result<usize>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    buf.reserve(max);
+    stream
+        .read_buf(&mut bytes::BufMut::limit(&mut *buf, max))
+        .await
+}
+
 pub(super) async fn stream_fixed_into(
     stream: &mut dyn H1Io,
-    initial: Vec<u8>,
+    mut initial: Vec<u8>,
     len: u64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
     drain: Drain,
@@ -93,14 +107,16 @@ pub(super) async fn stream_fixed_into(
 ) -> io::Result<bool> {
     let take = (initial.len() as u64).min(len) as usize;
     let mut remaining = len - take as u64;
-    if take > 0 && !send_chunk(tx, Bytes::copy_from_slice(&initial[..take]), inline).await {
-        return Ok(drain_fixed(stream, remaining, drain).await);
+    if take > 0 {
+        initial.truncate(take);
+        if !send_chunk(tx, Bytes::from(initial), inline).await {
+            return Ok(drain_fixed(stream, remaining, drain).await);
+        }
     }
-    let mut buf = initial;
+    let mut buf = bytes::BytesMut::new();
     while remaining > 0 {
-        buf.clear();
         let want = usize::try_from(remaining).map_or(READ_CHUNK, |left| left.min(READ_CHUNK));
-        let Some(read) = until_closed(tx, read_into(stream, &mut buf, want)).await else {
+        let Some(read) = until_closed(tx, read_into_bytes_mut(stream, &mut buf, want)).await else {
             return Ok(drain_fixed(stream, remaining, drain).await);
         };
         let n = read?;
@@ -108,7 +124,7 @@ pub(super) async fn stream_fixed_into(
             return Err(cut_short().into_error().into_io());
         }
         remaining -= n as u64;
-        if !send_chunk(tx, Bytes::copy_from_slice(&buf[..n]), inline).await {
+        if !send_chunk(tx, buf.split().freeze(), inline).await {
             return Ok(drain_fixed(stream, remaining, drain).await);
         }
     }
@@ -141,17 +157,17 @@ pub(super) async fn stream_to_close_into(
     if !initial.is_empty() && !send_chunk(tx, Bytes::from(initial), inline).await {
         return Ok(false);
     }
-    let mut buf = Vec::new();
+    let mut buf = bytes::BytesMut::new();
     loop {
-        buf.clear();
-        let Some(read) = until_closed(tx, read_into(stream, &mut buf, READ_CHUNK)).await else {
+        let Some(read) = until_closed(tx, read_into_bytes_mut(stream, &mut buf, READ_CHUNK)).await
+        else {
             return Ok(false);
         };
         let n = read?;
         if n == 0 {
             return Ok(true);
         }
-        if !send_chunk(tx, Bytes::copy_from_slice(&buf[..n]), inline).await {
+        if !send_chunk(tx, buf.split().freeze(), inline).await {
             return Ok(false);
         }
     }

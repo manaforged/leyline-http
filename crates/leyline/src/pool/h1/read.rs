@@ -2,7 +2,7 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 
 use super::*;
 
-pub(super) const READ_CHUNK: usize = 8192;
+pub(super) const READ_CHUNK: usize = 64 * 1024;
 
 pub(super) const MAX_H1_CHUNK_LINE_BYTES: usize = 16 * 1024;
 

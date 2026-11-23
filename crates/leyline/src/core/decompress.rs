@@ -89,32 +89,65 @@ impl Decoder {
             .map_err(BodyLimit::error)?;
         self.raw_read += chunk.len();
         self.fed = true;
-        let mut data = chunk.to_vec();
-        for stage in &mut self.stages {
-            data = stage.write(&data)?;
+        match self.stages.as_mut_slice() {
+            [] => self.emit_slice(chunk, out),
+            [single] => {
+                let before = out.len();
+                single.write_into(chunk, out)?;
+                self.produced = self.produced.saturating_add(out.len() - before);
+                Ok(())
+            }
+            [first, rest @ ..] => {
+                let mut data = first.write(chunk)?;
+                let Some((last, middle)) = rest.split_last_mut() else {
+                    return self.emit_slice(&data, out);
+                };
+                for stage in middle {
+                    data = stage.write(&data)?;
+                }
+                let before = out.len();
+                last.write_into(&data, out)?;
+                self.produced = self.produced.saturating_add(out.len() - before);
+                Ok(())
+            }
         }
-        self.emit(data, out)
     }
 
     pub(crate) fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
         if !self.fed {
             return Ok(());
         }
-        for index in 0..self.stages.len() {
+        if let [single] = self.stages.as_mut_slice() {
+            let before = out.len();
+            single.finish_into(out)?;
+            self.produced = self.produced.saturating_add(out.len() - before);
+            return Ok(());
+        }
+        let len = self.stages.len();
+        for index in 0..len {
+            if index + 1 == len {
+                let before = out.len();
+                self.stages[index].finish_into(out)?;
+                self.produced = self.produced.saturating_add(out.len() - before);
+                continue;
+            }
             let mut data = self.stages[index].finish()?;
-            for stage in &mut self.stages[index + 1..] {
+            let (middle, last) = self.stages[index + 1..].split_at_mut(len - index - 2);
+            for stage in middle {
                 data = stage.write(&data)?;
             }
-            self.emit(data, out)?;
+            let before = out.len();
+            last[0].write_into(&data, out)?;
+            self.produced = self.produced.saturating_add(out.len() - before);
         }
         Ok(())
     }
 
-    fn emit(&mut self, data: Vec<u8>, out: &mut Vec<u8>) -> Result<()> {
+    fn emit_slice(&mut self, data: &[u8], out: &mut Vec<u8>) -> Result<()> {
         let room = self.cap.room(self.produced);
         self.produced = self.produced.saturating_add(data.len());
         if data.len() <= room {
-            out.extend_from_slice(&data);
+            out.extend_from_slice(data);
             return Ok(());
         }
         match self.cap.overflow {
@@ -135,7 +168,12 @@ pub(crate) fn decompress_body(
     let Some(mut decoder) = Decoder::new(codings, config)? else {
         return Ok((body, false));
     };
-    let mut out = Vec::new();
+    let hint = body
+        .len()
+        .saturating_mul(2)
+        .min(1024 * 1024)
+        .min(config.max_body_size);
+    let mut out = Vec::with_capacity(hint);
     decoder.feed(&body, &mut out)?;
     decoder.finish(&mut out)?;
     Ok((out, true))
