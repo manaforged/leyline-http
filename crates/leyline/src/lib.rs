@@ -142,12 +142,8 @@ pub mod internals {
     pub mod fuzz {
         pub use crate::cookie::parse::parse_cookie_date;
         pub use crate::net::proxy::http::validate_connect_response;
+        pub use crate::pool::h1::parse::parse_validated_h1_head as parse_h1_head;
         pub use crate::pool::h1::parse::read_chunked_body;
-
-        /// Parses an HTTP/1.1 response head into its status, fields, and minor version.
-        pub fn parse_h1_head(head: &[u8]) -> crate::Result<(u16, http::HeaderMap, u8)> {
-            crate::wire::h1::parse_h1_head(head)
-        }
 
         /// Parses a `Set-Cookie` value received from `request_url`.
         pub fn parse_set_cookie(header: &str, request_url: &str) -> Option<crate::cookie::Cookie> {

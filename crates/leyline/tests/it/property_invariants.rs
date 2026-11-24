@@ -45,7 +45,7 @@ fn prop_h1_head_ows_and_framing_invariants() {
     let values: &[&[u8]] = &[b"ok", b"a b", b"v=1; x=2", b"hello\tworld", b"12345"];
 
     for case in 0..400 {
-        let status = 100 + (rng.range(500) as u16);
+        let status = 200 + (rng.range(400) as u16);
         let minor = rng.range(2);
         let mut head = format!("HTTP/1.{minor} {status} OK\r\n").into_bytes();
         let count = 1 + rng.range(6);
@@ -82,7 +82,7 @@ fn prop_h1_head_ows_and_framing_invariants() {
         let len = rng.range(128);
         let noise = rng.bytes(len);
         if let Ok((status, headers, minor)) = parse_h1_head(&noise) {
-            assert!((100..=999).contains(&status));
+            assert!((200..=999).contains(&status));
             assert!(minor <= 1);
             assert!(
                 !(headers.contains_key("content-length")

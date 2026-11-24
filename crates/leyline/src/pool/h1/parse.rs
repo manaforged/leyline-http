@@ -64,6 +64,17 @@ pub(super) fn classify<'h>(
     Ok((status, minor, scanned))
 }
 
+/// Parses and validates a final HTTP/1.1 response head into its status, fields, and minor version.
+#[cfg(feature = "bench-internals")]
+pub fn parse_validated_h1_head(head: &[u8]) -> Result<(u16, http::HeaderMap, u8), Error> {
+    let mut state = ResponseState::default();
+    let Some((status, minor, _, seen)) = final_head(head, &Method::GET, &mut state)? else {
+        return Err(malformed("informational response without final head"));
+    };
+    let headers = Fields::raw(Bytes::copy_from_slice(head), seen).into_map();
+    Ok((status, headers, minor))
+}
+
 pub(super) struct Buffered {
     pub(super) body: Vec<u8>,
     pub(super) trailers: http::HeaderMap,

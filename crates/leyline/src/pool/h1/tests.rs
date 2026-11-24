@@ -28,6 +28,42 @@ fn obs_fold_appends_to_previous_header_never_creates_one() {
 }
 
 #[test]
+fn obs_fold_with_blank_or_empty_value_keeps_ows_trimmed() {
+    let (_, headers, _) =
+        parse_h1_head(b"HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\n \r\nX-Empty: \r\n folded\r\n\r\n")
+            .expect("valid folded head");
+    assert_eq!(
+        headers.get("set-cookie").expect("set-cookie").as_bytes(),
+        b"a=1"
+    );
+    assert_eq!(
+        headers.get("x-empty").expect("x-empty").as_bytes(),
+        b"folded"
+    );
+    let (_, _, scanned) =
+        crate::wire::h1::scan_head(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n \r\n\r\n")
+            .expect("scan_head parses");
+    scanned
+        .body
+        .validate()
+        .expect("whitespace-only obs-fold on Content-Length must not leave trailing space");
+    let (_, _, folded_from_empty) =
+        crate::wire::h1::scan_head(b"HTTP/1.1 200 OK\r\nContent-Length: \r\n 5\r\n\r\n")
+            .expect("scan_head parses empty-then-folded Content-Length");
+    folded_from_empty
+        .body
+        .validate()
+        .expect("obs-fold after empty Content-Length must validate cleanly");
+    let (_, _, split_length) =
+        crate::wire::h1::scan_head(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n 0\r\n\r\n")
+            .expect("scan_head parses split Content-Length");
+    split_length
+        .body
+        .validate()
+        .expect_err("non-empty obs-fold on Content-Length must append and fail validation");
+}
+
+#[test]
 fn fold_without_previous_header_is_dropped() {
     let head = "HTTP/1.1 200 OK\r\n\tContent-Length: 999\r\n\r\n";
     let (_, headers, _) = parse_h1_head(head.as_bytes()).unwrap();

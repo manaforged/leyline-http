@@ -102,9 +102,12 @@ impl<'a> Sink<'a> for Typed<'_> {
         let Some((name, value)) = self.last.as_mut() else {
             return Ok(());
         };
+        let trimmed = trim_ows(line);
+        if trimmed.is_empty() {
+            return Ok(());
+        }
         let mut joined = value.as_bytes().to_vec();
-        joined.push(b' ');
-        joined.extend_from_slice(trim_ows(line));
+        append_fold(&mut joined, trimmed);
         if let Ok(folded) = http::HeaderValue::from_maybe_shared(Bytes::from(joined)) {
             *value = folded;
             return Ok(());
@@ -113,6 +116,13 @@ impl<'a> Sink<'a> for Typed<'_> {
         self.last = None;
         Ok(())
     }
+}
+
+pub(super) fn append_fold(joined: &mut Vec<u8>, trimmed: &[u8]) {
+    if !joined.is_empty() {
+        joined.push(b' ');
+    }
+    joined.extend_from_slice(trimmed);
 }
 
 pub(crate) fn framing_value(name: &str) -> Result<(), Error> {

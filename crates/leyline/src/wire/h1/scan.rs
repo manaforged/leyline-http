@@ -56,10 +56,11 @@ impl<'a, P: Pick<'a>> Sink<'a> for Fold<'a, P> {
             return Ok(());
         };
         let line = trim_ows(line);
+        if line.is_empty() {
+            return Ok(());
+        }
         if is_valid_header_value(line) {
-            let joined = value.to_mut();
-            joined.push(b' ');
-            joined.extend_from_slice(line);
+            append_fold(value.to_mut(), line);
             return Ok(());
         }
         let key = *key;
