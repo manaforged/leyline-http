@@ -35,11 +35,11 @@ async fn tab_and_link_debug_redact_credentials_and_query() {
             .body("ok")
     })
     .await
-    .unwrap();
+    .expect("test server starts");
     let session = leyline::Session::new();
     let tab = session.tab();
     let url = server.url("/page?api_key=topsecret");
-    let resp = tab.open(&url).await.unwrap();
+    let resp = tab.open(&url).await.expect("tab opens page");
     let tab_debug = format!("{tab:?}");
     assert!(!tab_debug.contains("topsecret"), "{tab_debug}");
 

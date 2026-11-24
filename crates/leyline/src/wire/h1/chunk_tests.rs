@@ -17,7 +17,7 @@ fn trim_ows_only_strips_rfc9110_sp_and_htab() {
     let (_, headers, _) = super::parse_h1_head(
         b"HTTP/1.1 200 OK\r\nX-Trailing: bar \t \r\nContent-Length: 0\r\n\r\n",
     )
-    .unwrap();
+    .expect("valid h1 head");
     assert_eq!(
         headers.get("x-trailing").map(|v| v.as_bytes()),
         Some(b"bar".as_slice())

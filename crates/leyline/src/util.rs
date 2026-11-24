@@ -240,6 +240,9 @@ pub(crate) fn write<T>(rw: &std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+#[cfg(feature = "compression-brotli")]
+pub(crate) const BROTLI_BUFFER_SIZE: usize = 4096;
+
 const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(100 * 365 * 24 * 3600);
 
 pub(crate) fn saturating_after(
@@ -255,9 +258,7 @@ pub(crate) fn saturating_after_tokio(
     now: tokio::time::Instant,
     after: std::time::Duration,
 ) -> tokio::time::Instant {
-    now.checked_add(after)
-        .or_else(|| now.checked_add(FAR_FUTURE.min(after)))
-        .unwrap_or(now)
+    tokio::time::Instant::from_std(saturating_after(now.into_std(), after))
 }
 
 pub(crate) fn epoch_plus(after: std::time::Duration) -> Option<std::time::SystemTime> {

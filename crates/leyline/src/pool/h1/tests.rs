@@ -359,7 +359,7 @@ fn parse_h1_head_rejects_non_token_header_names() {
 async fn chunked_body_rejects_bare_lf_malformed_trailer_and_oversized_line() {
     let oversized = format!("0;{}\r\n\r\n", "a".repeat(17 * 1024));
     for payload in [
-        "1\na\r\n0\r\n\r\n".as_bytes(),
+        b"1;ext=1\n\r\na\r\n0\r\n\r\n".as_slice(),
         b"0\r\nNotAHeader\r\n\r\n",
         b"0\r\nBad Name: 1\r\n\r\n",
         oversized.as_bytes(),

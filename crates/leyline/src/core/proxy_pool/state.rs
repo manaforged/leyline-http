@@ -10,7 +10,7 @@ use crate::core::session::Session;
 use crate::error::Result;
 use crate::util::saturating_after;
 
-const MAX_STICKY_ORIGINS: NonZeroUsize = NonZeroUsize::new(4096).unwrap();
+const MAX_STICKY_ORIGINS: NonZeroUsize = NonZeroUsize::new(4096).expect("non-zero capacity");
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(super) struct Health {

@@ -7,10 +7,12 @@ use crate::wire::{Body, RequestHeaders, ResponseMode};
 
 #[test]
 fn proxy_headers_and_request_headers_cannot_collide_in_cache_key() {
-    let url = Arc::new(url::Url::parse("https://example.com/resource").unwrap());
-    let mut proxy_with_hdr = crate::net::ProxyUrl::parse("http://127.0.0.1:8080").unwrap();
+    let url = Arc::new(url::Url::parse("https://example.com/resource").expect("valid url"));
+    let mut proxy_with_hdr =
+        crate::net::ProxyUrl::parse("http://127.0.0.1:8080").expect("valid proxy url");
     proxy_with_hdr.extend_headers(&[("X-Tag".into(), "1".into())]);
-    let proxy_plain = crate::net::ProxyUrl::parse("http://127.0.0.1:8080").unwrap();
+    let proxy_plain =
+        crate::net::ProxyUrl::parse("http://127.0.0.1:8080").expect("valid proxy url");
 
     let req_proxy_hdr = Prepared {
         method: &Method::GET,

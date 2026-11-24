@@ -2,10 +2,10 @@ use super::*;
 
 #[test]
 fn encodes_standard_a_and_https_queries() {
-    let q = encode_query("example.com.", TYPE_A).unwrap();
+    let q = encode_query("example.com.", TYPE_A).expect("A query encodes");
     assert_eq!(&q[..12], &[0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0]);
     assert_eq!(&q[12..], b"\x07example\x03com\x00\x00\x01\x00\x01");
-    let h = encode_query("secret.test", TYPE_HTTPS).unwrap();
+    let h = encode_query("secret.test", TYPE_HTTPS).expect("HTTPS query encodes");
     assert_eq!(&h[h.len() - 4..], &[0, 65, 0, 1]);
     assert_eq!(encode_query("", TYPE_A), Err(WireError::InvalidName));
     assert_eq!(encode_query("a..b", TYPE_A), Err(WireError::InvalidName));

@@ -13,17 +13,16 @@ use foreign_types::ForeignTypeRef;
 use libc::{c_char, c_int, c_uchar, c_uint, c_void};
 use std::ffi::CStr;
 use std::mem::{self, MaybeUninit};
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::slice;
 use std::str;
 use std::sync::Arc;
 
 fn catch_ffi<T>(fallback: T, f: impl FnOnce() -> T) -> T {
-    catch_unwind(AssertUnwindSafe(f)).unwrap_or(fallback)
+    crate::util::catch_unwind_ffi(f).unwrap_or(fallback)
 }
 
-unsafe fn c_slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
+pub(super) unsafe fn c_slice<'a>(ptr: *const u8, len: usize) -> &'a [u8] {
     if len == 0 || ptr.is_null() {
         &[]
     } else {
@@ -244,9 +243,9 @@ where
         let Some(callback) = session_ctx.ex_data(SslContext::cached_ex_index::<F>()) else {
             return 0;
         };
-        // SAFETY: returning 1 below tells BoringSSL that this callback took ownership of `session`.
+        // SAFETY: once `from_ptr` takes ownership of `session`, we must return 1 even if `callback` panics so BoringSSL does not free it a second time.
         let session = unsafe { SslSession::from_ptr(session) };
-        callback(ssl, session);
+        catch_ffi((), || callback(ssl, session));
         1
     })
 }

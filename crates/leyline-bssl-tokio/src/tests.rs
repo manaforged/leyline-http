@@ -203,7 +203,7 @@ async fn tls13_post_handshake_mtls_alert_normalizes_on_both_ssl_and_record_strea
         drop(
             server_task
                 .await
-                .unwrap()
+                .expect("server task finishes")
                 .expect_err("server rejects missing post-handshake cert"),
         );
 

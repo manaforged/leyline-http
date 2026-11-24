@@ -399,10 +399,13 @@ fn proxy_pool_same_for_doh_checks_len_and_each_entry() {
 #[tokio::test]
 async fn stats_host_lookup_matches_standard_ports_and_round_trips_hosts() {
     let gates = HostGates::new(HostLimits::new().max_in_flight(2));
-    let https_url = url::Url::parse("https://example.com/a").unwrap();
-    let http_url = url::Url::parse("http://example.org/b").unwrap();
-    let _p1 = gates.admit_with(None, &https_url).await.unwrap();
-    let _p2 = gates.admit_with(None, &http_url).await.unwrap();
+    let https_url = url::Url::parse("https://example.com/a").expect("valid https url");
+    let http_url = url::Url::parse("http://example.org/b").expect("valid http url");
+    let _p1 = gates
+        .admit_with(None, &https_url)
+        .await
+        .expect("admit https");
+    let _p2 = gates.admit_with(None, &http_url).await.expect("admit http");
 
     let stats = crate::core::Stats::new(
         crate::pool::ConnectionStats::default(),
@@ -424,15 +427,19 @@ async fn stats_host_lookup_matches_standard_ports_and_round_trips_hosts() {
 #[tokio::test]
 async fn host_gates_ready_with_preserves_delay_after_lru_eviction() {
     let gates = HostGates::new(HostLimits::new());
-    let first_url = url::Url::parse("https://site0.example/").unwrap();
-    let first_origin = Origin::of(&first_url).unwrap();
+    let first_url = url::Url::parse("https://site0.example/").expect("valid first url");
+    let first_origin = Origin::of(&first_url).expect("first origin");
     let delay = Duration::from_secs(60);
     gates.set_floor_origin(first_origin.clone(), Some(delay));
-    let _pass = gates.admit_with(None, &first_url).await.unwrap();
+    let _pass = gates
+        .admit_with(None, &first_url)
+        .await
+        .expect("admit first site");
 
     for idx in 1..=1100 {
-        let other = url::Url::parse(&format!("https://site{idx}.example/")).unwrap();
-        let origin = Origin::of(&other).unwrap();
+        let other =
+            url::Url::parse(&format!("https://site{idx}.example/")).expect("valid site url");
+        let origin = Origin::of(&other).expect("site origin");
         gates.set_floor_origin(origin, Some(Duration::from_secs(5)));
     }
 

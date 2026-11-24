@@ -6,9 +6,10 @@ use libc::{c_char, c_int, c_long, c_void, strlen};
 use std::any::Any;
 use std::io;
 use std::io::prelude::*;
-use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::ptr;
 use std::slice;
+
+use crate::util::catch_unwind_ffi;
 
 use crate::cvt_p;
 use crate::error::ErrorStack;
@@ -111,7 +112,7 @@ unsafe extern "C" fn bwrite<S: Write>(bio: *mut BIO, buf: *const c_char, len: c_
         let state = state::<S>(bio);
         let buf = slice::from_raw_parts(buf.cast(), len);
 
-        match catch_unwind(AssertUnwindSafe(|| state.stream.write(buf))) {
+        match catch_unwind_ffi(|| state.stream.write(buf)) {
             Ok(Ok(len)) => len as c_int,
             Ok(Err(err)) => {
                 if retriable_error(&err) {
@@ -139,7 +140,7 @@ unsafe extern "C" fn bread<S: Read>(bio: *mut BIO, buf: *mut c_char, len: c_int)
         let state = state::<S>(bio);
         let buf = slice::from_raw_parts_mut(buf.cast(), len);
 
-        match catch_unwind(AssertUnwindSafe(|| state.stream.read(buf))) {
+        match catch_unwind_ffi(|| state.stream.read(buf)) {
             Ok(Ok(len)) => len as c_int,
             Ok(Err(err)) => {
                 if retriable_error(&err) {
@@ -179,7 +180,7 @@ unsafe extern "C" fn ctrl<S: Write>(
 
         if cmd == BIO_CTRL_FLUSH {
             BIO_clear_retry_flags(bio);
-            match catch_unwind(AssertUnwindSafe(|| state.stream.flush())) {
+            match catch_unwind_ffi(|| state.stream.flush()) {
                 Ok(Ok(())) => 1,
                 Ok(Err(err)) => {
                     if retriable_error(&err) {

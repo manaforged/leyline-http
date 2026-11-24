@@ -595,14 +595,14 @@ async fn a_hook_that_leaves_a_relative_url_fails_the_request() -> Check {
 async fn a_download_checksum_survives_build_and_request_from() -> Check {
     let server = testing::Server::http(|_| ok("payload")).await?;
     let session = Session::new();
-    let path = std::env::temp_dir().join(format!("leyline-sum-{}.bin", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("leyline-sum-{}", std::process::id()));
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join("file.bin");
 
     let request = session.get(server.url("/file")).sha256([7; 32]).build()?;
     let failed = session.request_from(request).download_to(&path).await;
     let kept = path.exists();
-    if kept {
-        std::fs::remove_file(&path)?;
-    }
+    drop(std::fs::remove_dir_all(&dir));
 
     let error = failed
         .err()

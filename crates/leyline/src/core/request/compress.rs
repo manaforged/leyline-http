@@ -31,13 +31,10 @@ fn gzip(_data: &[u8]) -> Result<Vec<u8>> {
 }
 
 #[cfg(feature = "compression-brotli")]
-const BROTLI_BUFFER_SIZE: usize = 4096;
-
-#[cfg(feature = "compression-brotli")]
 fn brotli(data: &[u8]) -> Result<Vec<u8>> {
     use std::io::Read;
     let mut out = Vec::with_capacity(data.len() / 2);
-    brotli::CompressorReader::new(data, BROTLI_BUFFER_SIZE, 5, 22)
+    brotli::CompressorReader::new(data, crate::util::BROTLI_BUFFER_SIZE, 5, 22)
         .read_to_end(&mut out)
         .map_err(Error::from)?;
     Ok(out)

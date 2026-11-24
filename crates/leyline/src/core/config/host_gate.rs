@@ -87,7 +87,8 @@ impl Room {
     }
 }
 
-const MAX_CRAWL_FLOORS: std::num::NonZeroUsize = std::num::NonZeroUsize::new(1024).unwrap();
+const MAX_CRAWL_FLOORS: std::num::NonZeroUsize =
+    std::num::NonZeroUsize::new(1024).expect("non-zero capacity");
 const MAX_ORIGIN_GATES: usize = 4096;
 
 #[derive(Debug)]

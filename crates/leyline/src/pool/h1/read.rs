@@ -126,21 +126,28 @@ impl Chunked {
     }
 
     fn trailer(&mut self, line: &[u8]) -> Result<(), Error> {
+        const INVALID_TRAILER_NAME: &str = "invalid HTTP/1.1 trailer name";
         let Some(colon) = memchr::memchr(b':', line) else {
             return Err(malformed("HTTP/1.1 trailer line has no colon"));
         };
         let raw_name = &line[..colon];
         if !crate::wire::h1::is_valid_token_bytes(raw_name) {
-            return Err(malformed("invalid HTTP/1.1 trailer name"));
+            return Err(malformed(INVALID_TRAILER_NAME));
         }
         let name = HeaderName::from_bytes(raw_name)
-            .map_err(|err| malformed("invalid HTTP/1.1 trailer name").with_source(err))?;
+            .map_err(|err| malformed(INVALID_TRAILER_NAME).with_source(err))?;
         let raw_value = crate::wire::h1::trim_ows(&line[colon + 1..]);
         let value = HeaderValue::from_bytes(raw_value)
             .map_err(|err| malformed("invalid HTTP/1.1 trailer value").with_source(err))?;
         self.trailers.append(name, value);
         Ok(())
     }
+}
+
+fn chunk_line_too_long() -> Error {
+    malformed(format!(
+        "chunked size/trailer line exceeds {MAX_H1_CHUNK_LINE_BYTES} bytes"
+    ))
 }
 
 fn line_end(buf: &[u8]) -> Result<Option<usize>, Error> {
@@ -150,16 +157,12 @@ fn line_end(buf: &[u8]) -> Result<Option<usize>, Error> {
         }
         let pos = lf - 1;
         if pos > MAX_H1_CHUNK_LINE_BYTES {
-            return Err(malformed(format!(
-                "chunked size/trailer line exceeds {MAX_H1_CHUNK_LINE_BYTES} bytes"
-            )));
+            return Err(chunk_line_too_long());
         }
         return Ok(Some(pos));
     }
     if buf.len() > MAX_H1_CHUNK_LINE_BYTES {
-        return Err(malformed(format!(
-            "chunked size/trailer line exceeds {MAX_H1_CHUNK_LINE_BYTES} bytes"
-        )));
+        return Err(chunk_line_too_long());
     }
     Ok(None)
 }

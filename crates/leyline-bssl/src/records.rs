@@ -281,8 +281,7 @@ impl Records {
             ));
         }
         let body = plaintext.len() + 1 + TAG_LEN;
-        let body_len = u16::try_from(body)
-            .map_err(|_| ErrorStack::internal_error_str("TLS record length overflows u16"))?;
+        let body_len = u16::try_from(body).unwrap_or(u16::MAX);
         let nonce = self.write.nonce()?;
         let start = out.len();
         out.reserve(HEADER_LEN + body);

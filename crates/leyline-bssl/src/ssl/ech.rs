@@ -74,11 +74,7 @@ unsafe fn take_openssl_buf(out: *mut u8, out_len: usize) -> Vec<u8> {
         return Vec::new();
     }
     // SAFETY: `out` was allocated by BoringSSL with `OPENSSL_malloc` and has `out_len` initialized bytes.
-    let bytes = if out_len == 0 {
-        Vec::new()
-    } else {
-        unsafe { slice::from_raw_parts(out, out_len).to_vec() }
-    };
+    let bytes = unsafe { super::callbacks::c_slice(out, out_len) }.to_vec();
     // SAFETY: `out` is non-null and owned by the caller to free with `OPENSSL_free`.
     unsafe { ffi::OPENSSL_free(out.cast()) };
     bytes

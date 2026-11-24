@@ -192,8 +192,11 @@ async fn a_second_idle_probe_still_fires_after_an_acked_ping() {
         .body("one")
         .send()
         .await
-        .unwrap();
-    assert_eq!(first_probe.text().await.unwrap(), "first");
+        .expect("first idle probe succeeds");
+    assert_eq!(
+        first_probe.text().await.expect("first response body"),
+        "first"
+    );
     assert_eq!(origin.connections.load(Ordering::SeqCst), 1);
 
     tokio::time::sleep(IDLE * 3).await;
@@ -203,7 +206,10 @@ async fn a_second_idle_probe_still_fires_after_an_acked_ping() {
     )
     .await
     .expect("second idle probe must wake the driver and time out")
-    .unwrap();
-    assert_eq!(second_probe.text().await.unwrap(), "fresh");
+    .expect("second probe recovers on fresh connection");
+    assert_eq!(
+        second_probe.text().await.expect("second response body"),
+        "fresh"
+    );
     assert_eq!(origin.connections.load(Ordering::SeqCst), 2);
 }
