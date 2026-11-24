@@ -305,6 +305,45 @@ g_subcrates() {
     ok "sub-workspace crates clean"
 }
 
+g_asan() {
+    local host asan_opts="${ASAN_OPTIONS:-}"
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    if [[ "$(uname -s)" == Linux && -z "$asan_opts" ]]; then
+        asan_opts="detect_leaks=1"
+    fi
+    for manifest in crates/leyline-bssl/Cargo.toml crates/leyline-bssl-tokio/Cargo.toml; do
+        step "AddressSanitizer ($manifest)"
+        ASAN_OPTIONS="$asan_opts" RUSTFLAGS="-Zsanitizer=address" cargo +nightly test \
+            --manifest-path "$manifest" \
+            --lib \
+            --target "$host" \
+            || fail "ASan failed in $manifest"
+    done
+    ok "ASan clean"
+}
+
+g_mutants() {
+    command -v cargo-mutants >/dev/null || fail "cargo-mutants not installed: cargo install --locked cargo-mutants"
+    local base="${MUTANTS_BASE:-origin/main}"
+    local diff_file subcrate
+    diff_file="$(mktemp)"
+    step "cargo mutants --in-diff (base: $base)"
+    git diff "$base"..HEAD -- crates/leyline >"$diff_file"
+    if [[ -s "$diff_file" ]]; then
+        cargo mutants -p leyline-http --in-diff "$diff_file" -- --features full,bench-internals \
+            || { rm -f "$diff_file"; fail "cargo mutants found surviving mutants in leyline-http"; }
+    fi
+    for subcrate in crates/leyline-bssl crates/leyline-bssl-tokio; do
+        git diff "$base"..HEAD --relative="$subcrate" -- "$subcrate" >"$diff_file"
+        if [[ -s "$diff_file" ]]; then
+            (cd "$subcrate" && cargo mutants --in-diff "$diff_file" -- --lib) \
+                || { rm -f "$diff_file"; fail "cargo mutants found surviving mutants in $subcrate"; }
+        fi
+    done
+    rm -f "$diff_file"
+    ok "diff mutants caught"
+}
+
 g_release() {
     step "release qualification (tag, manifests, changelog)"
     local tag="${GITHUB_REF_NAME:-}"
@@ -387,7 +426,7 @@ g_publish() {
 
 gate_order=(
     fmt clippy features doc book links msrv test deny benches
-    subcrates package kani live release publish fuzz-timed
+    subcrates package kani asan mutants live release publish fuzz-timed
 )
 quick_gates=(fmt clippy doc)
 full_gates=(fmt clippy features doc book links msrv test deny benches subcrates package)
