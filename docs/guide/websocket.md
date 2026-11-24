@@ -90,7 +90,8 @@ Request-level setters on `RequestBuilder`:
 | `proxy(url)` | Overrides the session proxy (`wss://` follows `https://` proxy and `NO_PROXY` rules) |
 
 Session-level limits on `SessionBuilder` (for the 5 size/buffer setters,
-passing `None` keeps `tungstenite::WebSocketConfig::default()`, not unlimited):
+passing `None` restores the library's default limit shown below, not
+unlimited):
 
 | Setter | Default | Effect |
 | --- | --- | --- |
@@ -112,10 +113,13 @@ connections remain open until closed.
 
 ## HTTP/2 or HTTP/1.1
 
-With `websocket_http2(true)`, Leyline tries RFC 8441 extended `CONNECT` on a
-pooled HTTP/2 connection and falls back to an HTTP/1.1 RFC 6455 upgrade if ALPN
-does not negotiate `h2` or the peer does not advertise
-`SETTINGS_ENABLE_CONNECT_PROTOCOL`. Other errors are returned directly.
+By default (`websocket_http2(true)`), Leyline multiplexes WebSockets onto a
+pooled HTTP/2 connection (RFC 8441 extended `CONNECT`, matching modern Chrome
+and Firefox) and falls back automatically to a classic HTTP/1.1 `101 Switching
+Protocols` upgrade if the server does not negotiate `h2` or does not advertise
+HTTP/2 WebSocket support (`SETTINGS_ENABLE_CONNECT_PROTOCOL`). Set
+`websocket_http2(false)` if an intermediary or server mishandles HTTP/2
+upgrades and you want to go straight to HTTP/1.1.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -132,6 +136,32 @@ println!("version={:?} protocol={:?}", ws.version(), ws.protocol());
 # Ok(())
 # }
 ```
+
+## Browser-profile WebSockets
+
+A WebSocket opened from a browser `Session` automatically reuses that session's
+TLS fingerprint, proxy rules, cookies, and `User-Agent`, and sets `Origin` to
+the WebSocket URL's `https://` origin. When the WebSocket endpoint lives on a
+different subdomain or host than the page (for example `wss://ws.shop.example`
+opened from `https://shop.example`), override `origin` explicitly:
+
+```rust,no_run
+use leyline::{Browser, Message, Session};
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::from(Browser::Chrome158);
+let mut ws = session
+    .get("wss://ws.shop.example/live")
+    .header("origin", "https://shop.example")
+    .websocket()
+    .await?;
+ws.send(Message::Text("subscribe".to_owned())).await?;
+# Ok(())
+# }
+```
+
+Leyline does not negotiate `Sec-WebSocket-Extensions` (`permessage-deflate` is
+not offered, and `sec-websocket-extensions` is reserved).
 
 ## Split the connection
 
@@ -160,7 +190,3 @@ reader.await.expect("reader task panicked");
 # Ok(())
 # }
 ```
-
-## Next
-
-Read [HTTP/3](http3.md).

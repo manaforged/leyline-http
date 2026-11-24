@@ -25,6 +25,7 @@ fingerprint):
 
 ## Bundled profiles
 
+<!-- Rendered from docs/guide/bundled-profiles.md by mdBook -->
 {{#include bundled-profiles.md}}
 
 `.browser(browser)` claims the first platform its profile covers (Windows →
@@ -149,7 +150,7 @@ profile, or bare session without writing TOML:
 | Setter | Input format and effect |
 | --- | --- |
 | `ja3(raw)` | `version,ciphers,extensions,curves,point_formats` — sets cipher list, curve list, and exact extension order (`version` must be `771`, point formats `0`) |
-| `ja4_r(raw)` | Raw `JA4_r` or `JA4_ro` string — sets cipher list, extensions, and signature algorithms (hashed JA4 cannot be inverted and fails) |
+| `ja4_r(raw)` | Raw unsorted (`JA4_r`) or raw ordered (`JA4_ro`) string — sets cipher list, extensions, and signature algorithms (hashed JA4 cannot be inverted and fails) |
 | `akamai(raw)` | `SETTINGS\|WINDOW_UPDATE\|PRIORITY\|pseudo_order` — sets HTTP/2 `SETTINGS`, connection window, and pseudo-header order (`PRIORITY` must be `0`) |
 | `header_order(names)` | Replaces the regular header wire order |
 
@@ -160,14 +161,22 @@ use leyline::{Browser, Platform, Session};
 let ja3 = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,\
            0-23-65281-11-35-16-51-43-45-10-13-5-18-27-17613-51764-65037,4588-29-23-24,0";
 let akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p";
-let session = Session::builder()
+let from_ja3 = Session::builder()
     .browser(Browser::Chrome158)
     .ja3(ja3)
     .akamai(akamai)
     .platform(Platform::Windows)
     .audit(true)
     .build()?;
-# drop(session);
+
+let ja4_r = "t13d1516h2_002f,0035,009c,009d,1301,1302,1303,c02b,c02c,c02f,c030,cca8,cca9_\
+             0005,000a,000b,000d,0012,0015,0017,001b,0023,002b,002d,0033,ff01_\
+             0403,0804,0401,0503,0805,0501,0806,0601";
+let from_ja4_r = Session::builder()
+    .browser(Browser::Chrome158)
+    .ja4_r(ja4_r)
+    .build()?;
+# drop((from_ja3, from_ja4_r));
 # Ok(())
 # }
 ```
@@ -175,7 +184,3 @@ let session = Session::builder()
 - Unspecified fields (identity headers, HTTP/3, signature algorithms for JA3, curves for JA4_r) come from the base profile.
 - `Response::fingerprint()` reports the resulting `ja3()` and `akamai()`, and `Session::profile()` embeds the overlay in `[[fingerprint]]` so `Session::save`/`load` reproduces it.
 - GREASE values enable `grease = true`; data-bearing extensions (`application_settings`, `compress_certificate`, `delegated_credentials`, `record_size_limit`) inherit parameters from the base profile; `padding` (21) must be last. Invalid or unsupported IDs fail `build()` with `Kind::Config`.
-
-## Next
-
-Read [MSRV](msrv.md) for the Rust version Leyline supports.

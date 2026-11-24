@@ -18,7 +18,3 @@ compiler feature, never on a schedule or for style. A bump ships in a minor
 release with its own line in
 [CHANGELOG.md](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md);
 a patch release never raises the MSRV.
-
-## Next
-
-Read the [API reference](https://docs.rs/leyline-http) to see how the public API fits together.

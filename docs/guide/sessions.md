@@ -148,8 +148,7 @@ The hook sees:
 
 - The method.
 - The absolute URL.
-- The headers you set on the request. It does not see the session's default
-  headers, the profile headers, `Cookie`, `Host`, or `Content-Length`.
+- The headers you set on the request. It does not see `bearer_auth`, `basic_auth`, session default headers, profile headers, `Cookie`, `Host`, or `Content-Length`.
 - The body. `Body::as_bytes()` returns its bytes (`None` for a stream); `Body::content_length()` returns the known byte length for buffered, `Body::file`, and sized-stream bodies.
 
 Leyline sends the method, URL, headers, and body the hook leaves, so a hook can
@@ -157,8 +156,8 @@ sign the query string. The URL must stay an absolute `http` or `https` URL, or
 the request fails. Leyline ignores edits to `http::Request::version` and
 extensions.
 
-- The hook runs before every attempt (first send and each retry), not on
-  redirect hops.
+- The hook runs before every transport attempt (first send and each retry), not on
+  redirect hops or 401 `refresh_token` / Digest authentication replays.
 - Each retry starts from your original method, URL, headers, and body, so a
   hook that inserts a header does not duplicate it.
 - Returning an error aborts the request without retrying; wrap custom errors
@@ -217,103 +216,6 @@ let langs = session.languages().map(<[String]>::to_vec);
 # }
 ```
 
-## Choose a browser
-
-The `Browser` enum has a variant for each bundled profile. The
-[API reference](https://docs.rs/leyline-http/latest/leyline/enum.Browser.html) lists them, and
-[Profile reference](profiles.md) gives the capture kind of each.
-
-- One function per product returns its newest non-deprecated build:
-  `Browser::chrome()`, `edge()`, `opera()`, `brave()`, `firefox()`, `safari()`,
-  `safari_ios()`, `cfnetwork()`, and `okhttp()`. A release can move them to
-  newer captures; pin a variant such as `Browser::Chrome158` to keep one
-  fingerprint.
-- `Browser::default()` is `Browser::chrome()`.
-- `Browser::version()` returns the product's major version, `Browser::id()`
-  returns a stable id such as `chrome-158` or `edge-158`, and
-  `Browser::chromium_major()` returns the underlying Chromium major version for
-  Chromium-based browsers (`None` for Firefox, Safari, CFNetwork, and OkHttp).
-
-```rust
-use leyline::Browser;
-
-assert_eq!(Browser::default(), Browser::chrome());
-assert_eq!(Browser::Edge158.id(), "edge-158");
-assert_eq!(Browser::Opera140.version(), 140);
-```
-
-## Choose a platform
-
-`Platform` sets the operating system the session claims: `Windows`, `MacOS`,
-`Linux`, `Android`, `IOS`, or `Host`. `Platform::Host` resolves to the OS you
-compiled for, or `Windows` for an unrecognized target. The platform drives
-`Sec-CH-UA-Platform`, `Sec-CH-UA-Mobile`, and the TCP fingerprint.
-
-### Platform defaults and call order
-
-- `.browser(browser)` claims the first platform, in the order Windows,
-  macOS, Linux, Android, iOS, that its profile covers. Chrome claims Windows,
-  `Browser::Safari26` macOS, and `Browser::SafariIOS27` iOS.
-  `Session::from(b)` uses the same rule.
-- `.platform(platform)` always wins, called before or after `.browser(..)`.
-  It maps the browser to its sibling for the platform.
-  `Browser::for_platform` does the same.
-- `.profile(profile).platform(platform)` and
-  `Session::builder().platform(platform)` take the platform as given.
-- A session with no browser, profile, or platform claims the host platform.
-- A second `.browser(..)` call replaces the first. Languages stay until
-  `.languages(..)` sets new ones, so `to_builder().browser(..)` keeps the
-  parent's.
-
-## Pick Edge or Opera
-
-Edge and Opera are `Browser` variants built on the Chrome captures:
-`Browser::Edge145` to `Browser::Edge158`, and `Browser::Opera129` to
-`Browser::Opera140`. The TLS and HTTP/2 fingerprint stays Chrome's, and the
-`User-Agent` and `sec-ch-ua` brand list change. Edge also leaves out the
-trust anchors extension of the ClientHello.
-
-```rust,no_run
-use leyline::{Browser, Platform, Session};
-
-# fn run() -> leyline::Result<()> {
-let edge = Session::from(Browser::edge());
-let opera = Session::builder()
-    .browser(Browser::Opera140).platform(Platform::MacOS)
-    .build()?;
-# let _ = (edge, opera);
-# Ok(())
-# }
-```
-
-An Edge version equals its Chrome version. Each Opera version maps to its
-underlying Chromium release (for example, `Browser::Opera140` sends Chrome 157's
-TLS). Both exist on Windows, macOS, and Linux only; `Platform::Android` or
-`Platform::IOS` fails `build()` with `Kind::Config`. Brave has its own profiles,
-such as `Browser::Brave158`.
-
-`Browser::headers(platform)` returns the identity headers a session
-sends as `(name, value)` pairs: `user-agent` first, then `sec-ch-ua` when the
-browser sends it, then `accept-language` when the profile has one. Use it when a payload
-that is not a header must carry the same values. It returns `None` when the
-browser has no identity for the platform.
-
-`Session::browser()`, `hello()`, `platform()`, and `languages()` return
-the values `build()` resolved. `browser()` and `hello()` are `None` for a
-plain or loaded-profile session. `Session::user_agent()`
-returns the `User-Agent` the session sends, including one from
-`SessionBuilder::user_agent` or `SessionBuilder::headers`.
-
-```rust,no_run
-use leyline::{Browser, Platform};
-
-let edge = Browser::Edge158.headers(Platform::Windows);
-assert!(edge.is_some_and(|headers| headers[0].1.contains("Edg/")));
-
-let session = leyline::Session::from(Browser::default());
-println!("{:?} on {} sends {}", session.browser(), session.platform(), session.user_agent());
-```
-
 ## Share a session
 
 A clone is an `Arc` clone: it shares the cookie jar, the connection pool, the
@@ -332,7 +234,7 @@ tokio::spawn(async move { worker.get("https://example.com/").send().await })
 ```
 
 `host_limits(HostLimits)` and a `Proxy::list` are shared by clones
-and sessions made with `to_builder()` too. See [Crawling](crawling.md#limit-each-host) and
+and sessions made with `to_builder()` too. See [Limit each host](network.md#limit-each-host) and
 [Proxies](proxies.md).
 
 ## Block the calling thread
@@ -429,6 +331,103 @@ let err = worker.get("https://example.com/").send().await.unwrap_err();
 assert_eq!(err.kind(), Kind::Request);
 assert!(err.is_shut_down());
 # }
+```
+
+## Choose a browser
+
+The `Browser` enum has a variant for each bundled profile. The
+[API reference](https://docs.rs/leyline-http/latest/leyline/enum.Browser.html) lists them, and
+[Profile reference](profiles.md) gives the capture kind of each.
+
+- One function per product returns its newest non-deprecated build:
+  `Browser::chrome()`, `edge()`, `opera()`, `brave()`, `firefox()`, `safari()`,
+  `safari_ios()`, `cfnetwork()`, and `okhttp()`. A release can move them to
+  newer captures; pin a variant such as `Browser::Chrome158` to keep one
+  fingerprint.
+- `Browser::default()` is `Browser::chrome()`.
+- `Browser::version()` returns the product's major version, `Browser::id()`
+  returns a stable id such as `chrome-158` or `edge-158`, and
+  `Browser::chromium_major()` returns the underlying Chromium major version for
+  Chromium-based browsers (`None` for Firefox, Safari, CFNetwork, and OkHttp).
+
+```rust
+use leyline::Browser;
+
+assert_eq!(Browser::default(), Browser::chrome());
+assert_eq!(Browser::Edge158.id(), "edge-158");
+assert_eq!(Browser::Opera140.version(), 140);
+```
+
+## Choose a platform
+
+`Platform` sets the operating system the session claims: `Windows`, `MacOS`,
+`Linux`, `Android`, `IOS`, or `Host`. `Platform::Host` resolves to the OS you
+compiled for, or `Windows` for an unrecognized target. The platform drives
+`Sec-CH-UA-Platform`, `Sec-CH-UA-Mobile`, and the TCP fingerprint.
+
+### Platform defaults and call order
+
+- `.browser(browser)` claims the first platform, in the order Windows,
+  macOS, Linux, Android, iOS, that its profile covers. Chrome claims Windows,
+  `Browser::Safari26` macOS, and `Browser::SafariIOS27` iOS.
+  `Session::from(b)` uses the same rule.
+- `.platform(platform)` always wins, called before or after `.browser(..)`.
+  It maps the browser to its sibling for the platform.
+  `Browser::for_platform` does the same.
+- `.profile(profile).platform(platform)` and
+  `Session::builder().platform(platform)` take the platform as given.
+- A session with no browser, profile, or platform claims the host platform.
+- A second `.browser(..)` call replaces the first. Languages stay until
+  `.languages(..)` sets new ones, so `to_builder().browser(..)` keeps the
+  parent's.
+
+## Pick Edge or Opera
+
+Edge and Opera are `Browser` variants built on the Chrome captures:
+`Browser::Edge145` to `Browser::Edge158`, and `Browser::Opera129` to
+`Browser::Opera140`. The TLS and HTTP/2 fingerprint stays Chrome's, and the
+`User-Agent` and `sec-ch-ua` brand list change. Edge also leaves out the
+trust anchors extension of the ClientHello.
+
+```rust,no_run
+use leyline::{Browser, Platform, Session};
+
+# fn run() -> leyline::Result<()> {
+let edge = Session::from(Browser::edge());
+let opera = Session::builder()
+    .browser(Browser::Opera140).platform(Platform::MacOS)
+    .build()?;
+# let _ = (edge, opera);
+# Ok(())
+# }
+```
+
+An Edge version equals its Chrome version. Each Opera version maps to its
+underlying Chromium release (for example, `Browser::Opera140` sends Chrome 157's
+TLS). Both exist on Windows, macOS, and Linux only; `Platform::Android` or
+`Platform::IOS` fails `build()` with `Kind::Config`. Brave has its own profiles,
+such as `Browser::Brave158`.
+
+`Browser::headers(platform)` returns the identity headers a session sends as
+`(name, value)` pairs (`user-agent`, then `sec-ch-ua` if sent, then
+`accept-language` if present). Use this if you need to send the same
+`User-Agent` or language values inside a JSON body or form field. It returns
+`None` when the browser has no identity for the platform.
+
+`Session::browser()`, `hello()`, `platform()`, and `languages()` return
+the values `build()` resolved. `browser()` and `hello()` are `None` for a
+plain or loaded-profile session. `Session::user_agent()`
+returns the `User-Agent` the session sends, including one from
+`SessionBuilder::user_agent` or `SessionBuilder::headers`.
+
+```rust,no_run
+use leyline::{Browser, Platform};
+
+let edge = Browser::Edge158.headers(Platform::Windows);
+assert!(edge.is_some_and(|headers| headers[0].1.contains("Edg/")));
+
+let session = leyline::Session::from(Browser::default());
+println!("{:?} on {} sends {}", session.browser(), session.platform(), session.user_agent());
 ```
 
 ## Save and restore a session

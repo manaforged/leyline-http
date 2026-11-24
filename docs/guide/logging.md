@@ -146,37 +146,41 @@ Each `trace` call adds a hook, and every hook sees every event.
 activity. Wrap `Metrics::new()` in an `Arc`, pass a clone to `.trace(..)`, and
 read counters from the handle (`Display` formats a single `key=value` line):
 
-| Method | Count |
+| Method | Signature / Count |
 | --- | --- |
-| `requests()`, `attempts()` | Requests and total attempts (retries included) |
-| `status_class(n)` | Responses with status `n`xx (`2`, `3`, `4`, `5`) |
-| `errors(kind)`, `errors_total()` | Errors per `Kind` and all errors |
-| `bodies_complete()`, `bodies_failed()`, `bodies_dropped()` | Streamed body outcomes |
-| `latency()` | `(Option<Duration>, u64)` histogram buckets (10, 50, 100, 250, 500, 1000, 2500, 5000, 10000 ms, and `None` for > 10 s) |
+| `requests()`, `attempts()` | `u64` monotonic totals (attempts include retries) |
+| `status_class(class: u8)` | `u64` responses in `class`xx (`2`, `3`, `4`, `5` — note `u8`, not `u16`) |
+| `errors(kind)`, `errors_total()` | `u64` errors per `Kind` and all errors |
+| `bodies_complete()`, `bodies_failed()`, `bodies_dropped()` | `u64` streamed body outcomes |
+| `latency()` | `Vec<(Option<Duration>, u64)>` **per-bucket (non-cumulative)** counts of `Event::Summary` elapsed time (full request when buffered; time-to-headers when `.stream()`), with upper bounds 10, 50, 100, 250, 500, 1000, 2500, 5000, 10000 ms and `None` (> 10 s) |
 
 Pair `Metrics` with `Session::stats()` for live connection and queue counts:
-`hosts()`, `in_flight(host)`, `waiting(host)` (paused hosts count as waiting),
-`busy()`, and `idle()`.
+`hosts()` lists tracked origin strings, `in_flight(url)` and `waiting(url)`
+accept `impl IntoUrl` (for example `"https://api.example/"` or an entry from
+`stats.hosts()`; origins paused by `HostLimits::pause_on` count as waiting),
+and `busy()` / `idle()` count connections.
 
 ```rust,no_run
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::Kind;
+use leyline::{Kind, Session};
 use leyline::trace::Metrics;
 
-# async fn run(session: leyline::Session, metrics: Arc<Metrics>) {
-loop {
-    tokio::time::sleep(Duration::from_secs(10)).await;
-    println!("{metrics}");
-    if metrics.errors(Kind::Proxy) > 100 {
-        break;
-    }
-    let stats = session.stats();
-    for host in stats.hosts() {
-        println!("{host} in_flight={} waiting={}", stats.in_flight(host), stats.waiting(host));
-    }
+# async fn run() -> leyline::Result<()> {
+let metrics = Arc::new(Metrics::new());
+let session = Session::builder().trace(Arc::clone(&metrics)).build()?;
+let _ = session.get("https://api.example/").send().await;
+println!("{metrics} (2xx={})", metrics.status_class(2));
+if metrics.errors(Kind::Proxy) > 100 {
+    eprintln!("high proxy error rate");
 }
+let stats = session.stats();
+for host in stats.hosts() {
+    println!("{host} in_flight={} waiting={}", stats.in_flight(host), stats.waiting(host));
+}
+let _ = Duration::from_secs(10);
+# Ok(())
 # }
 ```
 
@@ -245,9 +249,11 @@ impl Trace for OneLine {
 
 ## Phase events
 
-Match the six per-attempt `Event` variants in `Trace::event` (see
-[Trace the request lifecycle](sessions.md#trace-the-request-lifecycle) for
-attempt `id` and task rules):
+Match the six per-attempt `Event` variants in `Trace::event` (all `Event`
+variants are `#[non_exhaustive]`, so include `..` in struct patterns). Note for
+`tracing::Span` correlation: `Summary` and HTTP/1.1 events run on the caller's
+task, while HTTP/2 and HTTP/3 connection-open events (`Dns`, `Connect`, `Tls`)
+fire on the spawned connection task (keep listeners non-blocking).
 
 | Variant | Key fields | When it fires |
 | --- | --- | --- |
@@ -256,9 +262,4 @@ attempt `id` and task rules):
 | `Tls` | `id`, `host`, `version`, `cipher`, `alpn`, `elapsed` | TLS handshake completed |
 | `Sent` | `id`, `method`, `path`, `elapsed` | Request dispatched (`elapsed` is zero on H2/H3 before the driver sends) |
 | `Head` | `id`, `host`, `status`, `headers`, `elapsed` | Response head arrived (raw `&http::HeaderMap` before decompression/redirects) |
-| `Done` | `id`, `elapsed`, `error` | One transport attempt finished |
-
-## Next
-
-Read [Service integration](service-integration.md) to use a session inside a
-web service.
+| `Done` | `id`, `elapsed`, `outcome` (`Result<(), &Error>`) | One transport attempt finished |

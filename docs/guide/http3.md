@@ -107,11 +107,11 @@ A request that ends early resets its stream with the code Chrome sends:
 When the pool drops an idle connection, Leyline sends no CONNECTION_CLOSE
 frame, as Chrome does not.
 
-## QUIC fingerprint
+## Custom TOML & QUIC protocol internals
 
 Bundled browser profiles configure `[h3]` automatically; you only need this
-table when authoring a custom profile TOML. `dcid_length` is required, and
-omitted keys keep `quiche` defaults.
+section when authoring a custom profile TOML. `dcid_length` is required, and
+omitted keys keep defaults.
 
 | Key | Effect |
 | --- | --- |
@@ -141,7 +141,3 @@ HTTP/3 runs through `socks5://` and `socks5h://` proxies when the `socks`
 feature is enabled (via SOCKS5 `UDP ASSOCIATE`). `http://` and `https://`
 proxies cannot carry QUIC: `Race` falls back to `Auto`, and `Http3` fails with
 `Kind::Config`. See [HTTP/3 through a SOCKS5 proxy](proxies.md#http3-through-a-socks5-proxy).
-
-## Next
-
-Read [TLS trust](tls-trust.md).

@@ -7,24 +7,24 @@
 - [Quick start](guide/quick-start.md)
 - [API clients](guide/api-clients.md)
 - [Sessions](guide/sessions.md)
-- [Choosing a profile](guide/choosing-a-profile.md)
 - [Requests](guide/requests.md)
 - [Responses](guide/responses.md)
+- [Errors](guide/errors.md)
+- [Retries and timeouts](guide/retries-and-timeouts.md)
 - [Streaming](guide/streaming.md)
 - [Cancellation](guide/cancellation.md)
 
-# Reliability and routing
+# Routing and proxies
 
 - [Redirects](guide/redirects.md)
-- [Retries and timeouts](guide/retries-and-timeouts.md)
-- [Errors](guide/errors.md)
 - [Proxies](guide/proxies.md)
 
-# Sessions and crawling
+# Browsers, accounts, and crawling
 
-- [Crawling](guide/crawling.md)
+- [Choosing a profile](guide/choosing-a-profile.md)
 - [Cookies](guide/cookies.md)
 - [Accounts](guide/accounts.md)
+- [Crawling](guide/crawling.md)
 
 # Protocols and operations
 

@@ -1,7 +1,8 @@
 # Quick start
 
-This chapter takes you from an empty project to a request and a parsed
-response. Each section links to the chapter that owns the topic.
+This chapter takes you from an empty project to a request, a parsed JSON
+response, status error handling, and a resumable file download. Each section
+links to a full guide when you need more detail.
 
 ## Add the dependency
 
@@ -38,21 +39,22 @@ async fn main() -> leyline::Result<()> {
 }
 ```
 
-`Session::get` and its siblings return a `RequestBuilder`. Awaiting the
-builder sends the request and returns a `Response`; `.text().await?` and
-`.bytes().await?` send the request and read the body in one step. `.send()`
-does the same as awaiting the builder and returns a named future.
+`Session::get` and its siblings return a `RequestBuilder`. You can either
+`.await` a builder directly or call `.send().await?` — both behave identically
+(`.send()` is useful when you need to name or store the future type).
+`.text().await?` and `.bytes().await?` send the request and read the body in
+one step.
 
 ## Choose a plain or a browser session
 
 | Session | Build it with | Sends |
 | --- | --- | --- |
-| Plain | `Session::new()` or `Session::builder().build()` | `user-agent: leyline/<version>`, `accept: */*`, and no `sec-*` headers |
-| Browser | `Session::from(Browser::default())` | The TLS, HTTP/2, HTTP/3, and headers of the newest bundled Chrome on Windows |
+| Plain | `Session::new()` or `Session::builder().build()` | `user-agent: leyline/<version>`, `accept: */*`, and no browser headers |
+| Browser | `Session::from(Browser::default())` | The TLS handshake, HTTP/2, HTTP/3, and headers of the newest bundled Chrome on Windows |
 | Pinned browser | `Session::builder().browser(Browser::Chrome158).build()` | One fixed browser profile |
 
 Use a plain session for APIs. Use a browser session when the server checks
-that the client is a browser. `SessionBuilder::user_agent` replaces the
+that the client is a real browser. `SessionBuilder::user_agent` replaces the
 default `user-agent` on either kind.
 
 ```rust,no_run
@@ -72,9 +74,10 @@ let pinned = Session::builder().browser(Browser::Chrome158).build()?;
 ## Read the body
 
 `text()` decodes the body with the charset from `Content-Type`, falling back to
-UTF-8. `json::<T>()` deserializes into any `DeserializeOwned` type and fails
-with `Kind::Json` on invalid JSON. Each body call consumes the response, so read
-`status()` and `headers()` first.
+UTF-8. `json::<T>()` parses JSON into any `#[derive(serde::Deserialize)]` type
+that owns its fields (such as `String` or `Vec`, not borrowed `&str` — known in
+Serde as `DeserializeOwned`) and fails with `Kind::Json` on invalid JSON. Each
+body call consumes the response, so read `status()` and `headers()` first.
 
 ```rust,no_run
 use serde::Deserialize;
@@ -103,9 +106,9 @@ println!("{} {} {}", page.len(), state.name, state.ready);
 | Method | Effect |
 | --- | --- |
 | `json(&value)` | Serializes as JSON and sets `content-type: application/json` |
-| `form(pairs)` | Sends `application/x-www-form-urlencoded` from any iterator of `(AsRef<str>, AsRef<str>)` |
-| `query(pairs)` | Appends query pairs to the URL |
-| `timeout(Duration)` | Sets `Timeout::total` across retries; use `Timeout::new().body(..)` for streamed bodies and downloads |
+| `form(pairs)` | Sends `application/x-www-form-urlencoded` from an array (`[("k", "v")]`), `Vec`, slice, or `HashMap` of strings |
+| `query(pairs)` | Appends query pairs (same collection types as `form`) to the URL |
+| `timeout(Duration)` | Sets `Timeout::total` across retries; use `Timeout::new().total(None).body(..)` for long streamed downloads |
 
 ```rust,no_run
 use std::time::Duration;
@@ -183,12 +186,17 @@ std::fs::write("me.json", body)?;
 
 ## Download a file
 
-`RequestBuilder::download_to(path)` streams directly to disk, commits atomically,
-and resumes across dropped transfers when the server sends a strong `ETag`. Pass
-`Timeout::new().body(...)` to bound the transfer time (`Duration` alone stops at
-the response head for streamed transfers) and `max_body_size` to raise or remove
-the 100 MiB cap. See [Streaming](streaming.md#resume-a-download) for checksums,
-progress callbacks, and one-shot `Response::download_to`.
+`RequestBuilder::download_to(path)` streams directly to a temporary `.part`
+file, renames it onto `path` only after the transfer succeeds (an atomic commit,
+so you never get a half-written file), rejects `4xx`/`5xx` statuses
+automatically, and resumes dropped transfers when the server sends a strong
+`ETag` (a file-version header such as `"abc123"`, not a weak `W/"..."` tag).
+
+For large files, clear the 300 s `total` deadline with `.total(None)` and set
+`Timeout::body(...)` for the transfer time, and raise or remove (`None`) the
+default 100 MiB `max_body_size` cap. See
+[Streaming](streaming.md#download-a-file) for SHA-256 verification and progress
+callbacks.
 
 ```rust,no_run
 use std::time::Duration;
@@ -199,8 +207,7 @@ use leyline::Timeout;
 let session = leyline::Session::new();
 let bytes = session
     .get("https://example.com/archive.tar.gz")
-    .timeout(Timeout::new().body(Duration::from_secs(600)))
-    .error_for_status()
+    .timeout(Timeout::new().total(None).body(Duration::from_secs(600)))
     .retry(3)
     .max_body_size(512 * 1024 * 1024)
     .download_to("archive.tar.gz")

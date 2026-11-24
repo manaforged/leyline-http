@@ -40,13 +40,15 @@ leyline-http = { version = "0.3", features = ["test-util"] }
 | `addr()` | The bound address |
 | `tls()` | A `Tls` that trusts only the server's CA |
 | `ca_der()` | The CA certificate as DER, for an HTTPS server |
-| `requests().await` | Every request so far, in order |
-| `next_request().await` | The next request, when it arrives |
+| `requests().await` | Every request received so far, in order |
+| `next_request().await` | Yields each request once in arrival order (returning unread buffered ones first, waiting if none, or `None` after stop); `requests()` still lists it |
 | `shutdown().await` | Stops the server; dropping it does too |
 
-A handler is any `Fn(&testing::Request) -> testing::Response + Send + Sync +
-'static`. It runs on a blocking thread, so a handler that blocks delays only
-its own response.
+`testing::Server` speaks TCP HTTP/1.1 without client-certificate verification;
+for HTTP/2, mTLS, or Unix sockets, bind your own test server (for example with
+`axum`/`hyper` and `rcgen`). A handler is any
+`Fn(&testing::Request) -> testing::Response + Send + Sync + 'static` running on
+a blocking thread, so a slow handler delays only its own response.
 
 | `testing::Request` method | Returns |
 | --- | --- |
@@ -190,9 +192,26 @@ assert_eq!(text, "ping");
 ```
 
 `testing::Server::http_on(listener, handler)` and
-`testing::Server::https_on(listener, handler)` are synchronous, so blocking
-tests can also start plain or TLS servers without `block_on` on a bound
-`std::net::TcpListener`.
+`testing::Server::https_on(listener, handler)` are synchronous constructors
+returning `std::io::Result<Server>`, so blocking tests can start plain or TLS
+servers directly on a `std::net::TcpListener` without `block_on` (note that
+`requests()`, `next_request()`, and `shutdown()` remain `async` and still use
+`block_on` or `.await`):
+
+```rust,no_run
+# #[cfg(feature = "test-util")]
+# fn run() -> leyline::Result<()> {
+use std::net::TcpListener;
+use leyline::testing;
+
+let listener = TcpListener::bind("127.0.0.1:0")?;
+let server = testing::Server::https_on(listener, |_| testing::Response::new(200).body("ok"))?;
+let session = leyline::Session::builder().tls(server.tls()).build_blocking()?;
+assert_eq!(session.block_on(session.get(server.url("/")).text())?, "ok");
+assert_eq!(session.block_on(server.requests()).len(), 1);
+# Ok(())
+# }
+```
 
 ## Test timeouts
 
@@ -357,8 +376,3 @@ assert_eq!(seen[0].0, "GET");
 ```
 
 See [Logging and tracing](logging.md#one-event-per-request).
-
-## Next
-
-Read [Fingerprints](fingerprints.md) to see what a browser session sends on
-each layer.

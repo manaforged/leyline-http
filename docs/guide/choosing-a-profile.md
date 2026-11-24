@@ -39,10 +39,11 @@ HTTP/3 against HTTP/2 for origins that advertise `h3`. See [HTTP/3](http3.md).
 | A phone browser | `.browser(browser).platform(Platform::Android)` or `Platform::IOS` with a browser that has that platform |
 | One fixed version | `.browser(Browser::Chrome158).platform(platform)` |
 
-`.browser(Browser::Safari26).platform(Platform::IOS)` maps to the Safari on
-iPhone sibling. [Sessions](sessions.md#platform-defaults-and-call-order)
-gives the platform defaults and the call order, and
-[Set the languages](sessions.md#set-the-languages) sets `accept-language`.
+`.browser(Browser::Safari26).platform(Platform::IOS)` automatically selects
+the Safari iOS profile.
+[Sessions](sessions.md#platform-defaults-and-call-order) gives the platform
+defaults and call order, and [Set the languages](sessions.md#set-the-languages)
+sets `accept-language`.
 
 ## Match the platform
 
@@ -51,22 +52,23 @@ and the TCP fingerprint. `Platform::Host` uses the OS the program runs on.
 
 ## Keep a saved session stable
 
-Newest-build helpers such as `Browser::chrome()` advance in releases, and
-bundled profile data can be corrected between releases. Pin a specific `Browser`
-variant and check `session.profile_id()` (or `err.is_profile_changed()` after
-`Session::load`), or pass `.profile(&toml)` to freeze the exact profile bytes.
+| Strategy | Call | When to use it |
+| --- | --- | --- |
+| Always latest | `Browser::chrome()` / `Browser::default()` | Ephemeral scrapers that should automatically advance to newer Chrome releases on upgrade |
+| Pinned version | `Browser::Chrome158` | Accounts and reproducible tests (detects bundled-profile data edits via `profile_id()` / `err.is_profile_changed()`) |
+| Frozen TOML | `.profile(&toml)` | Long-lived accounts that must keep byte-identical profile data across upgrades (note: frozen profiles eventually age) |
+
 See [Save and restore a session](sessions.md#save-and-restore-a-session) and
 [Profile data stability](profiles.md#profile-data-stability).
 
 ## Read the JA4 labels
 
-The [profile reference](profiles.md) labels the JA4 of each profile `gated`
-or `estimated`. A Chrome or Brave profile is estimated because Chrome
-shuffles the extension order on every connection. JA4 sorts the extensions
-before it hashes them, so the JA4 stays the same; JA3 does not. To check a
-live session, see
+JA3 and JA4 are TLS handshake hashes that anti-bot WAFs check. The
+[profile reference](profiles.md) labels each profile's offline JA4 test as
+`gated` or `estimated`:
+
+- Both `gated` and `estimated` profiles are verified against live echo servers (`tls.peet.ws`).
+- Chrome and Brave are marked `estimated` only because Chrome randomizes TLS extension order on every connection (so an offline static hash can only estimate one ordering). Because JA4 sorts extensions before hashing, a live Chrome session still produces one constant JA4 (while JA3 changes per connection).
+
+To verify a live session yourself, see
 [Fingerprints](fingerprints.md#audit-a-session).
-
-## Next
-
-Read [Requests](requests.md) to build and send a request.

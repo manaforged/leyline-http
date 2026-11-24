@@ -57,10 +57,13 @@ retried by default.
 attempt `n + 1`, capped at `max` (equal jitter). Call `retry.delay(attempt)` to
 sample the wait for a 0-based retry index.
 
-`Retry::budget(ratio)` caps retries to a fraction of total requests (for
-example `0.2` for 20%) after a 100-retry burst allowance, preventing retry
-storms during outages. Clones of a `Session` share the budget; when the budget
-stops a retry, `Error::retries_exhausted()` is `true`.
+`Retry::budget(ratio)` uses a token bucket to prevent retry storms during
+outages: the bucket starts with a 100-retry burst allowance, each new request
+deposits `ratio` tokens (for example `0.2` for 20%, capped at 100), and each
+retry spends 1 token. Set it on `SessionBuilder::retry` so all clones share one
+budget (a per-request `Retry::budget` creates its own independent bucket). When
+the budget stops a retry on an error outcome (or with `error_for_status()`),
+`Error::retries_exhausted()` is `true`.
 
 ```rust
 use std::time::Duration;
@@ -160,7 +163,7 @@ can be sent again. A streaming request body is retried only when no byte of
 it was read, for example after a connect error. See
 [Streaming](streaming.md).
 
-- **Retried for any method (never reached server):** DNS, connect, TLS, or proxy errors, connect timeouts, HTTP/2 `REFUSED_STREAM`, or HTTP/3 requests the server reports it did not process. A 401 Digest challenge is not a final answer, so an unsent error on the authorized leg still counts.
+- **Retried for any method (never reached server):** DNS, connect, TLS, or proxy errors, connect timeouts, HTTP/2 `REFUSED_STREAM`, or HTTP/3 requests the server reports it did not process. If a request fails before reaching the server on the second (Digest-authenticated) leg of a `401` challenge, Leyline still treats it as unsent and retries it for any method.
 - **Not treated as unsent:** An error on a redirect leg after the original request already received a response.
 
 `any_method(true)` retries every failure of any method. Use it only when the
@@ -195,17 +198,23 @@ ALPN needs no second send. See
 ## The timeouts
 
 `Timeout` holds all six timeouts. Each setter takes a `Duration` or `None`
-(`None` disables that timeout). Deadlines of 2 s or more for `total` use a
-shared 250 ms coarse ticker.
+(`None` disables that timeout). To keep timer overhead low, `total` timeouts of
+2 s or more are checked on a shared 250 ms ticker (they may fire up to ~250 ms
+past the exact deadline; timeouts under 2 s use exact timers).
 
 | Setter | Default | Covers |
 | --- | --- | --- |
-| `total` | 300 s | Whole `send`: redirects, retries, backoff, and buffered body read (ends at response head for `.stream()`). Also bounds WebSocket handshakes |
+| `total` | 300 s | Whole `send`: redirects, retries, backoff, and buffered body read (ends at response headers for `.stream()`). Also bounds WebSocket handshakes and `RequestBuilder::download_to` retries |
 | `connect` | 10 s | One new connection (DNS, TCP/UDP, proxy negotiation, TLS/QUIC handshake). Session-wide; not applied to pooled reuse |
-| `response_header` | none | Dispatch to response head per redirect leg, including connect (also covers the body when buffered) |
-| `read` | none | Longest idle gap between chunks on a `.stream()` or chunk-delivered body |
-| `body` | none | Total time to read a `.stream()` or chunk-delivered body from its first read |
+| `response_header` | none | Dispatch to response headers per redirect leg, including connect (on buffered requests, also covers reading the buffered body) |
+| `read` | none | Longest idle gap between chunks on streamed reads (`.stream()`, `download_to`, `events()`, `bytes_stream()`) — not applied to buffered responses |
+| `body` | none | Total time to read a streamed body (`.stream()`, `download_to`, `events()`, `bytes_stream()`) from its first read — not applied to buffered responses |
 | `error_body` | 10 s | Body prefix captured by `RequestBuilder::error_for_status()`, bounded by `total`. See [Responses](responses.md#turn-a-status-into-an-error) |
+
+Recommended defaults by workload:
+
+- **Buffered JSON APIs / service calls:** Set `connect` (5–10 s), `response_header` (per-attempt cap), and `total` (overall cap across retries).
+- **Streamed relays & downloads:** Clear or raise `total` (`.total(None)` for long downloads) and set `read` (catch stalled servers) + `body` (catch slow trickles).
 
 `Timeout::total`, and `.timeout(duration)`, bound the whole call, every retry and wait included. To bound each attempt, set `Timeout::response_header` or `read`.
 
@@ -239,8 +248,10 @@ Every timeout gives an error of kind `Kind::Timeout`. For a connect timeout,
 
 ## Per-request timeouts
 
-`RequestBuilder::timeout` merges `total`, `read`, `body`, `response_header`,
-and `error_body` over the session defaults (`None` disables a timeout). A
+Unlike `SessionBuilder::timeout` (which replaces the whole `Timeout`),
+`RequestBuilder::timeout` and `http::Request` `Timeout` extensions **merge**
+only the fields you set on `Timeout::new()` over the session defaults (`None`
+explicitly disables a field; unset fields keep the session value). A plain
 `Duration` sets `total` (which also bounds WebSocket handshakes). A per-request
 `connect` timeout is ignored because connections are pooled session-wide.
 
@@ -275,9 +286,10 @@ let streamed = session
 ## Bound a whole download
 
 `Timeout::body` bounds the whole transfer from its first read for both
-resumable `RequestBuilder::download_to` and one-shot `Response::download_to`. A
-plain `Duration` passed to `.timeout` sets only `total` (which stops at the
-response head for streamed downloads), so set `Timeout::body`.
+resumable `RequestBuilder::download_to` and one-shot `Response::download_to`.
+Because `RequestBuilder::download_to` still enforces the 300 s session
+`Timeout::total` across retries, pass `.total(None)` (or raise `total`) for
+long resumable downloads:
 
 ```rust,no_run
 use std::time::Duration;
@@ -287,8 +299,8 @@ use leyline::Timeout;
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let written = session
     .get("https://example.com/archive.zip")
-    .timeout(Timeout::new().body(Duration::from_secs(600)))
-    .error_for_status()
+    .timeout(Timeout::new().total(None).body(Duration::from_secs(600)))
+    .max_body_size(None)
     .retry(3)
     .download_to("archive.zip")
     .await;
@@ -301,9 +313,5 @@ match written {
 # }
 ```
 
-See [Streaming](streaming.md#resume-a-download) and
+See [Streaming](streaming.md#download-a-file) and
 [Cancellation](cancellation.md) for checkpoint and partial-file behavior.
-
-## Next
-
-Read [Errors](errors.md) to match on `Kind`.

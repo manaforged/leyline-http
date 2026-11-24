@@ -8,8 +8,21 @@ failure from an origin failure.
 An `http://` proxy receives the `CONNECT` request and any
 `Proxy-Authorization` credentials in cleartext; an `https://` proxy receives
 them inside TLS. A plain `http://` URL goes to an `http://` or `https://`
-proxy as an absolute-form request, and through a SOCKS5 proxy over a
-`CONNECT` tunnel.
+proxy as a full-URL ("absolute-form") HTTP request, and through a SOCKS5 proxy
+over a `CONNECT` tunnel.
+
+## Choose a proxy mode
+
+| Mode | Cookies | TLS session cache | Saved by `Session::save`? | Best for |
+| --- | --- | --- | --- | --- |
+| Single `Proxy` (`"http://..."`) | Shared session jar | Shared | Yes (without password) | Persistent logged-in accounts, corporate proxy |
+| `Proxy::list(urls)` | Shared session jar (warns: cookies travel across exit IPs) | Shared | No (restores direct) | Stateless scraping or rotating IPs with `cookies(None)` |
+| `Proxy::identified(triples)` | Isolated empty jar per proxy | Isolated per proxy | No (neither proxies nor per-proxy jars) | Multi-identity browser scraping pools without cross-IP cookie leaks |
+| `Proxy::custom(f)` | Shared session jar | Shared | No | Dynamic per-URL / geo / gateway routing |
+
+For persistent logged-in accounts, use one `Session` per account with one
+`Proxy` and `Session::save`. For rotating scraping pools, use `Proxy::identified`
+(or `Proxy::list` with `.cookies(None)`).
 
 ## Set one proxy
 
@@ -48,11 +61,10 @@ default. With either scheme the proxy resolves the host name.
 leyline-http = { version = "0.3", features = ["socks"] }
 ```
 
-Without the feature, `build()` refuses a SOCKS URL with `Kind::Config`,
-whether it is the session proxy, an entry of a proxy list, or the
-proxy from the environment. A SOCKS URL string given to a request fails the
-first request that uses it. The message names the
-feature.
+Without the feature, `build()` refuses a SOCKS URL with `Kind::Config` (session
+proxy, proxy list entry, or environment proxy). A per-request `socks5://` URL
+without the feature fails that request with `Kind::Proxy`. The message names
+the feature.
 
 An `https://` proxy means TLS to the proxy, then `CONNECT` through it. A
 session with certificate pins or a client certificate cannot use one, because
@@ -157,11 +169,9 @@ let session = leyline::Session::builder()
 # }
 ```
 
-Uppercase `HTTP_PROXY` is skipped when the process looks like a CGI handler
-(the httpoxy mitigation): when any of `GATEWAY_INTERFACE`, `REQUEST_METHOD`,
-`SERVER_SOFTWARE`, `SCRIPT_NAME`, `SCRIPT_FILENAME`, `PATH_INFO`,
-`QUERY_STRING`, `SERVER_PROTOCOL`, `SERVER_NAME`, or `SERVER_PORT` is set.
-Leyline then logs a warning on the `leyline::env_proxy::cgi` target.
+Uppercase `HTTP_PROXY` is skipped when standard CGI variables (such as
+`GATEWAY_INTERFACE`, `REQUEST_METHOD`, or `SCRIPT_NAME`) are set (the httpoxy
+mitigation), logging a warning on `leyline::env_proxy::cgi`.
 
 ## Per-request override
 
@@ -305,14 +315,12 @@ let session = Session::builder()
 | An error with `is_proxy()` | A strike. The origin loses its sticky proxy |
 | A response where `block()` is `Some` | A strike. The origin loses its sticky proxy |
 | Any other response | The strikes reset |
-| Any other error, `ProxyTarget` included | No change |
+| Any other error (including origin-unreachable [`Kind::ProxyTarget`](#proxy-errors)) | No change |
 
-After `ban_after` strikes, the proxy is banned for `ban_for`, and every origin
-that stuck to it loses its sticky proxy. Each retry picks the next healthy
-proxy and skips the one that just failed. A request with its own `.proxy(..)`
-does not use the list, and a request or WebSocket `.proxy(..)` given a list
-fails with `Kind::Config`. `ban_after(u32::MAX)` keeps every proxy in rotation. Blocks are described in
-[Crawling](crawling.md#classify-a-block-response).
+- After `ban_after` strikes, the proxy is banned for `ban_for` and loses all sticky origins.
+- Each retry moves to the next healthy proxy (skipping the one that just failed). Pair `Proxy::list` with `block_statuses([403, 429])` and `Retry::new(3).when(|a| a.is_transient() || a.is_block())` to rotate immediately on blocks (omit `HostLimits::pause_on([429])` if you want other proxies to keep going).
+- `Proxy::list` shares one cookie jar across all proxies — pass `.cookies(None)` for stateless scraping or use [`Proxy::identified`](#pin-a-browser-and-platform-to-each-proxy) to isolate cookies per proxy.
+- A per-request `.proxy(..)` bypasses the list, and passing a `Proxy::list` to a single request or WebSocket fails with `Kind::Config`. Set `ban_after(u32::MAX)` to keep every proxy in rotation. See [Classify a block response](crawling.md#classify-a-block-response).
 
 Clones of a list share its health state. `Session::stats()` reports it:
 `proxies()` lists each proxy without its password, and `proxy_in_use(p)`,
@@ -366,10 +374,8 @@ On first use of a proxy, the pool derives and caches a session for it via
 `to_builder().browser(..).platform(..)`:
 
 - **Shared with the parent session:** connection pool (in its own partition) and `host_limits`.
-- **Isolated per proxy:** cookie jar (starts empty, even when two proxies share a browser and platform), TLS session cache, and browser/platform identity. Cookies never cross between proxies.
-
-The parent session must use a browser profile; `Proxy::identified` on a plain
-session fails `build()` with `Kind::Config`.
+- **Isolated per proxy:** cookie jar (starts empty, even when two proxies share a browser and platform), TLS session cache, and browser/platform identity. Cookies never cross between proxies, and `session.cookies()` reads/writes only the parent jar (not per-proxy jars).
+- **Parent browser & saving:** The parent session must use a browser profile (`Proxy::identified` on a plain session fails `build()` with `Kind::Config`; the parent profile handles `no_proxy` direct requests). `Session::save` does not persist `Proxy::identified` or its per-proxy cookie jars.
 
 ## Proxy errors
 
@@ -419,13 +425,9 @@ proxy without the `socks` feature. `build()` rejects `Protocol::Http3`
 when such a proxy takes every URL, and an `Http3` request fails with
 `Kind::Config` when the rules pick such a proxy for its URL. Under
 `Protocol::Race`, a request through such a proxy takes the `Auto` path.
-MASQUE (`CONNECT-UDP`, RFC 9298) is not supported.
+HTTP/3 over HTTP proxies (`MASQUE` / `CONNECT-UDP`, RFC 9298) is not supported.
 
 Many proxies do not support `UDP ASSOCIATE`. When an HTTP/3 connection
 through a proxy fails, `Race` skips HTTP/3 for that origin and proxy for 5
 minutes. To keep every request on TCP, set `Protocol::Auto`. See
 [HTTP/3](http3.md).
-
-## Next
-
-Read [Cookies](cookies.md).

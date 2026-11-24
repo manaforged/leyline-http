@@ -80,16 +80,63 @@ cookie also matches subdomains. The jar applies the rules it
 applies to a `Set-Cookie` header from that URL, and ignores a cookie the URL
 may not set: for example, it drops a `secure` cookie for an `http://` URL.
 
+### Import cookies from Playwright or Chrome
+
+When handing an authenticated session from Playwright or Chrome into Leyline,
+map each exported cookie into `Cookie::builder` and insert it against an
+`https://` URL for that cookie's domain:
+
+```rust,no_run
+use leyline::cookie::{Cookie, SameSite};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportedCookie {
+    name: String,
+    value: String,
+    domain: String,
+    path: String,
+    secure: bool,
+    http_only: bool,
+    same_site: Option<String>,
+}
+
+# fn run(json: &str) -> Result<(), Box<dyn std::error::Error>> {
+let session = leyline::Session::new();
+let exported: Vec<ExportedCookie> = serde_json::from_str(json)?;
+for item in exported {
+    let host = item.domain.trim_start_matches('.');
+    let origin = format!("https://{host}/");
+    let same_site = match item.same_site.as_deref() {
+        Some("Strict") => SameSite::Strict,
+        Some("None") => SameSite::None,
+        _ => SameSite::Lax,
+    };
+    let mut builder = Cookie::builder(&item.name, &item.value)
+        .path(&item.path)
+        .secure(item.secure)
+        .http_only(item.http_only)
+        .same_site(same_site);
+    if item.domain.starts_with('.') {
+        builder = builder.domain(&item.domain);
+    }
+    session.cookies().insert(&origin, builder.build());
+}
+# Ok(())
+# }
+```
+
 To run a session with no cookies at all, see
 [Turn cookies off](sessions.md#turn-cookies-off).
 
 ## Read the cookies a response set
 
 `Response::cookies()` parses the `Set-Cookie` headers of the final response
-into `Cookie` records. It does not read the jar, so it also lists a deletion.
-It skips a header that does not parse and a cookie whose `Domain` is a public
-suffix or does not cover the host. To read what the session sends, ask the
-jar.
+into `Cookie` records. It does not read the jar, so it also includes deletion
+headers (such as `Max-Age=0`). It skips headers that do not parse or whose
+`Domain` is a public suffix or does not cover the host. To read what the
+session will send next, query the jar.
 
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -108,9 +155,10 @@ for cookie in resp.cookies() {
 same cookies, so a cookie one task receives reaches every other task at once.
 
 `SessionBuilder::cookies(jar)` starts a session from a jar you built.
-`session.to_builder().cookies(jar).build()?` makes a session that shares
-the pool and every other setting but reads and writes the given jar; use it for a second
-identity on warm connections. See [Sessions](sessions.md#derive-a-session).
+`session.to_builder().cookies(jar).build()?` shares the pool with a different
+jar; for isolated anti-bot accounts, also pass `.share_connections(false)` so
+TLS session tickets and HTTP/2 sockets are not shared between accounts. See
+[Sessions](sessions.md#derive-a-session).
 
 `snapshot()` is a fork: a new store with a copy of every cookie and all its
 attributes. A write to the copy does not reach the original.
@@ -131,7 +179,9 @@ if probe.get("https://example.com/check").send().await?.status().is_success() {
 
 ## What the jar does
 
-The jar follows Chrome:
+> **Debugging missing `SameSite` cookies?** `SameSite` enforcement uses `sec-fetch-site`, computed from `Tab` / `from_page` / `Referer` (including scheme changes like `http://` → `https://`). Cross-site requests omit `Strict` cookies and send `Lax` cookies only on top-level `GET`/`HEAD` navigations.
+
+The jar follows Chrome's rules:
 
 - A cookie is stored under the exact domain the `Set-Cookie` names: its
   `Domain=` value, or the request host.
@@ -177,7 +227,3 @@ For a custom cookie store, `Jar` and `Cookie` implement `Serialize` and
 - Saving writes every non-expired cookie, session cookies included.
 - Loading skips expired or oversized cookies, keeps the newest copy of duplicate `(name, path, domain)` keys, enforces the 180/3300 caps, and clamps expiry to 400 days from load time.
 - Last-access times are preserved so eviction order survives restarts.
-
-## Next
-
-Read [Accounts](accounts.md).

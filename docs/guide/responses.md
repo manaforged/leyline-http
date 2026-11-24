@@ -53,7 +53,7 @@ HTTP/3 responses carry them; a streamed response and HTTP/1.1 yield none.
 `relay_headers()` returns a header map ready to forward downstream:
 
 - Strips RFC 9110 §7.6.1 hop-by-hop headers: `connection`, every header listed in `connection`, `keep-alive`, `proxy-connection`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailer`, `transfer-encoding`, and `upgrade`.
-- When Leyline decodes the body, also strips `content-encoding` and `content-length` so the headers match what every sink returns.
+- When Leyline decodes the body, also strips `content-encoding` and `content-length` so the headers match the decoded body returned by `text()`, `bytes()`, `bytes_stream()`, and `download_to()`.
 - When decoding is disabled (`decode(false)`) or the coding is not offered, `content-encoding` stays intact.
 
 See [Service integration](service-integration.md#relay-an-upstream-body).
@@ -84,11 +84,11 @@ overrides the declared charset. Without the `charset` feature, on by default,
 
 ### Size cap and content coding
 
-`max_body_size` (100 MiB by default) caps decoded bytes across every sink
-(`text`, `bytes`, `json`, `bytes_stream`, `write_to`, `download_to`) on every
-protocol, failing with `Kind::BodyLimit`. Set it on the session or on one
-request (applies to both buffered and `.stream()` responses); pass `None` on
-either builder to remove the cap:
+`max_body_size(impl Into<Option<usize>>)` (100 MiB by default) caps decoded
+bytes across every body method (`text`, `bytes`, `json`, `bytes_stream`,
+`write_to`, `download_to`) on every protocol, failing with `Kind::BodyLimit`.
+Set it on the session or on one request (applies to both buffered and
+`.stream()` responses); pass `None` on either builder to remove the cap:
 
 ```rust,no_run
 use leyline::Session;
@@ -140,8 +140,9 @@ entries, quoted parameters, multi-value `rel`). Each `Link` exposes `url()`,
 resolve against `resp.url()`. For example, find the next page with
 `resp.links().into_iter().find(|l| l.has_rel("next"))`.
 
-`RequestBuilder::pages()` turns a request into a stream of responses that
-follows `Link: rel="next"` automatically:
+`RequestBuilder::pages()` turns a request into a `futures_util::Stream` of
+responses that follows `Link: rel="next"` automatically (add
+`futures-util = "0.3"` to `Cargo.toml` and import `futures_util::StreamExt`):
 
 - Read with `futures_util::StreamExt::next` and cap with `.take(n)`.
 - Follow-ups use `GET` with the first request's headers, timeouts, retry policy, and `error_for_status()` setting.
@@ -196,7 +197,7 @@ retry policy is done, and keeps the start of the body in the error:
 | Body bytes kept, after decoding | 64 KiB, and never more than `max_body_size` | `SessionBuilder::max_error_body_size` |
 | Time to read that body | 10 s, and never past the `total` timeout | `Timeout::error_body` |
 
-- **Bounded read.** Leyline decides at the status line. Error responses read only up to `max_error_body_size` decoded bytes and `Timeout::error_body` (stopping decompression at the byte cap).
+- **Bounded read.** As soon as Leyline sees a `4xx` or `5xx` status line, it caps reading the error body at `max_error_body_size` decoded bytes and `Timeout::error_body` (stopping decompression at the byte cap so a large error page cannot exhaust memory).
 - **Partial capture.** If the read fails or times out, the error still keeps the status, headers, and whatever bytes arrived. `content-encoding` is dropped when decoded; `content-length` is dropped when truncated.
 - **Connection reuse.** On HTTP/2 and HTTP/3, excess error bodies reset only that stream. On HTTP/1.1, remaining fixed-length bytes up to `max_error_body_size` drain in the background within the idle timeout so the connection stays reusable; larger or unframed error bodies close the connection. `download_to` with `error_for_status()` uses the same limits.
 

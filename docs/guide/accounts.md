@@ -54,6 +54,37 @@ let session = Session::load("account/session.json")?
 `build()` returns `Kind::Config` with `err.is_profile_changed() == true` when
 the session's profile id differs from the saved one (for example after a crate
 upgrade updated a bundled profile). Otherwise it restores the connection state.
+To accept an upgraded bundled profile while keeping the saved cookies, load the
+saved `jar` field into a fresh session and re-save:
+
+```rust,no_run
+use leyline::cookie::Jar;
+use leyline::{Browser, Platform, Session};
+
+#[derive(serde::Deserialize)]
+struct SavedCookies {
+    jar: Jar,
+}
+
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
+let session = match Session::load("account/session.json")?.build() {
+    Ok(s) => s,
+    Err(err) if err.is_profile_changed() => {
+        let saved: SavedCookies = serde_json::from_slice(&std::fs::read("account/session.json")?)?;
+        let fresh = Session::builder()
+            .browser(Browser::Chrome158)
+            .platform(Platform::Windows)
+            .cookies(saved.jar)
+            .build()?;
+        fresh.save("account/session.json")?;
+        fresh
+    }
+    Err(err) => return Err(err.into()),
+};
+# drop(session);
+# Ok(())
+# }
+```
 
 | Choice | Why |
 | --- | --- |
@@ -68,7 +99,7 @@ upgrade updated a bundled profile). Otherwise it restores the connection state.
 | --- | --- |
 | A cookie changes | A save runs, at most once per `every` |
 | `every` passes and the connection state changed | A save runs, so new TLS tickets, `Alt-Svc`, and HSTS entries reach the file |
-| `session.shutdown()` | A last save runs and the writer stops. `shutdown` cancels at once; `.await` it to wait until the save is on disk |
+| `session.shutdown()` | Cancels in-flight requests immediately and flushes a final save; `.await` it to wait until the file write finishes |
 | The runtime drops the task | The writer saves unsaved changes as it stops |
 
 Each save writes a temporary file, syncs it, and renames it, so a crash never leaves a half-written file. On Unix the file has mode `0600`; on Windows it takes the default ACLs of its directory. `autosave` panics outside a Tokio runtime.
@@ -182,9 +213,10 @@ A `Tab` sends each request with the current page as its `from_page`, so the
 [Requests](requests.md#keep-the-page-with-a-tab) lists the calls. For an
 account:
 
-- `fetch` on a tab with no page fails with `Kind::Request` ("the tab has no page; open one first") and sends nothing. Open a page first.
-- `current()` reads the page, and `page(..)` sets it manually.
-- A page script sets its own `accept`. Set it on the `fetch` builder when the site's script does. See [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
+- `open`, `follow`, `submit`, and `submit_form` are `async fn`s returning `Result<Response>` directly; only `fetch` returns a `RequestBuilder`.
+- `fetch` on a tab with no current page fails with `Kind::Request` ("the tab has no page; open one first") and sends nothing. Open a page first (or call `tab.page(Some(url))` with a parsed `Url`).
+- `Tab` clones share the same current page, so give each concurrent page flow its own `session.tab()`.
+- A page script sets its own `accept`; set it on the `fetch` builder when the site's script does. See [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
 
 ```rust,no_run
 use leyline::profile::RequestKind;
@@ -205,32 +237,8 @@ println!("{} {}", orders.status(), logo.status());
 
 ## Log in with the page's form
 
-The `html` feature, on by default, adds `leyline::html` and turns on the `multipart` feature. `html::forms(document)` returns every `<form>` as an `html::Form` with the values a browser would submit:
-
-- Hidden inputs, checked checkboxes, text areas, and selected options.
-- One checked radio button per name: the last one, as a browser keeps it.
-- Controls outside the `<form>` element that name it with `form="id"`. When two elements share the id, the first one is the form.
-- No disabled controls, and no controls inside a disabled `<fieldset>` except in the first `<legend>` that is a direct child of that fieldset.
-- No options inside a disabled `<optgroup>`. A list box (`<select size>`) with no selected option sends nothing.
-- Line breaks in names and values converted to CRLF, as a browser sends them.
-- Values with every HTML named character reference decoded, such as `&amp;` and `&eacute;`.
-
-`Form::find(document, name)` returns the first form whose `id` or `name` attribute is `name`.
-
-`Tab::follow` and `Tab::submit_form` drop the session credentials when the target origin differs from the current page: the `Authorization`, `Cookie`, and `Proxy-Authorization` defaults and the session bearer token, as a redirect does.
-
-| Call | Effect |
-| --- | --- |
-| `action()`, `method()` | The `action` attribute and the method, `http::Method::GET` or `POST` |
-| `enctype()` | The encoding as a MIME type: `application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain` |
-| `base()` | The `href` of the page's `<base>` element, if any |
-| `fields()`, `field(name)` | Every `(name, value)` pair, or the first value of one field |
-| `set(name, value)` | Replaces every value of the field with one value, or adds the field |
-| `buttons()`, `press(name)` | The submit button names; `press` adds one button's name and value. It returns `false` for an unknown name, and adds `name.x` and `name.y` for an image button |
-
-`Tab::submit_form(&form)` sends `form.fields()` as they are, with no submit button: call `form.press(name)` first when the site reads the button. The action resolves against the page's `<base href>`, or the current page when there is none. A `POST` form sends the fields with `RequestKind::FormNavigate`, encoded as its `enctype()` says: `application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain`. A `GET` form replaces the action's query with the fields. Both are navigations that carry the page as the `Referer` and change the current page.
-
-The session redirect policy applies: after a login `POST`, a 301, 302, or 303 continues as a `GET` without the body, and a 307 or 308 repeats the `POST`. The response and the current page are those of the final URL.
+The default `html` feature (which implies `multipart`) adds `leyline::html` for
+extracting `<form>` fields, `<meta>` tags, and `<a href>` links:
 
 ```rust,no_run
 use leyline::html::{self, Form};
@@ -250,18 +258,36 @@ println!("{}", cart.status());
 # }
 ```
 
-`html::meta(document, name)` returns the `content` of the first `<meta>` whose `name` or `property` equals `name`, without case; many sites put a CSRF token there. `html::links(document)` returns every `<a href>` as an `html::Anchor` with `href()`, `text()`, and `rel()`. `href()` is the raw attribute; pass it to `Tab::follow`, which resolves it.
+`html::forms(document)` returns every `<form>` as an `html::Form`, and
+`Form::find(document, name)` finds the first matching `id` or `name`:
+
+| Call | Effect |
+| --- | --- |
+| `action()`, `method()` | The `action` attribute and method (`http::Method::GET` or `POST`) |
+| `enctype()` | Encoding MIME type (`application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain`) |
+| `base()` | The `<base href>` of the page, if any |
+| `fields()`, `field(name)` | Every `(name, value)` pair, or the first value of one field |
+| `set(name, value)` | Replaces all values of a field with one value, or adds it |
+| `buttons()`, `press(name)` | Lists submit button names; `press` adds one button's value (or `name.x`/`name.y` for image buttons) |
+
+- **Browser-accurate form extraction:** includes hidden inputs, checked checkboxes, textareas, selected options, the last checked radio per name, external `form="id"` controls, HTML entity decoding, and CRLF normalization; skips disabled controls, disabled `<optgroup>` options, and disabled `<fieldset>` controls outside the first child `<legend>`.
+- **`Tab::submit_form(&form)`** resolves `action` against `<base href>` or the current page, sends `POST` with `RequestKind::FormNavigate` (or `GET` replacing the query), follows redirects, and updates `tab.current()`. Cross-origin navigations strip default `Authorization`/`Cookie`/`Proxy-Authorization` headers and bearer tokens (jar cookies still follow normal domain/`SameSite` rules, so OAuth/SSO flows work).
+- `html::meta(document, name)` matches `name` or `property` case-insensitively (useful for CSRF tokens), and `html::links(document)` returns `<a href>` anchors (`href()`, `text()`, `rel()`).
 
 ## Check the login, log in again
 
-Leyline cannot tell whether a site considers you logged in. Request an endpoint that only a logged-in user can read, and log in again when it says no. The jar and `Session::autosave` keep the new cookies.
+Leyline cannot tell whether a site considers you logged in. Probe an
+authenticated endpoint with `session.get(...)` (or after `tab.open(...)` — do
+not call `tab.fetch(...)` before the tab has an open page), and log in again if
+it returns `401`:
 
 ```rust,no_run
 use leyline::html::Form;
 use leyline::http::StatusCode;
 
-# async fn run(tab: leyline::Tab) -> leyline::Result<()> {
-let me = tab.fetch(leyline::http::Method::GET, "https://shop.example/api/me").send().await?;
+# async fn run(session: leyline::Session) -> leyline::Result<()> {
+let tab = session.tab();
+let me = session.get("https://shop.example/api/me").send().await?;
 if me.status() == StatusCode::UNAUTHORIZED {
     let page = tab.open("https://shop.example/login").await?.text().await?;
     if let Some(mut form) = Form::find(&page, "login") {
@@ -292,8 +318,4 @@ println!("{} {}", a?.status(), b?.status());
 # }
 ```
 
-To stop every task of the account and run the last autosave, call `session.shutdown()`. See [Sessions](sessions.md#stop-a-session).
-
-## Next
-
-Read [Proxies](proxies.md).
+To stop every task of the account and run the last autosave, call `session.shutdown().await`. See [Sessions](sessions.md#stop-a-session).

@@ -51,6 +51,16 @@ The build needs:
   `LEYLINE_BSSL_ASSUME_PATCHED` is set. A source checkout also uses Git to
   fetch the BoringSSL submodule.
 
+In minimal Docker / CI builder images, install both the C++ toolchain and Git:
+
+```sh
+# Debian / Ubuntu (e.g. rust:1.96-slim)
+apt-get update && apt-get install -y --no-install-recommends build-essential git
+
+# Alpine (native musl build, e.g. rust:1.96-alpine)
+apk add --no-cache build-base git
+```
+
 On Windows, the x86_64 assembly is NASM source. When NASM is on `PATH`, or
 `NASM` names it, the build assembles it. Otherwise it links the objects that
 ship in `prebuilt/x86_64-pc-windows-msvc/`, which CI assembles with NASM
@@ -97,8 +107,3 @@ The build finds `<arch>-linux-musl-gcc` and `<arch>-linux-musl-g++` on
 `PATH`; set `CC_<target>` and `CXX_<target>` to use another compiler. By
 default the Linux trial link drops `libstdc++`; when a fallback or
 `LEYLINE_BSSL_RUST_CPPLIB=stdc++` links it, musl links it statically.
-
-## Next
-
-Read the [Profile reference](profiles.md) for each bundled profile and the
-capture it comes from.

@@ -100,10 +100,9 @@ To see the headers a request was prepared with, build the session with
 
 ## Query parameters and bodies
 
-`query` appends pairs to the URL after any query it already has. `form` sends
-pairs as `application/x-www-form-urlencoded`. Both take any iterator of
-`(K, V)` tuples, or references to them, where `K` and `V` are `AsRef<str>`.
-One request can carry both.
+`query` appends pairs to the URL after any existing query; `form` sends pairs
+as `application/x-www-form-urlencoded`. Both accept an array (`[("k", "v")]`),
+`Vec`, slice, or `HashMap` of string pairs. One request can carry both.
 
 `body` takes a `Body`, or anything that converts to one: `String`,
 `&'static str`, `Vec<u8>`, `&'static [u8]`, `Bytes`, or `()`. `json` sets
@@ -188,116 +187,6 @@ let resp = session.post("https://api.example/upload").multipart(form).send().awa
 when missing or non-UTF-8) and sends no part `Content-Type` by default (RFC 7578
 `text/plain`); call `.mime(..)` to set one. Unopenable files fail with
 `Kind::Io`. See `examples/multipart.rs` for a complete example.
-
-## Request kinds
-
-A `RequestKind` sets the `sec-fetch-*` headers and the header order for a fetch
-context: `Native`, `Navigate`, `FrameNavigate`, `Reload`, `Script`, `Image`,
-`Xhr`, `Form`, `CrossOrigin`, `SameSite`, and `FormNavigate`.
-`RequestKind::Navigate` is the default for a GET from a browser session.
-
-On a browser session with no request kind, a POST, PUT, or PATCH infers one from
-`content-type`: `application/json` gives `Xhr`, and
-`application/x-www-form-urlencoded` gives `Form`. Other types leave the
-kind unset. Set `.kind(..)` when the guess is wrong.
-
-`Form` is a script that posts form data with `fetch()`. `FormNavigate` is a
-person who clicks the submit button of an HTML form, as on a login page;
-`form()` never infers it.
-
-| RequestKind | `sec-fetch-mode` | `sec-fetch-dest` | `sec-fetch-user` | Other headers |
-| --- | --- | --- | --- | --- |
-| `Form` | `cors` | `empty` | none | A script `accept`, `priority: u=1, i` |
-| `FormNavigate` | `navigate` | `document` | `?1` | An HTML `accept`, `upgrade-insecure-requests: 1`, `cache-control: max-age=0` |
-
-## Send the requests of a page
-
-Pass the page that sends a request to `from_page`. Leyline then sets
-`Referer`, `Origin`, and `sec-fetch-site` the way the browser does for the
-request's kind. A navigation with a `from_page` page is a link click. A
-navigation without one is a typed URL: `sec-fetch-site: none` and no
-`Referer`.
-
-```rust,no_run
-use leyline::profile::RequestKind;
-
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::from(leyline::Browser::default());
-let page = session.get("https://shop.example/cart").send().await?;
-let page_url = page.url().clone();
-let cart = session
-    .get("https://shop.example/api/cart")
-    .kind(RequestKind::Xhr)
-    .from_page(page_url.clone())
-    .send().await?;
-let logo = session
-    .get("https://cdn.example/logo.png")
-    .kind(RequestKind::Image)
-    .from_page(page_url)
-    .send().await?;
-# drop((cart, logo));
-# Ok(())
-# }
-```
-
-`Referer` follows `strict-origin-when-cross-origin`. P is the page and T the
-target:
-
-| P and T | `Referer` |
-| --- | --- |
-| Same origin | The full page URL, without fragment and user info |
-| Same site or cross site | The page origin and `/` |
-| P is `https`, T is `http` | None |
-
-`Origin` follows the request kind and relationship between P and T:
-
-| RequestKind | No `from_page` | Same origin | Same site or cross site | P is `https`, T is `http` |
-| --- | --- | --- | --- | --- |
-| `Xhr` GET | None | None | P origin | P origin |
-| `Xhr` POST, `Form` | T origin | T origin | P origin | P origin |
-| `FormNavigate` | T origin | T origin | P origin | `null` |
-| `Image`, `Script` | None | None | None | None |
-
-`sec-fetch-site` is computed from the page and every redirect by the same rules
-for Chromium and Gecko profiles. `sec-fetch-user: ?1` goes only with `Navigate`
-and `FormNavigate`. An explicit `referer` header wins over the computed value.
-
-## Keep the page with a tab
-
-A `Tab` keeps the current page, as a browser tab does: each request sends
-that page as its `from_page`, and each navigation sets the next page.
-`Session::tab()` makes one, and clones of a tab share the page.
-
-| Call | Sends | Changes the page |
-| --- | --- | --- |
-| `open(url)` | A typed URL: no `from_page` | Yes |
-| `follow(url)` | A link click from the current page | Yes |
-| `submit(url, fields)` | A clicked form, `RequestKind::FormNavigate` | Yes |
-| `submit_form(&form)` | A parsed `html::Form`, with its own method and action | Yes |
-| `fetch(method, url)` | A script request, `RequestKind::Xhr`; `.kind(..)` makes it an image or script | No |
-
-- Each navigation response (including `4xx`/`5xx`) updates the current page to the final URL after redirects; transport errors leave it unchanged.
-- Relative URLs resolve against the current page, or else the session `base_url`.
-- `page(url)` sets the current page manually. `fetch` on a tab with no current page fails with `Kind::Request` without sending anything.
-
-```rust,no_run
-use leyline::profile::RequestKind;
-
-# async fn run() -> leyline::Result<()> {
-let tab = leyline::Session::from(leyline::Browser::default()).tab();
-tab.open("https://shop.example/").await?;
-tab.follow("/cart").await?;
-let cart = tab.fetch(leyline::http::Method::GET, "/api/cart").send().await?;
-let logo = tab.fetch(leyline::http::Method::GET, "https://cdn.example/logo.png").kind(RequestKind::Image).send().await?;
-tab.submit("/checkout", [("step", "address")]).await?;
-println!("{:?}", tab.current());
-# drop((cart, logo));
-# Ok(())
-# }
-```
-
-[Accounts](accounts.md) uses a tab with a saved session and submits the forms
-of a page.
 
 ## Override the session for one request
 
@@ -413,3 +302,114 @@ let resp = session.execute(req).await?;
 The `tower` feature makes `Session` a `tower_service::Service` over the
 same send path. See
 [Service integration](service-integration.md#use-the-tower-adapter).
+
+## Request kinds
+
+A `RequestKind` sets the `sec-fetch-*` headers and the header order for a fetch
+context: `Native`, `Navigate`, `FrameNavigate`, `Reload`, `Script`, `Image`,
+`Xhr`, `Form`, `CrossOrigin`, `SameSite`, and `FormNavigate`.
+`RequestKind::Navigate` is the default for a GET from a browser session.
+
+On a browser session with no request kind, a POST, PUT, or PATCH infers one from
+`content-type`: `application/json` gives `Xhr`, and
+`application/x-www-form-urlencoded` gives `Form`. Other types leave the
+kind unset. Set `.kind(..)` when the guess is wrong.
+
+`Form` is a script that posts form data with `fetch()`. `FormNavigate` is a
+person who clicks the submit button of an HTML form, as on a login page;
+`form()` never infers it.
+
+| RequestKind | `sec-fetch-mode` | `sec-fetch-dest` | `sec-fetch-user` | Other headers |
+| --- | --- | --- | --- | --- |
+| `Form` | `cors` | `empty` | none | A script `accept`, `priority: u=1, i` |
+| `FormNavigate` | `navigate` | `document` | `?1` | An HTML `accept`, `upgrade-insecure-requests: 1`, `cache-control: max-age=0` |
+
+## Send the requests of a page
+
+Pass the page that sends a request to `from_page`. Leyline then sets
+`Referer`, `Origin`, and `sec-fetch-site` the way the browser does for the
+request's kind. A navigation with a `from_page` page is a link click. A
+navigation without one is a typed URL: `sec-fetch-site: none` and no
+`Referer`.
+
+```rust,no_run
+use leyline::profile::RequestKind;
+
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::from(leyline::Browser::default());
+let page = session.get("https://shop.example/cart").send().await?;
+let page_url = page.url().clone();
+let cart = session
+    .get("https://shop.example/api/cart")
+    .kind(RequestKind::Xhr)
+    .from_page(page_url.clone())
+    .send().await?;
+let logo = session
+    .get("https://cdn.example/logo.png")
+    .kind(RequestKind::Image)
+    .from_page(page_url)
+    .send().await?;
+# drop((cart, logo));
+# Ok(())
+# }
+```
+
+`Referer` follows `strict-origin-when-cross-origin`. P is the page and T the
+target:
+
+| P and T | `Referer` |
+| --- | --- |
+| Same origin | The full page URL, without fragment and user info |
+| Same site or cross site | The page origin and `/` |
+| P is `https`, T is `http` | None |
+
+`Origin` follows the request kind and relationship between P and T:
+
+| RequestKind | No `from_page` | Same origin | Same site or cross site | P is `https`, T is `http` |
+| --- | --- | --- | --- | --- |
+| `Xhr` GET | None | None | P origin | P origin |
+| `Xhr` POST, `Form` | T origin | T origin | P origin | P origin |
+| `FormNavigate` | T origin | T origin | P origin | `null` |
+| `Image`, `Script` | None | None | None | None |
+
+`sec-fetch-site` is computed from the page and every redirect by the same rules
+for Chromium and Gecko profiles. `sec-fetch-user: ?1` goes only with `Navigate`
+and `FormNavigate`. An explicit `referer` header wins over the computed value.
+
+## Keep the page with a tab
+
+A `Tab` keeps the current page, as a browser tab does: each request sends
+that page as its `from_page`, and each navigation sets the next page.
+`Session::tab()` makes one, and clones of a tab share the page.
+
+| Call | Returns | Sends | Changes page |
+| --- | --- | --- | --- |
+| `open(url)` | `async -> Result<Response>` | A typed URL: no `from_page` | Yes |
+| `follow(url)` | `async -> Result<Response>` | A link click from the current page | Yes |
+| `submit(url, fields)` | `async -> Result<Response>` | A clicked form (`RequestKind::FormNavigate`) | Yes |
+| `submit_form(&form)` | `async -> Result<Response>` | A parsed `html::Form`, with its own method and action | Yes |
+| `fetch(method, url)` | `RequestBuilder` | A script request (`RequestKind::Xhr`; chain `.kind(..)` for `Image`/`Script`) | No |
+
+- `open`, `follow`, `submit`, and `submit_form` are `async fn`s returning `Result<Response>` directly (do not chain `.send()`). Only `fetch` returns a `RequestBuilder`.
+- Each navigation response (including `4xx`/`5xx`) updates the current page to the final URL after redirects; transport errors leave it unchanged.
+- Relative URLs resolve against the current page, or else the session `base_url`.
+- `page(impl Into<Option<Url>>)` sets or clears the current page manually (pass a parsed `Url`, not `&str`). `fetch` on a tab with no current page fails with `Kind::Request` without sending anything.
+
+```rust,no_run
+use leyline::profile::RequestKind;
+
+# async fn run() -> leyline::Result<()> {
+let tab = leyline::Session::from(leyline::Browser::default()).tab();
+tab.open("https://shop.example/").await?;
+tab.follow("/cart").await?;
+let cart = tab.fetch(leyline::http::Method::GET, "/api/cart").send().await?;
+let logo = tab.fetch(leyline::http::Method::GET, "https://cdn.example/logo.png").kind(RequestKind::Image).send().await?;
+tab.submit("/checkout", [("step", "address")]).await?;
+println!("{:?}", tab.current());
+# drop((cart, logo));
+# Ok(())
+# }
+```
+
+[Accounts](accounts.md) uses a tab with a saved session and submits the forms
+of a page.

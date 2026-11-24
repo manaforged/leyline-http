@@ -50,7 +50,7 @@ let mut crawl = Session::new()
 while let Some(page) = crawl.next().await {
     match page {
         Ok(page) => println!("{}", page.url()),
-        Err(err) => eprintln!("{}: {}", err.url().map_or("-", |url| url.as_str()), err.kind()),
+        Err(err) => eprintln!("crawl error ({}): {err}", err.kind()),
     }
 }
 println!("{} pages, {} errors", crawl.pages(), crawl.errors());
@@ -63,25 +63,25 @@ println!("{} pages, {} errors", crawl.pages(), crawl.errors());
 | `respect(Respect)` or `None` | `Robots` | `Robots` obeys `robots.txt`, `Crawl-delay`, `noindex`, `nofollow`, and `rel="nofollow"`. `AiTrain` also obeys `Content-Signal`, `Content-Usage`, and `noai`. `None` disables robots checks |
 | `scope(Scope)` | `Host` | `Host` (seed host), `Domain` (registrable domain), `Prefix` (host + seed directory), or `Any` |
 | `filter(keep)` | none | Keeps discovered URLs only when `keep(&Url)` returns `true` (on top of `scope`; never applied to the seed) |
-| `limit(n)` or `None` | none | Stops after `n` kept pages |
+| `limit(n: usize)` or `None` | none | Stops after `n` kept pages |
 | `agent(name)` | `*` | Product token matched in `robots.txt` and meta robots (falls back to `*`) |
-| `max_body_size(n)` | session's (100 MiB) | Max decoded size of pages, sitemaps (50 MiB when unset), and `robots.txt` |
+| `max_body_size(n: usize)` | session's (100 MiB) | Max decoded size of pages, sitemaps (50 MiB when unset), and `robots.txt` |
 | `redirect(policy)` | session's, else `5` | Redirect limit for pages, sitemaps, and `robots.txt` |
-| `max_depth(n)` or `None` | `64` | Max link depth from seed (deeper links are silently dropped) |
-| `max_url_size(n)` or `None` | `2048` | Max URL length in bytes (longer URLs are silently dropped) |
-| `max_sitemaps(n)` or `None` | `50` | Max sitemap files to open (`0` disables sitemaps) |
+| `max_depth(n: usize)` or `None` | `64` | Max link depth from seed (deeper links are silently dropped) |
+| `max_url_size(n: usize)` or `None` | `2048` | Max URL length in bytes (longer URLs are silently dropped) |
+| `max_sitemaps(n: usize)` or `None` | `50` | Max sitemap files to open (`0` disables sitemaps) |
 | `max_crawl_delay(d)` or `None` | `30 s` | Cap on `robots.txt` `Crawl-delay` (`Duration::ZERO` ignores it) |
 | `robots_max_age(d)` or `None` | `24 h` | Re-fetch interval for `robots.txt` |
 | `dedup(bool)` | `true` | Skips canonical aliases and duplicate-text pages |
-| `dedup_min_words(n)` or `None` | `20` | Minimum words for duplicate-text matching (`None` disables text dedup) |
-| `host_limits(HostLimits)` | 1/host, 16 total, 1/s, pause on 429/503 | Replaces crawl default pace (`HostLimits::new()` removes crawl defaults); session `host_limits` still apply on top |
+| `dedup_min_words(n: usize)` or `None` | `20` | Minimum words for duplicate-text matching (`None` disables text dedup) |
+| `host_limits(HostLimits)` | 1/host, 16 total, 1/s, pause on 429/503 | Replaces crawl default pace. Pass `HostLimits::new()` if you want `Session::builder().host_limits(...)` alone to govern pace |
 
 ### Crawl rules and defaults
 
-- **URL pipeline:** Drops non-`http(s)`, out-of-scope, `filter`-rejected, or already-seen URLs (normalized without fragments, with sorted query params and normalized percent-encoding; sent as written). Redirects are re-queued through the same checks (seed redirects to a sibling host widen scope; cross-site seed redirects yield only that page).
+- **URL normalization & redirects:** Drops non-`http(s)`, out-of-scope, `filter`-rejected, or already-seen URLs (normalized without fragments, with sorted query params and normalized percent-encoding; sent as written). Redirects are re-queued through the same checks (seed redirects to a sibling host widen scope; cross-site seed redirects yield only that page).
 - **Content & dedup:** Skips block pages (`Response::block()`), non-2xx statuses, and non-HTML (sniffs missing `Content-Type` per WHATWG MIME Sniffing). Holds canonical aliases until their canonical target resolves, and deduplicates pages of ≥ `dedup_min_words` words.
 - **Sitemaps & robots:** Fetches `robots.txt` before crawling each site (retried under session `Retry`, or 4 times at 1/2/4/8 s when unset), then reads listed sitemaps (or `/sitemap.xml`), supporting plain text, gzip, and sitemap indexes while ignoring media extension `<loc>` tags. Missing sitemaps are not errors; failed sitemaps increment `errors()`.
-- **Credentials & pacing:** Sends session `Authorization` / `bearer_auth` / default `Cookie` headers only to the seed's origin (jar cookies still follow RFC 6265 rules; avoid placing secrets in custom default headers). Requests wait for both session and crawl `HostLimits` without holding a slot while paused or waiting to retry.
+- **Credentials, pacing & multi-host seeds:** Sends session `Authorization` / `bearer_auth` / default `Cookie` headers only to the seed's origin (jar cookies still follow RFC 6265 rules). Requests wait for both session and crawl `HostLimits`. To crawl multiple seed domains concurrently, spawn one `session.crawl(seed)` per domain on a shared cloned `Session` so all crawls share connection pools, `HostLimits`, and proxy health.
 - **Lifecycle:** Transport errors are yielded as `Err` without stopping the crawl. `Session::shutdown()` ends the crawl cleanly; dropping `Crawl` cancels in-flight requests.
 
 ### Inspect pages and skip counts
@@ -90,7 +90,8 @@ Each `Page` exposes `url()` (final URL), `depth()`, `status()`, `headers()`
 (sensitive headers such as `Set-Cookie` stripped), `header(name)`, `html()`,
 `text()` (from `html::text`), and `into_html()`.
 
-`Crawl` tracks `requests()`, `pages()`, `errors()`, and `skipped(SkipReason)`:
+`Crawl` counters return `u64`: `requests()`, `pages()`, `errors()`, and
+`skipped(SkipReason)`:
 
 | `SkipReason` | `as_str()` | Meaning |
 | --- | --- | --- |
@@ -131,9 +132,12 @@ println!("{} links rejected", crawl.skipped(SkipReason::Filter));
 
 ## Save and resume a crawl
 
-`crawl.save(path).await` stops scheduling new work, drains active fetches, and
-writes an atomic JSON checkpoint (versioned, max 64 MiB, mode `0600` on Unix).
-Drain any buffered `Err` items from `next()` before calling `save`.
+`crawl.save(path).await` (async) stops scheduling new work, drains active
+fetches, and writes an atomic JSON checkpoint (versioned, max 64 MiB, mode
+`0600` on Unix). `Crawl::load(&session, path)` (synchronous, no `.await`)
+restores it. If any buffered `Err` is unread — including one produced while
+draining active fetches — `save` returns `Kind::Config` and leaves the previous
+checkpoint intact.
 
 ```rust,no_run
 use leyline::Session;
@@ -164,7 +168,11 @@ while let Some(page) = crawl.next().await {
 
 Combine `HostLimits`, `Proxy::list`, `block_statuses`, `Retry`, `Timeout::body`,
 `trace::Log`, and `trace::Metrics` on one shared `Session`, then clone it into
-worker tasks:
+worker tasks (or pass it to `session.crawl(seed).host_limits(HostLimits::new())`
+so your session limits aren't throttled by `Crawl`'s 1/host default).
+
+- **Polite single-IP crawl:** set `HostLimits::pause_on([429, 503])` and stop retrying on blocks (`!attempt.is_block()`).
+- **Rotating proxy pool:** omit `pause_on([429])` (which would pause the origin across all proxies) and retry blocks (`attempt.is_transient() || attempt.is_block()`) so Leyline strikes the blocked proxy and rotates to the next healthy one.
 
 ```rust,no_run
 use std::time::Duration;
@@ -184,16 +192,16 @@ let metrics = std::sync::Arc::new(Metrics::new());
 
 let session = Session::builder()
     .browser(Browser::Chrome158)
+    .cookies(None)
     .host_limits(
         HostLimits::new()
             .max_in_flight(4)
             .per_second(2.0)
-            .max_total_in_flight(64)
-            .pause_on([429, 503]),
+            .max_total_in_flight(64),
     )
     .proxy(proxies)
     .block_statuses([403, 429])
-    .retry(Retry::new(3).when(|attempt| attempt.is_transient() && !attempt.is_block()))
+    .retry(Retry::new(3).when(|attempt| attempt.is_transient() || attempt.is_block()))
     .timeout(Timeout::new().body(Duration::from_secs(60)))
     .trace(Log)
     .trace(metrics)
@@ -205,39 +213,11 @@ let session = Session::builder()
 
 ## Limit each host
 
-`HostLimits` applies per origin (scheme, host, port) across HTTP/1.1, HTTP/2,
-and HTTP/3. Clones and derived sessions share its live counters, queues, and
-pauses; `HostLimits::default()` sets no limits.
-
-| Setter | Effect |
-| --- | --- |
-| `max_in_flight(n)` | Max concurrent requests per origin (minimum 1) |
-| `per_second(rate)` | Minimum spacing of `1 / rate` seconds between starts per origin (`<= 0` disables) |
-| `max_total_in_flight(n)` | Max concurrent requests across all origins (minimum 1) |
-| `host_max_in_flight(host, n)` | Per-host override for `max_in_flight` (`*.example.com` matches subdomains only; exact host wins over wildcard, longer wildcard over shorter) |
-| `host_per_second(host, rate)` | Per-host override for `per_second` (same host/wildcard precedence) |
-| `max_pending(n)` or `None` | Max requests queued waiting for a per-host slot or HTTP/1.1 connection (default `1024`; `None` removes the cap; excess fails with `Kind::Overloaded`) |
-| `max_total_pending(n)` or `None` | Max requests queued waiting for `max_total_in_flight` across all origins (excess fails with `Kind::Overloaded`) |
-| `pause_on(statuses)` | Pauses new requests to the responding origin using `Retry::wait_header` / `Retry-After` (or `pause_for`) |
-| `pause_for(duration)` | Fallback pause duration when no wait header is sent (default `60 s`) |
-| `max_pause(duration)` | Cap on server-requested pauses (default `24 h`) |
-
-```rust
-use leyline::HostLimits;
-
-let limits = HostLimits::new()
-    .max_in_flight(4)
-    .per_second(2.0)
-    .host_max_in_flight("api.shop.example", 1)
-    .host_per_second("api.shop.example", 0.5)
-    .host_max_in_flight("*.cdn.example", 16)
-    .max_total_in_flight(64);
-# let _ = limits;
-```
-
-- A host override uses only the overrides set for it; unset fields are unlimited for that host while `max_total_in_flight` still applies.
-- Requests acquire slots in order: per-origin in-flight → origin pause & rate spacing → global in-flight (never holding a global slot while paused or waiting for rate spacing).
-- Queue waits count toward request deadlines (`Kind::Timeout`). Buffered requests release slots after the body is read; `.stream()` requests hold them until the body ends, errors, or drops. Dropping a waiting request removes it from the queue.
+`HostLimits` caps per-origin concurrency, request rate, queue depth
+(`max_pending`, `max_total_pending` → `Kind::Overloaded`), and `429`/`503`
+pauses across all tasks sharing a session. See
+[Limit each host](network.md#limit-each-host) for the full setter reference and
+examples.
 
 ## Obey robots.txt
 
@@ -361,10 +341,6 @@ respective chapters:
 - **Proxy rotation & per-proxy identities:** [Use a proxy list](proxies.md#use-a-proxy-list) (`Proxy::list`, `Proxy::identified`)
 - **Browser rotation & graceful shutdown:** [Sessions](sessions.md#derive-a-session) (`to_builder().browser(..)`), [Stop a session](sessions.md#stop-a-session)
 - **Error classification:** [Errors](errors.md#match-on-the-kind) (`Error::kind()`, `attempts()`, `proxy()`)
-- **Resumable capped file downloads:** [Resume a download](streaming.md#resume-a-download) (`RequestBuilder::download_to`)
+- **Resumable capped file downloads:** [Download a file](streaming.md#download-a-file) (`RequestBuilder::download_to`)
 - **Per-request tags, `Log`, `Metrics`, and `Session::stats()`:** [Logging and tracing](logging.md#count-requests-and-inspect-queues)
 - **Pool and body memory bounds:** [Connection pool](network.md#connection-pool) and [Size cap and content coding](responses.md#size-cap-and-content-coding)
-
-## Next
-
-Read [Accounts](accounts.md).
