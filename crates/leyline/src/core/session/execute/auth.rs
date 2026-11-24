@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use super::super::helpers::header_values;
 use super::journey::Journey;
 use crate::core::digest::{self, Challenge, DigestAuth, DigestNonces};
 use crate::core::headers::HeaderList;
@@ -44,7 +43,9 @@ impl DigestLeg {
         if !in_scope(journey) {
             return Ok(None);
         }
-        let challenges: Vec<Challenge> = header_values(headers, http::header::WWW_AUTHENTICATE)
+        let challenges: Vec<Challenge> = headers
+            .get_all(http::header::WWW_AUTHENTICATE)
+            .iter()
             .filter_map(|v| v.to_str().ok())
             .filter_map(|v| digest::parse_challenge(v).ok())
             .collect();

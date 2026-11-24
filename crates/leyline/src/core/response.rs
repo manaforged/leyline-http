@@ -129,7 +129,7 @@ impl Response {
     }
 
     pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
-        self.parts.proxy = proxy.and_then(crate::util::redact_url);
+        self.parts.proxy = proxy.and_then(crate::util::parse_redacted_url);
     }
 
     /// Returns the block detected in the response, if any.
@@ -152,7 +152,7 @@ impl Response {
         self.parts.headers.map()
     }
 
-    /// Returns the response trailers.
+    /// Returns the response trailers received with a buffered response.
     pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
         self.parts
             .trailers

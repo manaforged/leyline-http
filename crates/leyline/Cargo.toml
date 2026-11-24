@@ -194,24 +194,16 @@ toml = { workspace = true }
 
 [dev-dependencies]
 leyline-http = { path = ".", features = ["test-util"] }
-bytes = { workspace = true }
 leyline-quiche = { workspace = true, features = ["internal"] }
 # In-test cert generation + a localhost TLS acceptor for the
 # pinning hostname-verification integration test.
-leyline-bssl = { workspace = true }
 leyline-bssl-sys = { workspace = true }
-leyline-bssl-tokio = { workspace = true }
 foreign-types = "0.5"
 tokio = { workspace = true, features = ["full", "test-util"] }
-tokio-util = { workspace = true }
-futures-util = { workspace = true }
-serde_json = { workspace = true }
-url = { workspace = true }
-base64 = { workspace = true }
 # Codecs for the in-process httpbin-lite mock (tests/it/http_semantics.rs) and the
 # live H3 streaming test, which decodes the raw streamed body per its
-# content-encoding. zstd is a normal dep of leyline but integration tests only
-# see dev-deps, so it is restated here.
+# content-encoding. Optional codecs are restated here so `--no-default-features`
+# tests can still build them.
 flate2 = { workspace = true }
 brotli = { workspace = true }
 zstd = { workspace = true }

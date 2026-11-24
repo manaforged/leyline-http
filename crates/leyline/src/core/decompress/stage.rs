@@ -84,6 +84,32 @@ fn is_zlib_header(cmf: u8, flg: u8) -> bool {
     cmf & 0x0f == 8 && cmf >> 4 <= 7 && (u16::from(cmf) << 8 | u16::from(flg)) % 31 == 0
 }
 
+#[cfg(feature = "compression-deflate")]
+fn pump_deflate<D: Write>(
+    decoder: &mut Box<D>,
+    input: &[u8],
+    out: &mut Vec<u8>,
+    sink: fn(&mut Box<D>) -> &mut Sink,
+) -> Result<()> {
+    run_into(decoder, out, sink, |d| {
+        pump(&mut **d, input, Encoding::Deflate.name())
+    })
+}
+
+#[cfg(feature = "compression-deflate")]
+fn finish_deflate<D: Write>(
+    decoder: &mut Box<D>,
+    out: &mut Vec<u8>,
+    sink: fn(&mut Box<D>) -> &mut Sink,
+    try_finish: impl FnOnce(&mut Box<D>) -> std::io::Result<()>,
+) -> Result<()> {
+    run_into(decoder, out, sink, |d| {
+        try_finish(d)
+            .map_err(|e| decode_error(Encoding::Deflate.name(), e))
+            .and_then(|()| require_end(&mut **d, Encoding::Deflate.name()))
+    })
+}
+
 impl Stage {
     #[cfg(feature = "compression-deflate")]
     fn finish_pending(&mut self, cap: Cap, head: &[u8], out: &mut Vec<u8>) -> Result<()> {
@@ -217,19 +243,9 @@ impl Stage {
                 self.write_into(&head, out)
             }
             #[cfg(feature = "compression-deflate")]
-            Self::Zlib(d) => run_into(
-                d,
-                out,
-                |d| d.get_mut(),
-                |d| pump(&mut **d, input, Encoding::Deflate.name()),
-            ),
+            Self::Zlib(d) => pump_deflate(d, input, out, |d| d.get_mut()),
             #[cfg(feature = "compression-deflate")]
-            Self::RawDeflate(d) => run_into(
-                d,
-                out,
-                |d| d.get_mut(),
-                |d| pump(&mut **d, input, Encoding::Deflate.name()),
-            ),
+            Self::RawDeflate(d) => pump_deflate(d, input, out, |d| d.get_mut()),
             #[cfg(feature = "compression-brotli")]
             Self::Brotli(d) => run_into(
                 d,
@@ -276,27 +292,9 @@ impl Stage {
                 self.finish_pending(cap, &head, out)
             }
             #[cfg(feature = "compression-deflate")]
-            Self::Zlib(d) => run_into(
-                d,
-                out,
-                |d| d.get_mut(),
-                |d| {
-                    d.try_finish()
-                        .map_err(|e| decode_error(Encoding::Deflate.name(), e))
-                        .and_then(|()| require_end(&mut **d, Encoding::Deflate.name()))
-                },
-            ),
+            Self::Zlib(d) => finish_deflate(d, out, |d| d.get_mut(), |d| d.try_finish()),
             #[cfg(feature = "compression-deflate")]
-            Self::RawDeflate(d) => run_into(
-                d,
-                out,
-                |d| d.get_mut(),
-                |d| {
-                    d.try_finish()
-                        .map_err(|e| decode_error(Encoding::Deflate.name(), e))
-                        .and_then(|()| require_end(&mut **d, Encoding::Deflate.name()))
-                },
-            ),
+            Self::RawDeflate(d) => finish_deflate(d, out, |d| d.get_mut(), |d| d.try_finish()),
             #[cfg(feature = "compression-brotli")]
             Self::Brotli(d) => run_into(
                 d,

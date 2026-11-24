@@ -23,10 +23,10 @@ pub(super) async fn open_new<W: Copy + Send>(
     connector: &FingerprintConnector,
     offer: Option<(&H2Config, W)>,
 ) -> Result<Dialed<W>, Error> {
-    let (host, port, proxy) = (key.host.as_str(), key.port, key.proxy.as_ref());
     match key.scheme {
         Scheme::Https => open_tls(pool, key, connector, offer).await,
         Scheme::Http => {
+            let (host, port, proxy) = (key.host.as_str(), key.port, key.proxy.as_ref());
             let (io, addr) = dial_plain(connector, host, port, proxy, pool.io()).await?;
             let facts = TlsFacts {
                 remote_addr: addr,

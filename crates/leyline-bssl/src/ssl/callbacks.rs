@@ -330,16 +330,19 @@ pub(super) unsafe extern "C" fn raw_sign<M>(
 where
     M: PrivateKeyMethod,
 {
-    catch_ffi(ffi::ssl_private_key_result_t::ssl_private_key_failure, || {
-        // SAFETY: boring passes `in_len` readable bytes at `in_` when `in_len > 0`.
-        let input = unsafe { c_slice(in_, in_len) };
-        let signature_algorithm = SslSignatureAlgorithm(signature_algorithm);
-        let callback = |method: &M, ssl: &mut _, output: &mut _| {
-            method.sign(ssl, input, signature_algorithm, output)
-        };
-        // SAFETY: boring provides valid inputs.
-        unsafe { raw_private_key_callback(ssl, out, out_len, max_out, callback) }
-    })
+    catch_ffi(
+        ffi::ssl_private_key_result_t::ssl_private_key_failure,
+        || {
+            // SAFETY: boring passes `in_len` readable bytes at `in_` when `in_len > 0`.
+            let input = unsafe { c_slice(in_, in_len) };
+            let signature_algorithm = SslSignatureAlgorithm(signature_algorithm);
+            let callback = |method: &M, ssl: &mut _, output: &mut _| {
+                method.sign(ssl, input, signature_algorithm, output)
+            };
+            // SAFETY: boring provides valid inputs.
+            unsafe { raw_private_key_callback(ssl, out, out_len, max_out, callback) }
+        },
+    )
 }
 
 pub(super) unsafe extern "C" fn raw_decrypt<M>(
@@ -353,14 +356,17 @@ pub(super) unsafe extern "C" fn raw_decrypt<M>(
 where
     M: PrivateKeyMethod,
 {
-    catch_ffi(ffi::ssl_private_key_result_t::ssl_private_key_failure, || {
-        // SAFETY: boring passes `in_len` readable bytes at `in_` when `in_len > 0`.
-        let input = unsafe { c_slice(in_, in_len) };
-        let callback =
-            |method: &M, ssl: &mut _, output: &mut _| method.decrypt(ssl, input, output);
-        // SAFETY: boring provides valid inputs.
-        unsafe { raw_private_key_callback(ssl, out, out_len, max_out, callback) }
-    })
+    catch_ffi(
+        ffi::ssl_private_key_result_t::ssl_private_key_failure,
+        || {
+            // SAFETY: boring passes `in_len` readable bytes at `in_` when `in_len > 0`.
+            let input = unsafe { c_slice(in_, in_len) };
+            let callback =
+                |method: &M, ssl: &mut _, output: &mut _| method.decrypt(ssl, input, output);
+            // SAFETY: boring provides valid inputs.
+            unsafe { raw_private_key_callback(ssl, out, out_len, max_out, callback) }
+        },
+    )
 }
 
 pub(super) unsafe extern "C" fn raw_complete<M>(
@@ -372,10 +378,13 @@ pub(super) unsafe extern "C" fn raw_complete<M>(
 where
     M: PrivateKeyMethod,
 {
-    catch_ffi(ffi::ssl_private_key_result_t::ssl_private_key_failure, || {
-        // SAFETY: boring provides valid inputs.
-        unsafe { raw_private_key_callback::<M>(ssl, out, out_len, max_out, M::complete) }
-    })
+    catch_ffi(
+        ffi::ssl_private_key_result_t::ssl_private_key_failure,
+        || {
+            // SAFETY: boring provides valid inputs.
+            unsafe { raw_private_key_callback::<M>(ssl, out, out_len, max_out, M::complete) }
+        },
+    )
 }
 
 unsafe fn raw_private_key_callback<M>(

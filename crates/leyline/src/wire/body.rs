@@ -2,7 +2,7 @@ use std::fmt;
 use std::io;
 use std::path::Path;
 use std::pin::Pin;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
@@ -24,11 +24,7 @@ impl<S: Stream + Unpin> Stream for Exclusive<S> {
     type Item = S::Item;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let stream = self
-            .get_mut()
-            .0
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
+        let stream = crate::util::get_mut(&mut self.get_mut().0);
         Pin::new(stream).poll_next(cx)
     }
 }
@@ -179,20 +175,21 @@ impl Body {
 
     /// Streams the file at `path` as a body whose `content-length` is the file size read now, and fails when the file cannot be opened or is not a regular file.
     pub fn file(path: impl AsRef<Path>) -> crate::error::Result<Self> {
+        let require_file = |meta: &std::fs::Metadata| -> io::Result<()> {
+            if meta.is_file() {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "body path is not a file",
+                ))
+            }
+        };
         let path = path.as_ref();
-        let meta = std::fs::metadata(path)?;
-        if !meta.is_file() {
-            return Err(
-                io::Error::new(io::ErrorKind::InvalidInput, "body path is not a file").into(),
-            );
-        }
+        require_file(&std::fs::metadata(path)?)?;
         let file = std::fs::File::open(path)?;
         let opened_meta = file.metadata()?;
-        if !opened_meta.is_file() {
-            return Err(
-                io::Error::new(io::ErrorKind::InvalidInput, "body path is not a file").into(),
-            );
-        }
+        require_file(&opened_meta)?;
         let length = opened_meta.len();
         let stream = tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
         Ok(Self::stream(stream, Some(length)))

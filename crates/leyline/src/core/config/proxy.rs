@@ -308,7 +308,7 @@ impl Proxy {
     pub(crate) fn shown_url(&self) -> Option<url::Url> {
         self.primary_url()
             .map(|p| crate::util::redact_url_value(p.url()))
-            .or_else(|| self.primary().and_then(crate::util::redact_url))
+            .or_else(|| self.primary().and_then(crate::util::parse_redacted_url))
     }
 
     pub(crate) fn summary(&self, pool: Option<&ProxyPool>) -> Option<String> {

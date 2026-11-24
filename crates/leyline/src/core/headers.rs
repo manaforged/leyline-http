@@ -38,9 +38,9 @@ pub(crate) fn utf8_pair(
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HeaderEntry {
-    pub name: HeaderName,
-    pub value: HeaderValue,
-    pub anchor: Option<HeaderPosition>,
+    pub(crate) name: HeaderName,
+    pub(crate) value: HeaderValue,
+    pub(crate) anchor: Option<HeaderPosition>,
 }
 
 #[derive(Clone, Default, PartialEq, Eq)]
@@ -61,7 +61,7 @@ impl std::fmt::Debug for HeaderList {
 }
 
 impl HeaderList {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -81,20 +81,33 @@ impl HeaderList {
         self.inner.is_empty()
     }
 
-    pub fn append(
+    fn push(
         &mut self,
         n: impl TryInto<HeaderName>,
         v: impl TryInto<HeaderValue>,
+        anchor: Option<HeaderPosition>,
     ) -> Result<()> {
         self.inner.push(HeaderEntry {
             name: name(n)?,
             value: value(v)?,
-            anchor: None,
+            anchor,
         });
         Ok(())
     }
 
-    pub fn set(&mut self, n: impl TryInto<HeaderName>, v: impl TryInto<HeaderValue>) -> Result<()> {
+    pub(crate) fn append(
+        &mut self,
+        n: impl TryInto<HeaderName>,
+        v: impl TryInto<HeaderValue>,
+    ) -> Result<()> {
+        self.push(n, v, None)
+    }
+
+    pub(crate) fn set(
+        &mut self,
+        n: impl TryInto<HeaderName>,
+        v: impl TryInto<HeaderValue>,
+    ) -> Result<()> {
         let name = name(n)?;
         let value = value(v)?;
         self.remove_all(name.as_str());
@@ -112,15 +125,10 @@ impl HeaderList {
         n: impl TryInto<HeaderName>,
         v: impl TryInto<HeaderValue>,
     ) -> Result<()> {
-        self.inner.push(HeaderEntry {
-            name: name(n)?,
-            value: value(v)?,
-            anchor: Some(anchor),
-        });
-        Ok(())
+        self.push(n, v, Some(anchor))
     }
 
-    pub fn remove_all(&mut self, name: &str) {
+    pub(crate) fn remove_all(&mut self, name: &str) {
         self.inner
             .retain(|entry| !entry.name.as_str().eq_ignore_ascii_case(name));
     }
@@ -129,14 +137,14 @@ impl HeaderList {
         self.inner.retain(|entry| !drop(&entry.name));
     }
 
-    pub fn get(&self, name: &str) -> Option<&HeaderValue> {
+    pub(crate) fn get(&self, name: &str) -> Option<&HeaderValue> {
         self.inner
             .iter()
             .find(|entry| entry.name.as_str().eq_ignore_ascii_case(name))
             .map(|entry| &entry.value)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
         self.inner.iter().map(|entry| (&entry.name, &entry.value))
     }
 

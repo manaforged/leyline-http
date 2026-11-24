@@ -197,7 +197,7 @@ impl Error {
     }
 
     pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
-        self.inner.proxy = proxy.and_then(crate::util::redact_url);
+        self.inner.proxy = proxy.and_then(crate::util::parse_redacted_url);
     }
 
     pub(crate) fn with_trail(mut self, attempts: u32, proxy: Option<Url>) -> Self {

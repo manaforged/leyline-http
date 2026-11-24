@@ -323,9 +323,7 @@ pub(crate) struct H1Idle(std::sync::Mutex<VecDeque<(H1Slot, TlsInfo, Instant)>>)
 
 impl H1Idle {
     pub(crate) fn queue(&mut self) -> &mut VecDeque<(H1Slot, TlsInfo, Instant)> {
-        self.0
-            .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        crate::util::get_mut(&mut self.0)
     }
 
     pub(crate) fn len(&self) -> usize {

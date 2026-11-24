@@ -99,7 +99,10 @@ pub struct Session {
     inner: Arc<SessionInner>,
 }
 
-pub(super) type AutosaveWriter = (tokio::sync::watch::Sender<bool>, tokio::task::JoinHandle<()>);
+pub(super) type AutosaveWriter = (
+    tokio::sync::watch::Sender<bool>,
+    tokio::task::JoinHandle<()>,
+);
 
 #[derive(Clone)]
 pub(crate) struct SessionInner {

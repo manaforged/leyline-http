@@ -344,7 +344,11 @@ impl HostGates {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn ready_at_with(&self, origin: &Origin, floor: Option<Duration>) -> Option<Instant> {
+    pub(crate) fn ready_at_with(
+        &self,
+        origin: &Origin,
+        floor: Option<Duration>,
+    ) -> Option<Instant> {
         let gate = crate::util::lock(&self.gates.by_origin)
             .get(origin)
             .cloned()?;

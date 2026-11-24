@@ -2,7 +2,7 @@ allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
 allow-indexing-slicing-in-tests = true
-allow-dbg-in-tests = true
+allow-dbg-in-tests = false
 
 disallowed-types = [
     { path = "once_cell::sync::Lazy", reason = "use std::sync::LazyLock" },

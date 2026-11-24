@@ -151,25 +151,39 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         })
     }
 
+    fn transition_or_reset(&mut self, stream_id: u32, event: StreamEvent) -> Result<bool, H2Error> {
+        let Some(actor) = self.streams.get_mut(stream_id) else {
+            return Ok(false);
+        };
+        if let Err(error) = actor.state.transition(event) {
+            self.reset_stream(
+                stream_id,
+                map_state_err(stream_id, error),
+                ErrorCode::StreamClosed,
+            )?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
     fn respond(
         &mut self,
         h: &HeadersFrame,
         head: Option<(http::StatusCode, crate::wire::Fields, Option<u64>)>,
     ) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
-        let Some(actor) = self.streams.get_mut(stream_id) else {
+        if !self.transition_or_reset(
+            stream_id,
+            StreamEvent::RecvHeaders {
+                end_stream: h.end_stream,
+            },
+        )? {
             return Ok(());
-        };
-        if let Err(error) = actor.state.transition(StreamEvent::RecvHeaders {
-            end_stream: h.end_stream,
-        }) {
-            return self.reset_stream(
-                stream_id,
-                map_state_err(stream_id, error),
-                ErrorCode::StreamClosed,
-            );
         }
         let Some((status, headers, length)) = head else {
+            return Ok(());
+        };
+        let Some(actor) = self.streams.get_mut(stream_id) else {
             return Ok(());
         };
         actor.status = status;
@@ -190,17 +204,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     fn on_trailers(&mut self, h: &HeadersFrame, trailers: HeaderMap) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
-        let Some(actor) = self.streams.get_mut(stream_id) else {
+        if !self.transition_or_reset(stream_id, StreamEvent::RecvTrailers)? {
             return Ok(());
-        };
-        if let Err(error) = actor.state.transition(StreamEvent::RecvTrailers) {
-            return self.reset_stream(
-                stream_id,
-                map_state_err(stream_id, error),
-                ErrorCode::StreamClosed,
-            );
         }
-        actor.trailers = trailers;
+        if let Some(actor) = self.streams.get_mut(stream_id) {
+            actor.trailers = trailers;
+        }
         self.finish_remote(stream_id)
     }
 }

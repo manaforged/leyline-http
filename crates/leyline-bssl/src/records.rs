@@ -124,10 +124,9 @@ impl Direction {
     }
 
     fn nonce(&mut self) -> Result<[u8; NONCE_LEN], ErrorStack> {
-        let next_seq = self
-            .seq
-            .checked_add(1)
-            .ok_or_else(|| ErrorStack::internal_error_str("TLS record sequence number exhausted"))?;
+        let next_seq = self.seq.checked_add(1).ok_or_else(|| {
+            ErrorStack::internal_error_str("TLS record sequence number exhausted")
+        })?;
         let mut nonce = self.iv;
         for (byte, seq) in nonce[NONCE_LEN - 8..]
             .iter_mut()
@@ -237,7 +236,9 @@ impl Records {
     /// Decrypts one whole record in place and returns its content type and the plaintext range within `record`.
     pub fn open(&mut self, record: &mut [u8]) -> Result<(u8, Range<usize>), ErrorStack> {
         if record.len() < HEADER_LEN + 1 + TAG_LEN {
-            return Err(ErrorStack::internal_error_str("TLS record shorter than header and tag"));
+            return Err(ErrorStack::internal_error_str(
+                "TLS record shorter than header and tag",
+            ));
         }
         let (header, body) = record.split_at_mut(HEADER_LEN);
         let nonce = self.read.nonce()?;
@@ -275,7 +276,9 @@ impl Records {
         out: &mut Vec<u8>,
     ) -> Result<(), ErrorStack> {
         if plaintext.len() > MAX_PLAINTEXT {
-            return Err(ErrorStack::internal_error_str("TLS record plaintext exceeds 16 KiB"));
+            return Err(ErrorStack::internal_error_str(
+                "TLS record plaintext exceeds 16 KiB",
+            ));
         }
         let body = plaintext.len() + 1 + TAG_LEN;
         let body_len = u16::try_from(body)

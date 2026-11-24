@@ -34,6 +34,9 @@ pub(super) fn add_decompressor<C: CertificateCompressor>(
 }
 
 #[cfg(feature = "compression-brotli")]
+const BROTLI_BUFFER_SIZE: usize = 4096;
+
+#[cfg(feature = "compression-brotli")]
 pub(super) struct Brotli;
 
 #[cfg(feature = "compression-brotli")]
@@ -43,7 +46,10 @@ impl CertificateCompressor for Brotli {
     const CAN_DECOMPRESS: bool = true;
 
     fn decompress<W: std::io::Write>(&self, input: &[u8], output: &mut W) -> std::io::Result<()> {
-        output.write_all(&read_limited_cert(brotli::Decompressor::new(input, 4096))?)
+        output.write_all(&read_limited_cert(brotli::Decompressor::new(
+            input,
+            BROTLI_BUFFER_SIZE,
+        ))?)
     }
 }
 

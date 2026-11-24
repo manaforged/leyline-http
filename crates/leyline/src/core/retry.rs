@@ -118,28 +118,26 @@ impl Retry {
         self.configured
     }
 
-    pub(crate) fn for_robots(&self) -> Self {
+    fn or_default(&self, fallback: impl FnOnce() -> Self) -> Self {
         if self.configured {
             self.clone()
         } else {
-            Self::new(DEFAULT_ROBOTS_RETRIES)
+            fallback()
         }
+    }
+
+    pub(crate) fn for_robots(&self) -> Self {
+        self.or_default(|| Self::new(DEFAULT_ROBOTS_RETRIES))
     }
 
     #[cfg(feature = "html")]
     pub(crate) fn for_crawl_page(&self) -> Self {
-        if self.configured {
-            self.clone()
-        } else {
-            Self::new(DEFAULT_CRAWL_PAGE_RETRIES)
-        }
+        self.or_default(|| Self::new(DEFAULT_CRAWL_PAGE_RETRIES))
     }
 
     #[cfg(feature = "html")]
     pub(crate) fn for_crawl_robots(&self) -> Self {
-        if self.configured {
-            self.clone()
-        } else {
+        self.or_default(|| {
             Self::new(DEFAULT_CRAWL_ROBOTS_RETRIES)
                 .when(|attempt| {
                     attempt.is_transient() || attempt.status().is_some_and(|s| s.is_server_error())
@@ -148,7 +146,7 @@ impl Retry {
                     DEFAULT_CRAWL_ROBOTS_MIN_BACKOFF,
                     DEFAULT_CRAWL_ROBOTS_MAX_BACKOFF,
                 )
-        }
+        })
     }
 
     /// Returns a policy with `count` retries, exponential backoff from 100 ms to 1 s, and a 60 s maximum server wait.

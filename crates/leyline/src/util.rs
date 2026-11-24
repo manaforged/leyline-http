@@ -46,8 +46,12 @@ pub(crate) fn redact_url_value(url: &url::Url) -> url::Url {
     parsed
 }
 
-pub(crate) fn redact_url(raw: &str) -> Option<url::Url> {
+pub(crate) fn parse_redacted_url(raw: &str) -> Option<url::Url> {
     url::Url::parse(raw).ok().map(|u| redact_url_value(&u))
+}
+
+pub(crate) fn delta_duration(raw: &str) -> Option<std::time::Duration> {
+    delta_seconds(raw).map(|secs| std::time::Duration::from_secs(secs.min(u64::from(u32::MAX))))
 }
 
 pub(crate) fn mask_query(text: &str) -> String {
@@ -440,6 +444,8 @@ pub(crate) mod wait;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::every_input;
 
 #[cfg(kani)]
 #[path = "util/content_length_proofs.rs"]
@@ -448,39 +454,6 @@ mod content_length_proofs;
 #[cfg(kani)]
 #[path = "util/ascii_proofs.rs"]
 mod ascii_proofs;
-
-/// Calls `check` with every concatenation of up to `max_len` tokens from `alphabet`.
-#[cfg(test)]
-pub(crate) fn every_input(alphabet: &[&[u8]], max_len: usize, mut check: impl FnMut(&[u8])) {
-    let mut digits: Vec<usize> = Vec::with_capacity(max_len);
-    let mut input = Vec::new();
-    loop {
-        input.clear();
-        for &digit in &digits {
-            input.extend_from_slice(alphabet[digit]);
-        }
-        check(&input);
-        if !next_input(&mut digits, alphabet.len(), max_len) {
-            return;
-        }
-    }
-}
-
-#[cfg(test)]
-fn next_input(digits: &mut Vec<usize>, base: usize, max_len: usize) -> bool {
-    for digit in digits.iter_mut() {
-        *digit += 1;
-        if *digit < base {
-            return true;
-        }
-        *digit = 0;
-    }
-    if digits.len() == max_len {
-        return false;
-    }
-    digits.push(0);
-    true
-}
 
 pub(crate) fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
     table

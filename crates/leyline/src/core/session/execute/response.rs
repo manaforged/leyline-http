@@ -3,7 +3,6 @@ use std::time::SystemTime;
 
 use url::Url;
 
-use super::super::helpers::header_values;
 use super::journey::Journey;
 use crate::core::BodyRules;
 use crate::core::decompress::{buffer_and_strip, decompress_and_strip};
@@ -26,7 +25,9 @@ impl Session {
         if !self.stores_cookies() {
             return;
         }
-        let set_cookies: Vec<&str> = header_values(resp_headers, http::header::SET_COOKIE)
+        let set_cookies: Vec<&str> = resp_headers
+            .get_all(http::header::SET_COOKIE)
+            .iter()
             .filter_map(|v| v.to_str().ok())
             .collect();
         if !set_cookies.is_empty() {
@@ -75,10 +76,11 @@ impl Session {
         {
             return;
         }
-        let values: Vec<&str> =
-            header_values(resp_headers, http::header::STRICT_TRANSPORT_SECURITY)
-                .filter_map(|v| v.to_str().ok())
-                .collect();
+        let values: Vec<&str> = resp_headers
+            .get_all(http::header::STRICT_TRANSPORT_SECURITY)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
         if !values.is_empty() {
             lock(&self.inner.hsts).note(url, &values, SystemTime::now());
         }

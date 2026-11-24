@@ -219,26 +219,25 @@ impl FingerprintConnector {
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
         let started = Instant::now();
+        let remaining = || {
+            self.connect_timeout
+                .map(|budget| budget.saturating_sub(started.elapsed()))
+        };
         let session_key = SessionCache::key(host, port, proxy);
         #[cfg(unix)]
         let unix_path = proxy.is_none().then(|| self.dialer.unix_socket()).flatten();
-        let mut ech_override = {
-            #[cfg(unix)]
-            let skip = unix_path.is_some();
-            #[cfg(not(unix))]
-            let skip = false;
-            if skip {
-                None
-            } else if proxy.is_some() {
-                let remaining = self
-                    .connect_timeout
-                    .map(|budget| budget.saturating_sub(started.elapsed()));
-                within(remaining, self.resolve_initial_ech(host, port))
-                    .await
-                    .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
-            } else {
-                self.resolve_initial_ech(host, port).await
-            }
+        #[cfg(unix)]
+        let skip_ech = unix_path.is_some();
+        #[cfg(not(unix))]
+        let skip_ech = false;
+        let mut ech_override = if skip_ech {
+            None
+        } else if proxy.is_some() {
+            within(remaining(), self.resolve_initial_ech(host, port))
+                .await
+                .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
+        } else {
+            self.resolve_initial_ech(host, port).await
         };
         let mut retried_ech = false;
         loop {
@@ -248,19 +247,13 @@ impl FingerprintConnector {
             };
             let result = match proxy {
                 Some(proxy) => {
-                    let remaining = self
-                        .connect_timeout
-                        .map(|budget| budget.saturating_sub(started.elapsed()));
                     let tunnel = within(
-                        remaining,
+                        remaining(),
                         proxy::open(self, host, port, proxy, Route::Connect),
                     )
                     .await
                     .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()).into_proxy())?
                     .map_err(TlsError::into_proxy)?;
-                    let remaining = self
-                        .connect_timeout
-                        .map(|budget| budget.saturating_sub(started.elapsed()));
                     let handshake = async {
                         match tunnel {
                             Tunnel::Plain(tcp) => {
@@ -279,33 +272,21 @@ impl FingerprintConnector {
                             }
                         }
                     };
-                    within(remaining, handshake)
+                    within(remaining(), handshake)
                         .await
                         .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
                 }
                 None => {
-                    #[cfg(unix)]
-                    if let Some(path) = unix_path {
-                        let unix_stream = self.dialer.dial_unix(path).await?;
-                        self.tls_handshake_unix_with_ech(
-                            unix_stream,
-                            host,
-                            &session_key,
-                            plan,
-                            ech_mode,
-                        )
-                        .await
-                    } else {
-                        let tcp_stream = self.dialer.dial(host, port).await?;
-                        self.tls_handshake_with_ech(tcp_stream, host, &session_key, plan, ech_mode)
-                            .await
-                    }
-                    #[cfg(not(unix))]
-                    {
-                        let tcp_stream = self.dialer.dial(host, port).await?;
-                        self.tls_handshake_with_ech(tcp_stream, host, &session_key, plan, ech_mode)
-                            .await
-                    }
+                    self.dial_direct_with_ech(
+                        #[cfg(unix)]
+                        unix_path,
+                        host,
+                        port,
+                        &session_key,
+                        plan,
+                        ech_mode,
+                    )
+                    .await?
                 }
             };
             match result {
@@ -325,6 +306,28 @@ impl FingerprintConnector {
                 Err(other) => return Err(other.into_error()),
             }
         }
+    }
+
+    async fn dial_direct_with_ech(
+        &self,
+        #[cfg(unix)] unix_path: Option<&std::path::Path>,
+        host: &str,
+        port: u16,
+        session_key: &str,
+        plan: AlpnPlan,
+        ech_mode: handshake::EchMode<'_>,
+    ) -> Result<Result<TlsStream, handshake::HandshakeFailure>, TlsError> {
+        #[cfg(unix)]
+        if let Some(path) = unix_path {
+            let unix_stream = self.dialer.dial_unix(path).await?;
+            return Ok(self
+                .tls_handshake_unix_with_ech(unix_stream, host, session_key, plan, ech_mode)
+                .await);
+        }
+        let tcp_stream = self.dialer.dial(host, port).await?;
+        Ok(self
+            .tls_handshake_with_ech(tcp_stream, host, session_key, plan, ech_mode)
+            .await)
     }
 }
 

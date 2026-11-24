@@ -126,15 +126,23 @@ impl Conns {
             entries.h1.retain(|_, entry| {
                 let idle = entry.idle.queue();
                 idle.retain(|(slot, _, returned_at)| {
-                    if slots::is_past_lifetime(slot.opened_at, max_lifetime, now) {
-                        dead_evicted += 1;
-                        return false;
+                    match slots::h1_stale_for(
+                        slot.opened_at,
+                        *returned_at,
+                        idle_timeout,
+                        max_lifetime,
+                        now,
+                    ) {
+                        None => true,
+                        Some(Counter::EvictionsIdle) => {
+                            idle_evicted += 1;
+                            false
+                        }
+                        Some(_) => {
+                            dead_evicted += 1;
+                            false
+                        }
                     }
-                    if slots::is_past_idle(*returned_at, idle_timeout, now) {
-                        idle_evicted += 1;
-                        return false;
-                    }
-                    true
                 });
                 !idle.is_empty() || !slots::is_past_idle(entry.last_use, idle_timeout, now)
             });

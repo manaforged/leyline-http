@@ -25,6 +25,22 @@ pub(super) fn is_past_idle(since: Instant, idle_timeout: Duration, now: Instant)
     now.saturating_duration_since(since) >= idle_timeout
 }
 
+pub(super) fn h1_stale_for(
+    opened: Instant,
+    returned_at: Instant,
+    idle_timeout: Duration,
+    max_lifetime: Option<Duration>,
+    now: Instant,
+) -> Option<Counter> {
+    if is_past_lifetime(opened, max_lifetime, now) {
+        Some(Counter::EvictionsDead)
+    } else if is_past_idle(returned_at, idle_timeout, now) {
+        Some(Counter::EvictionsIdle)
+    } else {
+        None
+    }
+}
+
 pub(super) fn mux_stale_for(
     entry: &MuxEntry,
     idle_timeout: Duration,
@@ -50,10 +66,6 @@ impl Pool {
     pub(crate) fn checkout_mux<C: MuxClient>(&self, key: &PoolKey) -> Option<(C, TlsInfo)> {
         self.checkout_mux_idle(key, Instant::now())
             .map(|(conn, tls, _)| (conn, tls))
-    }
-
-    fn past_idle(&self, since: Instant, now: Instant) -> bool {
-        is_past_idle(since, self.config.idle_timeout, now)
     }
 
     fn mux_stale(&self, entry: &MuxEntry, now: Instant) -> Option<Counter> {
@@ -145,12 +157,14 @@ impl Pool {
         let mut entries = write(&self.conns.shards.of(key).entries);
         let hit = entries.h1.get_mut(key).and_then(|entry| {
             while let Some((slot, tls, returned_at)) = entry.idle.queue().pop_back() {
-                if self.past_lifetime(slot.opened_at, now) {
-                    self.conns.counters.add(Counter::EvictionsDead, 1);
-                    continue;
-                }
-                if self.past_idle(returned_at, now) {
-                    self.conns.counters.add(Counter::EvictionsIdle, 1);
+                if let Some(counter) = h1_stale_for(
+                    slot.opened_at,
+                    returned_at,
+                    self.config.idle_timeout,
+                    self.config.max_lifetime,
+                    now,
+                ) {
+                    self.conns.counters.add(counter, 1);
                     continue;
                 }
                 entry.last_use = now;

@@ -37,6 +37,8 @@ custom proxy headers.
 - `SessionBuilder::max_pending_per_host` is merged into `HostLimits::max_pending(impl Into<Option<usize>>)` (the single owner of per-host request queuing), `Tls::tls12_min` and `Tls::tls13_only` are replaced by `Tls::min_version(TlsVersion)`, `TlsMinVersion` is renamed `TlsVersion`, `leyline::relay_headers` is removed in favor of `Response::relay_headers()`, and `trace::Metrics::new()` returns `Metrics` directly.
 - `Session::proxy()`, `Response::proxy()`, and `Error::proxy()` return redacted `Option<&Url>`, `Stats::proxies()` yields `&Url`, and `Stats::{in_flight, waiting, proxy_in_use, proxy_failures, proxy_banned_until}` accept `impl IntoUrl`.
 - Calling `send()`, `text()`, `bytes()`, `pages()`, `events()`, or `websocket()` with download-only options (`sha256`, `progress`, or `resume`) now fails with `Kind::Config` instead of silently ignoring them.
+- HTTPS responses whose peer closes the connection without a TLS `close_notify` alert now fail with `Kind::Io` (`UnexpectedEof`) instead of treating the truncation as end of body.
+- `profile::TcpProfile::from_ja4t` starts from OS socket defaults (leaving `ttl` unset at `0`) rather than inheriting a browser platform's default TTL.
 
 ### Added
 

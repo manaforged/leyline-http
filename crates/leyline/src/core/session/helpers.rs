@@ -280,13 +280,6 @@ pub(super) fn base_url(url: impl IntoUrl) -> Result<url::Url> {
     Ok(url)
 }
 
-pub(in crate::core::session) fn header_values(
-    headers: &http::HeaderMap,
-    name: http::HeaderName,
-) -> impl Iterator<Item = &http::HeaderValue> {
-    headers.get_all(name).iter()
-}
-
 impl Default for Session {
     fn default() -> Self {
         Self::new()
