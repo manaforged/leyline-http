@@ -21,12 +21,12 @@ session's connection pool.
 
 Without a `protocol` call, the default depends on the profile and build:
 
-- **`Race`**: bundled profiles with `race = true` in `[h3]` — Chrome, Edge, Opera, Brave, Firefox, Safari macOS, and Safari iOS 18+ (when the `http3` feature is enabled and `unix_socket` is not set).
-- **`Auto`**: plain `Session::new()`, Safari iOS 17, CFNetwork, OkHttp, `unix_socket` sessions, and builds without the `http3` feature.
+- `Race` when the `http3` feature is on, `unix_socket` is not set, and the profile sets `race = true` in `[h3]`. The bundled Chrome, Edge, Opera, Brave, Firefox, Safari macOS, and Safari iOS 18+ profiles do.
+- `Auto` for every other session: plain `Session::new()`, Safari iOS 17, CFNetwork, OkHttp, `unix_socket` sessions, and builds without the `http3` feature.
 
 Keep that default for a browser session: `Race` uses HTTP/3 where a browser
 would and falls back to TCP. `Http3` forces QUIC on every request, the first
-one included, and fails where QUIC is blocked; use it only to test that an
+one included, and fails where QUIC is blocked. Use it only to test that an
 origin speaks HTTP/3. `build()` fails with `Kind::Config` when `Http3` or
 `Race` meets a profile with no `[h3]` table, such as the bare profile.
 
@@ -107,11 +107,17 @@ A request that ends early resets its stream with the code Chrome sends:
 When the pool drops an idle connection, Leyline sends no CONNECTION_CLOSE
 frame, as Chrome does not.
 
-## QUIC fingerprint
+## Custom TOML & QUIC protocol internals
 
-Bundled browser profiles configure `[h3]` automatically; you only need this
-table when authoring a custom profile TOML. `dcid_length` is required, and
-omitted keys keep `quiche` defaults.
+Skip this section unless you write your own profile TOML. Bundled profiles
+already have an `[h3]` table.
+
+An `[h3]` table must set these keys: `initial_max_data`,
+`initial_max_stream_data_bidi_local`, `initial_max_stream_data_bidi_remote`,
+`initial_max_stream_data_uni`, `initial_max_streams_bidi`,
+`initial_max_streams_uni`, `max_idle_timeout_secs`, `max_udp_payload_size`,
+`active_connection_id_limit`, and `dcid_length`. The keys below are optional.
+`race = true` makes `Race` the session default.
 
 | Key | Effect |
 | --- | --- |
@@ -141,7 +147,3 @@ HTTP/3 runs through `socks5://` and `socks5h://` proxies when the `socks`
 feature is enabled (via SOCKS5 `UDP ASSOCIATE`). `http://` and `https://`
 proxies cannot carry QUIC: `Race` falls back to `Auto`, and `Http3` fails with
 `Kind::Config`. See [HTTP/3 through a SOCKS5 proxy](proxies.md#http3-through-a-socks5-proxy).
-
-## Next
-
-Read [TLS trust](tls-trust.md).

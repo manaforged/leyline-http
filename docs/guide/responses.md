@@ -37,23 +37,25 @@ let cookies: Vec<&[u8]> = resp
 ```
 
 `content_length()` parses `Content-Length`. When Leyline decodes a buffered
-body, it removes `Content-Encoding` and `Content-Length` from the headers. A
-`.stream()` response keeps the wire values.
+body, it removes `Content-Encoding` and `Content-Length` from the headers. So
+`content_length()` returns `None` for a decoded buffered body. A `.stream()`
+response keeps the wire values.
 
 `request_headers()` lists the headers the session prepared to send, in send
 order, after the request kind, the cookie jar, and your headers were merged. It
 needs `.audit(true)` on the session and is empty otherwise. The values are
 prepared before dispatch, not captured from the transport.
 
-`trailers()` iterates trailing headers in wire order. Buffered HTTP/2 and
-HTTP/3 responses carry them; a streamed response and HTTP/1.1 yield none.
+`trailers()` iterates the trailing headers. Buffered responses carry them on
+HTTP/1.1 (chunked bodies), HTTP/2, and HTTP/3. A `.stream()` response yields
+none.
 
 ### Relay headers
 
 `relay_headers()` returns a header map ready to forward downstream:
 
 - Strips RFC 9110 §7.6.1 hop-by-hop headers: `connection`, every header listed in `connection`, `keep-alive`, `proxy-connection`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailer`, `transfer-encoding`, and `upgrade`.
-- When Leyline decodes the body, also strips `content-encoding` and `content-length` so the headers match what every sink returns.
+- When Leyline decodes the body, also strips `content-encoding` and `content-length` so the headers match the decoded body returned by `text()`, `bytes()`, `bytes_stream()`, and `download_to()`.
 - When decoding is disabled (`decode(false)`) or the coding is not offered, `content-encoding` stays intact.
 
 See [Service integration](service-integration.md#relay-an-upstream-body).
@@ -79,16 +81,16 @@ streamed one is drained, with the `read` timeout on each chunk, then decoded.
 [Streaming](streaming.md) covers the streaming calls and downloads.
 
 `text()` replaces invalid sequences with U+FFFD, and a leading byte order mark
-overrides the declared charset. Without the `charset` feature, on by default,
-`text()` uses lossy UTF-8.
+overrides the declared charset. The `charset` feature is on by default. With
+it off, `text()` ignores the declared charset and decodes as lossy UTF-8.
 
 ### Size cap and content coding
 
-`max_body_size` (100 MiB by default) caps decoded bytes across every sink
-(`text`, `bytes`, `json`, `bytes_stream`, `write_to`, `download_to`) on every
-protocol, failing with `Kind::BodyLimit`. Set it on the session or on one
-request (applies to both buffered and `.stream()` responses); pass `None` on
-either builder to remove the cap:
+`max_body_size(impl Into<Option<usize>>)` (100 MiB by default) caps decoded
+bytes across every body method (`text`, `bytes`, `json`, `bytes_stream`,
+`write_to`, `download_to`) on every protocol, failing with `Kind::BodyLimit`.
+Set it on the session or on one request (applies to both buffered and
+`.stream()` responses); pass `None` on either builder to remove the cap:
 
 ```rust,no_run
 use leyline::Session;
@@ -106,9 +108,9 @@ let big = session
 # }
 ```
 
-- **Accepted codings.** A session offers and decodes every compiled-in coding (`gzip`, `deflate`, `br`, `zstd`). `accept_encoding([..])` restricts the list; `accept_encoding([])` offers none.
-- **Raw passthrough.** `RequestBuilder::decode(false)` skips decompression for one request while keeping `accept-encoding` unchanged. Codings the session did not offer also pass through raw.
-- **Chained codings.** Repeated `Content-Encoding` headers combine into one list; more than four codings fail with `Kind::Decode`.
+- A session offers and decodes every compiled-in coding (`gzip`, `deflate`, `br`, `zstd`). `accept_encoding([..])` restricts the list, and `accept_encoding([])` offers none.
+- `RequestBuilder::decode(false)` skips decompression for one request and leaves `accept-encoding` unchanged. A coding the session did not offer also passes through raw.
+- Repeated `Content-Encoding` headers combine into one list. More than four codings fail with `Kind::Decode`.
 
 ## Final URL and redirects
 
@@ -140,8 +142,9 @@ entries, quoted parameters, multi-value `rel`). Each `Link` exposes `url()`,
 resolve against `resp.url()`. For example, find the next page with
 `resp.links().into_iter().find(|l| l.has_rel("next"))`.
 
-`RequestBuilder::pages()` turns a request into a stream of responses that
-follows `Link: rel="next"` automatically:
+`RequestBuilder::pages()` turns a request into a `futures_util::Stream` of
+responses that follows `Link: rel="next"` automatically (add
+`futures-util = "0.3"` to `Cargo.toml` and import `futures_util::StreamExt`):
 
 - Read with `futures_util::StreamExt::next` and cap with `.take(n)`.
 - Follow-ups use `GET` with the first request's headers, timeouts, retry policy, and `error_for_status()` setting.
@@ -188,18 +191,6 @@ A 4xx or 5xx response is `Ok`. `Response::error_for_status()` returns a
 headers, and the final URL. It borrows the response, so you can still read
 the body of an error.
 
-`RequestBuilder::error_for_status()` checks the final response after the
-retry policy is done, and keeps the start of the body in the error:
-
-| Limit | Default | Set with |
-| --- | --- | --- |
-| Body bytes kept, after decoding | 64 KiB, and never more than `max_body_size` | `SessionBuilder::max_error_body_size` |
-| Time to read that body | 10 s, and never past the `total` timeout | `Timeout::error_body` |
-
-- **Bounded read.** Leyline decides at the status line. Error responses read only up to `max_error_body_size` decoded bytes and `Timeout::error_body` (stopping decompression at the byte cap).
-- **Partial capture.** If the read fails or times out, the error still keeps the status, headers, and whatever bytes arrived. `content-encoding` is dropped when decoded; `content-length` is dropped when truncated.
-- **Connection reuse.** On HTTP/2 and HTTP/3, excess error bodies reset only that stream. On HTTP/1.1, remaining fixed-length bytes up to `max_error_body_size` drain in the background within the idle timeout so the connection stays reusable; larger or unframed error bodies close the connection. `download_to` with `error_for_status()` uses the same limits.
-
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
@@ -213,8 +204,10 @@ if let Err(e) = resp.error_for_status() {
 # }
 ```
 
-[Errors](errors.md#status-codes-are-not-errors) covers the status error and
-its accessors.
+To check the status on the request instead, call
+`RequestBuilder::error_for_status()`. It also keeps the start of the error
+body. [Errors](errors.md#status-codes-are-not-errors) covers both calls, the
+body limits, and the error accessors.
 
 ## Proxy, timing, and TLS
 
@@ -229,13 +222,14 @@ through a proxy. It is `None` when `from_cache()` is `true`.
 
 ### Timing
 
-These calls report time summed across redirect legs, on every protocol. They
-do not include the body read.
+A leg is one request and its response; each followed redirect adds a leg.
+These calls sum the time over all legs, on every protocol. They do not
+include the body read.
 
 | Call | Returns | Meaning |
 | --- | --- | --- |
 | `reused()` | `bool` | Every leg reused a pooled connection |
-| `connect_time()` | `Option<Duration>` | DNS, TCP, TLS, and HTTP/2 preface over the legs that opened a connection; `None` when every leg was warm |
+| `connect_time()` | `Option<Duration>` | DNS, TCP, TLS, and HTTP/2 preface over the legs that opened a connection; `None` when every leg reused one |
 | `send_time()` | `Duration` | Request sent to response head |
 | `elapsed()` | `Duration` | Connect plus send: the time to the response head |
 

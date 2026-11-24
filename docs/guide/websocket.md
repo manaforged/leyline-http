@@ -90,7 +90,8 @@ Request-level setters on `RequestBuilder`:
 | `proxy(url)` | Overrides the session proxy (`wss://` follows `https://` proxy and `NO_PROXY` rules) |
 
 Session-level limits on `SessionBuilder` (for the 5 size/buffer setters,
-passing `None` keeps `tungstenite::WebSocketConfig::default()`, not unlimited):
+passing `None` restores the library's default limit shown below, not
+unlimited):
 
 | Setter | Default | Effect |
 | --- | --- | --- |
@@ -112,10 +113,10 @@ connections remain open until closed.
 
 ## HTTP/2 or HTTP/1.1
 
-With `websocket_http2(true)`, Leyline tries RFC 8441 extended `CONNECT` on a
-pooled HTTP/2 connection and falls back to an HTTP/1.1 RFC 6455 upgrade if ALPN
-does not negotiate `h2` or the peer does not advertise
-`SETTINGS_ENABLE_CONNECT_PROTOCOL`. Other errors are returned directly.
+Leyline first tries the WebSocket over a pooled HTTP/2 connection (RFC 8441
+extended `CONNECT`), as Chrome and Firefox do. If the server does not offer
+it, Leyline uses the HTTP/1.1 `101 Switching Protocols` upgrade. Set
+`websocket_http2(false)` to skip HTTP/2 when a proxy or server mishandles it.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -133,11 +134,40 @@ println!("version={:?} protocol={:?}", ws.version(), ws.protocol());
 # }
 ```
 
+## Browser-profile WebSockets
+
+A WebSocket opened from a browser `Session` automatically reuses that session's
+TLS fingerprint, proxy rules, cookies, and `User-Agent`, and sets `Origin` to
+the WebSocket URL's `https://` origin. When the WebSocket endpoint lives on a
+different subdomain or host than the page (for example `wss://ws.shop.example`
+opened from `https://shop.example`), override `origin` explicitly:
+
+```rust,no_run
+use leyline::{Browser, Message, Session};
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::from(Browser::Chrome158);
+let mut ws = session
+    .get("wss://ws.shop.example/live")
+    .header("origin", "https://shop.example")
+    .websocket()
+    .await?;
+ws.send(Message::Text("subscribe".to_owned())).await?;
+# Ok(())
+# }
+```
+
+Leyline offers no WebSocket extensions, so `permessage-deflate` is never used.
+It drops any `Sec-WebSocket-Extensions` header you set. If the server picks an
+extension in an HTTP/1.1 upgrade anyway, the handshake fails with
+`Kind::Request`.
+
 ## Split the connection
 
 `split()` returns `(impl Sink<Message> + Send + Unpin, impl Stream<Item = leyline::Result<Message>> + Send + Unpin)`
-so one task can write while another reads. Closing the sink does not send a
-close frame; send `Message::Close` instead.
+so one task can write while another reads. Closing the sink with
+`sink.close().await` sends a close frame with no code. Send
+`Message::Close(Some((code, reason)))` to include a code.
 
 ```rust,no_run
 use futures_util::{SinkExt, StreamExt};
@@ -160,7 +190,3 @@ reader.await.expect("reader task panicked");
 # Ok(())
 # }
 ```
-
-## Next
-
-Read [HTTP/3](http3.md).

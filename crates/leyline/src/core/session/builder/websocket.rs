@@ -7,13 +7,13 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the largest WebSocket frame the session accepts, or no limit for `None`.
+    /// Sets the largest WebSocket frame the session accepts, or the default for `None`.
     pub fn websocket_max_frame_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.websocket_config.max_frame_size = n.into();
         self
     }
 
-    /// Sets the largest WebSocket message the session accepts, or no limit for `None`.
+    /// Sets the largest WebSocket message the session accepts, or the default for `None`.
     pub fn websocket_max_message_size(mut self, n: impl Into<Option<usize>>) -> Self {
         self.websocket_config.max_message_size = n.into();
         self

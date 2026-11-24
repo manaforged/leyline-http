@@ -20,11 +20,12 @@ fingerprint):
 | `Browser::firefox()` | `Firefox160` | Windows | yes |
 | `Browser::safari()` | `Safari27` | macOS | yes |
 | `Browser::safari_ios()` | `SafariIOS27` | iOS | yes |
-| `Browser::cfnetwork()` | `CfnetworkMacOS26` | macOS | no (`Auto`) |
+| `Browser::cfnetwork()` | `CfnetworkIOS27` | iOS | no (`Auto`) |
 | `Browser::okhttp()` | `OkHttpAndroid10` | Android | no (`Auto`) |
 
 ## Bundled profiles
 
+<!-- Rendered from docs/guide/bundled-profiles.md by mdBook -->
 {{#include bundled-profiles.md}}
 
 `.browser(browser)` claims the first platform its profile covers (Windows →
@@ -35,12 +36,13 @@ and brand using Chromium's GREASE brand and ordering rules.
 
 ### What the JA4 column means
 
-Every profile records reference JA4 (`[tls.fingerprint]`) and Akamai HTTP/2
-(`[h2.fingerprint]`) values verified by the offline `fingerprint_conformance`
-test (which gates HTTP/2 on every profile):
+Every profile records a reference JA4 (`[tls.fingerprint]`) and Akamai HTTP/2
+string (`[h2.fingerprint]`). The offline `fingerprint_conformance` test
+recomputes them from the profile data and fails on a difference. It always
+checks HTTP/2.
 
-- **Gated:** Fixed `extension_permutation`, so offline computed JA4 is exact and gated.
-- **Estimated:** BoringSSL permutes extensions per connection (as Chrome and Brave do), so offline JA4 is estimated while live JA4 remains constant (JA4 sorts extensions before hashing).
+- gated: the profile has a fixed TLS extension order (`extension_permutation`), so the test checks JA4 exactly.
+- estimated: the extension order is shuffled per connection, as in Chrome and Brave, so the test can only estimate JA4 offline. The live JA4 stays the same, because JA4 sorts extensions before hashing.
 
 The live `tls_peet` suite checks every bundled profile against an echo server.
 
@@ -60,7 +62,12 @@ Each profile's `[meta]` records `capture` and `captured_against` (missing
 
 ### Family highlights
 
-- **Chrome, Edge, Opera, and Brave:** Official builds captured across macOS, Windows, and Linux against `tls.peet.ws` and `quic.browserleaks.com`, plus local HTTP/2 header-kind captures (`Navigate`, `Script`, `Xhr`, `Form`, `FormNavigate`, `SameSite`, `CrossOrigin`). Chrome 150+ adds ML-DSA signature schemes; Chrome 152+ adds Trust Anchor Identifiers (which Edge omits) and GREASE signature algorithms. Brave adds `sec-gpc: 1` and drops `application/signed-exchange`. Over QUIC, Chromium shuffles transport parameters, uses 8/0-byte CIDs, pads Initials to 1250 bytes, and sends `PRIORITY_UPDATE`.
+- **Chrome, Edge, Opera, and Brave:**
+  - Captured from official builds on macOS, Windows, and Linux against `tls.peet.ws` and `quic.browserleaks.com`.
+  - Header orders per request kind (`Navigate`, `Script`, `Xhr`, `Form`, `FormNavigate`, `SameSite`, `CrossOrigin`) come from local HTTP/2 captures.
+  - Chrome 150+ adds ML-DSA signature schemes. Chrome 152+ adds Trust Anchor Identifiers, which Edge omits, and GREASE signature algorithms.
+  - Brave adds `sec-gpc: 1` and drops `application/signed-exchange`.
+  - Over QUIC, Chromium shuffles transport parameters, uses 8-byte and 0-byte connection IDs, pads Initial packets to 1250 bytes, and sends `PRIORITY_UPDATE`.
 - **Firefox:** Official Mozilla desktop builds (macOS, Windows, Linux) and Android APKs. Fixed TLS extension order, three key shares (`X25519MLKEM768`, `X25519`, `P-256`), per-platform Android HTTP/2 `SETTINGS`, and QUIC `sni_midpoint` CRYPTO splitting with weighted destination CID lengths.
 - **Safari and Safari iOS:** Captured via `safaridriver` on macOS VMs, iOS simulators, and physical iPhone hardware (iOS 27). Safari 26+ and iOS 27 add `zstd` to `accept-encoding`; Safari 18+ and iOS 18+ include HTTP/3 (`rotate` transport parameters, 1200-byte Initials); Safari iOS 17 has no `[h3]` table.
 - **CFNetwork and OkHttp:** Native macOS/iOS `URLSession` captures (`CfnetworkMacOS26`, `CfnetworkIOS18`, `CfnetworkIOS27`) and OkHttp 4.12 on Android (`OkHttpAndroid10`). Real iOS/macOS apps prefix their own `<App>/<version>` token onto the `CFNetwork` `User-Agent`.
@@ -148,9 +155,9 @@ profile, or bare session without writing TOML:
 
 | Setter | Input format and effect |
 | --- | --- |
-| `ja3(raw)` | `version,ciphers,extensions,curves,point_formats` — sets cipher list, curve list, and exact extension order (`version` must be `771`, point formats `0`) |
-| `ja4_r(raw)` | Raw `JA4_r` or `JA4_ro` string — sets cipher list, extensions, and signature algorithms (hashed JA4 cannot be inverted and fails) |
-| `akamai(raw)` | `SETTINGS\|WINDOW_UPDATE\|PRIORITY\|pseudo_order` — sets HTTP/2 `SETTINGS`, connection window, and pseudo-header order (`PRIORITY` must be `0`) |
+| `ja3(raw)` | `version,ciphers,extensions,curves,point_formats`. Sets the cipher list, curve list, and exact extension order. `version` must be `771` and point formats `0` |
+| `ja4_r(raw)` | A raw `JA4_r` or `JA4_ro` string. Sets the cipher list, extensions, and signature algorithms. A hashed JA4 cannot be inverted and fails |
+| `akamai(raw)` | `SETTINGS\|WINDOW_UPDATE\|PRIORITY\|pseudo_order`. Sets HTTP/2 `SETTINGS`, the connection window, and pseudo-header order. `PRIORITY` must be `0` |
 | `header_order(names)` | Replaces the regular header wire order |
 
 ```rust
@@ -160,22 +167,30 @@ use leyline::{Browser, Platform, Session};
 let ja3 = "771,4865-4866-4867-49195-49199-49196-49200-52393-52392-49171-49172-156-157-47-53,\
            0-23-65281-11-35-16-51-43-45-10-13-5-18-27-17613-51764-65037,4588-29-23-24,0";
 let akamai = "1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p";
-let session = Session::builder()
+let from_ja3 = Session::builder()
     .browser(Browser::Chrome158)
     .ja3(ja3)
     .akamai(akamai)
     .platform(Platform::Windows)
     .audit(true)
     .build()?;
-# drop(session);
+
+let ja4_r = "t13d1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_\
+             0005,000a,000b,000d,0012,0017,001b,0023,002b,002d,0033,44cd,ca34,fe0d,ff01_\
+             0904,0905,0906,0403,0804,0401,0503,0805,0501,0806,0601";
+let from_ja4_r = Session::builder()
+    .browser(Browser::Chrome158)
+    .ja4_r(ja4_r)
+    .build()?;
+# drop((from_ja3, from_ja4_r));
 # Ok(())
 # }
 ```
 
+- The JA4_r string above is the Chrome 158 macOS capture in `crates/leyline/profiles/captures/chrome-158.0.8127.37-macos.json`.
 - Unspecified fields (identity headers, HTTP/3, signature algorithms for JA3, curves for JA4_r) come from the base profile.
 - `Response::fingerprint()` reports the resulting `ja3()` and `akamai()`, and `Session::profile()` embeds the overlay in `[[fingerprint]]` so `Session::save`/`load` reproduces it.
-- GREASE values enable `grease = true`; data-bearing extensions (`application_settings`, `compress_certificate`, `delegated_credentials`, `record_size_limit`) inherit parameters from the base profile; `padding` (21) must be last. Invalid or unsupported IDs fail `build()` with `Kind::Config`.
-
-## Next
-
-Read [MSRV](msrv.md) for the Rust version Leyline supports.
+- A GREASE value turns on `grease = true`.
+- Extensions that carry data (`application_settings`, `compress_certificate`, `delegated_credentials`, `record_size_limit`) take their parameters from the base profile.
+- `padding` (21) must be last in a JA3 string. JA4_r lists are sorted, so its position there does not matter.
+- An invalid or unsupported ID fails `build()` with `Kind::Config`.

@@ -9,44 +9,46 @@ are safe to override, and how to mix and rotate identities.
 
 | Layer | Holds |
 | --- | --- |
-| TLS (`[tls]`) | The cipher list, supported groups, signature algorithms, certificate compression, and extension behavior: GREASE, ECH GREASE, extension permutation or a fixed order, ALPS, record size limit, delegated credentials, OCSP stapling, signed certificate timestamps, session tickets, pre-shared key, padding, trust anchor requests, and the minimum TLS version |
-| HTTP/2 (`[h2]`) | The SETTINGS values and their order, the pseudo-header order, the default priority frame, and per-platform overrides |
-| Headers | The `User-Agent` and `sec-ch-ua` of each platform block. The header style in `profiles/headers.toml` and the `RequestKind` decide the other headers and their order. See [Requests](requests.md) |
-| TCP (`TcpProfile`) | The socket options that shape the SYN: TTL, MSS, window size, window scale, the don't-fragment bit, and `TCP_NODELAY` |
+| TLS (`[tls]`) | ClientHello ciphers, curves, signature algorithms, certificate compression, and extension ordering/randomization that form JA3 and JA4 |
+| HTTP/2 (`[h2]`) | `SETTINGS` values and order, pseudo-header order, default priority frame, and per-platform overrides (Akamai H2 fingerprint) |
+| Headers | `User-Agent`, `sec-ch-ua`, and per-`RequestKind` headers and order (JA4H). See [Requests](requests.md) |
+| TCP (`TcpProfile`) | Socket options shaping the TCP SYN packet: TTL, MSS, window size/scale, don't-fragment bit, and `TCP_NODELAY` (JA4T) |
 
-The session takes its `TcpProfile` from `profiles/platforms.toml` through
-`Platform::tcp_profile`; `SessionBuilder::tcp_profile` overrides it. Each
-OS applies what it can:
+The session takes its `TcpProfile` from `Platform::tcp_profile`;
+`SessionBuilder::tcp_profile` overrides it. Because operating systems restrict
+raw TCP SYN control from unprivileged sockets, `TcpProfile` is best-effort per
+OS:
 
 | OS | Applies |
 | --- | --- |
 | Linux | TTL, MSS, don't-fragment, and a `TCP_WINDOW_CLAMP` derived from the window fields |
-| macOS | TTL, MSS, and don't-fragment |
+| macOS | TTL and don't-fragment |
 | Windows | TTL and don't-fragment |
 
-Every OS sets `TCP_NODELAY` when the profile asks for it. The SYN option
-order in `options` is chosen by the kernel and cannot be set from a socket,
-so only the audit's JA4T reads it. `platforms.toml` has rows for Windows,
-macOS, Linux, and iOS; Android leaves `TcpProfile` empty and uses kernel
-defaults.
+Every OS applies `TCP_NODELAY` when the profile asks for it. The kernel, not
+Leyline, writes the TCP option order in the SYN. A Linux host that claims
+`Platform::Windows` still sends Linux's option order. `Fingerprint::ja4t()`
+reports the configured values, not what the kernel sent.
 
 ### Customize `TcpProfile`
 
-Construct a custom `leyline::profile::TcpProfile` from a JA4T string with
-`TcpProfile::from_ja4t`, from TOML via `FromStr`, or programmatically with
-`TcpProfile::new()`. Inspect fields with `ja4t()`, `ttl()`, `mss()`,
-`window_size()`, `window_scale()`, `df()`, and `nodelay()`. Unknown TOML keys
-or out-of-range values return an error.
+Build a custom `leyline::profile::TcpProfile` from a JA4T string
+(`window_options_mss_wscale`) with `TcpProfile::from_ja4t`, or from TOML with
+`str::parse`. `TcpProfile::new()` returns an empty profile that keeps every OS
+default; it has no setters. Inspect fields with
+`ja4t()`, `ttl()`, `mss()`, `window_size()`, `window_scale()`, `df()`,
+`no_delay()`, and `options()`. Unknown TOML keys or out-of-range values return
+`Kind::Config`.
 
 ```rust,no_run
 use leyline::Session;
 use leyline::profile::TcpProfile;
 
-# fn run() -> Result<(), Box<dyn std::error::Error>> {
+# fn run() -> leyline::Result<()> {
 let from_ja4t = TcpProfile::from_ja4t("64240_2-4-8-1-3_1380_10")?;
 let from_toml: TcpProfile = "ttl = 64\nmss = 1380\ndf = true".parse()?;
 let session = Session::builder().tcp_profile(from_ja4t).build()?;
-println!("{} ttl={:?}", from_toml.ja4t(), from_toml.ttl());
+println!("{} ttl={:?} no_delay={}", from_toml.ja4t(), from_toml.ttl(), from_toml.no_delay());
 # drop(session);
 # Ok(())
 # }
@@ -74,14 +76,14 @@ if let Some(sent) = resp.fingerprint() {
 # }
 ```
 
-| `Fingerprint` method | What it returns |
+| `Fingerprint` method | Layer & what it measures |
 | --- | --- |
-| `ja3()` | JA3, the MD5 form. It hashes the extensions in the order sent |
-| `ja4()` | JA4. It sorts the extensions before it hashes them |
-| `ja4t()` | JA4T from the session's `TcpProfile` values, including fields the running OS does not apply |
-| `ja4h()` | JA4H over the request line and headers of this response's request. Computed on the first `fingerprint()` call and cached |
-| `akamai()` | The Akamai HTTP/2 fingerprint |
-| `headers()` | The request headers as sent, lowercase names |
+| `ja3()` | TLS ClientHello MD5 hash (extension order sensitive; varies per Chrome connection) |
+| `ja4()` | Modern TLS ClientHello hash (sorts extensions so Chrome produces one stable JA4) |
+| `ja4t()` | TCP SYN packet parameters (`window_options_mss_wscale`) from the session's `TcpProfile` |
+| `ja4h()` | HTTP request method, version, header count, language, and header-order hash (computed lazily) |
+| `akamai()` | HTTP/2 `SETTINGS`, `WINDOW_UPDATE`, priority, and pseudo-header order (`1:65536;...\|m,a,s,p`) |
+| `headers()` | Regular request headers as prepared, lowercase names |
 
 A TLS echo service answers with the fingerprints of the connection it
 received. `Fingerprint::from_json` reads `tls.ja4`, `tls.ja3_hash`,
@@ -112,18 +114,25 @@ for (field, expected, seen) in sent.diff(&observed) {
 # }
 ```
 
-`diff` compares `ja4`, `ja3`, `akamai`, the header order of the headers both
-sides hold, and each header the session sent, pseudo-headers excluded. Values
-match when they are equal ignoring ASCII case. A field the service did not
-report is skipped. A header the session sent that the service does not list,
-while it lists others, appears with an empty observed value.
+`diff` compares `ja4`, `ja3`, `akamai`, header order, and each regular header
+(pseudo-headers, `ja4h`, and `ja4t` are not compared). Values match
+case-insensitively, and fields omitted by the echo server are skipped.
 
-JA4 and the Akamai HTTP/2 fingerprint are fixed for every profile, so any
-difference is listed. JA3 hashes the extensions in the order sent, and Chrome
-shuffles that order, so for a Chrome-family profile a JA3 difference is not
-listed; for a fixed-order profile such as Firefox or Safari it is. A header
-that a proxy or middlebox rewrites is listed. A proxy that ends TLS changes
-the result.
+JA4 and the Akamai HTTP/2 string are fixed for every profile. Chrome shuffles
+its TLS extension order per connection, so `diff` ignores JA3 on Chrome-family
+profiles. It checks JA3 on fixed-order profiles such as Firefox and Safari. A MITM proxy
+that terminates TLS changes the observed fingerprint.
+
+### If your diff is empty but you are still blocked
+
+A clean `tls.peet.ws` diff confirms TLS, HTTP/2, and header order. Anti-bot
+systems also check layers outside that one request:
+
+1. TCP options. The kernel writes the SYN option order, so a Linux host that claims `Platform::Windows` still looks like Linux. See [What a profile pins](#what-a-profile-pins).
+2. Fetch context. A plain `session.get(...)` sends `Sec-Fetch-Site`, `Referer`, and `Origin` like a typed URL. Use a `Tab` or `from_page(...)` for in-page requests.
+3. Cookies across exit IPs. `Proxy::list` shares one cookie jar across all proxies. `Proxy::identified` gives each proxy its own jar, and `.cookies(None)` stores none.
+4. HTTP/3 behind an HTTP proxy. An `http://` or `https://` proxy keeps `Protocol::Race` on TCP. Check HTTP/3 directly or through a `socks5://` proxy against `https://quic.browserleaks.com/?minify=1`.
+5. JavaScript. Leyline is an HTTP client, not a browser. It cannot solve JavaScript proof-of-work or Turnstile challenges.
 
 ## Override headers safely
 
@@ -137,7 +146,7 @@ of a new name.
 | `referer` | Safe. `RequestBuilder::from_page` is better: it also sets `origin` and `sec-fetch-site` |
 | `authorization`, `content-type`, application headers such as `x-api-key` | Safe |
 | `cookie` | Safe. The jar adds no cookies to that request |
-| `user-agent` | Changes the fingerprint. Setting `user-agent` on the session or on one request drops the profile's `sec-ch-ua*` hints unless explicitly set, so the two never disagree |
+| `user-agent` | Changes the fingerprint. It also drops the profile's `sec-ch-ua*` hints unless you set them, so the two never disagree |
 | `sec-ch-ua*`, `accept-encoding`, header order | Changes the fingerprint |
 | `accept` | Changes the fingerprint on a navigation. See [Set accept on a script request](#set-accept-on-a-script-request) |
 | `sec-fetch-*` | Your value replaces the computed one. Use `kind` and `from_page` instead |
@@ -168,12 +177,13 @@ let cart = tab
 
 ## Mix the hello and the headers
 
-A browser session sends two browsers and a platform. The hello browser
-supplies the ClientHello, the HTTP/2 and HTTP/3 settings, and the `ja3()`,
-`ja4()`, and `akamai()` audit values. The header browser supplies the
-`User-Agent`, `sec-ch-ua`, `Accept-Language`, the header shape, and the
-header order. The platform selects the OS that the `User-Agent` names, the
-HTTP/2 platform overrides, and the `TcpProfile`.
+Use this to match a browser release whose `User-Agent` changed before its TLS
+ClientHello did, or to rotate ClientHellos within one browser family. A browser
+session has two halves. `hello` picks the TLS ClientHello and the HTTP/2 and
+HTTP/3 settings, so it sets `ja3()`, `ja4()`, and `akamai()`. `browser` picks
+`User-Agent`, `sec-ch-ua`, `Accept-Language`, and header order. Both default to
+the same version. `platform` picks the OS headers, the HTTP/2 platform
+overrides, and the `TcpProfile`.
 
 | Setter | Hello side | Header side | `Kind::Config` at `build()` when |
 | --- | --- | --- | --- |
@@ -187,9 +197,9 @@ replaces the first. Call `.hello(..)` after `.browser(..)`.
 
 `Browser::next_hello()` returns the next distinct ClientHello of the same
 product in `Browser::all()` order, and wraps. It returns `None` when the
-product has one ClientHello. A profile can share its ClientHello with
-another version; its `[meta]` table names that version in `hello`.
-`next_hello` returns that version and counts shared ClientHellos once.
+product has one ClientHello. Some versions reuse an older version's
+ClientHello, and their `[meta] hello` key names it. `next_hello` skips those
+versions, so each step changes the ClientHello.
 
 ### Set the browser and platform
 
@@ -221,8 +231,8 @@ for the platform, for example Safari 26 on Windows. A session built with
 browser (leaving the parent unchanged) in its own partition of the shared
 connection pool with a fresh TLS session cache; see
 [Derive a session](sessions.md#derive-a-session) for the full sharing table.
-A `user-agent` from `SessionBuilder::user_agent` or `SessionBuilder::headers`
-still replaces the browser's `User-Agent`. `Session::browser()`, `hello()`,
+A session `user-agent` still replaces the browser's `User-Agent`, as in
+[Override headers safely](#override-headers-safely). `Session::browser()`, `hello()`,
 and `platform()` report the resolved identity.
 
 ```rust,no_run
@@ -251,9 +261,8 @@ let switched = session.to_builder().browser(Browser::firefox()).build()?;
 
 - The header browser has no profile for the platform, such as Edge or
   Opera on Android or iOS.
-- The policy is `Protocol::Http3` or `Race` and the hello browser has
-  no `[h3]` table. Under `Auto`, `Http1`, or `Http2` that is accepted. See
-  [HTTP/3](http3.md).
+- The hello browser has no `[h3]` table and the policy needs one. See
+  [HTTP/3](http3.md#protocol-policy).
 
 ## Read and test the bundled profiles
 
@@ -283,7 +292,3 @@ cargo test -p leyline-http --features bench-internals --test it fingerprint_conf
 
 It checks the profile data against the reference values; it does not capture
 a browser.
-
-## Next
-
-Read [Features and targets](features-and-targets.md).

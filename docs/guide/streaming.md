@@ -1,11 +1,105 @@
 # Streaming
 
 Stream when a body is larger than you want in memory, or when you want to act
-on the first bytes before the last ones arrive. This chapter covers request
-bodies, response bodies, downloads, `read_until`, and server-sent events (SSE).
-Streaming needs no extra Cargo feature (`Body::next()` and `Body::file()` need
-no extra crates; `bytes`, `futures-util`, and `tokio-util` with `io` are only
-for custom `Body::stream` and `StreamReader` examples below).
+on the first bytes before the last ones arrive. This chapter covers resumable
+file downloads, streaming request and response bodies, `read_until`, and
+server-sent events (SSE).
+
+Streaming needs no extra Leyline feature. Some examples on this page use
+other crates:
+
+| Call or type | Extra crate |
+| --- | --- |
+| `Body::next()`, `Body::file()`, `Events::next()` | None |
+| `tokio::fs::File` | `tokio` with feature `fs` |
+| `ReaderStream`, `StreamReader` | `tokio-util` with feature `io` |
+| `TryStreamExt`, `StreamExt` combinators | `futures-util` |
+
+`leyline::Bytes` re-exports `bytes::Bytes` for custom `Body::stream` sources.
+
+## Download a file
+
+Call `download_to(path)` directly on `RequestBuilder` (before `send`) for
+resumable, verified downloads that survive dropped connections and reject
+`4xx`/`5xx` statuses automatically.
+
+For large files, clear the default 300 s `Timeout::total` with `.total(None)`,
+bound the transfer with `Timeout::read` and `Timeout::body`, and raise or
+remove (`None`) the default 100 MiB `max_body_size` cap:
+
+```rust,no_run
+use std::time::Duration;
+
+use leyline::{Session, Timeout};
+
+# async fn run() -> leyline::Result<()> {
+let session = Session::new();
+let bytes = session
+    .get("https://example.com/archive.tar")
+    .timeout(
+        Timeout::new()
+            .total(None)
+            .read(Duration::from_secs(30))
+            .body(Duration::from_secs(600)),
+    )
+    .max_body_size(None)
+    .retry(3)
+    .progress(|written: u64, total: Option<u64>| {
+        println!("{written} of {total:?} bytes");
+    })
+    .download_to("archive.tar")
+    .await?;
+println!("saved {bytes} bytes");
+# Ok(())
+# }
+```
+
+With `.retry(n)`, a dropped transfer resumes from the last saved checkpoint.
+Calling `download_to(path)` again later resumes the same checkpoint.
+`Timeout::total` still spans every retry, so clear or raise it for a long
+download.
+
+| Topic | Behavior |
+| --- | --- |
+| Request | `GET` only, with no body and no caller `Range` or `If-Range` header. Otherwise `download_to` fails with `Kind::Config` |
+| Encoding | Asks for `identity` (uncompressed) bytes so byte offsets stay exact |
+| Resume | Sends `Range` and `If-Range` when the server sent a strong `ETag`, such as `"abc123"` and not `W/"abc123"`. The final URL, ETag, byte range, and total length must also match. Otherwise the download restarts on a `200` |
+| Checkpoints | Synced to disk after at least 1 MiB and 1 second since the last one, and on a body error |
+| Checksum | `.sha256([u8; 32])` checks the complete file, resumed prefix included, before the rename |
+| Fresh start | `.resume(false)` ignores a saved partial file |
+| Progress | `.progress` takes `impl Fn(u64, Option<u64>) + Send + Sync + 'static`, so use atomics for shared state. `total` is `None` without `Content-Length`. It runs on the requesting task |
+| Files | Writes `<name>.leyline.part`, `<name>.leyline.part.json` (metadata, at most 16 KiB), and an advisory `<name>.leyline.lock`, mode `0600` on Unix. It renames onto `path` only after success. On failure the existing target is untouched |
+
+`sha256`, `progress`, and `resume` apply only to `download_to`. On `send()`,
+`text()`, `bytes()`, `pages()`, `events()`, or `websocket()`, they fail with
+`Kind::Config`.
+
+### One-shot download (inspect headers first)
+
+To read the `Response` headers before you decide whether or where to save,
+send with `.stream()` and call `Response::download_to(path)`. This call also
+decodes a compressed body. It saves in one pass, with no resume and no
+progress callback:
+
+| Step | What happens |
+| --- | --- |
+| Status | `Response::download_to` does not check the status. Add `RequestBuilder::error_for_status()` to fail a `4xx` or `5xx` with `Kind::Status` before anything is written; see [Errors](errors.md#status-codes-are-not-errors) |
+| Write | Streams decoded bytes to a temporary `.<name>.<hex>.part` file in the same directory |
+| Limit | Capped by `max_body_size` in decoded bytes |
+| Commit | Flushes, syncs, and renames the file onto `path` in one atomic step. On Unix it keeps the existing file's permissions, without setuid, setgid, or sticky bits |
+| Error | Removes the temporary file and leaves `path` untouched. [Cancellation](cancellation.md#drop-a-request-before-send-returns) covers a dropped future |
+
+A path with no file name fails with `Kind::Request`. If directory sync fails
+after rename, `path` already holds the new file and the `Kind::Io` message says
+so.
+
+### Bound streamed bodies and downloads
+
+For a `.stream()` request, `Timeout::total` ends at the response headers.
+Bound the body with the `read` and `body` timeouts; see
+[Retries and timeouts](retries-and-timeouts.md#the-timeouts). To cancel a
+download from your code, such as on Ctrl-C, drop its future; see
+[Cancellation](cancellation.md).
 
 ## Stream a request body
 
@@ -14,7 +108,7 @@ needed; see [Requests](requests.md#query-parameters-and-bodies)). For any other
 async source, `Body::stream(s, len)` takes a `Stream` of `io::Result<Bytes>` and
 an `Option<u64>` length:
 
-- Give `Some(len)` whenever you know the length so Leyline sends `Content-Length` on every protocol (yielding more or fewer bytes than `len` fails the request).
+- Pass `Some(len)` whenever you know the length so Leyline sends `Content-Length` on every protocol (yielding more or fewer bytes than `len` fails the request).
 - `Body::content_length()` returns the known byte length for buffered, file, and sized-stream bodies.
 - Without a length, HTTP/1.1 uses `Transfer-Encoding: chunked` and HTTP/2 and HTTP/3 omit `Content-Length`.
 
@@ -36,34 +130,26 @@ println!("{}", resp.status());
 # }
 ```
 
-When your stream returns an error, the request fails with `Kind::Body`, and
-the error's `source()` chain carries your error. Leyline does not resend, because a stream
-cannot be replayed. An HTTP/2 or HTTP/3 connection resets only that stream
-and stays open. An HTTP/1.1 connection closes, because it holds part of the
-request.
+When your stream returns an error, the request fails with `Kind::Body` (carrying
+your error in `source()`). Leyline does not retry once bytes have been read:
+HTTP/2 and HTTP/3 reset only that stream, while HTTP/1.1 closes the connection.
 
 ### When a body cannot be replayed
 
-A streamed body is consumed by the first attempt, so:
+The first attempt consumes a streamed body, so Leyline cannot send it again:
 
-- **Redirects.** A redirect that turns the request into a GET follows
-  normally. A redirect that keeps the method and body, such as a 307 or 308,
-  fails with `Kind::Redirect`. See [Redirects](redirects.md).
-- **Retries.** The retry policy is skipped, and the first outcome is
-  returned.
+- A redirect that rewrites the request to `GET` follows. Every other redirect fails with `Kind::Redirect`; [Redirects](redirects.md#what-a-redirect-changes) lists which statuses rewrite.
+- A retry is skipped once any byte of the body was read.
 
-For retries or replayable redirects, buffer the body and send it as `Bytes`.
+Buffer the body as `Bytes` when you need retries or redirects that keep the
+body.
 
 ## Stream a response body
 
-Without `.stream()`, `send` reads the whole body into memory, up to
-`max_body_size` (100 MiB by default), before it returns. Call `.stream()` on
-the request builder to change that: `send` returns when the headers arrive,
-and the body comes off the connection as you read it.
-
-`bytes_stream()` returns the decoded body as a `Body`. `Body::next().await`
-returns the next chunk as `Option<leyline::Result<Bytes>>`: `None` after the
-last chunk, and an error that ends the body.
+Without `.stream()`, `send()` reads the entire body into memory (up to
+`max_body_size`, 100 MiB default) before returning. Call `.stream()` so `send()`
+returns as soon as the response headers arrive, then read chunks with
+`bytes_stream()` and `Body::next().await` (no `futures-util` import needed):
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -84,18 +170,15 @@ println!("{total} bytes");
 # }
 ```
 
-`text()`, `bytes()`, and `json()` also work on a `.stream()` response: they
-drain and decode it. A streamed response carries no trailers.
+`text()`, `bytes()`, and `json()` also work on a `.stream()` response (draining
+and decoding it). `Body` also
+implements `futures_util::Stream<Item = leyline::Result<Bytes>>`.
 
-`Body` is also a `futures_util::Stream<Item = leyline::Result<Bytes>>`, for
-code that takes a stream or uses the `StreamExt` combinators.
+### Read the body as `AsyncRead`
 
-### Read the body as AsyncRead
-
-A `leyline::Error` converts into a `std::io::Error`, so a streamed `Body`
-fits `tokio_util::io::StreamReader`, which is a `tokio::io::AsyncRead`. The
-`io::Error` keeps the `leyline::Error` inside, and `leyline::Error::find`
-returns it.
+`leyline::Error` converts into `std::io::Error` (keeping the `leyline::Error`
+inside for `Error::find`), so a streamed `Body` plugs into
+`tokio_util::io::StreamReader`:
 
 ```rust,no_run
 use futures_util::TryStreamExt;
@@ -118,99 +201,22 @@ match reader.read(&mut start).await {
 
 ### Decoded or raw
 
-`bytes_stream()`, `write_to(writer)`, and `download_to(path)` decode chunk by
-chunk and work on a buffered response too. Send the request with
-`.decode(false)` to get the bytes as sent, still encoded, for example to pass
-the body on with its `content-encoding`, as a proxy does.
-
-Every call stops at `max_body_size`: the request's, or else the session's.
-A body of exactly that many bytes passes. A longer one fails with
-`Kind::BodyLimit`, and the chunk that crosses the limit is not written. A
-coding the session does not offer passes through still encoded. See
-[Responses](responses.md#bodies).
-
-## Download a file
-
-`Response::download_to(path)` saves the decoded body to `path` and
-returns the number of bytes written. Send the request with `.stream()`, so
-the body is not buffered first, and with `.error_for_status()`, so an error
-response is not saved.
-
-| Step | What happens |
-| --- | --- |
-| Status | With `RequestBuilder::error_for_status()`, a status of 400 or more is a `Kind::Status` error with the status, the URL, the headers, and the start of the body, within the [status-error limits](responses.md#turn-a-status-into-an-error), and nothing is written. `download_to` itself does not check the status |
-| Write | The decoded body goes to a temporary file `.<name>.<16 hex>.part` in the same directory |
-| Limit | `max_body_size`, the request's or else the session's, in decoded bytes. `content_length()` is the encoded size |
-| Commit | Leyline flushes and syncs the file, renames it to `path`, and on Unix syncs the directory. When `path` already exists, the new file keeps its permission bits, without setuid, setgid, or sticky bits. The commit starts on a blocking thread after the file is synced. Once it has started, it finishes even if the future is dropped |
-| Error or drop | Before the commit starts, Leyline removes the temporary file, and `path` does not exist or keeps its old content |
-| Directory sync failure | `path` already holds the new file. The error is `Kind::Io`, and its message says that the target was replaced but the directory sync failed |
-
-A path with no file name fails with `Kind::Request`.
-
-### Bound the whole download
-
-For a `.stream()` request, `total` covers the request up to the response
-head. Two timeouts bound the body:
-
-- `read` limits the gap between two chunks. It stops a server that goes
-  quiet. A gap past it is a `Kind::Timeout` error from the stream.
-- `body` limits the whole body, from its first read. It stops a server that sends
-  slowly but never stops. A plain `Duration` passed to `.timeout` sets only
-  `total`, which ends at the head of a streamed response.
-
-```rust,no_run
-use std::time::Duration;
-
-use leyline::Timeout;
-
-# async fn run() -> leyline::Result<()> {
-let session = leyline::Session::new();
-match session
-    .get("https://example.com/image.iso")
-    .timeout(
-        Timeout::new()
-            .read(Duration::from_secs(30))
-            .body(Duration::from_secs(600)),
-    )
-    .error_for_status()
-    .max_body_size(8 * 1024 * 1024 * 1024)
-    .stream()
-    .send()
-    .await?
-    .download_to("image.iso")
-    .await
-{
-    Ok(n) => println!("{n} bytes"),
-    Err(e) if e.kind() == leyline::Kind::BodyLimit => eprintln!("too large: {e}"),
-    Err(e) => return Err(e),
-}
-# Ok(())
-# }
-```
-
-See [Retries and timeouts](retries-and-timeouts.md#the-timeouts). To stop a
-download from your code, drop the future; see
-[Cancellation](cancellation.md).
+`bytes_stream()`, `write_to(writer)`, and `Response::download_to(path)` decode
+chunk by chunk and stop at `max_body_size` (failing with `Kind::BodyLimit`).
+Pass `.decode(false)` to receive raw encoded bytes (useful in pass-through
+proxies). See [Responses](responses.md#bodies).
 
 ## Stop at a marker
 
-`Response::read_until(limit, done)` reads and decodes the body as the chunks
-arrive, and stops when you tell it to. Use it when the value you need sits
-near the top of a large page. Send the request with `.stream()`, so the body
-is not buffered first; the request keeps its redirects, retries,
-authentication, host limits, and `error_for_status()`.
+`Response::read_until(limit, done)` streams and decodes a `.stream()` response,
+calling `done(body, from)` after each chunk (`body` holds all decoded bytes so
+far; `from` is where the new chunk starts) and stopping as soon as `done`
+returns `true` or `limit` decoded bytes arrive.
 
-After each chunk that adds decoded bytes, Leyline calls `done(body, from)`:
-`body` is every decoded byte so far, and `from` is where the new bytes start.
-Return `true` to stop. The call returns `(bytes, matched)`: the decoded
-prefix, and `true` when `done` returned `true`. A match inside the first
-`limit` bytes wins over the limit.
-
-`matched` is `false` when the prefix reached `limit` decoded bytes or the body
-ended first; compare the length with `limit` to tell the two apart. At the
-limit, the body may or may not continue; Leyline reads no further to find out.
-`false` means that `done` found no answer, not that the answer is "no". A zero
-`limit` reads nothing, and `done` is never called for an empty body.
+It returns `(bytes, matched)`: `matched` is `true` if your closure returned
+`true`, and `false` whenever the response ended or hit `limit` bytes without a
+match (compare `bytes.len() == limit` to tell those two apart; `limit == 0`
+reads nothing).
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -235,72 +241,30 @@ if matched {
 # }
 ```
 
-Scan from `from` minus the marker length plus one, as the example does: a
-marker can straddle two chunks, and a scan of the whole body on every chunk
-costs quadratic time. `examples/stock_monitor.rs` reports a product as in
-stock, out of stock, or unknown with the same pattern.
-
-The limit counts decoded bytes. The bytes received from the network differ:
-fewer for a compressed body, and more by whatever the socket had already
-received when the read stopped. Leyline does not stop at the exact network
-byte where the marker ends. When it stops early, it drops the rest of the
-body: over HTTP/1.1 it closes the connection, and over HTTP/2 and HTTP/3 it
-resets the stream and keeps the connection.
-
-`total` and `response_header` bound the request up to the response head.
-`read` bounds each wait for a chunk, and `body` the whole read. See
-[Retries and timeouts](retries-and-timeouts.md#the-timeouts).
-
-Corrupt compressed data fails with `Kind::Decode`, a body cut short with
-`Kind::Io`, and an unknown or turned-off `Content-Encoding` is not decoded.
+Start each scan at `from.saturating_sub(marker.len() - 1)` so markers crossing
+chunk boundaries match in linear time (`examples/stock_monitor.rs` uses this
+pattern). [Cancellation](cancellation.md#drop-a-streamed-response) covers
+what stopping early does on the wire.
 
 ## Back-pressure
 
-A streamed response body reaches you through a bounded channel, so a slow
-reader slows the sender instead of growing a buffer.
+A streamed response body travels through a bounded channel so a slow reader
+applies back-pressure instead of growing memory unboundedly:
 
 | Protocol | Channel | When you stop reading |
 | --- | --- | --- |
-| HTTP/1.1 | 16 chunks | The socket reader waits, the socket buffer fills, and TCP flow control slows the peer |
-| HTTP/2 | 32 chunks | The driver keeps serving other streams. It queues the stalled stream's data and sends no window update for it, so the queue stays within the stream's receive window |
-| HTTP/3 | 32 chunks | Leyline stops reading the QUIC stream, and QUIC flow control slows the peer |
+| HTTP/1.1 | 32 chunks | Socket reader pauses and TCP flow control slows the peer |
+| HTTP/2 | 32 chunks | Driver serves other streams while withholding window updates for the stalled stream |
+| HTTP/3 | 32 chunks | QUIC stream reads pause and QUIC flow control slows the peer |
 
-Dropping the `bytes_stream()` stream before its end stops the transfer. See
-[Cancellation](cancellation.md) for what happens to the connection.
-
-## Resume a download
-
-Call `download_to(path)` directly on `RequestBuilder` (before `send`) for
-resumable, verified downloads that survive dropped connections. Pair it with
-`.retry(n)` to resume automatically within one call. `Response::download_to`
-above remains a one-shot atomic download.
-
-```rust,no_run
-use leyline::Session;
-
-# async fn run() -> leyline::Result<()> {
-let session = Session::new();
-let bytes = session
-    .get("https://example.com/archive.tar")
-    .retry(3)
-    .progress(|written, total| println!("{written} of {total:?} bytes"))
-    .download_to("archive.tar")
-    .await?;
-# let _ = bytes;
-# Ok(())
-# }
-```
-
-- **Resume contract.** Accepts `GET` without a body or caller `Range` header and requests identity encoding. Resumes using `Range` + `If-Range` only when the server returned a strong `ETag` and the final URL, validator, byte range, and total length agree; a `200` response or weak/missing `ETag` restarts cleanly.
-- **Verification and callbacks.** `sha256([u8; 32])` verifies the full file (including any resumed prefix) before atomic commit. `resume(false)` ignores saved partial files. `progress(|written, total| ..)` runs on the requesting task, so keep it fast. `max_body_size` caps the complete file size. `sha256`, `progress`, and `resume` are download-only and fail with `Kind::Config` on `send()`/`text()`/`bytes()`/`pages()`/`events()`/`websocket()`.
-- **Checkpoints and retries.** Checkpoints sync to disk after at least 1 MiB **and** 1 second since the last checkpoint, and on a reported body error. Under `.retry(n)`, dropped transfers retry automatically from the saved checkpoint; repeating `download_to(path)` later resumes the same checkpoint. Metadata is capped at 16 KiB, and invalid ranges, validators, sizes, or checksums fail without replacing the destination.
-- **Files on disk.** Keeps the existing target intact until atomic commit. Uses `<name>.leyline.part`, `<name>.leyline.part.json`, and an advisory `<name>.leyline.lock` beside the target (mode `0600` on Unix for partial and metadata files; use a private directory for sensitive data). Streamed-body `read` and `body` timeouts apply.
+Dropping `bytes_stream()` early cancels the transfer; see
+[Cancellation](cancellation.md).
 
 ## Read server-sent events
 
 `RequestBuilder::events()?` returns a lazy `leyline::sse::Events` stream
-yielding `leyline::sse::Event` values. Await `next()` or use
-`futures_util::Stream`:
+yielding `leyline::sse::Event` values. Await `next()` directly (no
+`futures-util` needed) or use `futures_util::Stream`:
 
 ```rust,no_run
 use leyline::{Retry, Session};
@@ -321,6 +285,23 @@ while let Some(event) = events.next().await {
 # }
 ```
 
-- **Framing and parsing.** Requires `GET` without a body and a `200 text/event-stream` response. Handles UTF-8, leading BOM, multiline `data`, comments, and CR/LF/CRLF line endings. `event.json::<T>()` deserializes `data` with serde; incomplete trailing events are discarded.
-- **Reconnection.** `Events::last_event_id(id)` seeds the initial `Last-Event-ID`; subsequent reconnects send the last id committed by a complete event block (an empty id clears it). `204` ends the stream. Defaults to 3 consecutive reconnects (resetting on each delivered event); `retry(0)` disables reconnects. Wait is `max(server retry, backoff)` capped by `max_wait`. Malformed responses and event-size errors are terminal.
-- **Limits and cancellation.** `max_event_size` defaults to 1 MiB (pass `None` to remove the cap), and the request's `max_body_size`, `read`, and `body` timeouts apply per connection. Dropping `Events` closes the active body or connect with no background reconnect task; cancelling a single `next()` future keeps the pending read in `Events`.
+Parsing:
+
+- `events()` needs a `GET` without a body. The response must be a `200` with `text/event-stream`.
+- The parser handles UTF-8, a leading BOM, multiline `data`, comments, and CR, LF, or CRLF line endings.
+- `event.json::<T>()` deserializes `data` with serde. An incomplete event at the end of the stream is dropped.
+
+Reconnection:
+
+- `Events::last_event_id(id)` sets the first `Last-Event-ID`. Each reconnect sends the id of the last complete event. An empty id clears it.
+- A `204` response ends the stream.
+- By default, `Events` reconnects up to 3 times in a row. The count resets on each delivered event. `retry(0)` turns reconnects off.
+- The wait is the larger of the server's `retry:` value and the backoff. Without a `retry:` value, the wait is the larger of the backoff and 3 s (or `max_wait`, if shorter).
+- A wait longer than `max_wait` ends the stream with the error. So do a malformed response and an event over the size limit.
+
+Limits and cancellation:
+
+- `max_event_size` defaults to 1 MiB. Pass `None` to remove the cap.
+- `max_body_size` and the `read` and `body` timeouts apply to each connection.
+- Dropping `Events` closes the open body or connect. No reconnect task keeps running.
+- Cancelling one `next()` future keeps the pending read in `Events`.

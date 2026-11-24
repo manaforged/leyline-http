@@ -8,13 +8,16 @@ changes, how to limit or stop redirects, and how to decide each one.
 
 | Status | Next request |
 | --- | --- |
-| `301`, `302` | `POST` becomes `GET` with no body and strips body headers (`content-length`, `content-type`, `content-encoding`, `content-language`, `content-location`). Other methods keep method and body |
-| `303` | Every method except `HEAD` becomes `GET` with no body and strips body headers |
+| `301`, `302` | `POST` becomes `GET` with no body, and the body headers are removed. Other methods keep the method and the body |
+| `303` | Every method except `HEAD` becomes `GET` with no body, and the body headers are removed |
 | `307`, `308` | Keeps the method and the body |
 
-- A redirect that keeps a streamed request body fails with `Kind::Redirect`, because the stream cannot be replayed.
+Body headers are every `content-*` header and `transfer-encoding`.
+
+- A redirect that keeps a streamed request body fails with `Kind::Redirect`, because the stream cannot be sent again.
 - A `Location` with a scheme other than `http` or `https` fails with `Kind::Redirect`.
-- When a server-chosen URL — a redirect, a `pages()` next link, `Tab::follow`, or `Tab::submit_form` — leaves the origin it came from, Leyline strips `Authorization`, `Proxy-Authorization`, `Cookie`, and the session bearer/basic auth. The cookie jar then adds cookies matching the new URL.
+- A server can choose the next URL through a redirect, a `pages()` next link, `Tab::follow`, or `Tab::submit_form`. When that URL leaves the origin it came from, Leyline removes `Authorization`, `Proxy-Authorization`, `Cookie`, and the session bearer or basic auth.
+- Leyline does not remove custom headers such as `x-api-key`. The cookie jar then adds the cookies that match the new URL.
 
 `Response::url()` is the final URL, and `Response::redirect_chain()` lists the
 URLs followed in order. See [Responses](responses.md#final-url-and-redirects).
@@ -28,8 +31,9 @@ URLs followed in order. See [Responses](responses.md#final-url-and-redirects).
 | `Redirect::custom(f)` | Calls `f(&Attempt)` per hop; hard cap of 32 hops (the 33rd fails with `Kind::Redirect`) |
 
 Set the policy with `SessionBuilder::redirect`, override it per request with
-`RequestBuilder::redirect` (or an `http::Request` extension for `Session::execute`),
-or derive a new session with `to_builder().redirect(..)`.
+`RequestBuilder::redirect` (or a `Redirect` extension on `http::Request` for
+`Session::execute`, `request_from`, and Tower `Service`), or derive a new
+session with `to_builder().redirect(..)`.
 
 ```rust,no_run
 use leyline::{Redirect, Session};
@@ -50,8 +54,10 @@ println!("{} {:?}", resp.status(), resp.header("location"));
 ## Decide each redirect
 
 `Redirect::custom` calls your closure for each hop with a `leyline::Attempt`
-(URLs have userinfo stripped). Return `true` to follow, or `false` to return
-the `3xx` response (`response()` and `error()` are `None` during redirects):
+(URLs have userinfo stripped). `Attempt` is shared with `Retry::when`, so
+during redirects only `status()`, `url()`, `location()`, and `previous()` are
+populated (`response()` and `error()` are `None`). Return `true` to follow, or
+`false` to return the `3xx` response:
 
 | Method | Return type | Value |
 | --- | --- | --- |
@@ -68,10 +74,10 @@ let policy = Redirect::custom(|attempt| {
     let (Some(url), Some(location)) = (attempt.url(), attempt.location()) else {
         return false;
     };
-    let same_host = url
+    let same_origin = url
         .join(location)
-        .is_ok_and(|next| next.host_str() == url.host_str());
-    same_host && attempt.previous().len() < 5
+        .is_ok_and(|next| next.origin() == url.origin());
+    same_origin && attempt.previous().len() < 5
 });
 let session = Session::builder()
     .redirect(policy)

@@ -1,7 +1,7 @@
 # Cookies
 
-Every session owns a `leyline::cookie::Jar` (unless disabled with
-`SessionBuilder::cookies(None)`, which `Session::save` persists). Cookie types
+Every session owns a `leyline::cookie::Jar`, unless you call
+`SessionBuilder::cookies(None)`. `Session::save` records that choice. Cookie types
 live in `leyline::cookie::{Jar, Cookie, CookieBuilder, SameSite}`. The jar
 follows Chrome's rules for sending and storing cookies.
 
@@ -80,16 +80,70 @@ cookie also matches subdomains. The jar applies the rules it
 applies to a `Set-Cookie` header from that URL, and ignores a cookie the URL
 may not set: for example, it drops a `secure` cookie for an `http://` URL.
 
+### Import cookies from Playwright or Chrome
+
+To move a logged-in session from Playwright or Chrome into Leyline, map each
+exported cookie into `Cookie::builder`. Insert it against an `https://` URL for
+the cookie's domain. Playwright marks a session cookie with `expires: -1`, so
+the example sets an expiry only when it is positive. The `SameSite` match
+accepts both Playwright and Chrome spellings.
+
+```rust,no_run
+use leyline::cookie::{Cookie, SameSite};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExportedCookie {
+    name: String,
+    value: String,
+    domain: String,
+    path: String,
+    secure: bool,
+    http_only: bool,
+    same_site: Option<String>,
+    #[serde(default, alias = "expirationDate")]
+    expires: Option<f64>,
+}
+
+# fn run(json: &str) -> Result<(), Box<dyn std::error::Error>> {
+let session = leyline::Session::new();
+let exported: Vec<ExportedCookie> = serde_json::from_str(json)?;
+for item in exported {
+    let host = item.domain.trim_start_matches('.');
+    let origin = format!("https://{host}/");
+    let same_site = match item.same_site.as_deref() {
+        Some("Strict" | "strict") => SameSite::Strict,
+        Some("None" | "no_restriction") => SameSite::None,
+        _ => SameSite::Lax,
+    };
+    let mut builder = Cookie::builder(&item.name, &item.value)
+        .path(&item.path)
+        .secure(item.secure)
+        .http_only(item.http_only)
+        .same_site(same_site);
+    if item.domain.starts_with('.') {
+        builder = builder.domain(&item.domain);
+    }
+    if let Some(secs) = item.expires.filter(|secs| *secs > 0.0) {
+        builder = builder.expires(std::time::UNIX_EPOCH + std::time::Duration::from_secs_f64(secs));
+    }
+    session.cookies().insert(&origin, builder.build());
+}
+# Ok(())
+# }
+```
+
 To run a session with no cookies at all, see
 [Turn cookies off](sessions.md#turn-cookies-off).
 
 ## Read the cookies a response set
 
 `Response::cookies()` parses the `Set-Cookie` headers of the final response
-into `Cookie` records. It does not read the jar, so it also lists a deletion.
-It skips a header that does not parse and a cookie whose `Domain` is a public
-suffix or does not cover the host. To read what the session sends, ask the
-jar.
+into `Cookie` records. It does not read the jar, so it also includes deletion
+headers (such as `Max-Age=0`). It skips headers that do not parse or whose
+`Domain` is a public suffix or does not cover the host. To read what the
+session will send next, query the jar.
 
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -108,9 +162,9 @@ for cookie in resp.cookies() {
 same cookies, so a cookie one task receives reaches every other task at once.
 
 `SessionBuilder::cookies(jar)` starts a session from a jar you built.
-`session.to_builder().cookies(jar).build()?` makes a session that shares
-the pool and every other setting but reads and writes the given jar; use it for a second
-identity on warm connections. See [Sessions](sessions.md#derive-a-session).
+`session.to_builder().cookies(jar).build()?` shares the pool with a different
+jar. To keep accounts fully apart, see
+[Sessions](sessions.md#derive-a-session).
 
 `snapshot()` is a fork: a new store with a copy of every cookie and all its
 attributes. A write to the copy does not reach the original.
@@ -131,29 +185,30 @@ if probe.get("https://example.com/check").send().await?.status().is_success() {
 
 ## What the jar does
 
-The jar follows Chrome:
+The jar follows Chrome's rules:
 
 - A cookie is stored under the exact domain the `Set-Cookie` names: its
   `Domain=` value, or the request host.
-- `Secure` cookies go only over HTTPS, or over HTTP to `localhost`, `127.0.0.1`, `[::1]`, or a `*.localhost` host.
+- `Secure` cookies go only over HTTPS, or over HTTP to `localhost`, a
+  `*.localhost` host, or a loopback IP (`127.0.0.0/8` or `[::1]`).
 - `SameSite` uses the `sec-fetch-site` value the request sends. Leyline
   computes it from the sending page and every URL in the redirect chain, schemes
-  included, so `http://` to `https://` on one host is cross-site. The
-  sending page is the request's `Referer`; without one, the session's `Referer`
-  when it is an absolute URL; otherwise the first URL. A request kind or header
-  that sets `sec-fetch-site` sets it for cookies too.
+  included, so `http://` to `https://` on one host is cross-site. Leyline
+  takes the sending page from the request's `Referer`. Without one, it uses the
+  session's `Referer` if that is an absolute URL, and otherwise the request URL.
+  A request kind or header that sets `sec-fetch-site` sets it for cookies too.
 - A cross-site request sends no `Strict` cookie, and sends `Lax` cookies only
   on a top-level navigation (`sec-fetch-dest: document`, or none) with `GET`
   or `HEAD`. Firefox profiles also treat a request as cross-site when its
   redirect chain crosses sites.
 - A cookie lives at most 400 days. A later `Max-Age` or `Expires`, or an
   `Expires` past the range of the platform clock, is cut to 400 days.
-- A cookie whose name and value together pass 4096 octets is refused. An
-  attribute whose value passes 1024 octets is ignored, so an oversized
-  `Path` falls back to the default path, which comes from the request URL
-  and has no cap. A cookie whose stored domain passes 1024 octets is
-  refused. `merge` and loading a saved jar apply the same limits
-  and skip a cookie that fails them.
+- The jar refuses a cookie whose name and value together pass 4096 octets.
+- The jar ignores an attribute whose value passes 1024 octets. An oversized
+  `Path` falls back to the default path from the request URL, which has no cap.
+- The jar refuses a cookie whose stored domain passes 1024 octets.
+- `merge` and loading a saved jar apply the same limits and skip a cookie
+  that fails them.
 - The limits are 180 cookies per exact domain and 3300 overall. Crossing a
   limit evicts the least recently accessed entries, 30 per domain or 300
   overall.
@@ -177,7 +232,3 @@ For a custom cookie store, `Jar` and `Cookie` implement `Serialize` and
 - Saving writes every non-expired cookie, session cookies included.
 - Loading skips expired or oversized cookies, keeps the newest copy of duplicate `(name, path, domain)` keys, enforces the 180/3300 caps, and clamps expiry to 400 days from load time.
 - Last-access times are preserved so eviction order survives restarts.
-
-## Next
-
-Read [Accounts](accounts.md).
