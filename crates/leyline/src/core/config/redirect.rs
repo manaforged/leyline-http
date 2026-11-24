@@ -3,6 +3,8 @@ use std::sync::Arc;
 use crate::core::attempt::Attempt;
 use crate::error::{Error, Kind, Result};
 
+const DEFAULT_REDIRECTS: usize = 10;
+const DEFAULT_ROBOTS_REDIRECTS: usize = 5;
 const CUSTOM_MAX_REDIRECTS: usize = 32;
 
 #[doc = include_str!("../../../docs/redirect.md")]
@@ -11,9 +13,13 @@ const CUSTOM_MAX_REDIRECTS: usize = 32;
 #[must_use]
 pub struct Redirect {
     kind: RedirectKind,
+    configured: bool,
 }
 
 type RedirectFn = Arc<dyn Fn(&Attempt<'_>) -> bool + Send + Sync>;
+
+impl std::panic::UnwindSafe for Redirect {}
+impl std::panic::RefUnwindSafe for Redirect {}
 
 #[derive(Clone)]
 enum RedirectKind {
@@ -40,15 +46,31 @@ impl From<usize> for Redirect {
 
 impl Default for Redirect {
     fn default() -> Self {
-        Self::limit(10)
+        Self::limit(DEFAULT_REDIRECTS)
     }
 }
 
 impl Redirect {
+    pub(crate) fn unset() -> Self {
+        Self {
+            kind: RedirectKind::Limited(DEFAULT_REDIRECTS),
+            configured: false,
+        }
+    }
+
+    pub(crate) fn for_robots(&self) -> Self {
+        if self.configured {
+            self.clone()
+        } else {
+            Self::limit(DEFAULT_ROBOTS_REDIRECTS)
+        }
+    }
+
     /// Follows at most `max` redirects; the default is 10.
     pub fn limit(max: usize) -> Self {
         Self {
             kind: RedirectKind::Limited(max),
+            configured: true,
         }
     }
 
@@ -56,6 +78,7 @@ impl Redirect {
     pub fn none() -> Self {
         Self {
             kind: RedirectKind::None,
+            configured: true,
         }
     }
 
@@ -66,7 +89,29 @@ impl Redirect {
     {
         Self {
             kind: RedirectKind::Custom(Arc::new(f)),
+            configured: true,
         }
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn hop_limit(&self) -> Option<usize> {
+        match self.kind {
+            RedirectKind::Limited(n) => Some(n),
+            RedirectKind::None => Some(0),
+            RedirectKind::Custom(_) => None,
+        }
+    }
+
+    pub(crate) fn approved_hop(
+        &self,
+        status: u16,
+        url: &url::Url,
+        location: &str,
+        previous: &[url::Url],
+    ) -> Option<url::Url> {
+        let hop = crate::util::without_userinfo(url.clone());
+        self.follows(&Attempt::redirect(status, &hop, Some(location), previous))
+            .then_some(hop)
     }
 
     pub(crate) fn check_hops(&self, hops: usize) -> Result<()> {

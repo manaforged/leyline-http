@@ -1,7 +1,8 @@
 use std::fmt;
 use std::io;
+use std::path::Path;
 use std::pin::Pin;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 
 use bytes::Bytes;
@@ -23,11 +24,7 @@ impl<S: Stream + Unpin> Stream for Exclusive<S> {
     type Item = S::Item;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let stream = self
-            .get_mut()
-            .0
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
+        let stream = crate::util::get_mut(&mut self.get_mut().0);
         Pin::new(stream).poll_next(cx)
     }
 }
@@ -38,7 +35,10 @@ pub(crate) struct Length(std::num::NonZeroU64);
 
 impl Length {
     fn new(bytes: u64) -> Option<Self> {
-        std::num::NonZeroU64::new(bytes.wrapping_add(1)).map(Self)
+        bytes
+            .checked_add(1)
+            .and_then(std::num::NonZeroU64::new)
+            .map(Self)
     }
 
     pub(crate) fn get(self) -> u64 {
@@ -151,16 +151,17 @@ impl Body {
         Body(BodyKind::Bytes(bytes))
     }
 
-    /// Wraps a byte stream as a body, and fails the stream when it sends more or fewer bytes than a given `length`.
-    pub fn stream<S>(stream: S, length: Option<u64>) -> Self
+    /// Wraps a byte stream as a body; `length` is the `content-length` in bytes, which the stream must send exactly or fail, and `None` sends the body chunked with no declared length.
+    pub fn stream<S>(stream: S, length: impl Into<Option<u64>>) -> Self
     where
         S: Stream<Item = io::Result<Bytes>> + Send + 'static,
     {
+        let length_hint = length.into().and_then(Length::new);
         let stream = Box::pin(stream);
-        let stream = match length {
+        let stream = match length_hint {
             Some(declared) => exclusive(Declared {
                 inner: stream,
-                declared,
+                declared: declared.get(),
                 sent: 0,
                 done: false,
             }),
@@ -168,8 +169,61 @@ impl Body {
         };
         Body(BodyKind::Stream {
             stream,
-            length_hint: length.and_then(Length::new),
+            length_hint,
         })
+    }
+
+    /// Streams the file at `path` as a body whose `content-length` is the file size read now, and fails when the file cannot be opened or is not a regular file.
+    pub fn file(path: impl AsRef<Path>) -> crate::error::Result<Self> {
+        let require_file = |meta: &std::fs::Metadata| -> io::Result<()> {
+            if meta.is_file() {
+                Ok(())
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "body path is not a file",
+                ))
+            }
+        };
+        let path = path.as_ref();
+        require_file(&std::fs::metadata(path)?)?;
+        let file = std::fs::File::open(path)?;
+        let opened_meta = file.metadata()?;
+        require_file(&opened_meta)?;
+        let length = opened_meta.len();
+        let stream = tokio_util::io::ReaderStream::new(tokio::fs::File::from_std(file));
+        Ok(Self::stream(stream, Some(length)))
+    }
+
+    /// Returns the bytes of a body held in memory, empty for an empty body, or `None` for a streamed body.
+    #[must_use]
+    pub fn as_bytes(&self) -> Option<&[u8]> {
+        match &self.0 {
+            BodyKind::Empty => Some(&[]),
+            BodyKind::Bytes(bytes) => Some(&bytes[..]),
+            BodyKind::Stream { .. } => None,
+        }
+    }
+
+    /// Returns the known byte length of the body (`0` when empty, the buffer length in memory, or the declared stream or file length), or `None` for an unsized stream.
+    #[must_use]
+    pub fn content_length(&self) -> Option<u64> {
+        self.len_hint()
+    }
+
+    /// Returns a copy of a body held in memory without copying its bytes, or `None` for a streamed body.
+    #[must_use]
+    pub fn try_clone(&self) -> Option<Self> {
+        match &self.0 {
+            BodyKind::Empty => Some(Body::default()),
+            BodyKind::Bytes(b) => Some(Body::bytes(b.clone())),
+            BodyKind::Stream { .. } => None,
+        }
+    }
+
+    /// Returns the next chunk of the body, an error that ends it, or `None` after the last chunk.
+    pub async fn next(&mut self) -> Option<crate::error::Result<Bytes>> {
+        futures_util::StreamExt::next(self).await
     }
 
     pub(crate) fn shared<S>(stream: S) -> Self
@@ -200,14 +254,6 @@ impl Body {
             BodyKind::Empty => (None, None),
             BodyKind::Bytes(b) => (Some(b), None),
             BodyKind::Stream { stream, .. } => (None, Some(stream)),
-        }
-    }
-
-    pub(crate) fn replay(&self) -> Option<Body> {
-        match &self.0 {
-            BodyKind::Empty => Some(Body::default()),
-            BodyKind::Bytes(b) => Some(Body::bytes(b.clone())),
-            BodyKind::Stream { .. } => None,
         }
     }
 }

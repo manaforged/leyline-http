@@ -2,7 +2,7 @@ use std::fmt;
 use std::sync::OnceLock;
 
 use bytes::Bytes;
-use http::{HeaderMap, HeaderName};
+use http::{HeaderMap, HeaderName, HeaderValue};
 
 use super::h1::{find_values, parse_head};
 use crate::util::has_token;
@@ -39,14 +39,29 @@ impl Fact {
         }
     }
 
+    pub(crate) fn from_header(name: &HeaderName) -> Option<Self> {
+        Self::ALL.into_iter().find(|fact| *name == fact.header())
+    }
+
+    #[inline]
     pub(crate) fn named(name: &[u8]) -> Option<Self> {
-        Self::ALL
-            .into_iter()
-            .find(|fact| name.eq_ignore_ascii_case(fact.header().as_str().as_bytes()))
+        match name.len() {
+            7 if name.eq_ignore_ascii_case(b"alt-svc") => Some(Self::AltSvc),
+            10 if name.eq_ignore_ascii_case(b"set-cookie") => Some(Self::Cookies),
+            16 if name.eq_ignore_ascii_case(b"content-encoding") => Some(Self::Encoded),
+            25 if name.eq_ignore_ascii_case(b"strict-transport-security") => Some(Self::Hsts),
+            _ => None,
+        }
     }
 }
 
 impl Seen {
+    pub(crate) fn note_header(&mut self, name: &HeaderName) {
+        if let Some(fact) = Fact::from_header(name) {
+            self.note(fact);
+        }
+    }
+
     pub(crate) fn note(&mut self, fact: Fact) {
         match fact {
             Fact::Cookies => self.cookies = true,
@@ -56,28 +71,33 @@ impl Seen {
         }
     }
 
+    pub(crate) fn note_connection(&mut self, value: &str) {
+        self.close |= has_token(value, "close");
+        self.keep_alive |= has_token(value, "keep-alive");
+    }
+
+    pub(crate) fn note_connection_bytes(&mut self, value: &[u8]) {
+        if let Some(v) = text(value) {
+            self.note_connection(v);
+        }
+    }
+
     fn of(map: &HeaderMap) -> Self {
         let mut seen = Self::default();
         let mut connection = false;
         for name in map.keys() {
-            if let Some(fact) = Fact::ALL.into_iter().find(|fact| *name == fact.header()) {
-                seen.note(fact);
-            }
+            seen.note_header(name);
             connection |= name == http::header::CONNECTION;
         }
         if !connection {
             return seen;
         }
-        seen.connection(
-            map.get(http::header::CONNECTION)
-                .and_then(|v| v.to_str().ok()),
-        )
-    }
-
-    pub(crate) fn connection(mut self, value: Option<&str>) -> Self {
-        self.close = value.is_some_and(|v| has_token(v, "close"));
-        self.keep_alive = value.is_some_and(|v| has_token(v, "keep-alive"));
-        self
+        for value in map.get_all(http::header::CONNECTION) {
+            if let Ok(v) = value.to_str() {
+                seen.note_connection(v);
+            }
+        }
+        seen
     }
 }
 
@@ -88,6 +108,11 @@ enum Repr {
     Map(HeaderMap),
     Raw {
         head: Bytes,
+        seen: Seen,
+        map: OnceLock<Box<HeaderMap>>,
+    },
+    List {
+        pairs: Vec<(HeaderName, HeaderValue)>,
         seen: Seen,
         map: OnceLock<Box<HeaderMap>>,
     },
@@ -102,11 +127,25 @@ impl Fields {
         })
     }
 
+    pub(crate) fn list(pairs: Vec<(HeaderName, HeaderValue)>, seen: Seen) -> Self {
+        Self(Repr::List {
+            pairs,
+            seen,
+            map: OnceLock::new(),
+        })
+    }
+
     /// Returns the fields as a header map, parsing them on the first call.
     pub fn map(&self) -> &HeaderMap {
         match &self.0 {
             Repr::Map(map) => map,
             Repr::Raw { head, map, .. } => map.get_or_init(|| Box::new(build(head))),
+            Repr::List { pairs, map, .. } => map.get_or_init(|| {
+                Box::new(pairs_to_map(
+                    pairs.iter().map(|(n, v)| (n.clone(), v.clone())),
+                    pairs.len(),
+                ))
+            }),
         }
     }
 
@@ -117,6 +156,13 @@ impl Fields {
             Repr::Raw { head, map, .. } => {
                 map.into_inner().map_or_else(|| build(&head), |map| *map)
             }
+            Repr::List { pairs, map, .. } => map.into_inner().map_or_else(
+                || {
+                    let len = pairs.len();
+                    pairs_to_map(pairs.into_iter(), len)
+                },
+                |map| *map,
+            ),
         }
     }
 
@@ -129,16 +175,31 @@ impl Fields {
     pub(crate) fn seen(&self) -> Seen {
         match &self.0 {
             Repr::Map(map) => Seen::of(map),
-            Repr::Raw { seen, .. } => *seen,
+            Repr::Raw { seen, .. } | Repr::List { seen, .. } => *seen,
         }
     }
 
     pub(crate) fn any_value(&self, name: &HeaderName, mut hit: impl FnMut(&[u8]) -> bool) -> bool {
         match &self.0 {
             Repr::Raw { head, map, .. } if map.get().is_none() => find_values(head, name, hit),
+            Repr::List { pairs, map, .. } if map.get().is_none() => pairs
+                .iter()
+                .filter(|(k, _)| k == name)
+                .any(|(_, v)| hit(v.as_bytes())),
             _ => self.map().get_all(name).iter().any(|v| hit(v.as_bytes())),
         }
     }
+}
+
+fn pairs_to_map(
+    pairs: impl Iterator<Item = (HeaderName, HeaderValue)>,
+    capacity: usize,
+) -> HeaderMap {
+    let mut out = HeaderMap::with_capacity(capacity);
+    for (name, value) in pairs {
+        out.append(name, value);
+    }
+    out
 }
 
 fn build(head: &Bytes) -> HeaderMap {

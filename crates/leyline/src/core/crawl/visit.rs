@@ -6,7 +6,7 @@ use url::Url;
 
 use super::fetch::{CONTENT_USAGE, Loaded};
 use super::frontier::{Queued, page_key};
-use super::{Crawl, MIN_PRINT_WORDS, NOFOLLOW, Page, SkipReason};
+use super::{Crawl, NOFOLLOW, Page, SkipReason};
 use crate::core::robots::{Purpose, usage_prefs};
 use crate::html::{self, Directives};
 
@@ -35,37 +35,58 @@ impl Crawl {
     }
 
     pub(super) fn page(&mut self, depth: usize, loaded: Loaded) {
-        let Loaded {
-            url,
-            status,
-            headers,
-            html,
-        } = loaded;
-        let base = html::base(&html)
-            .and_then(|href| url.join(&href).ok())
-            .unwrap_or_else(|| url.clone());
-        let rules = Directives::read(&html, &headers, &self.settings.agent);
+        let base = html::base(&loaded.html)
+            .and_then(|href| loaded.url.join(&href).ok())
+            .unwrap_or_else(|| loaded.url.clone());
+        let rules = Directives::read(&loaded.html, &loaded.headers, &self.settings.agent);
         let may_follow = self.settings.respect.is_none() || rules.follow();
         if may_follow {
-            self.follow(&base, &html, depth + 1);
+            self.follow(&base, &loaded.html, depth + 1);
         }
-        if let Some(reason) = self.excluded(rules, &headers) {
+        if let Some(reason) = self.excluded(rules, &loaded.headers) {
             self.stats.skip(reason);
             return;
         }
-        let canonical = html::canonical(&html)
+        if !self.settings.dedup {
+            let text = html::text(&loaded.html);
+            self.stats.page();
+            self.ready.push_back(Ok(Page::new(
+                loaded.url,
+                depth,
+                loaded.status,
+                loaded.headers,
+                loaded.html,
+                text,
+            )));
+            return;
+        }
+        self.deduplicate(depth, &base, may_follow, loaded);
+    }
+
+    fn deduplicate(&mut self, depth: usize, base: &Url, may_follow: bool, loaded: Loaded) {
+        let text = html::text(&loaded.html);
+        let canonical = html::canonical(&loaded.html)
             .and_then(|href| base.join(&href).ok())
-            .filter(|link| self.frontier.in_scope(link));
-        let own = page_key(&url);
+            .filter(|link| self.frontier.in_scope(link) && self.frontier.keeps(link));
+        let own = page_key(&loaded.url);
         let claimed = canonical.as_ref().map(page_key);
-        let text = html::text(&html);
-        let print = (text.split_whitespace().nth(MIN_PRINT_WORDS - 1).is_some())
-            .then(|| fingerprint(&text));
+        let print = self
+            .settings
+            .dedup_min_words
+            .filter(|&min| min == 0 || text.split_whitespace().nth(min - 1).is_some())
+            .map(|_| fingerprint(&text));
         let held = Held {
             own,
             claimed,
             print,
-            page: Page::new(url, depth, status, html, text),
+            page: Page::new(
+                loaded.url,
+                depth,
+                loaded.status,
+                loaded.headers,
+                loaded.html,
+                text,
+            ),
         };
         if let (Some(key), Some(link)) = (held.claimed.clone(), canonical)
             && may_follow
@@ -73,7 +94,8 @@ impl Crawl {
             && !self.dedup.kept.contains(&key)
             && !self.dedup.settled.contains(&key)
         {
-            self.frontier.add(Queued::link(link, depth));
+            self.frontier
+                .add(Queued::link(link, depth), &mut self.stats);
             self.dedup.waiting_on.insert(held.own.clone(), key.clone());
             self.dedup.held.entry(key).or_default().push(held);
             return;
@@ -172,7 +194,7 @@ impl Crawl {
                         .any(|token| token.eq_ignore_ascii_case(NOFOLLOW))
                 });
             if let (false, Ok(url)) = (nofollow, base.join(anchor.href())) {
-                self.frontier.add(Queued::link(url, depth));
+                self.frontier.add(Queued::link(url, depth), &mut self.stats);
             }
         }
     }

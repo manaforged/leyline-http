@@ -6,8 +6,9 @@ mod body_stream;
 mod config;
 #[cfg(feature = "html")]
 mod crawl;
-mod decompress;
+pub(crate) mod decompress;
 mod digest;
+pub(crate) mod doh;
 
 mod fetch_site;
 mod headers;
@@ -45,7 +46,7 @@ pub use request::{Event, Events, RequestBuilder};
 
 #[cfg(feature = "bench-internals")]
 pub(crate) use response::parse_links;
-pub use response::{Link, Response, relay_headers};
+pub use response::{Link, Response};
 pub use retry::Retry;
 pub use robots::{Purpose, Robots, RobotsSource};
 pub(crate) use session::Identity;

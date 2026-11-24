@@ -10,18 +10,56 @@ use super::SessionBuilder;
 impl SessionBuilder {
     pub(super) fn validate(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
         self.check_config()?;
-        if self.refresh_token.is_some() && (self.bearer.is_none() || self.base_url.is_none()) {
+        let bearer = self
+            .credential
+            .as_ref()
+            .is_some_and(super::Credential::refreshable);
+        if self.refresh_token.is_some() && !(bearer && self.base_url.is_some()) {
             return Err(Error::config(
                 "refresh_token requires bearer_auth and base_url",
             ));
         }
         self.check_proxy_pool()?;
+        self.check_interface()?;
+        #[cfg(unix)]
+        self.check_unix_socket()?;
         self.resolve_platform();
         #[cfg(feature = "http3")]
         self.resolve_protocol();
         self.resolve_proxies(on_invalid)?;
         #[cfg(feature = "http3")]
         self.check_h3_proxy()?;
+        Ok(())
+    }
+
+    fn check_interface(&self) -> Result<()> {
+        let Some(name) = self.socket_config.interface.as_deref() else {
+            return Ok(());
+        };
+        crate::net::SocketOptions::validate_interface_name(name)
+            .map_err(|err| Error::config(err.to_string()))
+    }
+
+    #[cfg(unix)]
+    fn check_unix_socket(&mut self) -> Result<()> {
+        if self.socket_config.unix_socket.is_none() {
+            return Ok(());
+        }
+        if !self.proxy_config.rules().is_empty()
+            || self.proxy_config.is_custom()
+            || self.proxy_pool.is_some()
+        {
+            return Err(Error::config(
+                super::super::transport_policy::UNIX_SOCKET_PROXY_ERR,
+            ));
+        }
+        self.proxy_config = std::mem::take(&mut self.proxy_config).env(false);
+        #[cfg(feature = "http3")]
+        if matches!(self.protocol_policy, Protocol::Http3) {
+            return Err(Error::config(
+                super::super::transport_policy::UNIX_SOCKET_H3_ERR,
+            ));
+        }
         Ok(())
     }
 
@@ -39,11 +77,11 @@ impl SessionBuilder {
             .proxy_pool
             .iter()
             .flat_map(ProxyPool::configs)
-            .any(|config| config.pool.is_some())
+            .any(|config| !config.is_single())
         {
             return Err(Error::config(
                 "a Proxy::list or Proxy::identified entry must be one proxy, not another \
-                 Proxy::list or Proxy::identified",
+                 Proxy::list or Proxy::identified, and not a Proxy::custom",
             ));
         }
         if !self.impersonates()
@@ -62,6 +100,10 @@ impl SessionBuilder {
 
     #[cfg(feature = "http3")]
     fn resolve_protocol(&mut self) {
+        #[cfg(unix)]
+        if self.socket_config.unix_socket.is_some() {
+            return;
+        }
         if !self.protocol_explicit && self.profile_races_h3() {
             self.protocol_policy = Protocol::Race;
         }
@@ -86,6 +128,10 @@ impl SessionBuilder {
     }
 
     fn resolve_proxies(&mut self, on_invalid: InvalidEnvProxy) -> Result<()> {
+        self.proxy_config.check_headers()?;
+        for config in self.proxy_pool.iter().flat_map(ProxyPool::configs) {
+            config.check_headers()?;
+        }
         for rule in self.proxy_rules() {
             rule.proxy()?;
         }
@@ -115,9 +161,9 @@ impl SessionBuilder {
 
     #[cfg(feature = "http3")]
     fn check_h3_proxy(&self) -> Result<()> {
-        if self.proxy_config.proxies_every_url()
-            && matches!(self.protocol_policy, Protocol::Http3)
-            && !crate::quic::proxy_carries_h3(self.proxy_config.primary_url())
+        if matches!(self.protocol_policy, Protocol::Http3)
+            && let Some(proxy) = self.proxy_config.https_proxy_for_all_hosts()
+            && !crate::quic::proxy_carries_h3(proxy)
         {
             return Err(Error::config(
                 "HTTP/3 needs a socks5:// or socks5h:// proxy with UDP ASSOCIATE; http and \

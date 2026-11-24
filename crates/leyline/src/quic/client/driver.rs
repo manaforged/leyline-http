@@ -237,6 +237,7 @@ pub(super) fn sweep_cancelled_streams(
     }
 }
 
+#[cfg(test)]
 pub(super) fn fail_all(
     streams: &mut HashMap<u64, H3Stream>,
     pending: &mut VecDeque<H3Command>,
@@ -244,20 +245,46 @@ pub(super) fn fail_all(
     closed: &AtomicBool,
     reason: String,
 ) {
+    fail_all_with(
+        streams,
+        pending,
+        commands,
+        closed,
+        reason,
+        H3SendError::Closed,
+    );
+}
+
+pub(super) fn fail_all_with(
+    streams: &mut HashMap<u64, H3Stream>,
+    pending: &mut VecDeque<H3Command>,
+    commands: &mut mpsc::Receiver<H3Command>,
+    closed: &AtomicBool,
+    reason: String,
+    active_err: fn(String) -> H3SendError,
+) {
     closed.store(true, Ordering::Release);
     commands.close();
     while let Ok(cmd) = commands.try_recv() {
         pending.push_back(cmd);
     }
     for (_, mut stream) in streams.drain() {
-        stream.deliver_error(H3SendError::Closed, reason.clone());
+        if stream.head_sent && stream.peer_finished && stream.stalled.is_none() {
+            if stream.length_mismatch() {
+                stream.deliver_terminal(std::io::Error::other(LENGTH_MISMATCH));
+            }
+            stream.stream_tx = None;
+            stream.terminal = None;
+        } else {
+            stream.deliver_error(active_err, reason.clone());
+        }
     }
     for cmd in pending.drain(..) {
         reject_unsent(cmd, reason.clone());
     }
 }
 
-fn reject_unsent(cmd: H3Command, reason: String) {
+pub(super) fn reject_unsent(cmd: H3Command, reason: String) {
     let H3Command::Request { resp_tx, .. } = cmd;
     drop(resp_tx.send(Err(H3SendError::NotSent(reason))));
 }

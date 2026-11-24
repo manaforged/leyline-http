@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use super::resolver::{Coalesced, ResolveFuture, Resolver, SystemResolver};
+use super::resolver::{Coalesced, EchFuture, ResolveFuture, Resolver, SystemResolver};
 
 #[derive(Clone)]
 pub(crate) struct DnsConfig {
@@ -54,8 +54,12 @@ impl DnsConfig {
         self
     }
 
-    pub(crate) fn into_resolver(self) -> Arc<dyn Resolver> {
-        let resolver = Arc::new(Coalesced::new(self.resolver));
+    pub(crate) fn overrides(&self) -> &HashMap<String, Vec<SocketAddr>> {
+        &self.overrides
+    }
+
+    pub(crate) fn into_resolver_with(self, base: Option<Arc<dyn Resolver>>) -> Arc<dyn Resolver> {
+        let resolver = Arc::new(Coalesced::new(base.unwrap_or(self.resolver)));
         if self.overrides.is_empty() {
             resolver
         } else {
@@ -84,14 +88,17 @@ impl Resolver for LayeredResolver {
         }
         self.resolver.resolve(host, port)
     }
+
+    fn resolve_ech<'a>(&'a self, host: &'a str, port: u16) -> EchFuture<'a> {
+        self.resolver.resolve_ech(host, port)
+    }
 }
 
 pub(crate) fn normalize_host(host: &str) -> String {
-    let stripped = host.trim().trim_end_matches('.');
-    let stripped = stripped
-        .strip_prefix('[')
-        .and_then(|s| s.strip_suffix(']'))
-        .unwrap_or(stripped);
+    let stripped = crate::util::bare_host(host.trim().trim_end_matches('.'));
+    if let Some(ip) = crate::util::parse_ip_host(stripped) {
+        return ip.to_string();
+    }
     let lowered = stripped.to_ascii_lowercase();
     match url::Host::parse(&lowered) {
         Ok(url::Host::Domain(d)) => d,

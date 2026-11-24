@@ -9,6 +9,15 @@ sets=(
     "default"
     "full"
     "full,bench-internals,socks,tower"
+    "http3"
+    "websocket"
+    "html"
+    "multipart"
+    "test-util"
+    "compression-gzip"
+    "compression-brotli"
+    "compression-deflate"
+    "compression-zstd"
     "socks"
     "tower"
     "charset"
@@ -34,6 +43,14 @@ for set in "${sets[@]}"; do
         failed+=("$label")
     fi
 done
+
+printf '\n== test -p leyline-http --no-default-features --lib ==\n'
+if cargo test -p leyline-http --no-default-features --lib --locked; then
+    printf 'PASS no-default-features lib tests\n'
+else
+    printf 'FAIL no-default-features lib tests\n'
+    failed+=("no-default-features-tests")
+fi
 
 if [[ ${#failed[@]} -gt 0 ]]; then
     printf 'feature sets failed: %s\n' "${failed[*]}" >&2

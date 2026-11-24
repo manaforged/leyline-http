@@ -1,6 +1,6 @@
 use std::future::Future;
 use std::io;
-use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, ToSocketAddrs};
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -8,6 +8,8 @@ use crate::util::coalesce::Coalesce;
 
 pub(crate) type ResolveFuture<'a> =
     Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, io::Error>> + Send + 'a>>;
+
+pub(crate) type EchFuture<'a> = Pin<Box<dyn Future<Output = Option<Vec<u8>>> + Send + 'a>>;
 
 /// Resolves a host name and port to socket addresses for new connections.
 pub trait Resolver: Send + Sync + 'static {
@@ -17,6 +19,15 @@ pub trait Resolver: Send + Sync + 'static {
         host: &'a str,
         port: u16,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<SocketAddr>, io::Error>> + Send + 'a>>;
+
+    /// Returns an RFC 9460 `ECHConfigList` for `host` and `port` when the resolver can supply HTTPS/SVCB records.
+    fn resolve_ech<'a>(
+        &'a self,
+        _host: &'a str,
+        _port: u16,
+    ) -> Pin<Box<dyn Future<Output = Option<Vec<u8>>> + Send + 'a>> {
+        Box::pin(async { None })
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -24,7 +35,7 @@ pub(crate) struct SystemResolver;
 
 impl Resolver for SystemResolver {
     fn resolve<'a>(&'a self, host: &'a str, port: u16) -> ResolveFuture<'a> {
-        if let Ok(ip) = host.parse::<IpAddr>() {
+        if let Some(ip) = crate::util::parse_ip_host(host) {
             let addr = SocketAddr::new(ip, port);
             return Box::pin(async move { Ok(vec![addr]) });
         }
@@ -46,6 +57,7 @@ type Lookup = Result<Vec<SocketAddr>, Arc<io::Error>>;
 pub(crate) struct Coalesced {
     inner: Arc<dyn Resolver>,
     running: Coalesce<(String, u16), Lookup>,
+    ech_running: Coalesce<(String, u16), Option<Vec<u8>>>,
 }
 
 impl Coalesced {
@@ -53,6 +65,7 @@ impl Coalesced {
         Self {
             inner,
             running: Coalesce::default(),
+            ech_running: Coalesce::default(),
         }
     }
 }
@@ -71,6 +84,17 @@ impl Resolver for Coalesced {
                 .await
                 .map_err(|e| io::Error::new(e.kind(), e.to_string()))
         })
+    }
+
+    fn resolve_ech<'a>(&'a self, host: &'a str, port: u16) -> EchFuture<'a> {
+        let inner = Arc::clone(&self.inner);
+        let owned = host.to_owned();
+        let lookup = self.ech_running.join_or_spawn(
+            &(owned.clone(), port),
+            move || async move { inner.resolve_ech(&owned, port).await },
+            |_| None,
+        );
+        Box::pin(lookup)
     }
 }
 

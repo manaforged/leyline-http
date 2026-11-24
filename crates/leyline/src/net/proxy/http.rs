@@ -3,8 +3,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use crate::error::Error;
-use crate::net::{Dialer, NetError, ProxyReply};
-use crate::util::proxy_basic_auth;
+use crate::net::{Dialer, NetError, ProxyReply, ProxyUrl};
 use crate::wire::h1::{self, MAX_H1_HEADER_BYTES, Sink};
 
 const TARGET_UNREACHABLE_STATUSES: [u16; 2] = [502, 504];
@@ -15,9 +14,9 @@ pub(crate) async fn tunnel(
     dialer: &Dialer,
     host: &str,
     port: u16,
-    proxy: &url::Url,
+    proxy: &ProxyUrl,
 ) -> Result<TcpStream, NetError> {
-    let mut tcp_stream = super::connect_to_proxy(dialer, proxy).await?;
+    let mut tcp_stream = super::connect_to_proxy(dialer, proxy.url()).await?;
     write_connect_and_validate(&mut tcp_stream, host, port, proxy).await?;
     Ok(tcp_stream)
 }
@@ -26,18 +25,24 @@ pub(crate) async fn write_connect_and_validate<S>(
     stream: &mut S,
     host: &str,
     port: u16,
-    proxy: &url::Url,
+    proxy: &ProxyUrl,
 ) -> Result<(), NetError>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    let connect_req = if let Some(credentials) = proxy_basic_auth(proxy) {
-        format!(
-            "CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\nProxy-Authorization: {credentials}\r\n\r\n"
-        )
-    } else {
-        format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n\r\n")
-    };
+    let mut connect_req = format!("CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n");
+    if let Some(credentials) = proxy.basic_auth_header() {
+        connect_req.push_str("Proxy-Authorization: ");
+        connect_req.push_str(&credentials);
+        connect_req.push_str("\r\n");
+    }
+    for (name, value) in proxy.headers() {
+        connect_req.push_str(name);
+        connect_req.push_str(": ");
+        connect_req.push_str(value);
+        connect_req.push_str("\r\n");
+    }
+    connect_req.push_str("\r\n");
 
     stream
         .write_all(connect_req.as_bytes())
@@ -57,8 +62,12 @@ where
         if response_buf.len() > MAX_H1_HEADER_BYTES {
             return Err(NetError::proxy("proxy CONNECT response too large"));
         }
-        if let Some(i) = h1::find_header_end(&response_buf) {
-            break i + 4;
+        match h1::scan_header_end(&response_buf) {
+            h1::HeaderEnd::Found(i) => break i + 4,
+            h1::HeaderEnd::BareLf => {
+                return Err(NetError::proxy("proxy CONNECT response has a bare LF"));
+            }
+            h1::HeaderEnd::Incomplete => {}
         }
     };
 
@@ -75,6 +84,9 @@ pub fn validate_connect_response(buf: &[u8], end_idx: usize) -> Result<(), NetEr
     }
 
     let head = &buf[..end_idx];
+    if matches!(h1::scan_header_end(head), h1::HeaderEnd::BareLf) {
+        return Err(NetError::proxy("proxy CONNECT response has a bare LF"));
+    }
     let response = std::str::from_utf8(head)
         .map_err(|e| NetError::proxy(format!("proxy CONNECT response is not UTF-8: {e}")))?;
     let status_line = response.split("\r\n").next().unwrap_or("");

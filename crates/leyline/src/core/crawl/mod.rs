@@ -10,6 +10,8 @@ mod visit;
 use std::collections::{HashMap, VecDeque};
 use std::future::{Future, poll_fn};
 use std::pin::Pin;
+use std::sync::Arc;
+use std::time::Duration;
 
 use futures_util::stream::{FuturesUnordered, Stream};
 use url::Url;
@@ -20,23 +22,55 @@ use frontier::{Frontier, Queued, page_key, same_site};
 use page::CrawlStats;
 pub use page::{Page, SkipReason};
 use sitemap::SitemapRead;
-use sites::{Site, SitemapFile, Sitemaps};
+use sites::{
+    Site, SitemapFile, Sitemaps, default_max_crawl_delay, default_max_sitemaps,
+    default_robots_max_age,
+};
 use visit::Dedup;
 
+use crate::core::Redirect;
 use crate::core::config::{HostGates, HostLimits, Origin};
 use crate::core::into_url::IntoUrl;
 use crate::core::retry::Retry;
-use crate::core::robots::{ANY_AGENT, MAX_REDIRECTS, Purpose, Robots};
+use crate::core::robots::{ANY_AGENT, Purpose, Robots};
 use crate::core::session::Session;
 use crate::error::Result;
 
 const NOFOLLOW: &str = "nofollow";
-const PAGE_RETRIES: u32 = 2;
-const MIN_PRINT_WORDS: usize = 20;
-const MAX_IN_FLIGHT: usize = 16;
+const DEFAULT_MIN_DEDUP_WORDS: usize = 20;
 const POLITE_IN_FLIGHT: usize = 1;
+const POLITE_TOTAL_IN_FLIGHT: usize = 16;
 const POLITE_PER_SECOND: f64 = 1.0;
 const PAUSE_STATUSES: [u16; 2] = [429, 503];
+
+fn default_dedup() -> bool {
+    true
+}
+
+fn default_dedup_min_words() -> Option<usize> {
+    Some(DEFAULT_MIN_DEDUP_WORDS)
+}
+
+pub(super) fn origin_cap_for(
+    pace: &HostGates,
+    own: &HostGates,
+    origin: &Origin,
+    fallback: usize,
+) -> usize {
+    min_some(
+        pace.max_in_flight_for(origin),
+        own.max_in_flight_for(origin),
+    )
+    .unwrap_or(fallback)
+    .max(1)
+}
+
+fn min_some(a: Option<usize>, b: Option<usize>) -> Option<usize> {
+    match (a, b) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    }
+}
 
 type Task = Pin<Box<dyn Future<Output = Event> + Send>>;
 
@@ -52,6 +86,7 @@ enum Event {
         fetched: Result<Fetched>,
     },
     Sitemap {
+        origin: Origin,
         file: SitemapFile,
         read: SitemapRead,
     },
@@ -64,7 +99,8 @@ pub enum Respect {
     /// Obeys robots.txt rules and noindex directives.
     Robots,
     /// Obeys robots.txt and also skips pages that refuse AI training use.
-    AiTraining,
+    #[serde(alias = "AiTraining")]
+    AiTrain,
 }
 
 #[doc = include_str!("../../../docs/crawl.md")]
@@ -72,7 +108,10 @@ pub enum Respect {
 pub struct Crawl {
     session: Session,
     limits: Option<HostLimits>,
+    redirect_override: Option<Redirect>,
+    redirect_policy: Redirect,
     pace: HostGates,
+    restored_pauses: Vec<(Origin, tokio::time::Instant)>,
     seeds: Vec<Result<Url>>,
     settings: Settings,
     started: bool,
@@ -96,20 +135,26 @@ struct Settings {
     agent: String,
     max_body: Option<usize>,
     max_pages: Option<usize>,
+    #[serde(default = "default_max_sitemaps")]
+    max_sitemaps: Option<usize>,
+    #[serde(default = "default_max_crawl_delay")]
+    max_crawl_delay: Option<Duration>,
+    #[serde(default = "default_robots_max_age")]
+    robots_max_age: Option<Duration>,
+    #[serde(default = "default_dedup")]
+    dedup: bool,
+    #[serde(default = "default_dedup_min_words")]
+    dedup_min_words: Option<usize>,
+    #[serde(default)]
+    redirect_hops: Option<Option<usize>>,
 }
 
 fn polite_limits() -> HostLimits {
     HostLimits::new()
         .max_in_flight(POLITE_IN_FLIGHT)
+        .max_total_in_flight(POLITE_TOTAL_IN_FLIGHT)
         .per_second(POLITE_PER_SECOND)
         .pause_on(PAUSE_STATUSES)
-}
-
-fn page_retry(session: &Retry) -> Retry {
-    match session.is_none() {
-        true => Retry::new(PAGE_RETRIES),
-        false => session.clone(),
-    }
 }
 
 impl Session {
@@ -124,13 +169,22 @@ impl Crawl {
         Crawl {
             session: session.clone(),
             limits: None,
+            redirect_override: None,
+            redirect_policy: session.redirect_policy().for_robots(),
             pace: HostGates::new(HostLimits::new()),
+            restored_pauses: Vec::new(),
             seeds,
             settings: Settings {
                 respect: Some(Respect::Robots),
                 agent: ANY_AGENT.to_owned(),
                 max_body: None,
                 max_pages: None,
+                max_sitemaps: default_max_sitemaps(),
+                max_crawl_delay: default_max_crawl_delay(),
+                robots_max_age: default_robots_max_age(),
+                dedup: default_dedup(),
+                dedup_min_words: default_dedup_min_words(),
+                redirect_hops: None,
             },
             started: false,
             frontier: Frontier::default(),
@@ -162,9 +216,9 @@ impl Crawl {
         self
     }
 
-    /// Sets the largest page body the crawl reads, overriding the session's `max_body_size`.
-    pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.settings.max_body = Some(bytes);
+    /// Sets the largest body the crawl reads, overriding the session's `max_body_size`; `None` removes the cap.
+    pub fn max_body_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.settings.max_body = Some(bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP));
         self
     }
 
@@ -174,9 +228,68 @@ impl Crawl {
         self
     }
 
-    /// Stops the crawl after it yields `pages` pages; unlimited by default.
-    pub fn limit(mut self, pages: usize) -> Self {
-        self.settings.max_pages = Some(pages);
+    /// Follows a discovered link, sitemap URL or redirect target only when `keep` returns true for it, on top of the scope and never for a seed; a checkpoint does not save the filter, so call this again after `Crawl::load`.
+    pub fn filter<F>(mut self, keep: F) -> Self
+    where
+        F: Fn(&Url) -> bool + Send + Sync + 'static,
+    {
+        self.frontier.filter = Some(Arc::new(keep));
+        self
+    }
+
+    /// Stops the crawl after it yields `pages` pages, or removes the cap when `None`.
+    pub fn limit(mut self, pages: impl Into<Option<usize>>) -> Self {
+        self.settings.max_pages = pages.into();
+        self
+    }
+
+    /// Replaces the redirect policy for this crawl (5 hops by default when neither crawl nor session sets one); a checkpoint does not save a `Redirect::custom` closure, so call this again after `Crawl::load`.
+    pub fn redirect(mut self, policy: impl Into<Redirect>) -> Self {
+        let policy = policy.into();
+        self.settings.redirect_hops = Some(policy.hop_limit());
+        self.redirect_override = Some(policy);
+        self
+    }
+
+    /// Sets the furthest link depth from a seed the crawl follows, 64 by default, or unlimited when `None`.
+    pub fn max_depth(mut self, depth: impl Into<Option<usize>>) -> Self {
+        self.frontier.max_depth = depth.into();
+        self
+    }
+
+    /// Sets the longest URL in bytes the crawl queues, 2048 by default, or unlimited when `None`.
+    pub fn max_url_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.frontier.max_url_size = bytes.into();
+        self
+    }
+
+    /// Sets the most sitemap files the crawl opens, 50 by default, or unlimited when `None`.
+    pub fn max_sitemaps(mut self, files: impl Into<Option<usize>>) -> Self {
+        self.settings.max_sitemaps = files.into();
+        self
+    }
+
+    /// Caps the robots.txt `Crawl-delay` the crawl honors, 30 seconds by default, or uncapped when `None`.
+    pub fn max_crawl_delay(mut self, delay: impl Into<Option<Duration>>) -> Self {
+        self.settings.max_crawl_delay = delay.into();
+        self
+    }
+
+    /// Sets how long a fetched robots.txt stays fresh before re-reading, 24 hours by default, or forever when `None`.
+    pub fn robots_max_age(mut self, max_age: impl Into<Option<Duration>>) -> Self {
+        self.settings.robots_max_age = max_age.into();
+        self
+    }
+
+    /// Sets whether canonical and duplicate-text pages are skipped, `true` by default.
+    pub fn dedup(mut self, enabled: bool) -> Self {
+        self.settings.dedup = enabled;
+        self
+    }
+
+    /// Sets the word-count floor for duplicate-text detection, 20 by default, or `None` to disable text matching.
+    pub fn dedup_min_words(mut self, words: impl Into<Option<usize>>) -> Self {
+        self.settings.dedup_min_words = words.into();
         self
     }
 
@@ -218,20 +331,55 @@ impl Crawl {
     fn purpose(&self) -> Option<Purpose> {
         match self.settings.respect? {
             Respect::Robots => None,
-            Respect::AiTraining => Some(Purpose::AiTrain),
+            Respect::AiTrain => Some(Purpose::AiTrain),
         }
     }
 
-    fn start(&mut self) {
-        if std::mem::replace(&mut self.started, true) {
-            return;
-        }
+    pub(super) fn max_active(&self) -> usize {
+        min_some(
+            self.pace.max_total(),
+            self.session.host_limits().max_total(),
+        )
+        .unwrap_or_else(|| self.session.max_connections())
+        .max(1)
+    }
+
+    pub(super) fn origin_cap(&self, origin: &Origin) -> usize {
+        origin_cap_for(
+            &self.pace,
+            self.session.host_limits(),
+            origin,
+            self.max_active(),
+        )
+    }
+
+    pub(super) fn approve_redirect_hop(
+        &self,
+        hops: usize,
+        status: u16,
+        url: &Url,
+        location: &str,
+        previous: &[Url],
+    ) -> Option<Url> {
+        self.redirect_policy
+            .check_hops(hops + 1)
+            .ok()
+            .and_then(|()| {
+                self.redirect_policy
+                    .approved_hop(status, url, location, previous)
+            })
+    }
+
+    fn resolve_pace(&mut self) -> Option<HostGates> {
         let pace = match self.limits.take() {
             Some(limits) => match limits.validate() {
                 Err(error) => {
-                    self.ready.push_back(Err(error));
+                    self.halt();
                     self.seeds.clear();
-                    return;
+                    self.restored_pauses.clear();
+                    self.ready.clear();
+                    self.ready.push_back(Err(error));
+                    return None;
                 }
                 Ok(()) => HostGates::new(limits),
             },
@@ -240,19 +388,46 @@ impl Crawl {
                 .host_limits()
                 .derived(|own| own.clone().filled_from(&polite_limits())),
         };
-        let pace = match self.settings.respect {
+        Some(match self.settings.respect {
             Some(_) => pace,
             None => pace.without_floors(),
+        })
+    }
+
+    fn resolve_redirect(&mut self) -> Redirect {
+        if let Some(policy) = self.redirect_override.take() {
+            return policy;
+        }
+        match self.settings.redirect_hops {
+            Some(Some(0)) => Redirect::none(),
+            Some(Some(max)) => Redirect::limit(max),
+            Some(None) | None => self.session.redirect_policy().for_robots(),
+        }
+    }
+
+    fn start(&mut self) {
+        if std::mem::replace(&mut self.started, true) {
+            return;
+        }
+        let Some(pace) = self.resolve_pace() else {
+            return;
         };
-        self.session = self.session.with_extra_gates(pace.clone());
-        self.page_retry = page_retry(self.session.default_retry());
+        let redirect = self.resolve_redirect();
+        self.session =
+            self.session
+                .for_crawl(pace.clone(), self.settings.max_body, redirect.clone());
+        self.redirect_policy = redirect;
+        self.page_retry = self.session.default_retry().for_crawl_page();
         self.clock.stopped = Some(self.session.stopped());
         self.pace = pace;
+        for (origin, at) in std::mem::take(&mut self.restored_pauses) {
+            self.pace.pause_until(origin, at);
+        }
         for seed in std::mem::take(&mut self.seeds) {
             match seed {
                 Ok(url) => {
                     self.trusted.get_or_insert_with(|| url.clone());
-                    self.frontier.add(Queued::seed(url));
+                    self.frontier.add(Queued::seed(url), &mut self.stats);
                 }
                 Err(err) => self.ready.push_back(Err(err)),
             }
@@ -272,22 +447,15 @@ impl Crawl {
     }
 
     fn fetch(&mut self, origin: Origin, queued: Queued) {
+        self.sync_floor(&origin);
         self.pages_in_flight += 1;
         *self.busy.entry(origin.clone()).or_default() += 1;
         self.stats.request();
         let session = self.session.clone();
         let (retry, trusted) = (self.page_retry.clone(), self.trusted.clone());
-        let (attempt, max_body) = (queued.attempts, self.settings.max_body);
+        let attempt = queued.attempts;
         self.tasks.push(Box::pin(async move {
-            let fetched = fetch(
-                session,
-                queued.url.clone(),
-                retry,
-                attempt,
-                trusted,
-                max_body,
-            )
-            .await;
+            let fetched = fetch(session, queued.url.clone(), retry, attempt, trusted).await;
             Event::Page {
                 origin,
                 queued,
@@ -296,8 +464,7 @@ impl Crawl {
         }));
     }
 
-    fn release(&mut self, origin: &Origin) {
-        self.pages_in_flight -= 1;
+    fn release_origin(&mut self, origin: &Origin) {
         if let Some(busy) = self.busy.get_mut(origin) {
             *busy -= 1;
             if *busy == 0 {
@@ -306,11 +473,17 @@ impl Crawl {
         }
     }
 
-    fn redirect(&mut self, queued: Queued, to: Url) {
-        if queued.hops >= MAX_REDIRECTS {
+    fn follow_redirect(&mut self, mut queued: Queued, status: u16, location: String, to: Url) {
+        let Some(hop) = self.approve_redirect_hop(
+            queued.hops,
+            status,
+            &queued.url,
+            &location,
+            &queued.previous,
+        ) else {
             self.stats.skip(SkipReason::Redirects);
             return;
-        }
+        };
         let from = page_key(&queued.url);
         let target = page_key(&to);
         if target == from || queued.chain.contains(&target) {
@@ -319,23 +492,21 @@ impl Crawl {
         let widen =
             queued.seed && same_site(&queued.url, &to) && self.frontier.in_scope(&queued.url);
         let seed = queued.seed && (queued.hops == 0 || widen || self.frontier.in_scope(&to));
-        let seen = self.frontier.has_seen(&to);
-        let mut chain = queued.chain;
-        chain.push(from);
-        let admitted = self.frontier.add_redirect(Queued {
-            url: to,
-            depth: queued.depth,
-            hops: queued.hops + 1,
-            seed,
-            widen,
-            attempts: 0,
-            chain,
-        });
-        match (admitted, seen) {
-            (false, true) => self.stats.skip(SkipReason::Duplicate),
-            (false, false) => self.stats.skip(SkipReason::Scope),
-            (true, _) => {}
-        }
+        queued.chain.push(from);
+        queued.previous.push(hop);
+        self.frontier.add_redirect(
+            Queued {
+                url: to,
+                depth: queued.depth,
+                hops: queued.hops + 1,
+                seed,
+                widen,
+                attempts: 0,
+                chain: queued.chain,
+                previous: queued.previous,
+            },
+            &mut self.stats,
+        );
     }
 
     fn handle(&mut self, event: Event) {
@@ -353,22 +524,30 @@ impl Crawl {
                 self.sites.remove(&origin);
                 self.ready.push_back(Err(error));
             }
-            Event::Sitemap { file, read } => self.sitemap_read(file, read),
+            Event::Sitemap { origin, file, read } => {
+                self.release_origin(&origin);
+                self.sitemap_read(file, read);
+            }
             Event::Page {
                 origin,
                 queued,
                 fetched,
             } => {
-                self.release(&origin);
+                self.pages_in_flight -= 1;
+                self.release_origin(&origin);
                 let key = page_key(&queued.url);
                 match fetched {
                     Err(err) => {
                         self.stats.error();
                         self.ready.push_back(Err(err));
                     }
-                    Ok(Fetched::Redirect { to }) => {
+                    Ok(Fetched::Redirect {
+                        status,
+                        location,
+                        to,
+                    }) => {
                         let target = page_key(&to);
-                        self.redirect(queued, to);
+                        self.follow_redirect(queued, status, location, to);
                         return self.forward(key, target);
                     }
                     Ok(Fetched::Later(wait)) => return self.later(queued, wait),

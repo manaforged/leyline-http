@@ -66,17 +66,17 @@ async fn a_retried_attempt_sends_the_same_request_again() {
     assert_eq!(response.status(), 200);
     let seen = seen.lock().expect("log");
     assert_eq!(seen.len(), 2);
-    assert_eq!(seen[0].method, seen[1].method);
-    assert_eq!(seen[0].target, seen[1].target);
-    assert_eq!(seen[0].headers, seen[1].headers);
-    assert_eq!(seen[0].body, seen[1].body);
-    assert_eq!(seen[1].body, b"payload");
+    assert_eq!(seen[0].method(), seen[1].method());
+    assert_eq!(seen[0].target(), seen[1].target());
+    assert_eq!(seen[0].headers(), seen[1].headers());
+    assert_eq!(seen[0].body(), seen[1].body());
+    assert_eq!(seen[1].body(), b"payload");
 }
 
 #[tokio::test]
 async fn request_builder_awaits_response_text_and_bytes_directly() {
     use crate::testing::{Response, Server};
-    let server = Server::http(|request| match request.target.as_str() {
+    let server = Server::http(|request| match request.target() {
         "/text" => Response::new(200).body("hello leyline"),
         "/bytes" => Response::new(200).body(&b"\x01\x02\x03"[..]),
         _ => Response::new(204),

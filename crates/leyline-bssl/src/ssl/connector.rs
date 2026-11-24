@@ -137,6 +137,11 @@ pub struct ConnectConfiguration {
 }
 
 impl ConnectConfiguration {
+    /// Sets whether BoringSSL verifies the server certificate against the target hostname.
+    pub fn set_verify_hostname(&mut self, verify_hostname: bool) {
+        self.verify_hostname = verify_hostname;
+    }
+
     pub fn into_ssl(mut self, domain: &str) -> Result<Ssl, ErrorStack> {
         if self.sni && domain.parse::<IpAddr>().is_err() {
             self.ssl.set_hostname(domain)?;

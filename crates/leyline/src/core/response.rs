@@ -21,7 +21,6 @@ pub use link::Link;
 #[cfg(feature = "bench-internals")]
 pub(crate) use link::parse_links;
 pub(crate) use prefix::StopReason;
-pub use relay::relay_headers;
 
 pub(crate) enum ResponseBody {
     Buffered(Vec<u8>),
@@ -50,7 +49,7 @@ pub(crate) struct Parts {
     pub(crate) audit_cache: OnceLock<crate::audit::Fingerprint>,
     pub(crate) compression: crate::core::BodyRules,
     pub(crate) attempts: u32,
-    pub(crate) proxy: Option<String>,
+    pub(crate) proxy: Option<Url>,
     pub(crate) block: Option<crate::core::block::Block>,
 }
 
@@ -94,6 +93,27 @@ impl Response {
         std::time::Duration::from_millis(u64::from(self.parts.timing.total_ms))
     }
 
+    /// Returns the socket address the connection for this response was opened to, which is the resolved server address when direct and the proxy's address through a proxy, or `None` when `from_cache` is true.
+    #[must_use]
+    pub fn remote_addr(&self) -> Option<std::net::SocketAddr> {
+        if self.parts.timing.from_cache {
+            return None;
+        }
+        self.parts.tls.as_ref().and_then(|tls| tls.remote_addr)
+    }
+
+    /// Returns whether the body came from the session's HTTP cache: a fresh stored response answered with no request, or a stale one was confirmed by a `304` and its stored body returned.
+    #[must_use]
+    pub fn from_cache(&self) -> bool {
+        self.parts.timing.from_cache
+    }
+
+    /// Returns whether the TLS handshake for this response succeeded with Encrypted Client Hello (ECH).
+    #[must_use]
+    pub fn ech_accepted(&self) -> bool {
+        self.parts.tls.as_ref().is_some_and(|tls| tls.ech_accepted)
+    }
+
     /// Returns the number of attempts made, including retries.
     pub fn attempts(&self) -> u32 {
         self.parts.attempts
@@ -103,13 +123,13 @@ impl Response {
         self.parts.attempts = attempts.max(1);
     }
 
-    /// Returns the redacted proxy address the response came through.
-    pub fn proxy(&self) -> Option<&str> {
-        self.parts.proxy.as_deref()
+    /// Returns the redacted proxy URL the response came through.
+    pub fn proxy(&self) -> Option<&Url> {
+        self.parts.proxy.as_ref()
     }
 
     pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
-        self.parts.proxy = proxy.map(redact);
+        self.parts.proxy = proxy.and_then(crate::util::parse_redacted_url);
     }
 
     /// Returns the block detected in the response, if any.
@@ -132,7 +152,7 @@ impl Response {
         self.parts.headers.map()
     }
 
-    /// Returns the response trailers.
+    /// Returns the response trailers received with a buffered response.
     pub fn trailers(&self) -> impl Iterator<Item = (&HeaderName, &HeaderValue)> {
         self.parts
             .trailers
@@ -232,11 +252,7 @@ impl Response {
 
     /// Returns the named header value as text, or `None` when it is absent or not visible ASCII.
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.parts
-            .headers
-            .map()
-            .get(name)
-            .and_then(|v| v.to_str().ok())
+        crate::util::header_str(self.parts.headers.map(), name)
     }
 }
 
@@ -284,7 +300,7 @@ impl fmt::Debug for Response {
             )
             .field("timing", &self.parts.timing)
             .field("attempts", &self.parts.attempts)
-            .field("proxy", &self.parts.proxy)
+            .field("proxy", &self.parts.proxy.as_ref().map(Url::as_str))
             .finish_non_exhaustive()
     }
 }

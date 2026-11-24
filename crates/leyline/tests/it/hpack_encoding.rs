@@ -68,3 +68,17 @@ fn table_resize_removes_cached_static_names() {
     assert_eq!(&block[..2], &[0x20, 0x7a]);
     assert_eq!(encoder.encode_header_block(&headers)[0], 0x7a);
 }
+
+#[test]
+fn multiple_table_resizes_emit_minimum_before_final() {
+    let mut encoder = Encoder::new();
+    let headers = [("x-custom", "value")];
+    let _ = encoder.encode_header_block(&headers);
+    encoder.set_max_table_size(0);
+    encoder.set_max_table_size(4096);
+    let block = encoder.encode_header_block(&headers);
+    assert_eq!(block[0], 0x20);
+    assert_eq!(block[1], 0x3f);
+    assert_eq!(block[2], 0xe1);
+    assert_eq!(block[3], 0x1f);
+}

@@ -12,7 +12,7 @@ cell() {
     ./paired.sh 2>&1 | tee "$OUT/$name-$peer.log"
 }
 for peer in ${PEERS:-wreq reqwest tlsclient}; do
-  if [ "$peer" = tlsclient ]; then export LEYLINE_CHROME=152; else export LEYLINE_CHROME=149; fi
+  export LEYLINE_CHROME="${LEYLINE_CHROME:-146}"
   cell hyper-1c64 "$peer" 1 64 400000 2000 200
   cell hyper-8c256 "$peer" 8 256 3000000 1 1
   cell hyper-8c8 "$peer" 8 8 200000 1 1

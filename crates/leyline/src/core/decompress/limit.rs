@@ -9,6 +9,7 @@ pub(crate) enum Overflow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Cap {
     pub(crate) limit: BodyLimit,
+    pub(crate) wire_limit: BodyLimit,
     pub(crate) overflow: Overflow,
 }
 
@@ -16,6 +17,7 @@ impl Cap {
     pub(crate) fn fail(limit: BodyLimit) -> Self {
         Self {
             limit,
+            wire_limit: limit,
             overflow: Overflow::Fail,
         }
     }
@@ -23,6 +25,7 @@ impl Cap {
     pub(crate) fn truncate_at(session: BodyLimit, caller: usize) -> Self {
         Self {
             limit: session.at_most(caller),
+            wire_limit: session,
             overflow: Overflow::Truncate,
         }
     }

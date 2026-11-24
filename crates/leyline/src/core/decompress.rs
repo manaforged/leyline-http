@@ -6,6 +6,8 @@ mod stage;
 use crate::error::BodyLimit;
 use limit::{Cap, Overflow};
 use stage::Stage;
+#[cfg(feature = "compression-zstd")]
+pub(crate) use stage::ZSTD_WINDOW_LOG_MAX;
 
 use crate::core::BodyRules;
 use crate::core::config::{Codings, MAX_CODINGS};
@@ -17,6 +19,7 @@ use http::HeaderMap;
 pub(crate) struct Decoder {
     stages: Vec<Stage>,
     fed: bool,
+    raw_read: usize,
     produced: usize,
     cap: Cap,
 }
@@ -70,6 +73,7 @@ impl Decoder {
         Self {
             stages,
             fed: false,
+            raw_read: 0,
             produced: 0,
             cap,
         }
@@ -79,33 +83,53 @@ impl Decoder {
         if chunk.is_empty() {
             return Ok(());
         }
+        self.cap
+            .wire_limit
+            .admit(self.raw_read, chunk.len())
+            .map_err(BodyLimit::error)?;
+        self.raw_read += chunk.len();
         self.fed = true;
-        let mut data = chunk.to_vec();
-        for stage in &mut self.stages {
-            data = stage.write(&data)?;
+        match self.stages.as_mut_slice() {
+            [] => self.emit_slice(chunk, out),
+            [single] => single.write_into(chunk, out),
+            [first, middle @ .., last] => {
+                let mut data = first.write(chunk)?;
+                for stage in middle {
+                    data = stage.write(&data)?;
+                }
+                last.write_into(&data, out)
+            }
         }
-        self.emit(data, out)
     }
 
     pub(crate) fn finish(&mut self, out: &mut Vec<u8>) -> Result<()> {
         if !self.fed {
             return Ok(());
         }
-        for index in 0..self.stages.len() {
+        if let [single] = self.stages.as_mut_slice() {
+            return single.finish_into(out);
+        }
+        let len = self.stages.len();
+        for index in 0..len {
+            if index + 1 == len {
+                self.stages[index].finish_into(out)?;
+                continue;
+            }
             let mut data = self.stages[index].finish()?;
-            for stage in &mut self.stages[index + 1..] {
+            let (middle, last) = self.stages[index + 1..].split_at_mut(len - index - 2);
+            for stage in middle {
                 data = stage.write(&data)?;
             }
-            self.emit(data, out)?;
+            last[0].write_into(&data, out)?;
         }
         Ok(())
     }
 
-    fn emit(&mut self, data: Vec<u8>, out: &mut Vec<u8>) -> Result<()> {
+    fn emit_slice(&mut self, data: &[u8], out: &mut Vec<u8>) -> Result<()> {
         let room = self.cap.room(self.produced);
         self.produced = self.produced.saturating_add(data.len());
         if data.len() <= room {
-            out.extend_from_slice(&data);
+            out.extend_from_slice(data);
             return Ok(());
         }
         match self.cap.overflow {
@@ -126,7 +150,12 @@ pub(crate) fn decompress_body(
     let Some(mut decoder) = Decoder::new(codings, config)? else {
         return Ok((body, false));
     };
-    let mut out = Vec::new();
+    let hint = body
+        .len()
+        .saturating_mul(2)
+        .min(crate::wire::BODY_RESERVE_CAP)
+        .min(config.max_body_size);
+    let mut out = Vec::with_capacity(hint);
     decoder.feed(&body, &mut out)?;
     decoder.finish(&mut out)?;
     Ok((out, true))
@@ -169,13 +198,9 @@ pub(crate) async fn buffer_decoded(
         ));
     };
     let mut bs = bs;
-    let limit = BodyLimit::session(config.max_body_size);
-    let mut read = 0usize;
     let mut out = Vec::new();
     while let Some(chunk) = bs.next().await {
         let chunk = chunk.map_err(Error::from)?;
-        limit.admit(read, chunk.len()).map_err(BodyLimit::error)?;
-        read += chunk.len();
         decoder.feed(&chunk, &mut out)?;
     }
     decoder.finish(&mut out)?;

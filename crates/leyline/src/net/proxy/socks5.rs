@@ -125,8 +125,7 @@ async fn authenticate(tcp_stream: &mut TcpStream, auth: &[u8]) -> Result<(), Net
 }
 
 pub(crate) fn encode_addr(host: &str, port: u16) -> Result<Vec<u8>, NetError> {
-    let bare = crate::util::bare_host(host);
-    if let Ok(ip) = bare.parse::<IpAddr>() {
+    if let Some(ip) = crate::util::parse_ip_host(host) {
         return Ok(encode_socket_addr(SocketAddr::new(ip, port)));
     }
     let host_bytes = host.as_bytes();

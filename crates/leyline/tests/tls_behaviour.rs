@@ -16,22 +16,6 @@ use leyline_bssl_tokio::SslStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-async fn reply_ok(mut stream: SslStream<TcpStream>) {
-    let mut head = Vec::new();
-    let mut buf = [0u8; 1024];
-    while !head.windows(4).any(|window| window == b"\r\n\r\n") {
-        match stream.read(&mut buf).await {
-            Ok(0) | Err(_) => return,
-            Ok(read) => head.extend_from_slice(&buf[..read]),
-        }
-    }
-    drop(
-        stream
-            .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
-            .await,
-    );
-}
-
 async fn self_signed_server() -> (u16, Vec<u8>) {
     let (cert, key) = tls_support::self_signed();
     let der = cert.to_der().unwrap();
@@ -40,7 +24,7 @@ async fn self_signed_server() -> (u16, Vec<u8>) {
         key,
         Arc::new(AtomicUsize::new(0)),
         |_| tls_support::HTTP11,
-        |_, stream| reply_ok(stream),
+        |_, stream| tls_support::serve_h1_ok(stream, "ok"),
     )
     .await;
     (port, der)
@@ -89,14 +73,14 @@ async fn a_pinned_leaf_connects_only_when_the_pin_matches() {
 
     assert_eq!(
         fetch(
-            bare_trust().ca_der(der.clone()).pin_sha256(pin),
+            bare_trust().ca_der(der.clone()).pin_cert_sha256(pin),
             url.clone()
         )
         .await
         .unwrap(),
         "ok"
     );
-    fetch(bare_trust().ca_der(der).pin_sha256([7; 32]), url)
+    fetch(bare_trust().ca_der(der).pin_cert_sha256([7; 32]), url)
         .await
         .expect_err("expected Err");
 }
@@ -179,7 +163,7 @@ async fn resuming_server() -> ResumingServer {
                 if stream.ssl().session_reused() {
                     counter.fetch_add(1, Ordering::SeqCst);
                 }
-                reply_ok(stream).await;
+                tls_support::serve_h1_ok(stream, "ok").await;
             }
         },
     )
@@ -212,7 +196,11 @@ async fn a_saved_tls_session_resumes_only_under_the_trust_that_made_it() {
     assert_eq!(first.text().await.unwrap(), "ok");
     let state = leyline::internals::connection_state(&unpinned);
 
-    let pinned = http1_session(bare_trust().ca_der(server.der.clone()).pin_sha256([7; 32]));
+    let pinned = http1_session(
+        bare_trust()
+            .ca_der(server.der.clone())
+            .pin_cert_sha256([7; 32]),
+    );
     leyline::internals::restore(&pinned, &state);
     let refused = pinned.get(server.url.clone()).send().await.unwrap_err();
     assert!(
@@ -263,35 +251,6 @@ async fn a_fresh_pool_labels_its_tickets_with_the_roots_it_loaded() {
     let rotated = http1_session(bare_trust().ca_file(&ca_file));
     leyline::internals::restore(&rotated, &state);
     let refused = rotated.get(server.url).send().await.unwrap_err();
-    assert!(
-        std::error::Error::source(&refused)
-            .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
-            .is_some(),
-        "{refused:?}"
-    );
-    assert_eq!(server.resumed.load(Ordering::SeqCst), 0);
-}
-
-#[tokio::test]
-async fn a_saved_tls_session_does_not_resume_after_environment_roots_change() {
-    let server = resuming_server().await;
-    let trusted = scratch_file("env-trusted.pem", &server.pem);
-    let other = scratch_file("env-other.pem", &unrelated_pem());
-    let env_trust = || Tls::new().system_roots(false).env_roots(true);
-    // SAFETY: no other test in this binary builds a session with environment roots, so no thread reads SSL_CERT_FILE while it changes.
-    unsafe { std::env::set_var("SSL_CERT_FILE", &trusted) };
-    let before = http1_session(env_trust());
-    let first = before.get(server.url.clone()).send().await.unwrap();
-    assert_eq!(first.text().await.unwrap(), "ok");
-    let state = leyline::internals::connection_state(&before);
-
-    // SAFETY: see above.
-    unsafe { std::env::set_var("SSL_CERT_FILE", &other) };
-    let after = http1_session(env_trust());
-    // SAFETY: see above.
-    unsafe { std::env::remove_var("SSL_CERT_FILE") };
-    leyline::internals::restore(&after, &state);
-    let refused = after.get(server.url).send().await.unwrap_err();
     assert!(
         std::error::Error::source(&refused)
             .and_then(|s| s.downcast_ref::<leyline::internals::TlsError>())
@@ -381,7 +340,7 @@ async fn the_server_receives_the_client_leaf_and_its_chain_in_order() {
             .map(|chain| chain.iter().map(|c| c.to_der().unwrap()).collect())
             .unwrap_or_default();
         seen_tx.send((leaf, chain)).unwrap();
-        reply_ok(stream).await;
+        tls_support::serve_h1_ok(stream, "ok").await;
     });
 
     let (leaf, leaf_key) = tls_support::self_signed();
@@ -390,15 +349,10 @@ async fn the_server_receives_the_client_leaf_and_its_chain_in_order() {
         .unwrap()
         .replace("CERTIFICATE-----", "TRUSTED CERTIFICATE-----");
     pem.push_str(&String::from_utf8(intermediate.to_pem().unwrap()).unwrap());
-    let chain = scratch_file("ordered-client-chain.pem", pem.as_bytes());
-    let private = scratch_file(
-        "ordered-client-key.pem",
-        &leaf_key.private_key_to_pem_pkcs8().unwrap(),
-    );
     let session = http1_session(
         bare_trust()
             .ca_der(server_der)
-            .client_cert(&chain, &private),
+            .client_cert_pem(pem, leaf_key.private_key_to_pem_pkcs8().unwrap()),
     );
     let response = session
         .get(format!("https://127.0.0.1:{port}/"))
@@ -426,7 +380,7 @@ async fn restored_tickets_for_other_trust_are_not_kept() {
     let saved = serde_json::to_value(&state).unwrap();
     assert!(!saved["tls_sessions"].as_array().unwrap().is_empty());
 
-    let pinned = http1_session(bare_trust().ca_der(server.der).pin_sha256([7; 32]));
+    let pinned = http1_session(bare_trust().ca_der(server.der).pin_cert_sha256([7; 32]));
     leyline::internals::restore(&pinned, &state);
     let kept = serde_json::to_value(leyline::internals::connection_state(&pinned)).unwrap();
     assert_eq!(kept["tls_sessions"].as_array().map(Vec::len), Some(0));

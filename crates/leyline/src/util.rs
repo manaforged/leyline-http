@@ -1,33 +1,57 @@
 #![forbid(unsafe_code)]
 /// Returns the URL with its credentials and query masked as `***` and its fragment removed.
 pub fn redact(raw: &str) -> String {
-    let Ok(mut parsed) = url::Url::parse(raw) else {
+    let Ok(parsed) = url::Url::parse(raw) else {
         return mask_userinfo(&mask_query(raw));
     };
-    let mut changed = if parsed.password().is_some() {
-        parsed.set_password(Some("***")).is_ok()
-    } else if !parsed.username().is_empty() {
-        parsed.set_username("***").is_ok()
+    let mut changed = parsed.password().is_some()
+        || !parsed.username().is_empty()
+        || parsed.query().is_some()
+        || parsed.fragment().is_some();
+    let redacted = if changed {
+        let out = redact_url_value(&parsed);
+        changed = out.as_str() != parsed.as_str();
+        out
     } else {
-        false
+        parsed
     };
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        if parsed.query().is_some() {
-            parsed.set_query(Some("***"));
-        }
-        parsed.set_fragment(None);
-        changed = true;
-    }
     let shown = if changed {
-        parsed.to_string()
+        redacted.to_string()
     } else {
         raw.to_string()
     };
-    if parsed.has_host() {
+    if redacted.has_host() {
         shown
     } else {
         mask_userinfo(&shown)
     }
+}
+
+pub(crate) fn redact_url_value(url: &url::Url) -> url::Url {
+    let mut parsed = url.clone();
+    let redacted = if parsed.password().is_some() {
+        parsed.set_password(Some("***"))
+    } else if !parsed.username().is_empty() {
+        parsed.set_username("***")
+    } else {
+        Ok(())
+    };
+    if redacted.is_err() {
+        tracing::trace!("url cannot carry userinfo");
+    }
+    if parsed.query().is_some() {
+        parsed.set_query(Some("***"));
+    }
+    parsed.set_fragment(None);
+    parsed
+}
+
+pub(crate) fn parse_redacted_url(raw: &str) -> Option<url::Url> {
+    url::Url::parse(raw).ok().map(|u| redact_url_value(&u))
+}
+
+pub(crate) fn delta_duration(raw: &str) -> Option<std::time::Duration> {
+    delta_seconds(raw).map(|secs| std::time::Duration::from_secs(secs.min(u64::from(u32::MAX))))
 }
 
 pub(crate) fn mask_query(text: &str) -> String {
@@ -84,10 +108,21 @@ pub(crate) fn header_first<'a, K: AsRef<str>, V: AsRef<[u8]>>(
     headers: &'a [(K, V)],
     name: &str,
 ) -> Option<&'a str> {
+    let (_, value) = &headers[header_position(headers, name)?];
+    std::str::from_utf8(value.as_ref()).ok()
+}
+
+pub(crate) fn header_str(
+    headers: &http::HeaderMap,
+    name: impl http::header::AsHeaderName,
+) -> Option<&str> {
+    headers.get(name).and_then(|v| v.to_str().ok())
+}
+
+pub(crate) fn header_position<K: AsRef<str>, V>(headers: &[(K, V)], name: &str) -> Option<usize> {
     headers
         .iter()
-        .find(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
-        .and_then(|(_, v)| std::str::from_utf8(v.as_ref()).ok())
+        .position(|(k, _)| k.as_ref().eq_ignore_ascii_case(name))
 }
 
 pub(crate) fn content_length(value: &str) -> Option<u64> {
@@ -112,15 +147,42 @@ pub(crate) fn header_contains_token<K: AsRef<str>, V: AsRef<[u8]>>(
     header_first(headers, name).is_some_and(|v| has_token(v, token))
 }
 
+pub(crate) fn any_token(bytes: &[u8], mut f: impl FnMut(&[u8]) -> bool) -> bool {
+    let mut i = 0;
+    while i < bytes.len() {
+        let mut start = i;
+        while i < bytes.len() && bytes[i] != b',' {
+            i += 1;
+        }
+        let mut end = i;
+        if i < bytes.len() {
+            i += 1;
+        }
+        while start < end && bytes[start].is_ascii_whitespace() {
+            start += 1;
+        }
+        while end > start && bytes[end - 1].is_ascii_whitespace() {
+            end -= 1;
+        }
+        if start < end && f(&bytes[start..end]) {
+            return true;
+        }
+    }
+    false
+}
+
 pub(crate) fn has_token(value: &str, token: &str) -> bool {
-    value
-        .split(',')
-        .any(|part| part.trim().eq_ignore_ascii_case(token))
+    let target = token.as_bytes();
+    any_token(value.as_bytes(), |tok| tok.eq_ignore_ascii_case(target))
+}
+
+pub(crate) fn starts_with_ignore_ascii_case(s: &str, prefix: &str) -> bool {
+    s.get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
 }
 
 pub(crate) fn is_body_header(name: &str) -> bool {
-    name.get(..CONTENT_PREFIX.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(CONTENT_PREFIX))
+    starts_with_ignore_ascii_case(name, CONTENT_PREFIX)
         || name.eq_ignore_ascii_case("transfer-encoding")
 }
 
@@ -147,8 +209,10 @@ pub(crate) fn redirect_location(
     status: u16,
     headers: &http::HeaderMap,
     base: &url::Url,
-) -> Option<url::Url> {
-    redirect_target(status, headers).and_then(|to| base.join(&to).ok())
+) -> Option<(String, url::Url)> {
+    let location = redirect_target(status, headers)?.into_owned();
+    let to = base.join(&location).ok()?;
+    Some((location, to))
 }
 
 pub(crate) fn request_target(url: &url::Url) -> &str {
@@ -161,6 +225,12 @@ pub(crate) fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, 
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+pub(crate) fn get_mut<T>(mutex: &mut std::sync::Mutex<T>) -> &mut T {
+    mutex
+        .get_mut()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 pub(crate) fn read<T>(rw: &std::sync::RwLock<T>) -> std::sync::RwLockReadGuard<'_, T> {
     rw.read().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -169,6 +239,9 @@ pub(crate) fn write<T>(rw: &std::sync::RwLock<T>) -> std::sync::RwLockWriteGuard
     rw.write()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
+
+#[cfg(feature = "compression-brotli")]
+pub(crate) const BROTLI_BUFFER_SIZE: usize = 4096;
 
 const FAR_FUTURE: std::time::Duration = std::time::Duration::from_secs(100 * 365 * 24 * 3600);
 
@@ -179,6 +252,13 @@ pub(crate) fn saturating_after(
     now.checked_add(after)
         .or_else(|| now.checked_add(FAR_FUTURE.min(after)))
         .unwrap_or(now)
+}
+
+pub(crate) fn saturating_after_tokio(
+    now: tokio::time::Instant,
+    after: std::time::Duration,
+) -> tokio::time::Instant {
+    tokio::time::Instant::from_std(saturating_after(now.into_std(), after))
 }
 
 pub(crate) fn epoch_plus(after: std::time::Duration) -> Option<std::time::SystemTime> {
@@ -200,11 +280,14 @@ const SECRET_HEADERS: [&str; 4] = [
 const CROSS_ORIGIN_EXTRA_HEADERS: [&str; 1] = ["host"];
 
 pub(crate) fn has_ascii_uppercase(text: &str) -> bool {
+    has_ascii_uppercase_bytes(text.as_bytes())
+}
+
+fn has_ascii_uppercase_bytes(bytes: &[u8]) -> bool {
     const ASCII: u64 = 0x7f7f_7f7f_7f7f_7f7f;
     const ONES: u64 = 0x0101_0101_0101_0101;
     const FROM_A: u64 = ONES * (0x80 - b'A' as u64);
     const PAST_Z: u64 = ONES * (0x80 - b'Z' as u64 - 1);
-    let bytes = text.as_bytes();
     let (Some(tail), (words, _)) = (bytes.last_chunk::<8>(), bytes.as_chunks::<8>()) else {
         return bytes.iter().any(u8::is_ascii_uppercase);
     };
@@ -239,6 +322,10 @@ pub(crate) fn cross_origin_header(name: &str) -> bool {
         || CROSS_ORIGIN_EXTRA_HEADERS
             .iter()
             .any(|s| name.eq_ignore_ascii_case(s))
+}
+
+pub(crate) fn bearer_credentials(token: &str) -> String {
+    format!("Bearer {token}")
 }
 
 pub(crate) fn basic_credentials(username: &str, password: &str) -> String {
@@ -286,6 +373,10 @@ pub(crate) fn bare_host(host: &str) -> &str {
         .unwrap_or(host)
 }
 
+pub(crate) fn parse_ip_host(host: &str) -> Option<std::net::IpAddr> {
+    bare_host(host.trim()).parse().ok()
+}
+
 #[cfg(feature = "http3")]
 pub(crate) fn unspecified_for(peer: std::net::SocketAddr) -> std::net::SocketAddr {
     let ip: std::net::IpAddr = match peer {
@@ -317,15 +408,23 @@ pub(crate) fn percent_decode(s: &str) -> String {
         .into_owned()
 }
 
+fn is_ascii_digits(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit())
+}
+
+pub(crate) fn parse_ascii_u64(value: &str) -> Option<u64> {
+    is_ascii_digits(value).then(|| value.parse().ok()).flatten()
+}
+
 pub(crate) fn delta_seconds(value: &str) -> Option<u64> {
     let value = value.trim();
-    if value.is_empty() || !value.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    Some(value.parse().unwrap_or(u64::MAX))
+    is_ascii_digits(value).then(|| value.parse().unwrap_or(u64::MAX))
 }
 
 pub(crate) fn domain_match(host: &str, domain: &str) -> bool {
+    if parse_ip_host(host).is_some() {
+        return host.eq_ignore_ascii_case(domain);
+    }
     let Some(rest) = host.len().checked_sub(domain.len()) else {
         return false;
     };
@@ -346,43 +445,16 @@ pub(crate) mod wait;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+pub(crate) use tests::every_input;
 
 #[cfg(kani)]
 #[path = "util/content_length_proofs.rs"]
 mod content_length_proofs;
 
-/// Calls `check` with every concatenation of up to `max_len` tokens from `alphabet`.
-#[cfg(test)]
-pub(crate) fn every_input(alphabet: &[&[u8]], max_len: usize, mut check: impl FnMut(&[u8])) {
-    let mut digits: Vec<usize> = Vec::with_capacity(max_len);
-    let mut input = Vec::new();
-    loop {
-        input.clear();
-        for &digit in &digits {
-            input.extend_from_slice(alphabet[digit]);
-        }
-        check(&input);
-        if !next_input(&mut digits, alphabet.len(), max_len) {
-            return;
-        }
-    }
-}
-
-#[cfg(test)]
-fn next_input(digits: &mut Vec<usize>, base: usize, max_len: usize) -> bool {
-    for digit in digits.iter_mut() {
-        *digit += 1;
-        if *digit < base {
-            return true;
-        }
-        *digit = 0;
-    }
-    if digits.len() == max_len {
-        return false;
-    }
-    digits.push(0);
-    true
-}
+#[cfg(kani)]
+#[path = "util/ascii_proofs.rs"]
+mod ascii_proofs;
 
 pub(crate) fn lookup<T: Copy>(table: &[(&str, T)], key: &str) -> Option<T> {
     table

@@ -14,6 +14,29 @@ use crate::tls::trust::{
 use crate::tls::{TlsIo, TlsStream};
 use crate::trace;
 
+#[derive(Clone, Copy)]
+pub(super) enum EchMode<'a> {
+    Session,
+    Override(&'a [u8]),
+    Disabled,
+}
+
+pub(super) enum HandshakeFailure {
+    EchRetry {
+        retry_configs: Vec<u8>,
+        error: TlsError,
+    },
+    Error(TlsError),
+}
+
+impl HandshakeFailure {
+    pub(super) fn into_error(self) -> TlsError {
+        match self {
+            Self::EchRetry { error, .. } | Self::Error(error) => error,
+        }
+    }
+}
+
 impl FingerprintConnector {
     pub(crate) fn tls_handshake(
         &self,
@@ -22,27 +45,62 @@ impl FingerprintConnector {
         session_key: &str,
         plan: AlpnPlan,
     ) -> impl Future<Output = Result<TlsStream, TlsError>> {
-        let records = self.hello.records();
-        self.handshake_over(tcp_stream, host, session_key, plan, move |stream| {
-            if !records {
-                return TlsIo::Boring(stream);
-            }
-            match stream.into_records() {
-                Ok(stream) => TlsIo::Records(Box::new(stream)),
-                Err(stream) => TlsIo::Boring(stream),
-            }
-        })
+        let fut =
+            self.tls_handshake_with_ech(tcp_stream, host, session_key, plan, EchMode::Disabled);
+        async move { fut.await.map_err(HandshakeFailure::into_error) }
     }
 
-    pub(crate) fn tls_handshake_nested(
+    pub(super) fn tls_handshake_with_ech(
+        &self,
+        tcp_stream: TcpStream,
+        host: &str,
+        session_key: &str,
+        plan: AlpnPlan,
+        ech_mode: EchMode<'_>,
+    ) -> impl Future<Output = Result<TlsStream, HandshakeFailure>> {
+        let records = self.hello.records();
+        self.handshake_over(
+            tcp_stream,
+            host,
+            session_key,
+            plan,
+            ech_mode,
+            move |stream| {
+                if !records {
+                    return TlsIo::Boring(stream);
+                }
+                match stream.into_records() {
+                    Ok(stream) => TlsIo::Records(Box::new(stream)),
+                    Err(stream) => TlsIo::Boring(stream),
+                }
+            },
+        )
+    }
+
+    pub(super) fn tls_handshake_nested_with_ech(
         &self,
         inner: TlsIo,
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
-    ) -> impl Future<Output = Result<TlsStream, TlsError>> {
-        self.handshake_over(inner, host, session_key, plan, |stream| {
+        ech_mode: EchMode<'_>,
+    ) -> impl Future<Output = Result<TlsStream, HandshakeFailure>> {
+        self.handshake_over(inner, host, session_key, plan, ech_mode, |stream| {
             TlsIo::Nested(Box::new(stream))
+        })
+    }
+
+    #[cfg(unix)]
+    pub(super) fn tls_handshake_unix_with_ech(
+        &self,
+        unix_stream: tokio::net::UnixStream,
+        host: &str,
+        session_key: &str,
+        plan: AlpnPlan,
+        ech_mode: EchMode<'_>,
+    ) -> impl Future<Output = Result<TlsStream, HandshakeFailure>> {
+        self.handshake_over(unix_stream, host, session_key, plan, ech_mode, |stream| {
+            TlsIo::Unix(Box::new(stream))
         })
     }
 
@@ -52,13 +110,16 @@ impl FingerprintConnector {
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
+        ech_mode: EchMode<'_>,
         wrap: impl FnOnce(leyline_bssl_tokio::SslStream<S>) -> TlsIo,
-    ) -> Result<TlsStream, TlsError>
+    ) -> Result<TlsStream, HandshakeFailure>
     where
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
         let host = crate::util::bare_host(host);
-        let (ssl, verification_failure) = self.prepare_ssl(host, session_key, plan)?;
+        let (ssl, verification_failure) = self
+            .prepare_ssl(host, session_key, plan, ech_mode)
+            .map_err(HandshakeFailure::Error)?;
 
         let stream = match leyline_bssl_tokio::SslStreamBuilder::new(ssl, io)
             .connect()
@@ -67,11 +128,15 @@ impl FingerprintConnector {
             Ok(stream) => stream,
             Err(e) => {
                 let verify_error = e.ssl().and_then(|ssl| ssl.verify_result().err());
-                return Err(classify_handshake(
-                    verification_failure.as_ref(),
-                    verify_error,
-                    e,
-                ));
+                let retry_configs = crate::tls::ech_retry_configs(e.ssl(), e.ssl_error());
+                let error = classify_handshake(verification_failure.as_ref(), verify_error, e);
+                return Err(match retry_configs {
+                    Some(retry_configs) => HandshakeFailure::EchRetry {
+                        retry_configs,
+                        error,
+                    },
+                    None => HandshakeFailure::Error(error),
+                });
             }
         };
 
@@ -80,6 +145,7 @@ impl FingerprintConnector {
         let peer_cert_der = ssl.peer_certificate().and_then(|cert| cert.to_der().ok());
         let tls_version = Some(ssl.version_str().to_string());
         let tls_cipher = ssl.current_cipher().map(|c| c.name().to_string());
+        let ech_accepted = ssl.ech_accepted();
         if trace::on() {
             let proto = alpn
                 .as_deref()
@@ -97,6 +163,7 @@ impl FingerprintConnector {
             peer_cert_der,
             tls_version,
             tls_cipher,
+            ech_accepted,
         })
     }
 
@@ -105,11 +172,15 @@ impl FingerprintConnector {
         host: &str,
         session_key: &str,
         plan: AlpnPlan,
+        ech_mode: EchMode<'_>,
     ) -> Result<(leyline_bssl::ssl::Ssl, Option<VerificationFailure>), TlsError> {
         let mut config = self
             .ssl_connector
             .configure()
             .map_err(TlsError::from_stack)?;
+        if self.trust.accepts_invalid_certs() || self.trust.accepts_invalid_hostnames() {
+            config.set_verify_hostname(false);
+        }
         if plan == AlpnPlan::Http11 {
             config
                 .set_alpn_protos(HTTP11_WIRE)
@@ -125,6 +196,14 @@ impl FingerprintConnector {
             self.session_cache.attach(&mut ssl, session_key)?;
         }
         self.hello.apply(&mut ssl, plan.alps())?;
+        let ech = match ech_mode {
+            EchMode::Session => self.trust.ech_config(),
+            EchMode::Override(bytes) => Some(bytes),
+            EchMode::Disabled => None,
+        };
+        if let Some(ech) = ech {
+            crate::tls::apply_ech(&mut ssl, ech).map_err(TlsError::from_stack)?;
+        }
         ssl.shed_handshake_config();
         Ok((ssl, verification_failure))
     }

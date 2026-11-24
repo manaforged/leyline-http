@@ -28,6 +28,42 @@ fn obs_fold_appends_to_previous_header_never_creates_one() {
 }
 
 #[test]
+fn obs_fold_with_blank_or_empty_value_keeps_ows_trimmed() {
+    let (_, headers, _) =
+        parse_h1_head(b"HTTP/1.1 200 OK\r\nSet-Cookie: a=1\r\n \r\nX-Empty: \r\n folded\r\n\r\n")
+            .expect("valid folded head");
+    assert_eq!(
+        headers.get("set-cookie").expect("set-cookie").as_bytes(),
+        b"a=1"
+    );
+    assert_eq!(
+        headers.get("x-empty").expect("x-empty").as_bytes(),
+        b"folded"
+    );
+    let (_, _, scanned) =
+        crate::wire::h1::scan_head(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n \r\n\r\n")
+            .expect("scan_head parses");
+    scanned
+        .body
+        .validate()
+        .expect("whitespace-only obs-fold on Content-Length must not leave trailing space");
+    let (_, _, folded_from_empty) =
+        crate::wire::h1::scan_head(b"HTTP/1.1 200 OK\r\nContent-Length: \r\n 5\r\n\r\n")
+            .expect("scan_head parses empty-then-folded Content-Length");
+    folded_from_empty
+        .body
+        .validate()
+        .expect("obs-fold after empty Content-Length must validate cleanly");
+    let (_, _, split_length) =
+        crate::wire::h1::scan_head(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n 0\r\n\r\n")
+            .expect("scan_head parses split Content-Length");
+    split_length
+        .body
+        .validate()
+        .expect_err("non-empty obs-fold on Content-Length must append and fail validation");
+}
+
+#[test]
 fn fold_without_previous_header_is_dropped() {
     let head = "HTTP/1.1 200 OK\r\n\tContent-Length: 999\r\n\r\n";
     let (_, headers, _) = parse_h1_head(head.as_bytes()).unwrap();
@@ -201,7 +237,7 @@ async fn a_full_host_refuses_requests_past_the_pending_limit() {
     let session = crate::Session::builder()
         .protocol(crate::Protocol::Http1)
         .max_connections_per_host(1)
-        .max_pending_per_host(1)
+        .host_limits(crate::HostLimits::new().max_pending(1))
         .build()
         .expect("session");
 
@@ -342,4 +378,41 @@ fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
         "H1 must preserve typed TLS failures, got {pinning:?}"
     );
     assert!(!pinning.is_connection_closed());
+}
+
+#[test]
+fn parse_h1_head_rejects_non_token_header_names() {
+    for head in [
+        "HTTP/1.1 200 OK\r\nBad Name: 1\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nBad(Name): 1\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nBad/Name: 1\r\n\r\n",
+    ] {
+        parse_h1_head(head.as_bytes()).expect_err(head);
+    }
+}
+
+#[tokio::test]
+async fn chunked_body_rejects_bare_lf_malformed_trailer_and_oversized_line() {
+    let oversized = format!("0;{}\r\n\r\n", "a".repeat(17 * 1024));
+    for payload in [
+        b"1;ext=1\n\r\na\r\n0\r\n\r\n".as_slice(),
+        b"0\r\nNotAHeader\r\n\r\n",
+        b"0\r\nBad Name: 1\r\n\r\n",
+        oversized.as_bytes(),
+    ] {
+        let mut head = H1Head {
+            status: 200,
+            headers: crate::wire::Fields::default(),
+            minor: 1,
+            framing: BodyFraming::Chunked,
+            initial_body: payload.to_vec(),
+        };
+        let (mut client, _server) = tcp_pair().await;
+        assert!(
+            read_h1_body(&mut client, &mut head, BodyLimit::session(usize::MAX))
+                .await
+                .is_err(),
+            "malformed chunked framing must fail"
+        );
+    }
 }

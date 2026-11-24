@@ -8,6 +8,7 @@ use crate::h2::frame::{
     DEFAULT_HEADER_TABLE_SIZE, DEFAULT_MAX_FRAME_SIZE, MAX_FRAME_SIZE_LIMIT, U31_MAX,
 };
 use crate::h2::hpack;
+#[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
 use crate::header_str::HeaderStr;
 use crate::profile::{DEFAULT_WINDOW_SIZE, PseudoOrder, SettingId};
 
@@ -191,6 +192,7 @@ use crate::wire::HeaderPair;
 
 pub type PseudoList<'a> = ([(&'a str, &'a str); 5], usize);
 
+#[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
 #[derive(Debug, Clone, Default)]
 pub struct PseudoHeaders {
     pub method: HeaderStr,
@@ -200,6 +202,7 @@ pub struct PseudoHeaders {
     pub protocol: Option<HeaderStr>,
 }
 
+#[cfg(any(test, feature = "bench-internals", feature = "websocket"))]
 impl PseudoHeaders {
     /// Returns whether `:method` is `method`, ignoring ASCII case.
     pub fn method_is(&self, method: &http::Method) -> bool {
@@ -210,36 +213,53 @@ impl PseudoHeaders {
         &'a self,
         pseudo_order: &[PseudoOrder; 4],
     ) -> Result<PseudoList<'a>, H2Error> {
-        let connect = self.method_is(&http::Method::CONNECT);
-        let is_connect = connect && self.protocol.is_none();
-        if connect && self.authority.is_empty() {
-            return Err(H2Error::Connection {
-                code: ErrorCode::ProtocolError,
-                reason: "CONNECT requires :authority".into(),
-            });
-        }
-
-        let mut list = [("", ""); 5];
-        let mut len = 0;
-        let mut push = |n: &'a str, v: &'a str| {
-            list[len] = (n, v);
-            len += 1;
-        };
-        for order in pseudo_order {
-            match order {
-                PseudoOrder::Method => push(":method", self.method.as_str()),
-                PseudoOrder::Scheme if !is_connect => push(":scheme", self.scheme.as_str()),
-                PseudoOrder::Scheme => {}
-                PseudoOrder::Authority => push(":authority", self.authority.as_str()),
-                PseudoOrder::Path if !is_connect => push(":path", self.path.as_str()),
-                PseudoOrder::Path => {}
-            }
-        }
-        if let Some(proto) = self.protocol.as_ref().map(|p| p.as_str()) {
-            push(":protocol", proto);
-        }
-        Ok((list, len))
+        build_pseudo_fields(
+            self.method.as_str(),
+            self.scheme.as_str(),
+            self.authority.as_str(),
+            self.path.as_str(),
+            self.protocol.as_deref(),
+            pseudo_order,
+        )
     }
+}
+
+pub(crate) fn build_pseudo_fields<'a>(
+    method: &'a str,
+    scheme: &'a str,
+    authority: &'a str,
+    path: &'a str,
+    protocol: Option<&'a str>,
+    pseudo_order: &[PseudoOrder; 4],
+) -> Result<PseudoList<'a>, H2Error> {
+    let connect = method.eq_ignore_ascii_case(http::Method::CONNECT.as_str());
+    let is_connect = connect && protocol.is_none();
+    if connect && authority.is_empty() {
+        return Err(H2Error::InvalidRequest(
+            "CONNECT requires :authority".into(),
+        ));
+    }
+
+    let mut list = [("", ""); 5];
+    let mut len = 0;
+    let mut push = |n: &'a str, v: &'a str| {
+        list[len] = (n, v);
+        len += 1;
+    };
+    for order in pseudo_order {
+        match order {
+            PseudoOrder::Method => push(":method", method),
+            PseudoOrder::Scheme if !is_connect => push(":scheme", scheme),
+            PseudoOrder::Scheme => {}
+            PseudoOrder::Authority => push(":authority", authority),
+            PseudoOrder::Path if !is_connect => push(":path", path),
+            PseudoOrder::Path => {}
+        }
+    }
+    if let Some(proto) = protocol {
+        push(":protocol", proto);
+    }
+    Ok((list, len))
 }
 
 pub(crate) fn encode_request_pseudos<'a, 'e>(

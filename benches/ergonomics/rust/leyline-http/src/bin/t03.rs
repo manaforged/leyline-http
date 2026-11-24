@@ -6,11 +6,9 @@ async fn main() -> leyline::Result<()> {
     session
         .post("http://localhost:18743/t03/login")
         .json(&json!({"user": "ada", "password": "secret"}))
-        .send()
         .await?;
     let me: Value = session
         .get("http://localhost:18743/t03/me")
-        .send()
         .await?
         .json()
         .await?;

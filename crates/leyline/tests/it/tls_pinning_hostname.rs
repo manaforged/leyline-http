@@ -183,7 +183,7 @@ fn connector(r#gen: &Generated, addr: SocketAddr) -> FingerprintConnector {
         .env_roots(false)
         .system_roots(false)
         .ca_der(r#gen.ca_der.clone())
-        .pin_sha256(r#gen.leaf_pin);
+        .pin_cert_sha256(r#gen.leaf_pin);
     FingerprintConnector::new_with_trust(&load_profile(), Platform::Linux.tcp_profile(), &trust)
         .expect("connector build")
         .with_resolver(Arc::new(LoopbackResolver(addr)))
@@ -211,7 +211,7 @@ async fn native_system_trust_preserves_custom_ca_hostname_and_pins() {
             trust = trust.ca_der(generated.ca_der.clone());
         }
         if let Some(pin) = pin {
-            trust = trust.pin_sha256(pin);
+            trust = trust.pin_cert_sha256(pin);
         }
         let addr = spawn_tls_server(&generated).await;
         let result = connector_with_trust(trust, addr)
@@ -313,7 +313,7 @@ async fn certificate_and_pinning_failures_are_permanent() {
         .env_roots(false)
         .system_roots(false)
         .ca_der(r#gen.ca_der.clone())
-        .pin_sha256([0; 32]);
+        .pin_cert_sha256([0; 32]);
     let err = connector_with_trust(trust, addr)
         .connect("right.example", 443, None, AlpnPlan::Browser)
         .await

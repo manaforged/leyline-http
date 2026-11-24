@@ -6,7 +6,7 @@ use super::scan::Scanner;
 use crate::util::{lookup, product_token};
 
 const META_NAME: &str = "robots";
-pub(crate) const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
+const X_ROBOTS_TAG: HeaderName = HeaderName::from_static("x-robots-tag");
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Directive {

@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use http::StatusCode;
+use http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
 use url::Url;
 
-use crate::util::redact;
+use crate::util::{header_str, masked, redact};
 
 /// A fetched HTML page that a crawl yields.
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -16,6 +16,12 @@ pub struct Page {
         deserialize_with = "status_deserialize"
     )]
     status: StatusCode,
+    #[serde(
+        default,
+        with = "header_map_serde",
+        skip_serializing_if = "HeaderMap::is_empty"
+    )]
+    headers: HeaderMap,
     html: String,
     text: String,
 }
@@ -26,6 +32,10 @@ impl fmt::Debug for Page {
             .field("url", &redact(self.url.as_str()))
             .field("depth", &self.depth)
             .field("status", &self.status)
+            .field(
+                "headers",
+                &masked(self.headers.iter().map(|(k, v)| (k.as_str(), v.as_bytes()))),
+            )
             .field("html_bytes", &self.html.len())
             .field("text_bytes", &self.text.len())
             .finish()
@@ -37,6 +47,7 @@ impl Page {
         url: Url,
         depth: usize,
         status: StatusCode,
+        headers: HeaderMap,
         html: String,
         text: String,
     ) -> Self {
@@ -44,6 +55,7 @@ impl Page {
             url,
             depth,
             status,
+            headers,
             html,
             text,
         }
@@ -65,6 +77,18 @@ impl Page {
     #[must_use]
     pub fn status(&self) -> StatusCode {
         self.status
+    }
+
+    /// Returns the response headers kept on the page, excluding sensitive credential headers such as `Set-Cookie`.
+    #[must_use]
+    pub fn headers(&self) -> &HeaderMap {
+        &self.headers
+    }
+
+    /// Returns the named page response header as text, or `None` when it is absent or not visible ASCII.
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        header_str(&self.headers, name)
     }
 
     /// Returns the page's HTML body.
@@ -110,6 +134,8 @@ pub enum SkipReason {
     Redirects,
     /// The URL is outside the crawl scope.
     Scope,
+    /// The crawl's `filter` rejected the URL.
+    Filter,
 }
 
 impl SkipReason {
@@ -127,6 +153,7 @@ impl SkipReason {
             SkipReason::Duplicate => "duplicate",
             SkipReason::Redirects => "redirects",
             SkipReason::Scope => "scope",
+            SkipReason::Filter => "filter",
         }
     }
 }
@@ -151,6 +178,59 @@ fn status_deserialize<'de, D: serde::Deserializer<'de>>(
 ) -> std::result::Result<StatusCode, D::Error> {
     let code = <u16 as serde::Deserialize>::deserialize(deserializer)?;
     StatusCode::from_u16(code).map_err(serde::de::Error::custom)
+}
+
+mod header_map_serde {
+    use super::{HeaderMap, HeaderName, HeaderValue};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    #[derive(Serialize)]
+    #[serde(untagged)]
+    enum WireValue<'a> {
+        Text(&'a str),
+        Bytes(&'a [u8]),
+    }
+
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OwnedValue {
+        Text(String),
+        Bytes(Vec<u8>),
+    }
+
+    pub(super) fn serialize<S: Serializer>(
+        headers: &HeaderMap,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let pairs: Vec<(&str, WireValue<'_>)> = headers
+            .iter()
+            .map(|(name, value)| {
+                let wire = match value.to_str() {
+                    Ok(text) => WireValue::Text(text),
+                    Err(_) => WireValue::Bytes(value.as_bytes()),
+                };
+                (name.as_str(), wire)
+            })
+            .collect();
+        pairs.serialize(serializer)
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<HeaderMap, D::Error> {
+        let pairs = Vec::<(String, OwnedValue)>::deserialize(deserializer)?;
+        let mut map = HeaderMap::with_capacity(pairs.len());
+        for (name, value) in pairs {
+            let name = HeaderName::from_bytes(name.as_bytes()).map_err(serde::de::Error::custom)?;
+            let bytes = match &value {
+                OwnedValue::Text(text) => text.as_bytes(),
+                OwnedValue::Bytes(raw) => raw.as_slice(),
+            };
+            let value = HeaderValue::from_bytes(bytes).map_err(serde::de::Error::custom)?;
+            map.append(name, value);
+        }
+        Ok(map)
+    }
 }
 
 impl CrawlStats {

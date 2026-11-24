@@ -114,13 +114,13 @@ std::fs::write("account/account.json", serde_json::to_vec(&out)?)?;
 let account: AccountIn = serde_json::from_slice(&std::fs::read("account/account.json")?)?;
 let session = account.session.build()?;
 let tab = session.tab();
-tab.set_current(account.page);
+tab.page(account.page);
 # let _ = account.email;
 # Ok(())
 # }
 ```
 
-`tab.set_current(page)` starts the tab on the saved page, so the next request carries it as its `Referer`. `autosave` writes only the session; write your struct yourself.
+`tab.page(page)` starts the tab on the saved page, so the next request carries it as its `Referer`. `autosave` writes only the session; write your struct yourself.
 
 The optional [HTTP cache](api-clients.md#cache-responses) lives in memory and is not saved with the account. Leyline keeps no `localStorage`, `sessionStorage`, IndexedDB, or service workers, because it runs no scripts.
 
@@ -189,11 +189,11 @@ connection makes a full handshake and checks the certificate again. A session fr
 A `Tab` sends each request with the current page as its `from_page`, so the `Referer`, `Origin`, and `sec-fetch-site` headers match a real click. [Requests](requests.md#keep-the-page-with-a-tab) lists the calls. For an account:
 
 - `fetch` on a tab with no page fails with `Kind::Request` ("the tab has no page; open one first") and sends nothing. Open a page first.
-- A `.stream()` navigation changes the page at the response head. `current()` reads the page, and `set_current(..)` sets it.
+- A `.stream()` navigation changes the page at the response head. `current()` reads the page, and `page(..)` sets it.
 - A page script sets its own `accept`. Set it on the `fetch` builder when the site's script does. See [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
 
 ```rust,no_run
-use leyline::RequestKind;
+use leyline::profile::RequestKind;
 
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let tab = session.tab();

@@ -17,7 +17,7 @@ use crate::util::{is_redirect_status, lookup, redirect_location};
 use crate::wire::Scheme;
 
 const SITEMAP_PATH: &str = "/sitemap.xml";
-const MAX_BYTES: usize = 50 * 1024 * 1024;
+const DEFAULT_MAX_BYTES: usize = 50 * 1024 * 1024;
 const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -106,7 +106,11 @@ pub(super) fn listed(site: &Url, robots: &Robots, obey: bool) -> Vec<Url> {
 
 pub(super) enum SitemapRead {
     Found(Sitemap),
-    Moved(Url),
+    Moved {
+        status: u16,
+        location: String,
+        to: Url,
+    },
     Later(Duration),
     Failed(Failure),
 }
@@ -134,7 +138,11 @@ pub(super) async fn read(
     attempt: u32,
     trusted: Option<Url>,
 ) -> SitemapRead {
-    let response = match Reply::send(&session, &url, &retry, attempt, trusted, None).await {
+    let cap = session
+        .body_rules()
+        .configured_max_body()
+        .unwrap_or(DEFAULT_MAX_BYTES);
+    let response = match Reply::send(&session, &url, &retry, attempt, trusted).await {
         Reply::Later(wait) => return SitemapRead::Later(wait),
         Reply::Sent(Ok(response)) => response,
         Reply::Sent(Err(error)) => return SitemapRead::Failed(Failure::Error(error)),
@@ -142,7 +150,11 @@ pub(super) async fn read(
     let status = response.status();
     if is_redirect_status(status.as_u16()) {
         return match redirect_location(status.as_u16(), response.headers(), &url) {
-            Some(to) => SitemapRead::Moved(to),
+            Some((location, to)) => SitemapRead::Moved {
+                status: status.as_u16(),
+                location,
+                to,
+            },
             None => SitemapRead::Failed(Failure::NoLocation),
         };
     }
@@ -152,12 +164,12 @@ pub(super) async fn read(
     if !status.is_success() {
         return SitemapRead::Failed(Failure::Status(status));
     }
-    let bytes = match read_capped(&session, response, MAX_BYTES).await {
+    let bytes = match read_capped(&session, response, cap).await {
         Ok(bytes) => bytes,
         Err(error) => return SitemapRead::Failed(Failure::Error(error)),
     };
     let bytes = if bytes.starts_with(&GZIP_MAGIC) {
-        let plain = gunzip(&bytes);
+        let plain = gunzip(&bytes, cap);
         drop(bytes);
         match plain {
             Ok(plain) => plain,
@@ -171,10 +183,10 @@ pub(super) async fn read(
     SitemapRead::Found(Sitemap::parse(&text))
 }
 
-fn gunzip(bytes: &[u8]) -> Result<Vec<u8>> {
+fn gunzip(bytes: &[u8], cap: usize) -> Result<Vec<u8>> {
     let mut out = Vec::new();
     let mut rules = BodyRules::default();
-    rules.max_body_size = MAX_BYTES;
+    rules.max_body_size = cap;
     let mut decoder = Decoder::capped(&Codings::Listed(vec![Encoding::Gzip]), &rules)?;
     decoder.feed(bytes, &mut out)?;
     decoder.finish(&mut out)?;

@@ -5,7 +5,7 @@ const DEFAULT_CONNECT: Option<Duration> = Some(Duration::from_secs(10));
 const DEFAULT_ERROR_BODY: Option<Duration> = Some(Duration::from_secs(10));
 
 #[doc = include_str!("../../docs/timeout.md")]
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 #[must_use]
 pub struct Timeout {

@@ -13,13 +13,13 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 fn saved_cookie(path: &std::path::Path) -> Option<String> {
-    let url = "https://shop.example/".parse().unwrap();
+    let url = "https://shop.example/";
     Session::load(path)
         .unwrap()
         .build()
         .unwrap()
         .cookies()
-        .get(&url, "sid")
+        .get(url, "sid")
 }
 
 #[test]
@@ -27,9 +27,7 @@ fn a_saved_session_names_its_format_version() {
     let dir = scratch("version");
     let path = dir.join("device.json");
     let session = Session::new();
-    session
-        .cookies()
-        .set(&"https://shop.example/".parse().unwrap(), "sid", "1");
+    session.cookies().set("https://shop.example/", "sid", "1");
     session.save(&path).unwrap();
     let saved: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
@@ -53,9 +51,9 @@ struct AccountIn {
 
 #[test]
 fn a_user_struct_saves_its_own_fields_beside_the_session() {
-    let url = "https://shop.example/".parse().unwrap();
+    let url = "https://shop.example/";
     let session = Session::from(Browser::Chrome154);
-    session.cookies().set(&url, "sid", "1");
+    session.cookies().set(url, "sid", "1");
     let text = serde_json::to_string(&AccountOut {
         session: &session,
         email: "a@shop.example".to_owned(),
@@ -64,7 +62,7 @@ fn a_user_struct_saves_its_own_fields_beside_the_session() {
     let account: AccountIn = serde_json::from_str(&text).unwrap();
     assert_eq!(account.email, "a@shop.example");
     let reopened = account.session.build().unwrap();
-    assert_eq!(reopened.cookies().get(&url, "sid").as_deref(), Some("1"));
+    assert_eq!(reopened.cookies().get(url, "sid").as_deref(), Some("1"));
     assert_eq!(reopened.profile_id(), session.profile_id());
 }
 
@@ -73,9 +71,7 @@ fn autosave_keeps_a_change_on(runtime: tokio::runtime::Runtime, name: &str) {
     let path = dir.join("device.json");
     let session = Session::new();
     runtime.block_on(async { session.autosave(&path, Duration::from_secs(60)) });
-    session
-        .cookies()
-        .set(&"https://shop.example/".parse().unwrap(), "sid", "1");
+    session.cookies().set("https://shop.example/", "sid", "1");
     drop(runtime);
     assert_eq!(saved_cookie(&path).as_deref(), Some("1"));
     drop(std::fs::remove_dir_all(&dir));
@@ -101,9 +97,7 @@ fn autosave_after_shutdown_and_runtime_drop_keeps_the_last_change() {
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let session = Session::new();
     runtime.block_on(async { session.autosave(&path, Duration::from_secs(60)) });
-    session
-        .cookies()
-        .set(&"https://shop.example/".parse().unwrap(), "sid", "1");
+    session.cookies().set("https://shop.example/", "sid", "1");
     drop(session.shutdown());
     drop(runtime);
     assert_eq!(saved_cookie(&path).as_deref(), Some("1"));
@@ -117,9 +111,7 @@ async fn awaiting_shutdown_waits_for_the_last_autosave() {
     let session = Session::new();
     session.autosave(&path, Duration::from_secs(3600));
     let child = session.to_builder().build().unwrap();
-    child
-        .cookies()
-        .set(&"https://shop.example/".parse().unwrap(), "sid", "7");
+    child.cookies().set("https://shop.example/", "sid", "7");
     child.shutdown().await;
     assert!(session.is_shut_down());
     assert_eq!(saved_cookie(&path).as_deref(), Some("7"));
@@ -162,7 +154,7 @@ async fn audit_flags_a_header_the_echo_did_not_see() {
         .find(|(name, _)| name == "user-agent")
         .map(|(_, value)| value.clone())
         .unwrap();
-    let echoed = leyline::Fingerprint::from_json(&format!(
+    let echoed = leyline::profile::Fingerprint::from_json(&format!(
         r#"{{"http1":{{"headers":["User-Agent: {agent}"]}}}}"#
     ))
     .unwrap();
@@ -222,7 +214,7 @@ async fn audit_matches_a_cookie_split_across_fields() {
         .await
         .unwrap();
     let jar = Jar::new();
-    let url = server.url("/").parse().unwrap();
+    let url = server.url("/");
     jar.set(&url, "a", "1");
     jar.set(&url, "b", "2");
     let resp = Session::builder()
@@ -247,7 +239,7 @@ async fn audit_matches_a_cookie_split_across_fields() {
         .split("; ")
         .map(|pair| format!("\"Cookie: {pair}\""))
         .collect();
-    let echoed = leyline::Fingerprint::from_json(&format!(
+    let echoed = leyline::profile::Fingerprint::from_json(&format!(
         r#"{{"http1":{{"headers":[{}]}}}}"#,
         lines.join(",")
     ))

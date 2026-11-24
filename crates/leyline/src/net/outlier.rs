@@ -25,10 +25,7 @@ struct Record {
 
 impl Outliers {
     pub(crate) fn failed(&self, addr: SocketAddr) {
-        let mut records = self
-            .records
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut records = crate::util::lock(&self.records);
         if records.len() >= MAX_TRACKED && !records.contains_key(&addr) {
             let now = Instant::now();
             records.retain(|_, record| record.until.is_some_and(|until| until > now));
@@ -44,25 +41,19 @@ impl Outliers {
             let time = BASE_EJECTION
                 .saturating_mul(record.ejections)
                 .min(MAX_EJECTION);
-            record.until = Some(Instant::now() + time);
+            record.until = Some(crate::util::saturating_after_tokio(Instant::now(), time));
         }
     }
 
     pub(crate) fn succeeded(&self, addr: SocketAddr) {
-        let mut records = self
-            .records
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let mut records = crate::util::lock(&self.records);
         if !records.is_empty() {
             records.remove(&addr);
         }
     }
 
     pub(crate) fn order(&self, mut addrs: Vec<SocketAddr>) -> Vec<SocketAddr> {
-        let records = self
-            .records
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
+        let records = crate::util::lock(&self.records);
         if records.is_empty() {
             return addrs;
         }

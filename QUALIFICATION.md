@@ -1,6 +1,6 @@
 # Qualification
 
-This page lists what is known about Leyline's behaviour under failure and load, and how each fact was established. Each row says which of five kinds of evidence backs it:
+This page lists what is known about Leyline's behavior under failure and load, and how each fact was established. Each row says which of five kinds of evidence backs it:
 
 | Kind | Meaning | Limit |
 | --- | --- | --- |
@@ -14,21 +14,37 @@ The scenarios are commands a user can rerun: see [`benches/qualification/README.
 
 ## Proved
 
-`cargo kani --no-default-features --lib -Z stubbing` runs 11 harnesses.
+`scripts/verify.sh --only kani` runs 27 symbolic harnesses (with a 30 s per-harness timeout). String, UTF-8, `Transfer-Encoding` token-list, and 17-byte chunk-overflow invariants run as bounded exhaustive unit tests in the library test suite.
 
 | Harness | Property |
 | --- | --- |
-| `a_chunk_size_follows_rfc_9112_section_7_1` | Chunk sizes up to 17 bytes parse as RFC 9112 section 7.1 defines, and overflow is an error |
-| `a_content_length_follows_rfc_9110_section_8_6` | Content-Length values up to 7 bytes parse as RFC 9110 section 8.6 defines |
+| `a_chunk_size_follows_rfc_9112_section_7_1` | Chunk sizes up to 9 bytes parse as RFC 9112 section 7.1 defines |
+| `a_content_length_follows_rfc_9110_section_8_6` | Content-Length values up to 6 bytes parse as RFC 9110 section 8.6 defines |
 | `a_content_length_overflow_is_exact_at_u64_max` | The largest accepted Content-Length is `u64::MAX` |
 | `a_body_limit_admits_exactly_what_fits` | A body limit accepts a body exactly when it fits |
 | `a_body_limit_room_is_exactly_what_is_left` | The room a body limit reports is the exact remainder |
+| `non_ascii_content_length_is_always_rejected` | Non-ASCII bytes in `Content-Length` are always rejected |
+| `dual_content_length_and_transfer_encoding_is_always_rejected` | Responses with both `Content-Length` and `Transfer-Encoding` are always rejected |
+| `response_state_rejects_101_and_caps_informational_responses` | Response state machine rejects `101`, caps 1xx responses, and preserves state on error |
+| `response_state_data_trailers_and_finish_enforce_lifecycle` | Response `data`, `trailers`, and `finish` transitions follow the HTTP/2 and HTTP/3 lifecycle |
+| `has_ascii_uppercase_swar_matches_byte_scan` | SWAR `has_ascii_uppercase` matches byte-by-byte scan for all byte slices up to 16 bytes |
 | `every_hpack_integer_round_trips` | HPACK integers encode and decode to the same value |
 | `arbitrary_bytes_never_decode_past_the_hpack_limit` | No byte string decodes to an HPACK integer past the limit |
+| `multiple_table_size_updates_track_minimum_and_latest` | HPACK dynamic table size updates preserve minimum and final bounds |
 | `a_frame_header_round_trips_and_ignores_the_reserved_bit` | HTTP/2 frame headers round-trip, and the reserved bit is ignored |
+| `padded_end_never_underflows_or_exceeds_payload` | HTTP/2 padding bounds never underflow or exceed the payload length |
+| `window_update_encode_masks_reserved_bits` | `WINDOW_UPDATE` encoding clears reserved high bits and preserves 31-bit values |
 | `a_server_setting_follows_rfc_9113_section_6_5_2` | Server SETTINGS values are accepted or refused as RFC 9113 section 6.5.2 defines |
 | `every_stream_transition_follows_rfc_9113_section_5_1` | Every HTTP/2 stream state transition matches RFC 9113 section 5.1 |
 | `a_flow_window_is_exact_and_never_passes_the_protocol_maximum` | Flow-control windows are exact and stay at or below 2^31 - 1 |
+| `zero_max_age_always_expires_at_unix_epoch` | `Max-Age=0` cookies always expire at the Unix epoch regardless of `Expires` |
+| `cookie_prefix_rules_enforce_rfc_6265bis` | `__Secure-` and `__Host-` cookie prefixes enforce RFC 6265bis attribute rules |
+| `download_content_range_requires_exact_offset_and_total` | Resumable download `Content-Range` parser enforces exact offset and non-overflowing total |
+| `skip_name_terminates_and_stays_in_bounds` | DNS wire name skipping always terminates within packet bounds and advances past start |
+| `skip_name_enforces_max_jumps_bound` | DNS compression pointer chains accept up to `MAX_JUMPS` hops and reject `MAX_JUMPS + 1` |
+| `extract_ech_from_svcb_never_panics` | SVCB/HTTPS ECH parameter extraction never panics and returns non-empty in-bounds ECH configs |
+| `parse_answer_rr_never_panics` | DNS answer resource record parsing never panics over arbitrary 24-byte packets with symbolic start offsets (`>= 12`), names, pointers, and RDATA lengths |
+| `parse_records_question_never_panics` | DNS question parsing never panics, emits no records when `ancount == 0`, and rejects truncated headers |
 
 ## Model-checked
 
@@ -53,11 +69,11 @@ Each scenario fails when the stated invariant breaks.
 | Hostile HTTP/2 peers | `hostile-*`: PING, RST, SETTINGS, empty frame and CONTINUATION floods, zero window, huge headers | CPU or memory grows without bound, or one peer slows another host |
 | Real origin | `q28-nginx`: the edge workload through nginx | Any failure the origin did not cause |
 | Response parsing | `differential.py`: 61 cases from RFC 9112 section 6.3 | Leyline reads a case differently from the RFC |
-| Crashes | 11 fuzz targets, including `h2_session`, which drives the client with server frames | A crash or a hung request |
+| Crashes | 13 fuzz targets, including `h2_session`, `dns_wire`, and `pkcs12` | A crash or a hung request |
 
 Two defaults come from these scenarios:
 
-- A host accepts 1,024 waiting HTTP/1.1 requests; the next request fails with `Overloaded`. `SessionBuilder::max_pending_per_host(None)` removes the limit.
+- A host accepts 1,024 waiting HTTP/1.1 requests; the next request fails with `Overloaded`. `SessionBuilder::host_limits(HostLimits::new().max_pending(None))` removes the limit.
 - An address that fails to connect 5 times in a row moves to the back of the dial order for 30 seconds times the number of times it was ejected, up to 300 seconds. A successful connection clears its record.
 
 ## Measured
@@ -74,7 +90,7 @@ One Ryzen 9 9950X3D. Client and origin run on separate L3 caches, each scenario 
 | 10,000 slow readers on large bodies | 0 failures, 295 KiB per reader |
 | 1 GiB download and upload | 316 KiB RSS growth |
 | Graceful shutdown under 2,000 streams | Quiet in 2 ms, 0 wrong digests |
-| Fuzzing | 676 million executions across 11 targets, 0 crashes |
+| Fuzzing | 680 million executions across all 13 targets, 0 crashes (676 million across the 11 pre-0.3.0 targets, 3.6 million on `dns_wire`, 528,000 on `pkcs12`) |
 | Parser differential | 0 of 61 RFC cases read wrongly |
 
 ## Not claimed

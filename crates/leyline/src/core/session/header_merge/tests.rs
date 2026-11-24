@@ -48,9 +48,9 @@ fn anchored_header_splices_after_anchor() {
 fn multiple_anchored_same_anchor_preserve_caller_order() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
-    drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-a0", "0"));
-    drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-b", "b"));
-    drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-a", "a"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUaMobile, "x-a0", "0"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUaMobile, "x-b", "b"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUaMobile, "x-a", "a"));
     apply_extra_headers(&mut headers, &extra, false);
     let names: Vec<&str> = headers.iter().map(|(k, _)| k.as_ref()).collect();
     let mobile = names.iter().position(|&n| n == "sec-ch-ua-mobile").unwrap();
@@ -81,11 +81,11 @@ fn anchored_headers_interleave_at_each_anchor() {
         ("accept-encoding".into(), "gzip".into()),
     ];
     let mut extra = HeaderList::new();
-    drop(extra.append_anchored(HeaderPosition::AfterCchUaPlatform, "x-extra-5", "5"));
-    drop(extra.append_anchored(HeaderPosition::AfterCchUa, "x-extra-1", "1"));
-    drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-extra-2", "2"));
-    drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-extra-3", "3"));
-    drop(extra.append_anchored(HeaderPosition::AfterCchUaMobile, "x-extra-4", "4"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUaPlatform, "x-extra-5", "5"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUa, "x-extra-1", "1"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUaMobile, "x-extra-2", "2"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUaMobile, "x-extra-3", "3"));
+    drop(extra.append_anchored(HeaderPosition::AfterSecChUaMobile, "x-extra-4", "4"));
     drop(extra.append_anchored(HeaderPosition::AfterUserAgent, "x-extra-6", "6"));
     drop(extra.append_anchored(HeaderPosition::AfterContentType, "x-extra-7", "7"));
     apply_extra_headers(&mut headers, &extra, false);
@@ -129,8 +129,8 @@ fn before_anchor_inserts_before_target() {
 fn client_hints_lead_the_client_hint_block_in_push_order() {
     let mut headers = preset_xhr();
     let mut extra = HeaderList::new();
-    drop(extra.append_anchored(HeaderPosition::BeforeCchUa, "device-memory", "8"));
-    drop(extra.append_anchored(HeaderPosition::BeforeCchUa, "dpr", "1"));
+    drop(extra.append_anchored(HeaderPosition::BeforeSecChUa, "device-memory", "8"));
+    drop(extra.append_anchored(HeaderPosition::BeforeSecChUa, "dpr", "1"));
     apply_extra_headers(&mut headers, &extra, false);
     let names: Vec<&str> = headers.iter().take(3).map(|(k, _)| k.as_ref()).collect();
     assert_eq!(names, ["device-memory", "dpr", "sec-ch-ua"]);

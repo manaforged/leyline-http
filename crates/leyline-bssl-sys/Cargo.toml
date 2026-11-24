@@ -1,6 +1,6 @@
 [package]
 name = "leyline-bssl-sys"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.96"
 authors = [
@@ -102,5 +102,8 @@ CVE-2026-77696 = "SM2; BoringSSL has no SM2"
 CVE-2026-84782 = "DTLS retransmission; Leyline does not use DTLS"
 CVE-2026-84783 = "OpenSSL 4.0 two-phase extension cache; BoringSSL builds the cache under the write lock"
 CVE-2026-84784 = "OpenSSL QUIC connection IDs; BoringSSL has no QUIC stack"
+CVE-2026-35190 = "OpenSSL TLS 1.3 server Suite B key-share OOB read; BoringSSL has no SSL_CERT_FLAG_SUITEB_128_LOS and Leyline is a client"
+CVE-2026-107493 = "PEM_X509_INFO_read_bio with non-NULL stack; BoringSSL pem_info.cc frees only entries above orig_num and leyline-bssl passes nullptr"
+CVE-2026-124709 = "OpenSSL QUIC server stream leak; BoringSSL has no QUIC stack"
 
 [workspace]

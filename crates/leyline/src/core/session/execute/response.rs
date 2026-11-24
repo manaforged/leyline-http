@@ -3,7 +3,6 @@ use std::time::SystemTime;
 
 use url::Url;
 
-use super::super::helpers::header_values;
 use super::journey::Journey;
 use crate::core::BodyRules;
 use crate::core::decompress::{buffer_and_strip, decompress_and_strip};
@@ -23,7 +22,12 @@ impl Session {
         resp_headers: &http::HeaderMap,
         url: &Url,
     ) {
-        let set_cookies: Vec<&str> = header_values(resp_headers, http::header::SET_COOKIE)
+        if !self.stores_cookies() {
+            return;
+        }
+        let set_cookies: Vec<&str> = resp_headers
+            .get_all(http::header::SET_COOKIE)
+            .iter()
             .filter_map(|v| v.to_str().ok())
             .collect();
         if !set_cookies.is_empty() {
@@ -67,19 +71,22 @@ impl Session {
     }
 
     pub(super) fn note_hsts(&self, url: &Url, resp_headers: &http::HeaderMap) {
-        if self.inner.inputs.tls_trust.accepts_invalid_certs() {
+        if self.inner.inputs.tls_trust.accepts_invalid_certs()
+            || self.inner.inputs.tls_trust.accepts_invalid_hostnames()
+        {
             return;
         }
-        let values: Vec<&str> =
-            header_values(resp_headers, http::header::STRICT_TRANSPORT_SECURITY)
-                .filter_map(|v| v.to_str().ok())
-                .collect();
+        let values: Vec<&str> = resp_headers
+            .get_all(http::header::STRICT_TRANSPORT_SECURITY)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .collect();
         if !values.is_empty() {
             lock(&self.inner.hsts).note(url, &values, SystemTime::now());
         }
     }
 
-    pub(in crate::core::session) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
+    pub(crate) fn hsts_upgrade(&self, url: &Arc<Url>) -> Arc<Url> {
         if !crate::core::hsts::HstsStore::applies(url) {
             return Arc::clone(url);
         }
@@ -90,14 +97,18 @@ impl Session {
 
     #[cfg(feature = "http3")]
     pub(super) fn note_alt_svc(&self, url: &Url, resp_headers: &http::HeaderMap) {
-        let owned: Vec<String> = header_values(resp_headers, http::header::ALT_SVC)
-            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+        let owned: Vec<std::borrow::Cow<'_, str>> = resp_headers
+            .get_all(http::header::ALT_SVC)
+            .iter()
+            .map(|v| String::from_utf8_lossy(v.as_bytes()))
             .collect();
-        let fields: Vec<&str> = owned.iter().map(String::as_str).collect();
-        if fields.is_empty() {
+        if owned.is_empty() {
             return;
         }
-        let age = header_values(resp_headers, http::header::AGE)
+        let fields: Vec<&str> = owned.iter().map(std::borrow::Cow::as_ref).collect();
+        let age = resp_headers
+            .get_all(http::header::AGE)
+            .iter()
             .next()
             .and_then(|v| v.to_str().ok())
             .and_then(|v| crate::util::delta_seconds(v.split(',').next().unwrap_or_default()))
@@ -185,7 +196,7 @@ impl Session {
                 bs.set_read_timeout(deadline.read());
                 bs.set_body_timeout(deadline.body());
                 let (buf, resp_headers) =
-                    buffer_and_strip(bs, resp_headers.into_map(), rules).await?;
+                    Box::pin(buffer_and_strip(bs, resp_headers.into_map(), rules)).await?;
                 (
                     crate::core::response::ResponseBody::Buffered(buf),
                     resp_headers.into(),

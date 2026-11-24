@@ -1,5 +1,5 @@
 use leyline::internals::h2::connection::PseudoHeaders;
-use leyline::internals::h2::error::{ErrorCode, H2Error};
+use leyline::internals::h2::error::H2Error;
 use leyline::internals::profile::PseudoOrder;
 
 const CHROME_ORDER: [PseudoOrder; 4] = [
@@ -88,10 +88,10 @@ fn connect_without_authority_rejected() {
         protocol: None,
     };
     let err = p.build_pseudo_list(&CHROME_ORDER).unwrap_err();
-    match err {
-        H2Error::Connection { code, .. } => assert_eq!(code, ErrorCode::ProtocolError),
-        other => panic!("expected Connection error, got {other:?}"),
-    }
+    assert!(
+        matches!(err, H2Error::InvalidRequest(_)),
+        "expected InvalidRequest error, got {err:?}"
+    );
 }
 
 #[test]

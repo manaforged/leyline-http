@@ -1,11 +1,11 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use futures_util::{FutureExt, StreamExt};
+use futures_util::FutureExt;
 use http::{Method, StatusCode, header};
 use sha2::{Digest, Sha256};
 
-use super::{Draft, RequestBuilder};
+use super::RequestBuilder;
 use crate::core::atomic;
 use crate::core::response::Response;
 use crate::core::retry::RetryPlan;
@@ -40,61 +40,80 @@ impl Default for Download {
 impl RequestBuilder {
     /// Verifies the SHA-256 of a download before replacing the destination file.
     pub fn sha256(mut self, checksum: [u8; 32]) -> Self {
-        self.draft.download.get_or_insert_default().checksum = Some(checksum);
+        self.draft
+            .build_extras_mut()
+            .download
+            .get_or_insert_default()
+            .checksum = Some(checksum);
         self
     }
-    /// Reports bytes written and the optional complete length during a download.
+    /// Calls `progress` during a download with the bytes written to the file so far and the complete length in bytes, which is `None` when the server does not declare it.
     pub fn progress(mut self, progress: impl Fn(u64, Option<u64>) + Send + Sync + 'static) -> Self {
-        self.draft.download.get_or_insert_default().progress = Some(Arc::new(progress));
+        self.draft
+            .build_extras_mut()
+            .download
+            .get_or_insert_default()
+            .progress = Some(Arc::new(progress));
         self
     }
     /// Enables resuming a prior download, on by default for RequestBuilder::download_to.
     pub fn resume(mut self, resume: bool) -> Self {
-        self.draft.download.get_or_insert_default().resume = resume;
+        self.draft
+            .build_extras_mut()
+            .download
+            .get_or_insert_default()
+            .resume = resume;
         self
     }
     /// Downloads atomically, retries a dropped transfer under the retry policy, and resumes a saved prefix only when a strong ETag still matches.
     pub async fn download_to(mut self, path: impl AsRef<Path>) -> Result<u64> {
+        let options = self
+            .draft
+            .build
+            .as_deref_mut()
+            .and_then(|b| b.download.take())
+            .unwrap_or_default();
         let key = self.prepare_download()?;
-        let options = self.draft.download.take().unwrap_or_default();
         let target = path.as_ref().to_path_buf();
-        let retry = self.draft.carry.retry_policy.clone();
+        let retry = self.draft.carry.take_retry_policy(&self.session);
+        self.draft.carry.overrides_mut().retry_policy = Some(crate::core::retry::Retry::unset());
+        let deadline = self.session.deadline(self.draft.carry.timeouts());
         let mut attempt = 0;
         loop {
+            deadline.check()?;
             let result = self
                 .next_transfer()
                 .transfer_to(target.clone(), key, options.clone())
                 .await;
-            let Err(error) = result else {
-                return result;
+            let failed = match result {
+                Ok(written) => return Ok(written),
+                Err(TransferFailure::Status(response)) => Ok(response),
+                Err(TransferFailure::Error(error)) => Err(error),
             };
-            let failed = Err(error);
             match retry.plan(&failed, attempt) {
-                RetryPlan::Backoff(wait) => tokio::time::sleep(wait).await,
-                _ => return failed.map(|_| 0),
+                RetryPlan::Backoff(wait) if wait < deadline.remaining() => {
+                    super::send::sleep_backoff(&self.session, &deadline, wait).await?;
+                }
+                _ => {
+                    return match failed {
+                        Ok(response) => {
+                            response.error_for_status()?;
+                            Err(bad_range())
+                        }
+                        Err(error) => Err(error),
+                    };
+                }
             }
             attempt += 1;
         }
     }
 
     fn next_transfer(&self) -> Self {
-        let draft = &self.draft;
         Self {
             session: self.session.clone(),
-            draft: Box::new(Draft {
-                method: draft.method.clone(),
-                url: draft.url.clone(),
-                body: crate::wire::Body::default(),
-                headers: draft.headers.clone(),
-                query_params: Vec::new(),
-                builder_error: None,
-                compress: None,
-                trusted_origin: draft.trusted_origin.clone(),
-                deadline: draft.deadline,
-                response: draft.response,
-                download: None,
-                carry: draft.carry.clone(),
-            }),
+            draft: self
+                .draft
+                .again(crate::wire::Body::default(), self.draft.headers.clone()),
         }
     }
 
@@ -103,38 +122,86 @@ impl RequestBuilder {
         target: std::path::PathBuf,
         key: [u8; 32],
         options: Box<Download>,
-    ) -> Result<u64> {
+    ) -> std::result::Result<u64, TransferFailure> {
         let resume = options.resume;
-        let partial =
-            Arc::new(atomic::blocking(move |_| Partial::open(target, key, resume)).await?);
+        let partial = Arc::new(
+            atomic::blocking(move |_| Partial::open(target, key, resume))
+                .await
+                .map_err(TransferFailure::Error)?,
+        );
         let old = partial.metadata();
         let offset = old.as_ref().map_or(0, |metadata| metadata.offset);
         if offset > self.draft.carry.body_rules.max_body_size as u64 {
-            return Err(limit());
+            return Err(TransferFailure::Error(limit()));
         }
-        self.resume_headers(old.as_ref())?;
-        let part = Arc::clone(&partial);
+        self.resume_headers(old.as_ref())
+            .map_err(TransferFailure::Error)?;
         let checksum = options.checksum.is_some() && offset > 0;
-        let hashing = async move {
-            if checksum {
-                atomic::blocking(move |_| part.prefix()).await
-            } else {
-                Ok(Sha256::new())
-            }
+        let (response, digest) = if checksum {
+            let part = Arc::clone(&partial);
+            let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let flag = Arc::clone(&active);
+            let mut hash_task =
+                tokio::task::spawn_blocking(move || part.prefix(&atomic::Waiting::from_flag(flag)));
+            let send = self.send();
+            tokio::pin!(send);
+            let (resp, hash_res) = tokio::select! {
+                resp = &mut send => {
+                    match resp {
+                        Ok(response) => {
+                            let hash_res = hash_task
+                                .await
+                                .map_err(|e| crate::error::Error::from(std::io::Error::other(e)))
+                                .and_then(|r| r);
+                            (Ok(response), hash_res)
+                        }
+                        Err(err) => {
+                            active.store(false, std::sync::atomic::Ordering::Release);
+                            drop(hash_task.await);
+                            return Err(TransferFailure::Error(err));
+                        }
+                    }
+                }
+                hash_res = &mut hash_task => {
+                    let hash_res = hash_res
+                        .map_err(|e| crate::error::Error::from(std::io::Error::other(e)))
+                        .and_then(|r| r);
+                    match hash_res {
+                        Ok(digest) => (send.await, Ok(digest)),
+                        Err(err) => return Err(TransferFailure::Error(err)),
+                    }
+                }
+            };
+            (
+                resp.map_err(TransferFailure::Error)?,
+                hash_res.map_err(TransferFailure::Error)?,
+            )
+        } else {
+            (
+                self.send().await.map_err(TransferFailure::Error)?,
+                Sha256::new(),
+            )
         };
-        let (response, digest) = tokio::try_join!(self.send(), hashing)?;
-        let (metadata, append) = metadata(&response, key, old.as_ref())?;
+        let (metadata, append) = match metadata(&response, key, old.as_ref()) {
+            Ok(meta) => meta,
+            Err(MetadataFailure::Status) => return Err(TransferFailure::Status(response)),
+            Err(MetadataFailure::Error(error)) => return Err(TransferFailure::Error(error)),
+        };
         if metadata
             .total
             .is_some_and(|total| total > response.parts.compression.max_body_size as u64)
         {
-            return Err(limit());
+            return Err(TransferFailure::Error(limit()));
         }
         let copy = metadata.clone();
         let part = Arc::clone(&partial);
-        atomic::blocking(move |_| part.begin(copy, append)).await?;
+        atomic::blocking(move |_| part.begin(copy, append))
+            .await
+            .map_err(TransferFailure::Error)?;
         let digest = if append { digest } else { Sha256::new() };
-        transfer(response, partial, (metadata, digest), options).await
+        transfer(response, partial, (metadata, digest), options)
+            .await
+            .map_err(TransferFailure::Error)
     }
 
     fn prepare_download(&mut self) -> Result<[u8; 32]> {
@@ -273,14 +340,31 @@ async fn verify_checksum(
     Ok(())
 }
 
+enum TransferFailure {
+    Status(Response),
+    Error(Error),
+}
+
+enum MetadataFailure {
+    Status,
+    Error(Error),
+}
+
 fn metadata(
     response: &Response,
     key: [u8; 32],
     old: Option<&Metadata>,
-) -> Result<(Metadata, bool)> {
+) -> std::result::Result<(Metadata, bool), MetadataFailure> {
+    if crate::wire::is_error_status(response.status().as_u16())
+        && !(response.status() == StatusCode::RANGE_NOT_SATISFIABLE
+            && complete_prefix(old, response).is_some())
+    {
+        return Err(MetadataFailure::Status);
+    }
     if !response.content_coding().is_identity() {
-        return Err(Error::new(Kind::Body)
-            .with_message("resumable download requires identity content encoding"));
+        return Err(MetadataFailure::Error(Error::new(Kind::Body).with_message(
+            "resumable download requires identity content encoding",
+        )));
     }
     let mut etag = response
         .header(header::ETAG.as_str())
@@ -291,21 +375,22 @@ fn metadata(
             (response.content_length(), false)
         }
         StatusCode::NOT_MODIFIED => {
-            let old = saved(old, response, &etag, |old| old.total == Some(old.offset))?;
+            let old = saved(old, response, &etag, |old| old.total == Some(old.offset))
+                .map_err(MetadataFailure::Error)?;
             (old.total, true)
         }
         StatusCode::PARTIAL_CONTENT => {
-            let old = saved(old, response, &etag, |_| true)?;
-            (Some(remainder(response, old)?), true)
+            let old = saved(old, response, &etag, |_| true).map_err(MetadataFailure::Error)?;
+            (
+                Some(remainder(response, old).map_err(MetadataFailure::Error)?),
+                true,
+            )
         }
         StatusCode::RANGE_NOT_SATISFIABLE if let Some(old) = complete_prefix(old, response) => {
             etag.clone_from(&old.etag);
             (Some(old.offset), true)
         }
-        _ => {
-            response.error_for_status()?;
-            return Err(bad_range());
-        }
+        _ => return Err(MetadataFailure::Error(bad_range())),
     };
     Ok((
         Metadata {
@@ -337,6 +422,9 @@ fn complete_prefix<'a>(old: Option<&'a Metadata>, response: &Response) -> Option
         old.offset > 0
             && old.total.is_none()
             && old.url == response.url().as_str()
+            && response
+                .header(header::ETAG.as_str())
+                .is_none_or(|got| old.etag.as_deref() == Some(got))
             && unsatisfied_total(response) == Some(old.offset)
     })
 }
@@ -355,31 +443,26 @@ fn remainder(response: &Response, old: &Metadata) -> Result<u64> {
     Ok(total)
 }
 
+fn range_matches(start: u64, end: u64, total: u64, offset: u64) -> Option<u64> {
+    (start == offset && start <= end && end.checked_add(1)? == total).then_some(total)
+}
+
 fn range(value: &str, offset: u64) -> Option<u64> {
     let (span, total) = value.strip_prefix("bytes ")?.split_once('/')?;
     let (start, end) = span.split_once('-')?;
-    if [start, end, total]
-        .into_iter()
-        .any(|number| !number.bytes().all(|byte| byte.is_ascii_digit()))
-    {
-        return None;
-    }
     let (start, end, total) = (
-        start.parse::<u64>().ok()?,
-        end.parse::<u64>().ok()?,
-        total.parse::<u64>().ok()?,
+        crate::util::parse_ascii_u64(start)?,
+        crate::util::parse_ascii_u64(end)?,
+        crate::util::parse_ascii_u64(total)?,
     );
-    (start == offset && start <= end && end.checked_add(1)? == total).then_some(total)
+    range_matches(start, end, total, offset)
 }
 
 fn unsatisfied_total(response: &Response) -> Option<u64> {
     let total = response
         .header(header::CONTENT_RANGE.as_str())?
         .strip_prefix("bytes */")?;
-    if total.is_empty() || !total.bytes().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    total.parse().ok()
+    crate::util::parse_ascii_u64(total)
 }
 
 fn strong_etag(value: &str) -> bool {
@@ -404,3 +487,7 @@ fn limit() -> Error {
     Error::new(Kind::BodyLimit)
         .with_message("download exceeds the complete representation size limit")
 }
+
+#[cfg(kani)]
+#[path = "download_proofs.rs"]
+mod proofs;

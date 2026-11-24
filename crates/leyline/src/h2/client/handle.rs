@@ -60,6 +60,10 @@ impl H2Client {
         self.shared.streams.open.load(Ordering::Relaxed)
     }
 
+    pub(crate) fn last_idle(&self) -> std::time::Instant {
+        self.shared.streams.last_idle.get()
+    }
+
     #[cfg(feature = "bench-internals")]
     pub fn send_shared(
         &self,
@@ -132,7 +136,7 @@ impl H2Client {
             });
         }
         let (ack_tx, ack_rx) = oneshot::channel();
-        let deadline = std::time::Instant::now() + timeout;
+        let deadline = crate::util::saturating_after(std::time::Instant::now(), timeout);
         self.shared
             .ping_tx
             .send((ack_tx, deadline))
@@ -165,6 +169,7 @@ pub(crate) struct Streams {
     pub(super) open: AtomicUsize,
     pub(super) reserved: AtomicUsize,
     pub(super) capacity: AtomicUsize,
+    pub(super) last_idle: crate::pool::types::Stamp,
 }
 
 impl Streams {
@@ -173,6 +178,7 @@ impl Streams {
             open: AtomicUsize::new(0),
             reserved: AtomicUsize::new(0),
             capacity: AtomicUsize::new(capacity),
+            last_idle: crate::pool::types::Stamp::now(),
         })
     }
 }

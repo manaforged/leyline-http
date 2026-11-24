@@ -1,5 +1,4 @@
 use std::fmt;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
@@ -70,9 +69,9 @@ fn latency_bucket(elapsed: Duration) -> usize {
 }
 
 impl Metrics {
-    /// Returns a new set of zeroed counters, shared so one clone can go to `trace` and one can be read.
-    pub fn new() -> Arc<Self> {
-        Arc::new(Self::default())
+    /// Returns a new set of zeroed counters; wrap in an `Arc` to share with `SessionBuilder::trace` and read its counters.
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Returns the number of requests, counting each `send` once.

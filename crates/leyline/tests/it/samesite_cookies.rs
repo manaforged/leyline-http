@@ -1,5 +1,6 @@
+use leyline::profile::RequestKind;
 use leyline::testing::{self, queue};
-use leyline::{Browser, Protocol, RequestKind, Session};
+use leyline::{Browser, Protocol, Session};
 
 #[tokio::test]
 async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
@@ -15,8 +16,8 @@ async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
         .build()
         .unwrap();
     let site = url::Url::parse(&server.url("/")).unwrap();
-    session.cookies().store("strict=1; SameSite=Strict", &site);
-    session.cookies().store("lax=1; SameSite=Lax", &site);
+    session.cookies().store(&site, "strict=1; SameSite=Strict");
+    session.cookies().store(&site, "lax=1; SameSite=Lax");
 
     for (path, preset) in [
         ("/nav", RequestKind::FormNavigate),
@@ -37,13 +38,13 @@ async fn cross_site_initiator_withholds_samesite_cookies_by_destination() {
         navigation.header_values("cookie"),
         vec!["lax=1"],
         "{}",
-        navigation.text()
+        navigation.head()
     );
     assert_eq!(
         subresource.header_values("cookie").len(),
         0,
         "{}",
-        subresource.text()
+        subresource.head()
     );
     server.shutdown().await;
 }
@@ -73,8 +74,8 @@ async fn samesite_follows_the_sent_fetch_site() {
         (&preset_session, RequestKind::CrossOrigin),
         (&referer_session, RequestKind::Xhr),
     ] {
-        session.cookies().store("strict=1; SameSite=Strict", &site);
-        session.cookies().store("lax=1; SameSite=Lax", &site);
+        session.cookies().store(&site, "strict=1; SameSite=Strict");
+        session.cookies().store(&site, "lax=1; SameSite=Lax");
         session
             .get(server.url("/"))
             .kind(preset)
@@ -87,7 +88,7 @@ async fn samesite_follows_the_sent_fetch_site() {
             req.header_values("cookie").len(),
             0,
             "{}",
-            String::from_utf8_lossy(&req.raw)
+            String::from_utf8_lossy(req.raw())
         );
     }
     server.shutdown().await;
@@ -108,7 +109,7 @@ async fn the_last_session_referer_sets_the_fetch_site() {
         ])
         .build()
         .unwrap();
-    session.cookies().store("strict=1; SameSite=Strict", &site);
+    session.cookies().store(&site, "strict=1; SameSite=Strict");
 
     session
         .get(server.url("/"))
@@ -123,7 +124,7 @@ async fn the_last_session_referer_sets_the_fetch_site() {
         req.header_values("cookie"),
         vec!["strict=1"],
         "{}",
-        req.text()
+        req.head()
     );
     server.shutdown().await;
 }
@@ -169,7 +170,7 @@ async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only()
             .unwrap();
         session
             .cookies()
-            .store("strict=1; SameSite=Strict", &site_a);
+            .store(&site_a, "strict=1; SameSite=Strict");
         session
             .request(http::Method::GET, &begin)
             .kind(RequestKind::Navigate)
@@ -185,13 +186,13 @@ async fn a_cross_site_redirect_chain_withholds_strict_cookies_for_firefox_only()
         firefox.header_values("cookie").len(),
         0,
         "{}",
-        firefox.text()
+        firefox.head()
     );
     assert_eq!(
         chrome.header_values("cookie"),
         vec!["strict=1"],
         "{}",
-        chrome.text()
+        chrome.head()
     );
     landing.shutdown().await;
     start.shutdown().await;
@@ -227,7 +228,7 @@ async fn an_unusable_or_suppressed_session_referer_is_not_the_initiator() {
         .unwrap();
     suppressed
         .cookies()
-        .store("strict=1; SameSite=Strict", &site);
+        .store(&site, "strict=1; SameSite=Strict");
     suppressed
         .get(server.url("/"))
         .kind(RequestKind::Xhr)
@@ -244,7 +245,7 @@ async fn an_unusable_or_suppressed_session_referer_is_not_the_initiator() {
         second.header_values("cookie"),
         vec!["strict=1"],
         "{}",
-        second.text()
+        second.head()
     );
     server.shutdown().await;
 }
@@ -274,7 +275,7 @@ async fn origin_names_the_initiator() {
         req.header_values("origin"),
         vec!["https://other.test"],
         "{}",
-        req.text()
+        req.head()
     );
     server.shutdown().await;
 }
@@ -304,7 +305,7 @@ async fn chrome_judges_the_final_target_after_a_cross_site_bounce() {
         .unwrap();
     session
         .cookies()
-        .store("strict=1; SameSite=Strict", &site_a);
+        .store(&site_a, "strict=1; SameSite=Strict");
 
     session
         .get(format!("http://site-a.test:{port}/start"))
@@ -337,7 +338,7 @@ async fn a_relative_request_referer_is_same_origin() {
         .protocol(Protocol::Http1)
         .build()
         .unwrap();
-    session.cookies().store("strict=1; SameSite=Strict", &site);
+    session.cookies().store(&site, "strict=1; SameSite=Strict");
 
     session
         .get(server.url("/x"))
@@ -353,7 +354,7 @@ async fn a_relative_request_referer_is_same_origin() {
         req.header_values("cookie"),
         vec!["strict=1"],
         "{}",
-        req.text()
+        req.head()
     );
     server.shutdown().await;
 }
@@ -383,7 +384,7 @@ async fn an_https_initiator_sends_a_null_origin_to_http() {
         req.header_values("origin"),
         vec!["null"],
         "{}",
-        String::from_utf8_lossy(&req.raw)
+        String::from_utf8_lossy(req.raw())
     );
     server.shutdown().await;
 }

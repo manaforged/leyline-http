@@ -23,6 +23,24 @@ pub use stream::TlsStream;
 #[cfg(feature = "http3")]
 pub(crate) use trust::install_verifier_ctx;
 
+pub(crate) fn apply_ech(
+    ssl: &mut leyline_bssl::ssl::SslRef,
+    ech: &[u8],
+) -> Result<(), leyline_bssl::error::ErrorStack> {
+    ssl.set_enable_ech_grease(false);
+    ssl.set_ech_config_list(ech)
+}
+
+pub(crate) fn ech_retry_configs(
+    ssl: Option<&leyline_bssl::ssl::SslRef>,
+    stack: Option<&leyline_bssl::error::ErrorStack>,
+) -> Option<Vec<u8>> {
+    ssl.zip(stack)
+        .and_then(|(ssl, stack)| ssl.ech_retry_configs(stack))
+        .filter(|bytes| !bytes.is_empty())
+        .map(<[u8]>::to_vec)
+}
+
 /// The BoringSSL context a browser profile builds, outside the semver promise.
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub struct TlsContext(
@@ -48,7 +66,7 @@ impl TlsContext {
     /// Builds the TLS context `browser` uses, with `min_version` as the floor when its profile declares none.
     pub fn new(
         browser: crate::Browser,
-        min_version: crate::profile::TlsMinVersion,
+        min_version: crate::profile::TlsVersion,
     ) -> crate::Result<Self> {
         Ok(Self(builder::ssl_context(browser.profile(), min_version)?))
     }

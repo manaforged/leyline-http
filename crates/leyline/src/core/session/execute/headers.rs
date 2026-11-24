@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use http::Method;
-use http::header::AUTHORIZATION;
+use http::header::{AUTHORIZATION, USER_AGENT};
 use url::Url;
 
 use super::super::header_merge::apply_extra_headers;
@@ -15,7 +15,7 @@ use crate::core::session::Session;
 use crate::header_str::HeaderStr;
 use crate::profile::RequestKind;
 use crate::profile::preset::{HeaderContext, Plan};
-use crate::util::{cross_origin_header, header_first};
+use crate::util::{cross_origin_header, header_first, header_position};
 use crate::wire::HeaderPair;
 use crate::wire::RequestHeaders;
 use crate::wire::{Body, BodyKind, Scheme};
@@ -42,11 +42,11 @@ impl Session {
         if plan.has_origin() {
             shape_origin(&mut headers, current_method, request.origin_downgrade);
         }
-        let caller_has = |name: &str| {
-            extra_headers
-                .is_some_and(|h| h.iter().any(|(k, _)| k.as_str().eq_ignore_ascii_case(name)))
-        };
-        self.merge_session_headers(&mut headers, &caller_has, strip_sensitive, current_url);
+        let caller_has = |name: &str| extra_headers.is_some_and(|h| h.get(name).is_some());
+        if caller_has(USER_AGENT.as_str()) {
+            headers.retain(|(name, _)| !client_hint(name) || caller_has(name));
+        }
+        self.merge_session_headers(&mut headers, extra_headers, strip_sensitive, current_url);
 
         if let Some(extra) = extra_headers {
             apply_extra_headers(&mut headers, extra, strip_sensitive);
@@ -55,7 +55,7 @@ impl Session {
             add_referer(&mut headers, referer);
         }
 
-        set_content_length(&mut headers, current_body);
+        set_content_length(&mut headers, current_method, current_body);
 
         self.add_jar_cookie(&mut headers, current_url, &request.site, current_method);
 
@@ -162,7 +162,7 @@ impl Session {
     fn caches_headers(&self, journey: &Journey) -> bool {
         !journey.initiated
             && matches!(journey.body.0, BodyKind::Empty)
-            && self.inner.inputs.bearer.is_none()
+            && self.inner.inputs.credential.is_none()
             && self.inner.inputs.jar().is_empty()
     }
 
@@ -179,45 +179,56 @@ impl Session {
     pub(in crate::core::session) fn merge_session_headers(
         &self,
         headers: &mut Vec<HeaderPair>,
-        caller_has: &dyn Fn(&str) -> bool,
+        caller: Option<&HeaderList>,
         strip_sensitive: bool,
         target: &Url,
     ) {
-        for (k, v) in self.session_defaults(target) {
+        let caller_has = |name: &str| caller.is_some_and(|h| h.get(name).is_some());
+        let profile = self
+            .inner
+            .header_plan
+            .append()
+            .iter()
+            .map(|(k, v)| (k.as_str(), HeaderStr::from_static(v.as_str()), false));
+        let session = self.session_defaults(target).map(|(k, v)| (k, v, true));
+        let mut set = vec![false; headers.len()];
+        for (k, v, repeats) in profile.chain(session) {
             if caller_has(k) || (strip_sensitive && cross_origin_header(k)) {
                 continue;
             }
-            match headers
-                .iter()
-                .position(|(hk, _)| hk == k || hk.eq_ignore_ascii_case(k))
-            {
-                Some(pos) => headers[pos].1 = v,
-                None => headers.push((Cow::Owned(k.to_owned()), v)),
-            }
+            let same = |(hk, _): &HeaderPair| hk.eq_ignore_ascii_case(k);
+            let at = match header_position(headers, k) {
+                Some(first) if !set[first] => {
+                    headers[first].1 = v;
+                    set[first] = repeats;
+                    continue;
+                }
+                Some(first) => first + headers[first..].iter().take_while(|&h| same(h)).count(),
+                None => headers.len(),
+            };
+            headers.insert(at, (Cow::Owned(k.to_owned()), v));
+            set.insert(at, repeats);
         }
     }
 
     fn session_defaults<'a>(&'a self, target: &Url) -> impl Iterator<Item = (&'a str, HeaderStr)> {
-        let bearer = self
+        let credential = self
             .inner
             .inputs
-            .bearer
+            .credential
             .as_ref()
-            .filter(|_| self.bearer_in_scope(target));
+            .filter(|_| self.credential_in_scope(target));
         let defaults = &self.inner.default_headers;
-        let slot = bearer.map_or(defaults.len(), |b| b.slot.min(defaults.len()));
+        let slot = credential.map_or(defaults.len(), |c| c.slot.min(defaults.len()));
         let pair = |(k, v): &'a (String, HeaderStr)| (k.as_str(), v.clone());
-        self.inner
-            .header_plan
-            .append()
+        defaults[..slot]
             .iter()
-            .map(|(k, v)| (k.as_str(), HeaderStr::from_static(v.as_str())))
-            .chain(defaults[..slot].iter().map(pair))
-            .chain(bearer.map(|b| (AUTHORIZATION.as_str(), b.value())))
+            .map(pair)
+            .chain(credential.map(|c| (AUTHORIZATION.as_str(), c.value())))
             .chain(defaults[slot..].iter().map(pair))
     }
 
-    pub(in crate::core::session) fn bearer_in_scope(&self, target: &Url) -> bool {
+    pub(in crate::core::session) fn credential_in_scope(&self, target: &Url) -> bool {
         self.inner
             .inputs
             .base_url
@@ -232,7 +243,8 @@ impl Session {
         site: &SiteContext<'_>,
         method: &Method,
     ) {
-        if self.inner.inputs.jar().is_empty()
+        if !self.stores_cookies()
+            || self.inner.inputs.jar().is_empty()
             || headers
                 .iter()
                 .any(|(k, _)| k.eq_ignore_ascii_case("cookie"))
@@ -299,10 +311,13 @@ fn add_referer(headers: &mut Vec<HeaderPair>, referer: &str) {
     }
 }
 
-fn set_content_length(headers: &mut Vec<HeaderPair>, body: &Body) {
-    if let Some(len) = body.len_hint()
-        && (!matches!(body.0, BodyKind::Empty) || len > 0)
-    {
+fn set_content_length(headers: &mut Vec<HeaderPair>, method: &Method, body: &Body) {
+    if matches!(body.0, BodyKind::Empty) {
+        headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
+        if matches!(*method, Method::POST | Method::PUT | Method::PATCH) {
+            headers.insert(0, ("content-length".into(), HeaderStr::from_static("0")));
+        }
+    } else if let Some(len) = body.len_hint() {
         headers.retain(|(k, _)| !k.eq_ignore_ascii_case("content-length"));
         headers.insert(
             0,
@@ -336,4 +351,10 @@ fn sends_origin(method: &Method, headers: &[HeaderPair]) -> bool {
     let cross_origin = header_first(headers, "sec-fetch-site")
         .is_some_and(|site| FetchSite::parse(site) != Some(FetchSite::SameOrigin));
     cors && cross_origin
+}
+
+const CLIENT_HINT: &str = "sec-ch-ua";
+
+fn client_hint(name: &str) -> bool {
+    crate::util::starts_with_ignore_ascii_case(name, CLIENT_HINT)
 }

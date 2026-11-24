@@ -247,7 +247,7 @@ fn a_request_body_reaches_the_server_on_a_blocking_connection() {
     let runtime = tokio::runtime::Runtime::new().expect("server runtime");
     let server = runtime
         .block_on(Server::https(|request| {
-            Response::new(200).body(request.body.len().to_string())
+            Response::new(200).body(request.body().len().to_string())
         }))
         .expect("server starts");
     let session = Session::new(

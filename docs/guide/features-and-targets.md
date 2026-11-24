@@ -38,7 +38,7 @@ To start from nothing and add back what you need:
 
 ```toml
 [dependencies]
-leyline-http = { version = "0.2", default-features = false, features = ["compression-brotli", "socks"] }
+leyline-http = { version = "0.3", default-features = false, features = ["compression-brotli", "socks"] }
 ```
 
 Build with `RUSTFLAGS="--cfg leyline_unstable_bssl"`, or enable

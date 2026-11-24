@@ -12,7 +12,7 @@ use crate::core::config::Origin;
 use crate::deadline::Deadline;
 use crate::error::Result;
 
-const ALARM_FLOOR: Duration = Duration::from_millis(10);
+const ALARM_FLOOR: Duration = Duration::from_millis(1);
 
 #[derive(Default)]
 pub(super) struct Clock {
@@ -102,7 +102,11 @@ impl Crawl {
 
     fn host_wait(&self, origin: &Origin) -> Wait {
         let own = self.session.host_limits();
-        match self.pace.ready_at(origin).max(own.ready_at(origin)) {
+        match self
+            .pace
+            .ready_at_with(origin, self.site_delay(origin))
+            .max(own.ready_at(origin))
+        {
             Some(at) => Wait::Until(at),
             None if !(self.pace.has_room(origin) && own.has_room(origin)) => Wait::Room,
             None => Wait::Ready,
@@ -136,13 +140,16 @@ impl Crawl {
         signalled || self.session.is_shut_down()
     }
 
-    fn halt(&mut self) {
+    pub(super) fn halt(&mut self) {
         self.frontier.clear();
         self.sitemaps.queue.clear();
+        self.sitemaps.clear_in_flight();
         self.clock.delayed.clear();
         self.clock.alarm = None;
         self.clock.alarm_at = None;
         self.clock.room = false;
+        self.busy.clear();
+        self.pages_in_flight = 0;
         self.tasks = FuturesUnordered::new();
     }
 }

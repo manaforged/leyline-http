@@ -1,4 +1,5 @@
-use leyline::{Browser, Fingerprint, Platform, Session};
+use leyline::profile::Fingerprint;
+use leyline::{Browser, Platform, Session};
 
 const ECHO_URL: &str = "https://tls.peet.ws/api/all";
 

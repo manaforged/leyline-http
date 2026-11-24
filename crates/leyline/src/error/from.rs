@@ -21,22 +21,49 @@ impl From<url::ParseError> for Error {
     }
 }
 
+pub(crate) fn is_tls_record_error(e: &io::Error) -> bool {
+    e.get_ref().is_some_and(|inner| {
+        inner.is::<leyline_bssl_tokio::RecordError>()
+            || inner.is::<leyline_bssl::error::ErrorStack>()
+    })
+}
+
+pub(crate) fn copy_io(e: &io::Error) -> io::Error {
+    if let Some(record) = e
+        .get_ref()
+        .and_then(|inner| inner.downcast_ref::<leyline_bssl_tokio::RecordError>())
+    {
+        return io::Error::new(e.kind(), record.clone());
+    }
+    io::Error::new(e.kind(), e.to_string())
+}
+
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         if let Some(limit) = BodyLimit::of_io(&e) {
             return limit.error();
         }
-        if e.kind() == io::ErrorKind::TimedOut {
-            return Error::new(Kind::Timeout).with_source(e);
+        if is_tls_record_error(&e) {
+            return Error::new(Kind::Tls).with_source(e);
         }
         if !e.get_ref().is_some_and(|inner| inner.is::<Error>()) {
-            return Error::new(Kind::Io).with_source(e);
+            let kind = match e.kind() {
+                io::ErrorKind::TimedOut => Kind::Timeout,
+                _ => Kind::Io,
+            };
+            return Error::new(kind).with_source(e);
         }
         match e.into_inner().map(|inner| inner.downcast::<Error>()) {
             Some(Ok(err)) => *err,
             Some(Err(other)) => Error::new(Kind::Io).with_source(io::Error::other(other)),
             None => Error::new(Kind::Io),
         }
+    }
+}
+
+impl From<Error> for io::Error {
+    fn from(error: Error) -> Self {
+        io::Error::new(error.io_kind(), error)
     }
 }
 

@@ -129,7 +129,7 @@ async fn every_session_identity_rebuilds_the_same_fingerprint() {
         for session in [&first, &again] {
             session.get(server.url("/")).send().await.unwrap();
             let request = server.next_request().await.unwrap();
-            sent.push(request.headers);
+            sent.push(request.headers().to_vec());
         }
         assert_eq!(sent[0], sent[1]);
     }

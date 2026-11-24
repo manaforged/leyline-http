@@ -14,7 +14,7 @@ fn same_context(a: &FingerprintConnector, b: &FingerprintConnector) -> bool {
 fn plain_sessions_share_one_tls_context_per_trust() {
     let bare = BrowserProfile::bare_shared();
     let trust = Tls::new().env_roots(false).system_roots(false);
-    let pinned = trust.clone().pin_sha256([7; 32]);
+    let pinned = trust.clone().pin_cert_sha256([7; 32]);
 
     let first = plain(&bare, &trust);
     let second = plain(&bare, &trust);

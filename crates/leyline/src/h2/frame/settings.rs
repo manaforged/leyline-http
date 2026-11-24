@@ -59,9 +59,11 @@ impl SettingsFrame {
         };
         header.encode(buf);
 
-        for &(id, val) in &self.params {
-            buf.put_u16(id);
-            buf.put_u32(val);
+        if !self.ack {
+            for &(id, val) in &self.params {
+                buf.put_u16(id);
+                buf.put_u32(val);
+            }
         }
     }
 }

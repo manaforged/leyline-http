@@ -54,6 +54,25 @@ impl Dialer {
     }
 
     #[cfg(feature = "http3")]
+    pub(crate) fn socket_options(&self) -> &SocketOptions {
+        &self.socket
+    }
+
+    #[cfg(unix)]
+    pub(crate) fn unix_socket(&self) -> Option<&std::path::Path> {
+        self.socket.unix_socket.as_deref()
+    }
+
+    #[cfg(unix)]
+    pub(crate) async fn dial_unix(
+        &self,
+        path: &std::path::Path,
+    ) -> Result<tokio::net::UnixStream, NetError> {
+        tokio::net::UnixStream::connect(path)
+            .await
+            .map_err(NetError::TcpConnect)
+    }
+
     pub(crate) fn resolver(&self) -> &dyn Resolver {
         self.resolver.as_ref()
     }
@@ -63,7 +82,7 @@ impl Dialer {
             .resolver
             .resolve(host, port)
             .await
-            .map_err(NetError::Dns)?;
+            .map_err(NetError::from_dns)?;
         trace::dns(host, port, addrs.len());
 
         if addrs.is_empty() {
@@ -76,15 +95,18 @@ impl Dialer {
         let race = self.socket.happy_eyeballs.unwrap_or_default();
         let turn = self.turn.fetch_add(1, Ordering::Relaxed);
         let order = self.outliers.order(interleave_by_family(addrs, turn));
-        let (tcp_stream, _addr) = happy_eyeballs_connect(order, race, |peer| {
+        let (tcp_stream, addr) = happy_eyeballs_connect(order, race, |peer| {
             let tcp = self.tcp.clone();
             let socket = self.socket.clone();
             let watch = Watch::new(Arc::clone(&self.outliers), peer, race.resolve_delay);
             async move { watch.finish(connect_one(peer, &tcp, &socket).await) }
         })
         .await
-        .map_err(NetError::TcpConnect)?;
-        trace::connect(host, port, false);
+        .map_err(|err| {
+            self.socket
+                .map_io_error(err, NetError::Config, NetError::TcpConnect)
+        })?;
+        trace::connect(host, port, false, Some(addr));
         Ok(tcp_stream)
     }
 }
@@ -132,12 +154,11 @@ async fn connect_one(
     tcp: &TcpProfile,
     options: &SocketOptions,
 ) -> io::Result<TcpStream> {
-    let domain = if peer.is_ipv6() {
-        socket2::Domain::IPV6
-    } else {
-        socket2::Domain::IPV4
-    };
-    let socket = socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))?;
+    let socket = socket2::Socket::new(
+        super::socket::socket_domain(peer),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
     configure(&socket, peer, tcp, options)?;
     socket.set_nonblocking(true)?;
 

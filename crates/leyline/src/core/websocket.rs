@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use tokio_tungstenite::WebSocketStream;
+use tokio_tungstenite::tungstenite::Error as WireError;
 use tokio_tungstenite::tungstenite::Message as WireMessage;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame as WireClose, Role};
 
@@ -26,17 +27,17 @@ use http::header::SEC_WEBSOCKET_PROTOCOL;
 use split::{WsSink, WsStream};
 
 /// A WebSocket message that a connection sends or receives.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Message {
     /// A UTF-8 text message.
     Text(String),
     /// A binary message.
     Binary(Vec<u8>),
-    /// A ping control frame.
-    Ping,
-    /// A pong control frame.
-    Pong,
+    /// A ping control frame and its payload, which the protocol limits to 125 bytes.
+    Ping(Vec<u8>),
+    /// A pong control frame and its payload, which echoes the ping it answers.
+    Pong(Vec<u8>),
     /// A close frame with an optional status code and reason.
     Close(Option<(u16, String)>),
 }
@@ -46,8 +47,8 @@ impl Message {
         match msg {
             WireMessage::Text(s) => Self::Text(s.as_str().to_owned()),
             WireMessage::Binary(b) => Self::Binary(b.to_vec()),
-            WireMessage::Ping(_) => Self::Ping,
-            WireMessage::Pong(_) => Self::Pong,
+            WireMessage::Ping(b) => Self::Ping(b.to_vec()),
+            WireMessage::Pong(b) => Self::Pong(b.to_vec()),
             WireMessage::Close(frame) => {
                 Self::Close(frame.map(|f| (f.code.into(), f.reason.as_str().to_owned())))
             }
@@ -55,17 +56,50 @@ impl Message {
         }
     }
 
-    fn into_wire(self) -> WireMessage {
-        match self {
+    fn into_wire(self) -> Result<WireMessage> {
+        Ok(match self {
             Self::Text(s) => WireMessage::Text(s.into()),
             Self::Binary(b) => WireMessage::Binary(b.into()),
-            Self::Ping => WireMessage::Ping(Vec::new().into()),
-            Self::Pong => WireMessage::Pong(Vec::new().into()),
+            Self::Ping(b) => WireMessage::Ping(control_payload("ping", b)?.into()),
+            Self::Pong(b) => WireMessage::Pong(control_payload("pong", b)?.into()),
             Self::Close(frame) => WireMessage::Close(frame.map(|(code, reason)| WireClose {
                 code: code.into(),
                 reason: reason.into(),
             })),
-        }
+        })
+    }
+}
+
+const MAX_CONTROL_PAYLOAD: usize = 125;
+
+fn control_payload(frame: &str, payload: Vec<u8>) -> Result<Vec<u8>> {
+    if payload.len() > MAX_CONTROL_PAYLOAD {
+        return Err(Error::new(Kind::Request).with_message(format!(
+            "ws send: a {frame} payload of {} bytes passes the {MAX_CONTROL_PAYLOAD}-byte \
+             limit of a control frame",
+            payload.len()
+        )));
+    }
+    Ok(payload)
+}
+
+async fn send_on<S>(sink: &mut S, msg: Message) -> Result<()>
+where
+    S: Sink<WireMessage, Error = WireError> + Unpin,
+{
+    sink.send(msg.into_wire()?)
+        .await
+        .map_err(|e| wire_error("ws send", e))
+}
+
+async fn recv_on<S>(stream: &mut S) -> Result<Option<Message>>
+where
+    S: Stream<Item = std::result::Result<WireMessage, WireError>> + Unpin,
+{
+    match stream.next().await {
+        Some(Ok(msg)) => Ok(Some(Message::wire(msg))),
+        Some(Err(e)) => Err(wire_error("ws recv", e)),
+        None => Ok(None),
     }
 }
 
@@ -76,7 +110,7 @@ pub struct WebSocket {
     inner: WebSocketStream<WsIo>,
     version: http::Version,
     protocol: Option<String>,
-    headers: Vec<(String, String)>,
+    headers: http::HeaderMap,
 }
 
 impl WebSocket {
@@ -96,11 +130,10 @@ impl WebSocket {
 
         let ((status, headers, _), leftover) =
             crate::pool::upgrade_on_stream(&mut stream, handshake.url, &request).await?;
-        let headers = crate::wire::string_pairs(&headers);
-        check_upgrade_response(status, &headers, &sec_key, handshake.extra_headers)?;
+        let pairs = crate::wire::string_pairs(&headers);
+        check_upgrade_response(status, &pairs, &sec_key, handshake.extra_headers)?;
 
-        let protocol =
-            crate::util::header_first(&headers, SEC_WEBSOCKET_PROTOCOL.as_str()).map(str::to_owned);
+        let protocol = crate::util::header_str(&headers, SEC_WEBSOCKET_PROTOCOL).map(str::to_owned);
         let ws_stream = WebSocketStream::from_partially_read(
             Box::new(stream) as WsIo,
             leftover,
@@ -150,10 +183,8 @@ impl WebSocket {
 
         check_subprotocol(stream.response_headers(), handshake.extra_headers)?;
 
-        let protocol =
-            crate::util::header_first(stream.response_headers(), SEC_WEBSOCKET_PROTOCOL.as_str())
-                .map(str::to_owned);
-        let headers = stream.response_headers().to_vec();
+        let headers = header_map_from_pairs(stream.response_headers());
+        let protocol = crate::util::header_str(&headers, SEC_WEBSOCKET_PROTOCOL).map(str::to_owned);
 
         let ws_stream = WebSocketStream::from_raw_socket(
             Box::new(stream) as WsIo,
@@ -169,36 +200,17 @@ impl WebSocket {
         }))
     }
 
-    pub(crate) fn header_map(&self) -> http::HeaderMap {
-        self.headers
-            .iter()
-            .filter_map(|(name, value)| {
-                Some((
-                    http::HeaderName::from_bytes(name.as_bytes()).ok()?,
-                    http::HeaderValue::from_str(value).ok()?,
-                ))
-            })
-            .collect()
-    }
-
     /// Sends one message.
     pub async fn send(&mut self, msg: Message) -> Result<()> {
-        self.inner
-            .send(msg.into_wire())
-            .await
-            .map_err(|e| wire_error("ws send", e))
+        send_on(&mut self.inner, msg).await
     }
 
-    /// Receives the next message, or returns `None` once the connection has ended.
+    /// Receives the next message, or `None` once the connection has closed; a ping is returned as `Message::Ping` and answered with a pong on the next `recv` or `send`.
     pub async fn recv(&mut self) -> Result<Option<Message>> {
-        match self.inner.next().await {
-            Some(Ok(msg)) => Ok(Some(Message::wire(msg))),
-            Some(Err(e)) => Err(wire_error("ws recv", e)),
-            None => Ok(None),
-        }
+        recv_on(&mut self.inner).await
     }
 
-    /// Sends a close frame and closes the connection.
+    /// Sends a close frame with no status code; send `Message::Close(Some((code, reason)))` for a custom code and reason.
     pub async fn close(&mut self) -> Result<()> {
         self.inner
             .close(None)
@@ -206,36 +218,49 @@ impl WebSocket {
             .map_err(|e| wire_error("ws close", e))
     }
 
-    /// Returns the subprotocol that the server selected.
+    /// Returns the HTTP version (`HTTP_11` or `HTTP_2`) negotiated for the WebSocket handshake.
+    #[must_use]
+    pub fn version(&self) -> http::Version {
+        self.version
+    }
+
+    /// Returns the subprotocol the server selected from the request's `sec-websocket-protocol` header, or `None` when none was offered.
+    #[must_use]
     pub fn protocol(&self) -> Option<&str> {
         self.protocol.as_deref()
     }
 
-    /// Returns the first handshake response header with the given name.
+    /// Returns the handshake response headers.
+    #[must_use]
+    pub fn headers(&self) -> &http::HeaderMap {
+        &self.headers
+    }
+
+    /// Returns the first handshake response header with the given name as text, or `None` when it is absent or not visible ASCII.
+    #[must_use]
     pub fn header(&self, name: &str) -> Option<&str> {
-        crate::util::header_first(&self.headers, name)
+        crate::util::header_str(&self.headers, name)
     }
 
     /// Splits the connection into a message sink and a message stream.
     pub fn split(
         self,
     ) -> (
-        impl futures_util::Sink<Message, Error = Error> + Send,
-        impl futures_util::Stream<Item = Result<Message>> + Send,
+        impl futures_util::Sink<Message, Error = Error> + Send + Unpin,
+        impl futures_util::Stream<Item = Result<Message>> + Send + Unpin,
     ) {
         let (sink, stream) = self.halves();
-        let sink = futures_util::sink::unfold(sink, |mut sink, msg: Message| async move {
-            sink.send(msg).await?;
-            Ok::<_, Error>(sink)
-        });
-        let stream = futures_util::stream::unfold(Some(stream), |state| async move {
-            let mut stream = state?;
-            match stream.recv().await {
-                Ok(Some(msg)) => Some((Ok(msg), Some(stream))),
-                Ok(None) => None,
-                Err(e) => Some((Err(e), None)),
-            }
-        });
+        let stream = Box::pin(futures_util::stream::unfold(
+            Some(stream),
+            |state| async move {
+                let mut stream = state?;
+                match stream.recv().await {
+                    Ok(Some(msg)) => Some((Ok(msg), Some(stream))),
+                    Ok(None) => None,
+                    Err(e) => Some((Err(e), None)),
+                }
+            },
+        ));
         (sink, stream)
     }
 
@@ -252,6 +277,19 @@ impl WebSocket {
             },
         )
     }
+}
+
+fn header_map_from_pairs(pairs: &[(String, String)]) -> http::HeaderMap {
+    let mut map = http::HeaderMap::with_capacity(pairs.len());
+    for (name, value) in pairs {
+        if let (Ok(name), Ok(value)) = (
+            http::HeaderName::from_bytes(name.as_bytes()),
+            http::HeaderValue::from_bytes(value.as_bytes()),
+        ) {
+            map.append(name, value);
+        }
+    }
+    map
 }
 
 fn connect_pseudo(url: &url::Url, host: &str, port: u16) -> PseudoHeaders {

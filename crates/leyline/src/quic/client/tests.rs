@@ -404,5 +404,5 @@ fn a_header_value_keeps_its_raw_bytes() {
     let Ok(ResponseBlock::Final { headers, .. }) = response_block(&mut state, &list) else {
         panic!("final response head");
     };
-    assert_eq!(headers["x-raw"].as_bytes(), [b'a', 0xff]);
+    assert_eq!(headers.map()["x-raw"].as_bytes(), [b'a', 0xff]);
 }

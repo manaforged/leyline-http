@@ -23,18 +23,18 @@ builds get `test-util` and release builds do not:
 
 ```toml
 [dependencies]
-leyline-http = "0.2"
+leyline-http = "0.3"
 
 [dev-dependencies]
-leyline-http = { version = "0.2", features = ["test-util"] }
+leyline-http = { version = "0.3", features = ["test-util"] }
 ```
 
 | Item | Does |
 | --- | --- |
 | `testing::Server::http(handler)` | Starts an HTTP/1.1 server on `127.0.0.1` on a free port |
 | `testing::Server::https(handler)` | The same over TLS with a private CA, `http/1.1` only |
-| `testing::Server::http_on(listener, handler)` | An HTTP/1.1 server on a `std::net::TcpListener` you bound, for a fixed port or address. Call it inside a Tokio runtime |
-| `queue([..])` | A handler that answers with each `testing::Response` in turn, then 503 |
+| `testing::Server::http_on(listener, handler)` | An HTTP/1.1 server on a `std::net::TcpListener` you bound, for a fixed port or address. It is not `async` and needs no runtime, so synchronous code can call it |
+| `queue([..])` | A handler that answers with each `testing::Response` in turn, then with an empty 503 once they run out |
 | `url(path)` | `http://127.0.0.1:<port>/path`, or `https://`. `url("")` is the origin with a trailing `/`, for a `base_url` |
 | `addr()` | The bound address |
 | `tls()` | A `Tls` that trusts only the server's CA |
@@ -47,17 +47,18 @@ A handler is any `Fn(&testing::Request) -> testing::Response + Send + Sync +
 'static`. It runs on a blocking thread, so a handler that blocks delays only
 its own response.
 
-| `testing::Request` | Holds |
+| `testing::Request` method | Returns |
 | --- | --- |
-| `method`, `target`, `body` | The method, the request target, and the body |
-| `headers` | Every header in wire order, with the case the client sent |
-| `request_line` | The first line, such as `GET /items HTTP/1.1` |
-| `raw` | The request head as received: request line, headers, and the empty line, byte for byte |
-| `text()` | `raw` as text, with invalid UTF-8 replaced |
+| `method()`, `target()`, `body()` | The method, the request target, and the body |
+| `headers()` | Every header in wire order, with the case the client sent |
+| `request_line()` | The first line, such as `GET /items HTTP/1.1` |
+| `raw()` | The request head as received: request line, headers, and the empty line, byte for byte |
+| `text()` | The body as text, with invalid UTF-8 replaced |
+| `head()` | The request line and headers as text, without the body, with invalid UTF-8 replaced |
 | `header(name)` | The first value of a header. The name match ignores case |
 | `header_values(name)` | Every value of a header, in wire order |
 
-Use `raw` or `header_values(name).len()` to check what a parsed map hides: header case,
+Use `raw()` or `header_values(name).len()` to check what a parsed map hides: header case,
 order, and duplicates.
 
 | `testing::Response` | Does |
@@ -65,7 +66,8 @@ order, and duplicates.
 | `new(status)` | A response with this status and an empty body |
 | `header(name, value)` | Adds a header |
 | `body(bytes)` | Sets the body, sent with `content-length` |
-| `close()` | Adds `connection: close`. The server closes the connection after the response |
+| `close()` | Adds `connection: close`. The server closes the connection after it sends the whole response; it does not cut the body |
+| `abort_after(bytes)` | Sends the head and the first `bytes` bytes of the body, then drops the connection. A body no longer than `bytes` is sent whole |
 | `delay(duration)` | Waits before the status line and headers |
 | `chunks(parts, pause)` | Sends a chunked body with `pause` between parts. It replaces `body`, skips empty parts, and adds `transfer-encoding: chunked` unless you set `content-length` or `transfer-encoding` |
 
@@ -101,9 +103,11 @@ assert_eq!(resp.header("x-echo-id"), Some("test-1"));
 
 let sent = server.requests().await;
 assert_eq!(sent.len(), 1);
-assert_eq!(sent[0].method, "POST");
-assert_eq!(sent[0].target, "/items");
-assert_eq!(sent[0].body, b"hello");
+assert_eq!(sent[0].method(), "POST");
+assert_eq!(sent[0].target(), "/items");
+assert_eq!(sent[0].body(), b"hello");
+assert_eq!(sent[0].text(), "hello");
+assert!(sent[0].head().starts_with("POST /items"));
 # Ok(())
 # }
 ```
@@ -139,6 +143,56 @@ assert_eq!(resp.attempts(), 2);
 # }
 ```
 
+## Cut a body short
+
+`abort_after(bytes)` drops the connection part-way through the body, which
+is how to test the handling of a truncated response. The client sees
+`Kind::Body` or `Kind::Io`. `close()` does not do this: it sends the whole
+body first.
+
+```rust,no_run
+# #[cfg(feature = "test-util")]
+# async fn run() -> leyline::Result<()> {
+use leyline::{Kind, testing};
+
+let server = testing::Server::http(|_| {
+    testing::Response::new(200).body("0123456789").abort_after(4)
+})
+.await?;
+let session = leyline::Session::builder().retry(0).build()?;
+let err = session
+    .get(server.url("/cut"))
+    .text().await
+    .expect_err("the body ends after 4 of 10 bytes");
+assert!(matches!(err.kind(), Kind::Body | Kind::Io));
+# Ok(())
+# }
+```
+
+## Test blocking code
+
+A `leyline::blocking::Session` reaches a `testing::Server` from a plain
+`#[test]` function. Start the server with the session's `block_on`:
+
+```rust,no_run
+# #[cfg(feature = "test-util")]
+# fn run() -> leyline::Result<()> {
+use leyline::testing;
+
+let session = leyline::Session::builder().build_blocking()?;
+let server = session.block_on(testing::Server::http(|request| {
+    testing::Response::new(200).body(request.body().to_vec())
+}))?;
+let text = session.block_on(session.post(server.url("/echo")).body("ping").text())?;
+assert_eq!(text, "ping");
+# Ok(())
+# }
+```
+
+`testing::Server::http_on(listener, handler)` is not `async`, so synchronous
+code can also start a server with no `block_on`, on a
+`std::net::TcpListener` it bound.
+
 ## Test timeouts
 
 `delay` holds back the head, so it trips `total` and `response_header`.
@@ -154,7 +208,7 @@ use leyline::testing;
 const LIMIT: Duration = Duration::from_millis(100);
 const STALL: Duration = Duration::from_millis(500);
 
-let server = testing::Server::http(|request| match request.target.as_str() {
+let server = testing::Server::http(|request| match request.target() {
     "/slow-head" => testing::Response::new(200).delay(STALL),
     _ => testing::Response::new(200).chunks(["first", "second"], STALL),
 })
@@ -255,7 +309,7 @@ let proxy = testing::Server::http(|_| testing::Response::new(200)).await?;
 let session = Session::builder().proxy(proxy.url("")).build()?;
 session.get("http://upstream.test/path").send().await?;
 let seen = proxy.requests().await;
-assert_eq!(seen[0].target, "http://upstream.test/path");
+assert_eq!(seen[0].target(), "http://upstream.test/path");
 # Ok(())
 # }
 ```

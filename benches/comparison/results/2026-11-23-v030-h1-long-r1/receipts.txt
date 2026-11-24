@@ -1,0 +1,45 @@
+stop_ref leyline stop_min_rounds 3 stop_margin 0.05
+date_utc 2026-11-23T21:41:03Z
+kernel 7.0.0-38-generic
+loadavg_before 1.72 3.92 4.57
+loadavg_after 8.57 5.46 5.05
+governor performance
+cpu AMD Ryzen 9 9950X3D 16-Core Processor
+server_cpus 3-7,19-23 client_cpus 8-15,24-31
+server_addr 127.0.0.1:0 netns none link loopback
+leyline_source_hash 8381ed83d4c0bb893837f77167878e815494efaf6a153285d2e4737a65da3d4c
+leyline_commit c75e85e8
+profile bare
+timeout 30s
+leyline_chrome bare
+tls matched
+certificate_verification trusted-ca
+ca_sha256 59a5668c6cdf5070a3828aff802f86320c5bedbb2b541f6f8e1d0cb568b5fb67
+curl-client/Cargo.lock name = "curl-sys" version = "0.4.91+curl-8.22.0"
+h2-client/Cargo.lock name = "h2" version = "0.4.20"
+hyper-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.21"
+leyline-client/Cargo.lock name = "leyline-http" version = "0.2.0"
+pingora-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "pingora-core" version = "0.9.0"
+reqwest-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.20" -- name = "reqwest" version = "0.13.5"
+ureq-client/Cargo.lock 
+wreq-client/Cargo.lock name = "wreq" version = "0.16.3"
+go go version go1.27.1 linux/amd64
+node v22.19.0 builtin_undici 6.21.2 undici  axios  got 
+python Python 3.12.3 httpcore==1.0.9 httpx==0.28.1 requests==2.31.0 urllib3==2.0.7 
+java openjdk version "21.0.13.1" 2026-11-17
+okhttp 
+dotnet 
+proto h1
+mode throughput paced_seconds 10
+8f5282e8ee78b9a29e63e77f1c5010eff469a5ccd1082e1d867b29983b82137e  server
+a53c5dc919c8e427b78e33cab544c66d681f589a2a1a52d614b362b93d36a2c6  leyline
+994e0e610f481185d0f131508a110f82497b928241b6c561fd939c952339c77b  leyline-blocking
+dc6347adf95c0494499a28d6f8623d7f78979d9ffe7ae53977b85a6e8bb4b570  reqwest
+e4d40b42c1ffd0b9ab951865be63d8b0351779b5d2e4fe4fc22bb94f30be5bfc  hyper
+749f99a8147aacfddfa23831a1b72e4b9a3bf366aadbeec2b8e19415343dfd43  h2
+a89fab90e2e32abdedb8b81fa619c3a9d71eab61e1d81a4c9156289596057e93  curl
+e376ae1da7e685a2c450ba5f4520c71cbbca39d2ea1c7bb8a7e92652235e516d  wreq
+08f9caaccf8395d1dc9e5fa3873cfda224e5d683af38941528903b2770020e42  ureq
+8da74b33f39a216a8d1118973bfac92e75c24798aa9e1f4424e59ef32845c2b3  nethttp
+b0632a1e99bdb62221becdefece583a5f3abb45b174e3a1c532527dc00acc0e8  tlsclient
+38d61a359431c12d7499cda8181489ef9b1743f47772af43fecc4a2371eb40d7  fasthttp

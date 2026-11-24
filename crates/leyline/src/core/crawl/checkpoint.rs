@@ -19,7 +19,12 @@ use crate::core::session::Session;
 use crate::error::{Error, Kind, Result};
 use crate::util::version::{self, Versioned};
 
-const MAX_CHECKPOINT_BYTES: u64 = 64 * 1024 * 1024;
+const DEFAULT_MAX_CHECKPOINT_BYTES: u64 = 64 * 1024 * 1024;
+
+fn checkpoint_limit(session: &Session) -> u64 {
+    let body = session.body_rules().configured_max_body().unwrap_or(0) as u64;
+    DEFAULT_MAX_CHECKPOINT_BYTES.max(body)
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum CheckpointVersion {
@@ -43,6 +48,21 @@ impl Versioned for CheckpointVersion {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedSitemap {
+    Full {
+        url: Url,
+        attempts: u32,
+        not_before: Option<SystemTime>,
+        #[serde(default)]
+        hops: usize,
+        #[serde(default)]
+        previous: Vec<Url>,
+    },
+    Legacy(Url, u32, Option<SystemTime>),
+}
+
+#[derive(Serialize, Deserialize)]
 struct Checkpoint {
     #[serde(with = "version")]
     version: CheckpointVersion,
@@ -56,7 +76,7 @@ struct Checkpoint {
     dedup: Dedup,
     stats: CrawlStats,
     delayed: Vec<(SystemTime, Queued)>,
-    sitemaps: Vec<(Url, u32, Option<SystemTime>)>,
+    sitemaps: Vec<SavedSitemap>,
     sitemap_files: HashSet<String>,
     pauses: Vec<(Origin, SystemTime)>,
 }
@@ -69,10 +89,11 @@ impl Crawl {
         while let Some(event) = self.tasks.next().await {
             self.handle(event);
         }
+        let max_bytes = checkpoint_limit(&self.session);
         let saved = Checkpoint::capture(self)?;
         atomic::blocking(move |waiting| {
             let bytes = serde_json::to_vec(&saved).map_err(Error::from_json)?;
-            if bytes.len() as u64 > MAX_CHECKPOINT_BYTES {
+            if bytes.len() as u64 > max_bytes {
                 return Err(too_large());
             }
             waiting.check()?;
@@ -83,11 +104,12 @@ impl Crawl {
 
     /// Loads a checkpoint with a supplied session and rechecks robots.txt before sending new requests.
     pub fn load(session: &Session, path: impl AsRef<Path>) -> Result<Self> {
+        let max_bytes = checkpoint_limit(session);
         let mut bytes = Vec::new();
         std::fs::File::open(path)?
-            .take(MAX_CHECKPOINT_BYTES + 1)
+            .take(max_bytes.saturating_add(1))
             .read_to_end(&mut bytes)?;
-        if bytes.len() as u64 > MAX_CHECKPOINT_BYTES {
+        if bytes.len() as u64 > max_bytes {
             return Err(too_large());
         }
         let saved: Checkpoint = serde_json::from_slice(&bytes).map_err(Error::from_json)?;
@@ -125,7 +147,7 @@ impl Checkpoint {
             .filter_map(|origin| {
                 crawl
                     .pace
-                    .ready_at(&origin)
+                    .ready_at_with(&origin, crawl.site_delay(&origin))
                     .max(crawl.session.host_limits().ready_at(&origin))
                     .map(|at| Ok((origin, wall_time(at)?)))
             })
@@ -150,11 +172,13 @@ impl Checkpoint {
                 .queue
                 .iter()
                 .map(|file| {
-                    Ok((
-                        file.url.clone(),
-                        file.attempts,
-                        file.not_before.map(wall_time).transpose()?,
-                    ))
+                    Ok(SavedSitemap::Full {
+                        url: file.url.clone(),
+                        attempts: file.attempts,
+                        not_before: file.not_before.map(wall_time).transpose()?,
+                        hops: file.hops,
+                        previous: file.previous.clone(),
+                    })
                 })
                 .collect::<Result<_>>()?,
             sitemap_files: crawl.sitemaps.files.clone(),
@@ -164,7 +188,7 @@ impl Checkpoint {
 
     fn restore(self, session: &Session) -> Result<Crawl> {
         self.frontier.validate()?;
-        if self.stats.pages() > self.dedup.kept() as u64 {
+        if self.settings.dedup && self.stats.pages() > self.dedup.kept() as u64 {
             return Err(Error::config(
                 "checkpoint page count exceeds its duplicate history",
             ));
@@ -186,19 +210,32 @@ impl Checkpoint {
         crawl.sitemaps.queue = self
             .sitemaps
             .into_iter()
-            .map(|(url, attempts, at)| {
+            .map(|saved| {
+                let (url, attempts, at, hops, previous) = match saved {
+                    SavedSitemap::Full {
+                        url,
+                        attempts,
+                        not_before,
+                        hops,
+                        previous,
+                    } => (url, attempts, not_before, hops, previous),
+                    SavedSitemap::Legacy(url, attempts, at) => (url, attempts, at, 0, Vec::new()),
+                };
                 Ok(SitemapFile {
                     url,
                     attempts,
+                    hops,
+                    previous,
                     not_before: at.map(monotonic).transpose()?,
                 })
             })
             .collect::<Result<_>>()?;
         crawl.sitemaps.files = self.sitemap_files;
-        crawl.start();
-        for (origin, at) in self.pauses {
-            crawl.pace.pause_until(origin, monotonic(at)?);
-        }
+        crawl.restored_pauses = self
+            .pauses
+            .into_iter()
+            .map(|(origin, at)| Ok((origin, monotonic(at)?)))
+            .collect::<Result<_>>()?;
         Ok(crawl)
     }
 }

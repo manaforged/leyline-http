@@ -45,8 +45,8 @@ jobs:
         with:
           name: release-packages
           path: |
-            target/verify/package/*.crate
-            target/verify/release-notes.md
+            target/package/*.crate
+            target/release-notes.md
           retention-days: 7
           if-no-files-found: error
 

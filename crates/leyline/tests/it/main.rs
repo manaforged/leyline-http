@@ -14,13 +14,18 @@ mod http_support {
 mod tls_support;
 
 mod accounts_and_forms;
+mod audit_regressions;
 mod body_cap;
 mod cfnetwork_live;
 mod claim_guard;
+mod combination_matrix;
 mod connect_timeout;
 #[cfg(feature = "bench-internals")]
 mod connection_stats;
 mod content_encoding;
+mod contract_audit_fixes;
+mod contract_proxy_and_retry;
+mod contract_transport_matrix;
 mod cookie_lifetime;
 mod core_digest;
 #[cfg(feature = "multipart")]
@@ -36,7 +41,10 @@ mod credentials_hidden;
 mod deadlines_and_lifecycle;
 mod devices;
 mod digest_redirects;
+mod doh_and_ech;
 mod echo;
+mod enterprise_resilience;
+mod enterprise_workloads;
 mod ergonomics;
 mod error_body_budget;
 #[cfg(feature = "bench-internals")]
@@ -133,6 +141,7 @@ mod pool_h1_injection;
 mod pool_h1_keepalive;
 #[cfg(feature = "bench-internals")]
 mod pool_reconnect_storm;
+mod power_surface;
 mod pq_key_shares;
 #[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
 mod profile_and_builder_checks;
@@ -140,12 +149,14 @@ mod profile_and_builder_checks;
 mod profile_builtin;
 #[cfg(feature = "bench-internals")]
 mod profile_validation;
+mod property_invariants;
 mod proxy_identity;
 mod proxy_rebind;
 mod proxy_rules;
 #[cfg(all(feature = "bench-internals", feature = "http3", feature = "websocket"))]
 mod proxy_wire_bytes;
 mod public_debug;
+mod public_options_matrix;
 mod read_until;
 mod recovery;
 mod redirect_host;
@@ -166,9 +177,11 @@ mod sessions_and_devices;
 mod smoke;
 mod state_files;
 mod status_and_retry;
+mod surface_unlocks;
 mod timeouts;
 #[cfg(feature = "bench-internals")]
 mod tls_client_hello_order;
+mod tls_features;
 mod tls_floor;
 #[cfg(feature = "bench-internals")]
 mod tls_happy_eyeballs;
@@ -178,6 +191,8 @@ mod tls_peet;
 mod tls_pinning_hostname;
 mod tls_system_trust_live;
 mod trace_unwind;
+mod transport_features;
+mod v030_workloads;
 mod websocket_messages;
 #[cfg(feature = "websocket")]
 mod websocket_subprotocol;

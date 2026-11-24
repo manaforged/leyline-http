@@ -7,8 +7,16 @@ pub(super) async fn run_h1_stream_pump(mut pump: H1StreamPump) {
         limit: pump.drain_limit,
         wait: pump.pool.drain_wait(),
     };
-    let drained_clean =
-        stream_body_into(pump.io.as_mut(), pump.framing, initial, &pump.tx, drain).await;
+    let inline = matches!(pump.pool.io(), crate::pool::Io::Blocking(_));
+    let drained_clean = stream_body_into(
+        pump.io.as_mut(),
+        pump.framing,
+        initial,
+        &pump.tx,
+        drain,
+        inline,
+    )
+    .await;
     if drained_clean
         && pump.reusable
         && !excess
@@ -33,12 +41,13 @@ pub(super) async fn stream_body_into(
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
     drain: Drain,
+    inline: bool,
 ) -> bool {
     let result = match framing {
         BodyFraming::None => Ok(true),
-        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx, drain).await,
-        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx).await,
-        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx).await,
+        BodyFraming::Fixed(len) => stream_fixed_into(stream, initial, len, tx, drain, inline).await,
+        BodyFraming::Chunked => stream_chunked_into(stream, initial, tx, inline).await,
+        BodyFraming::ToClose => stream_to_close_into(stream, initial, tx, inline).await,
     };
     match result {
         Ok(clean) => clean,
@@ -47,6 +56,16 @@ pub(super) async fn stream_body_into(
             false
         }
     }
+}
+
+async fn send_chunk(tx: &mpsc::Sender<io::Result<Bytes>>, piece: Bytes, inline: bool) -> bool {
+    if tx.send(Ok(piece)).await.is_err() {
+        return false;
+    }
+    if inline {
+        tokio::task::yield_now().await;
+    }
+    true
 }
 async fn until_closed<T>(
     tx: &mpsc::Sender<io::Result<Bytes>>,
@@ -64,28 +83,55 @@ pub(super) struct Drain {
     wait: Duration,
 }
 
+const STREAM_SLAB_MIN_SPARE: usize = 16 * 1024;
+const SMALL_STREAM_COPY: usize = 4 * 1024;
+const DRAIN_BUF_CAP: usize = 8 * 1024;
+
+async fn read_stream_chunk<S>(
+    stream: &mut S,
+    buf: &mut bytes::BytesMut,
+    want: usize,
+) -> io::Result<usize>
+where
+    S: AsyncRead + Unpin + ?Sized,
+{
+    if buf.capacity() < want.min(STREAM_SLAB_MIN_SPARE) {
+        buf.reserve(want);
+    }
+    let limit = want.min(buf.capacity());
+    read_limit(stream, buf, limit).await
+}
+
+fn take_stream_chunk(buf: &mut bytes::BytesMut) -> Bytes {
+    if buf.len() <= SMALL_STREAM_COPY && buf.capacity() > SMALL_STREAM_COPY * 2 {
+        let piece = Bytes::copy_from_slice(&buf[..]);
+        buf.clear();
+        piece
+    } else {
+        buf.split().freeze()
+    }
+}
+
 pub(super) async fn stream_fixed_into(
     stream: &mut dyn H1Io,
-    initial: Vec<u8>,
+    mut initial: Vec<u8>,
     len: u64,
     tx: &mpsc::Sender<io::Result<Bytes>>,
     drain: Drain,
+    inline: bool,
 ) -> io::Result<bool> {
     let take = (initial.len() as u64).min(len) as usize;
     let mut remaining = len - take as u64;
-    if take > 0
-        && tx
-            .send(Ok(Bytes::copy_from_slice(&initial[..take])))
-            .await
-            .is_err()
-    {
-        return Ok(drain_fixed(stream, remaining, drain).await);
+    if take > 0 {
+        initial.truncate(take);
+        if !send_chunk(tx, Bytes::from(initial), inline).await {
+            return Ok(drain_fixed(stream, remaining, drain).await);
+        }
     }
-    let mut buf = initial;
+    let mut buf = bytes::BytesMut::new();
     while remaining > 0 {
-        buf.clear();
         let want = usize::try_from(remaining).map_or(READ_CHUNK, |left| left.min(READ_CHUNK));
-        let Some(read) = until_closed(tx, read_into(stream, &mut buf, want)).await else {
+        let Some(read) = until_closed(tx, read_stream_chunk(stream, &mut buf, want)).await else {
             return Ok(drain_fixed(stream, remaining, drain).await);
         };
         let n = read?;
@@ -93,11 +139,7 @@ pub(super) async fn stream_fixed_into(
             return Err(cut_short().into_error().into_io());
         }
         remaining -= n as u64;
-        if tx
-            .send(Ok(Bytes::copy_from_slice(&buf[..n])))
-            .await
-            .is_err()
-        {
+        if !send_chunk(tx, take_stream_chunk(&mut buf), inline).await {
             return Ok(drain_fixed(stream, remaining, drain).await);
         }
     }
@@ -108,7 +150,11 @@ async fn drain_fixed(stream: &mut dyn H1Io, mut remaining: u64, drain: Drain) ->
     if remaining > drain.limit {
         return false;
     }
-    let mut tmp = vec![0u8; READ_CHUNK];
+    if remaining == 0 {
+        return true;
+    }
+    let cap = usize::try_from(remaining).map_or(DRAIN_BUF_CAP, |left| left.min(DRAIN_BUF_CAP));
+    let mut tmp = vec![0u8; cap];
     let read_rest = async {
         while remaining > 0 {
             let want = remaining.min(tmp.len() as u64) as usize;
@@ -125,25 +171,22 @@ pub(super) async fn stream_to_close_into(
     stream: &mut dyn H1Io,
     initial: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    inline: bool,
 ) -> io::Result<bool> {
-    if !initial.is_empty() && tx.send(Ok(Bytes::from(initial))).await.is_err() {
+    if !initial.is_empty() && !send_chunk(tx, Bytes::from(initial), inline).await {
         return Ok(false);
     }
-    let mut buf = Vec::new();
+    let mut buf = bytes::BytesMut::new();
     loop {
-        buf.clear();
-        let Some(read) = until_closed(tx, read_into(stream, &mut buf, READ_CHUNK)).await else {
+        let Some(read) = until_closed(tx, read_stream_chunk(stream, &mut buf, READ_CHUNK)).await
+        else {
             return Ok(false);
         };
         let n = read?;
         if n == 0 {
             return Ok(true);
         }
-        if tx
-            .send(Ok(Bytes::copy_from_slice(&buf[..n])))
-            .await
-            .is_err()
-        {
+        if !send_chunk(tx, take_stream_chunk(&mut buf), inline).await {
             return Ok(false);
         }
     }
@@ -162,6 +205,7 @@ pub(super) async fn stream_chunked_into(
     stream: &mut dyn H1Io,
     mut buf: Vec<u8>,
     tx: &mpsc::Sender<io::Result<Bytes>>,
+    inline: bool,
 ) -> io::Result<bool> {
     let mut chunked = Chunked::new();
     loop {
@@ -173,11 +217,11 @@ pub(super) async fn stream_chunked_into(
             Step::Data(n) => {
                 let piece = Bytes::copy_from_slice(&buf[..n]);
                 buf.drain(..n);
-                if tx.send(Ok(piece)).await.is_err() {
+                if !send_chunk(tx, piece, inline).await {
                     return Ok(false);
                 }
             }
-            Step::Done => return Ok(true),
+            Step::Done => return Ok(buf.is_empty()),
         }
     }
 }
@@ -198,7 +242,7 @@ impl Exchange<'_> {
     ) -> Result<Sent<Reply<W>>, Error> {
         let leg = opened.leg();
         let count_install = leg == LegKind::Fresh && !(first && self.parked);
-        let replay = body.replay();
+        let replay = body.try_clone();
         let attempt = Attempt {
             leg,
             first,
@@ -254,7 +298,7 @@ impl Exchange<'_> {
         };
         let answer = deliver_head(self.pool, self.key, leg, req.response, req.body_limit).await?;
         let timing = ResponseTiming::leg(self.started, connect_ms);
-        Ok(Delivered::new(answer, req.scheme, tls, timing)?)
+        Ok(Delivered::new(answer, tls, timing)?)
     }
 }
 
@@ -277,12 +321,7 @@ enum Delivery {
 }
 
 impl Delivered {
-    fn new(
-        answer: Answer,
-        scheme: Scheme,
-        tls: TlsInfo,
-        timing: ResponseTiming,
-    ) -> Result<Self, Error> {
+    fn new(answer: Answer, tls: TlsInfo, timing: ResponseTiming) -> Result<Self, Error> {
         let Answer {
             status,
             headers,
@@ -304,7 +343,7 @@ impl Delivered {
             trailers,
             body,
         ));
-        response.tls = scheme.is_secure().then_some(tls);
+        response.tls = Some(tls);
         response.timing = timing;
         Ok(Self { response, pump })
     }
@@ -371,7 +410,9 @@ async fn deliver_head(
         .flatten();
     if !response.keeps_stream(status) || inline_error.is_some() {
         let (body, complete) = match inline_error {
-            Some((budget, len)) => read_error_prefix(io.as_mut(), &mut head, budget, len).await,
+            Some((budget, len)) => {
+                Box::pin(read_error_prefix(io.as_mut(), &mut head, budget, len)).await
+            }
             None => (
                 read_h1_body(io.as_mut(), &mut head, body_limit).await?,
                 true,

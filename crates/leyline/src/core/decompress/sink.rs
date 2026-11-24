@@ -22,6 +22,10 @@ impl Sink {
     pub(super) fn truncated(&self) -> bool {
         self.truncated
     }
+
+    pub(super) fn swap_buf(&mut self, other: &mut Vec<u8>) {
+        std::mem::swap(&mut self.buf, other);
+    }
 }
 
 impl Write for Sink {

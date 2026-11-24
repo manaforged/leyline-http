@@ -30,6 +30,7 @@ fn rotate() {
         rotated
             .proxy_for(&url, None)
             .expect("valid proxy url")
+            .as_deref()
             .map(crate::net::ProxyUrl::as_str),
         Some("http://second:2"),
         "with_proxy must win over the build-time proxy"

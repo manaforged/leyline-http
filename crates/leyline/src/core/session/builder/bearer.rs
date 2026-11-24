@@ -12,35 +12,40 @@ use refresh::Refresh;
 #[derive(Clone)]
 enum Token {
     Fixed(String),
+    Basic(String),
     Refreshing(Arc<Refresh>),
 }
 
 #[derive(Clone)]
-pub(crate) struct BearerToken {
+pub(crate) struct Credential {
     value: Token,
     pub(crate) slot: usize,
 }
 
-impl BearerToken {
+impl Credential {
     pub(in crate::core::session) fn value(&self) -> HeaderStr {
         match &self.value {
-            Token::Fixed(value) => HeaderStr::from(value.as_str()),
+            Token::Fixed(value) | Token::Basic(value) => HeaderStr::from(value.as_str()),
             Token::Refreshing(refresh) => refresh.value(),
         }
     }
 
     pub(in crate::core::session) fn version(&self) -> Option<u64> {
         match &self.value {
-            Token::Fixed(_) => None,
+            Token::Fixed(_) | Token::Basic(_) => None,
             Token::Refreshing(refresh) => Some(refresh.version()),
         }
     }
 
     pub(in crate::core::session) async fn renew(&self, version: u64) -> Result<()> {
         match &self.value {
-            Token::Fixed(_) => Ok(()),
+            Token::Fixed(_) | Token::Basic(_) => Ok(()),
             Token::Refreshing(refresh) => refresh.renew(version).await,
         }
+    }
+
+    pub(super) fn refreshable(&self) -> bool {
+        !matches!(self.value, Token::Basic(_))
     }
 
     pub(super) fn refreshing(mut self, callback: Option<Callback>) -> Self {
@@ -56,16 +61,30 @@ impl BearerToken {
 }
 
 impl SessionBuilder {
-    /// Sets the `Authorization: Bearer` header sent on every request.
-    pub fn bearer_auth(mut self, token: &str) -> Self {
-        let value = format!("Bearer {token}");
-        if crate::core::headers::value(value.as_str()).is_err() {
+    /// Sets the `Authorization: Bearer` header, sent to every origin, or only to the `base_url` origin when one is set, and never across a cross-origin redirect.
+    pub fn bearer_auth(self, token: impl AsRef<str>) -> Self {
+        self.credential(Token::Fixed(crate::util::bearer_credentials(
+            token.as_ref(),
+        )))
+    }
+
+    /// Sets the `Authorization` header to HTTP Basic credentials with the same origin scope as `bearer_auth`, replacing a bearer token or default `Authorization` header set before it.
+    pub fn basic_auth(self, user: impl AsRef<str>, password: impl AsRef<str>) -> Self {
+        self.credential(Token::Basic(crate::util::basic_credentials(
+            user.as_ref(),
+            password.as_ref(),
+        )))
+    }
+
+    fn credential(mut self, value: Token) -> Self {
+        let token = Credential { value, slot: 0 };
+        if crate::core::headers::value(token.value().as_str()).is_err() {
             self.invalid_header(AUTHORIZATION);
         }
         self.remove_default(AUTHORIZATION);
-        self.bearer = Some(BearerToken {
-            value: Token::Fixed(value),
+        self.credential = Some(Credential {
             slot: self.default_headers.len(),
+            ..token
         });
         self
     }
@@ -81,7 +100,7 @@ impl SessionBuilder {
     }
 
     pub(super) fn remove_default(&mut self, name: &str) {
-        if let Some(bearer) = self.bearer.as_mut() {
+        if let Some(bearer) = self.credential.as_mut() {
             let removed = self.default_headers[..bearer.slot]
                 .iter()
                 .filter(|(k, _)| k.eq_ignore_ascii_case(name))
@@ -94,7 +113,7 @@ impl SessionBuilder {
 
     pub(super) fn push_default(&mut self, name: String, value: String) {
         match self
-            .bearer
+            .credential
             .take_if(|_| name.eq_ignore_ascii_case(AUTHORIZATION))
         {
             Some(bearer) => self.default_headers.insert(bearer.slot, (name, value)),

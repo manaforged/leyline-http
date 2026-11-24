@@ -45,9 +45,14 @@ impl DatagramTransport {
         port: u16,
     ) -> Result<(Self, SocketAddr), QuicError> {
         let peer_addr = resolve_peer(connector.dialer().resolver(), host, port).await?;
-        let socket = UdpSocket::bind(crate::util::unspecified_for(peer_addr))
-            .await
-            .map_err(|e| QuicError::Socket(format!("udp bind: {e}")))?;
+        let options = connector.dialer().socket_options();
+        let socket = crate::net::bind_udp(peer_addr, options).map_err(|e| {
+            options.map_io_error(
+                e,
+                |e| QuicError::Config(format!("udp bind: {e}")),
+                |e| QuicError::Socket(format!("udp bind: {e}")),
+            )
+        })?;
         socket
             .connect(peer_addr)
             .await
@@ -64,7 +69,10 @@ impl DatagramTransport {
     ) -> Result<(Self, SocketAddr), QuicError> {
         let (relay, relay_addr) = Socks5Udp::open(connector.dialer(), proxy, host, port)
             .await
-            .map_err(|e| QuicError::Proxy(format!("h3 proxy: {e}")))?;
+            .map_err(|e| match e {
+                crate::net::NetError::Config(err) => QuicError::Config(format!("h3 proxy: {err}")),
+                other => QuicError::ProxyNet(Box::new(other)),
+            })?;
         Ok((Self::Socks5(relay), relay_addr))
     }
 
@@ -99,6 +107,49 @@ impl DatagramTransport {
             Self::Direct(socket) => socket.recv(buf).await,
             #[cfg(feature = "socks")]
             Self::Socks5(relay) => relay.recv(buf).await,
+        }
+    }
+
+    pub(crate) fn try_recv(&self, buf: &mut [u8]) -> io::Result<usize> {
+        match self {
+            Self::Direct(socket) => socket.try_recv(buf),
+            #[cfg(feature = "socks")]
+            Self::Socks5(_) => Err(io::Error::from(io::ErrorKind::WouldBlock)),
+        }
+    }
+
+    pub(crate) fn try_send(&self, datagram: &[u8]) -> io::Result<usize> {
+        match self {
+            Self::Direct(socket) => socket.try_send(datagram),
+            #[cfg(feature = "socks")]
+            Self::Socks5(_) => Err(io::Error::from(io::ErrorKind::WouldBlock)),
+        }
+    }
+
+    pub(crate) fn supports_direct_batch(&self) -> bool {
+        matches!(self, Self::Direct(_))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) async fn writable(&self) -> io::Result<()> {
+        match self {
+            Self::Direct(socket) => socket.writable().await,
+            #[cfg(feature = "socks")]
+            Self::Socks5(_) => Ok(()),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn try_send_batch(
+        &self,
+        buf: &[u8],
+        slot_len: usize,
+        lens: &[usize],
+    ) -> io::Result<usize> {
+        match self {
+            Self::Direct(socket) => crate::net::try_send_udp_batch(socket, buf, slot_len, lens),
+            #[cfg(feature = "socks")]
+            Self::Socks5(_) => Err(io::Error::from(io::ErrorKind::WouldBlock)),
         }
     }
 }

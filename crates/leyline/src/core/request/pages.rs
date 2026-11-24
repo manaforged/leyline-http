@@ -34,12 +34,19 @@ struct Template {
 
 impl RequestBuilder {
     /// Sends the request and follows each `Link: rel="next"` header, yielding one response per page.
-    pub fn pages(self) -> impl Stream<Item = Result<Response>> + Send + Unpin + use<> {
+    pub fn pages(mut self) -> impl Stream<Item = Result<Response>> + Send + Unpin + use<> {
+        let prepared = self
+            .reject_download_options()
+            .and_then(|()| self.prepare_in_place());
         let template = Template::of(&self);
         let visited = template.first.iter().cloned().collect();
+        let pending: PageFuture = match prepared {
+            Ok(()) => self.send_prepared(),
+            Err(error) => Box::pin(std::future::ready(Err(error))),
+        };
         Pages {
             template,
-            pending: Some(Box::pin(self.send())),
+            pending: Some(pending),
             visited,
         }
     }
@@ -47,9 +54,13 @@ impl RequestBuilder {
 
 impl Template {
     fn of(first: &RequestBuilder) -> Self {
+        let first_url = first
+            .draft
+            .url()
+            .map(|u| Url::clone(&first.session.hsts_upgrade(&std::sync::Arc::new(u.clone()))));
         Self {
             session: first.session.clone(),
-            first: first.draft.url().cloned(),
+            first: first_url,
             headers: first.draft.headers.clone(),
             carry: first.draft.carry.clone(),
         }
@@ -73,15 +84,20 @@ impl Template {
             next.draft.carry.preset = preset;
         }
         next.draft.headers = self.headers.clone();
+        next.draft
+            .headers
+            .remove_where(|name| crate::util::is_body_header(name.as_str()));
         if !self
             .first
             .as_ref()
             .is_some_and(|first| Origin::same(first, url))
         {
-            next.draft.carry.digest_auth = None;
-            next.draft
-                .headers
-                .remove_where(|name| cross_origin_header(name.as_str()));
+            if let Some(overrides) = next.draft.carry.overrides.as_deref_mut() {
+                overrides.digest_auth = None;
+            }
+            next.draft.headers.remove_where(|name| {
+                cross_origin_header(name.as_str()) || name.as_str().eq_ignore_ascii_case("referer")
+            });
         }
         next.trusting(self.first.clone())
     }
@@ -93,7 +109,13 @@ impl Pages {
         let Some(url) = response.link(NEXT) else {
             return;
         };
-        if self.template.downgrades(&url) {
+        let url = Url::clone(
+            &self
+                .template
+                .session
+                .hsts_upgrade(&std::sync::Arc::new(url)),
+        );
+        if self.template.downgrades(&url) || Origin::downgrades(response.url(), &url) {
             return;
         }
         if self.visited.insert(url.clone()) {

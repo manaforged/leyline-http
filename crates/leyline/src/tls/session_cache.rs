@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use leyline_bssl::ex_data::Index;
 use leyline_bssl::ssl::{Ssl, SslConnectorBuilder, SslRef, SslSession, SslSessionCacheMode};
 use lru::LruCache;
-use sha2::{Digest, Sha256};
 
 use crate::tls::error::TlsError;
 use crate::tls::trust::TrustIdentity;
@@ -16,7 +15,6 @@ const CAPACITY: NonZeroUsize = match NonZeroUsize::new(256) {
 };
 
 const POLICY_SEPARATOR: &str = "#trust=";
-const CREDENTIAL_SEPARATOR: &str = "#proxy-credentials=";
 
 #[derive(Clone)]
 pub(crate) struct SessionCache {
@@ -65,18 +63,11 @@ impl SessionCache {
         format!("{key}{POLICY_SEPARATOR}{}", self.policy.as_str())
     }
 
-    pub(crate) fn key(host: &str, port: u16, route: Option<&url::Url>) -> String {
-        let Some(route) = route else {
-            return format!("{host}:{port}|");
-        };
-        let mut bare = route.clone();
-        let credentials = format!("{}:{}", route.username(), route.password().unwrap_or(""));
-        let stripped = bare.set_username("").is_ok() && bare.set_password(None).is_ok();
-        if !stripped || credentials == ":" {
-            return format!("{host}:{port}|{bare}");
+    pub(crate) fn key(host: &str, port: u16, route: Option<&crate::net::ProxyUrl>) -> String {
+        match route {
+            None => format!("{host}:{port}|"),
+            Some(proxy) => format!("{host}:{port}|{}", proxy.identity()),
         }
-        let digest = hex::encode(Sha256::digest(credentials.as_bytes()));
-        format!("{host}:{port}|{bare}{CREDENTIAL_SEPARATOR}{digest}")
     }
 
     pub(crate) fn register(builder: &mut SslConnectorBuilder) -> Result<(), TlsError> {

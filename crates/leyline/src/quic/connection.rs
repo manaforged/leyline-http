@@ -39,7 +39,7 @@ impl H3Config {
         let mut config =
             quiche::Config::with_boring_ssl_ctx_builder(quiche::PROTOCOL_VERSION, ssl_builder)
                 .map_err(|e| QuicError::Config(format!("quic config: {e}")))?;
-        config.verify_peer(true);
+        config.verify_peer(!trust.accepts_invalid_certs());
         config
             .set_application_protos(quiche::h3::APPLICATION_PROTOCOL)
             .map_err(|e| QuicError::Config(format!("quic alpn: {e}")))?;
@@ -116,18 +116,39 @@ pub(crate) async fn connect_and_handshake(
     proxy: Option<&crate::net::ProxyUrl>,
 ) -> Result<EstablishedH3, QuicError> {
     let host = crate::util::bare_host(host);
-    let mut opening = open(h3_cfg, trust, connector, host, port, proxy).await?;
-    let h3 = handshake(h3_cfg, &mut opening).await?;
+    let mut ech_override = connector.resolve_initial_ech(host, port).await;
+    let mut retried_ech = false;
+    let (opening, h3) = loop {
+        let ech = ech_override.as_deref().or_else(|| trust.ech_config());
+        let mut opening = open(h3_cfg, trust, connector, host, port, proxy, ech).await?;
+        match handshake(h3_cfg, &mut opening).await {
+            Ok(h3) => break (opening, h3),
+            Err((err, retry_configs)) => {
+                if let Some(next) = FingerprintConnector::ech_retry_override(
+                    &mut retried_ech,
+                    ech.is_some(),
+                    retry_configs.as_deref(),
+                ) {
+                    ech_override = Some(next);
+                    continue;
+                }
+                return Err(err);
+            }
+        }
+    };
     let Opening {
         socket,
-        conn,
+        mut conn,
         peer_addr,
         local_addr,
     } = opening;
+    let ech_accepted = conn.ssl_mut().ech_accepted();
     let tls = crate::wire::TlsInfo::from(crate::wire::TlsFacts {
         peer_cert_der: conn.peer_cert().map(Into::into),
         version: Some("TLSv1.3".into()),
         cipher: conn.cipher().map(Into::into),
+        ech_accepted,
+        remote_addr: Some(peer_addr),
     });
     Ok(EstablishedH3 {
         socket,
@@ -164,6 +185,7 @@ async fn open(
     host: &str,
     port: u16,
     proxy: Option<&crate::net::ProxyUrl>,
+    ech: Option<&[u8]>,
 ) -> Result<Opening, QuicError> {
     let (scid_bytes, dcid_bytes) = connection_ids(h3_cfg)?;
     let mut config = h3_cfg.build_quic_config(trust, host)?;
@@ -190,6 +212,10 @@ async fn open(
     hello
         .apply(conn.ssl_mut(), true)
         .map_err(|e| QuicError::Config(format!("quic hello: {e}")))?;
+    if let Some(ech) = ech {
+        crate::tls::apply_ech(conn.ssl_mut(), ech)
+            .map_err(|e| QuicError::Config(format!("quic ech: {e}")))?;
+    }
     Ok(Opening {
         socket,
         conn,
@@ -201,38 +227,47 @@ async fn open(
 async fn handshake(
     h3_cfg: &H3Config,
     opening: &mut Opening,
-) -> Result<quiche::h3::Connection, QuicError> {
-    let h3_config = h3_cfg.build_h3_config()?;
+) -> Result<quiche::h3::Connection, (QuicError, Option<Vec<u8>>)> {
+    let h3_config = h3_cfg.build_h3_config().map_err(|e| (e, None))?;
     let Opening {
         socket,
         conn,
         peer_addr,
         local_addr,
     } = opening;
-    let mut out = vec![0u8; usize::from(h3_cfg.h3.max_udp_payload_size)];
+    let mut egress = EgressBatch::new(usize::from(h3_cfg.h3.max_udp_payload_size));
     let mut buf = vec![0u8; UDP_RECV_BUFFER];
     let mut iter = 0u32;
     loop {
         iter += 1;
         if iter > 10_000 {
-            return Err(QuicError::Protocol(format!(
-                "h3 handshake: CPU-spin guard tripped at {iter} iters: closed={} established={} h3=false",
-                conn.is_closed(),
-                conn.is_established(),
-            )));
+            return Err((
+                QuicError::Protocol(format!(
+                    "h3 handshake: CPU-spin guard tripped at {iter} iters: closed={} established={} h3=false",
+                    conn.is_closed(),
+                    conn.is_established(),
+                )),
+                None,
+            ));
         }
-        flush_egress(socket, conn, &mut out).await?;
+        flush_egress(socket, conn, &mut egress)
+            .await
+            .map_err(|e| (e, None))?;
         if conn.is_closed() {
-            return Err(QuicError::Protocol(close_reason(
-                "h3 handshake",
-                iter,
-                conn,
-            )));
+            let detail = close_reason("h3 handshake", iter, conn);
+            let err = if is_crypto_close(conn) {
+                QuicError::Tls(detail)
+            } else {
+                QuicError::Protocol(detail)
+            };
+            return Err((err, None));
         }
         if conn.is_established() {
             let h3 = quiche::h3::Connection::with_transport(conn, &h3_config)
-                .map_err(|e| QuicError::Protocol(format!("h3 with_transport: {e}")))?;
-            flush_egress(socket, conn, &mut out).await?;
+                .map_err(|e| (QuicError::Protocol(format!("h3 with_transport: {e}")), None))?;
+            flush_egress(socket, conn, &mut egress)
+                .await
+                .map_err(|e| (e, None))?;
             return Ok(h3);
         }
         let timeout = conn.timeout().unwrap_or(super::TIMER_FALLBACK);
@@ -242,32 +277,142 @@ async fn handshake(
                     from: *peer_addr,
                     to: *local_addr,
                 };
-                conn.recv(&mut buf[..len], recv_info)
-                    .map_err(|e| QuicError::Protocol(format!("quic recv: {e}")))?;
+                match conn.recv(&mut buf[..len], recv_info) {
+                    Ok(_) => {}
+                    Err(quiche::Error::TlsFail) => {
+                        let stack = leyline_bssl::error::ErrorStack::get();
+                        let retry_configs =
+                            crate::tls::ech_retry_configs(Some(conn.ssl_mut()), Some(&stack));
+                        return Err((QuicError::Tls(format!("quic tls: {stack}")), retry_configs));
+                    }
+                    Err(e) => return Err((QuicError::Protocol(format!("quic recv: {e}")), None)),
+                }
             }
-            Ok(Err(e)) => return Err(QuicError::Socket(format!("udp recv: {e}"))),
+            Ok(Err(e)) => return Err((QuicError::Socket(format!("udp recv: {e}")), None)),
             Err(_) => conn.on_timeout(),
         }
+    }
+}
+
+const EGRESS_BUFFER_CAP: usize = 64 * 1024;
+
+pub(crate) struct EgressBatch {
+    buf: Vec<u8>,
+    lens: Vec<usize>,
+    slot_len: usize,
+    max_packets: usize,
+}
+
+impl EgressBatch {
+    pub(crate) fn new(max_udp_payload: usize) -> Self {
+        let slot_len = max_udp_payload.max(1);
+        let max_packets = (EGRESS_BUFFER_CAP / slot_len).clamp(1, crate::net::MAX_UDP_BATCH);
+        Self {
+            buf: vec![0u8; slot_len * max_packets],
+            lens: Vec::with_capacity(max_packets),
+            slot_len,
+            max_packets,
+        }
+    }
+}
+
+fn udp_send_err(err: std::io::Error) -> QuicError {
+    QuicError::Socket(format!("udp send: {err}"))
+}
+
+fn send_next(conn: &mut quiche::Connection, out: &mut [u8]) -> Result<Option<usize>, QuicError> {
+    match conn.send(out) {
+        Ok((n, _send_info)) => Ok(Some(n)),
+        Err(quiche::Error::Done) => Ok(None),
+        Err(quiche::Error::TlsFail) => {
+            let stack = leyline_bssl::error::ErrorStack::get();
+            Err(QuicError::Tls(format!("quic tls: {stack}")))
+        }
+        Err(e) => Err(QuicError::Protocol(format!("quic send: {e}"))),
     }
 }
 
 pub(crate) async fn flush_egress(
     socket: &DatagramTransport,
     conn: &mut quiche::Connection,
-    out: &mut [u8],
+    batch: &mut EgressBatch,
 ) -> Result<(), QuicError> {
+    if !socket.supports_direct_batch() {
+        while let Some(n) = send_next(conn, &mut batch.buf[..batch.slot_len])? {
+            socket.send(&batch.buf[..n]).await.map_err(udp_send_err)?;
+        }
+        return Ok(());
+    }
     loop {
-        match conn.send(out) {
-            Ok((n, _send_info)) => {
-                socket
-                    .send(&out[..n])
-                    .await
-                    .map_err(|e| QuicError::Socket(format!("udp send: {e}")))?;
+        batch.lens.clear();
+        let mut done = false;
+        while batch.lens.len() < batch.max_packets {
+            let offset = batch.lens.len() * batch.slot_len;
+            match send_next(conn, &mut batch.buf[offset..offset + batch.slot_len])? {
+                Some(n) => batch.lens.push(n),
+                None => {
+                    done = true;
+                    break;
+                }
             }
-            Err(quiche::Error::Done) => return Ok(()),
-            Err(e) => return Err(QuicError::Protocol(format!("quic send: {e}"))),
+        }
+        if batch.lens.is_empty() {
+            return Ok(());
+        }
+        send_direct_batch(socket, batch).await?;
+        if done {
+            return Ok(());
         }
     }
+}
+
+#[cfg(target_os = "linux")]
+async fn send_direct_batch(
+    socket: &DatagramTransport,
+    batch: &EgressBatch,
+) -> Result<(), QuicError> {
+    let mut sent = 0;
+    while sent < batch.lens.len() {
+        let rem = &batch.lens[sent..];
+        let base = sent * batch.slot_len;
+        let res = if rem.len() == 1 {
+            socket.try_send(&batch.buf[base..base + rem[0]]).map(|_| 1)
+        } else {
+            socket.try_send_batch(&batch.buf[base..], batch.slot_len, rem)
+        };
+        match res {
+            Ok(n) => sent += n,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                socket.writable().await.map_err(udp_send_err)?;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(e) => return Err(udp_send_err(e)),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn send_direct_batch(
+    socket: &DatagramTransport,
+    batch: &EgressBatch,
+) -> Result<(), QuicError> {
+    for (i, &len) in batch.lens.iter().enumerate() {
+        let offset = i * batch.slot_len;
+        let pkt = &batch.buf[offset..offset + len];
+        loop {
+            match socket.try_send(pkt) {
+                Ok(_) => break,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    socket.send(pkt).await.map_err(udp_send_err)?;
+                    break;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(udp_send_err(e)),
+            }
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> String {
@@ -291,6 +436,12 @@ pub(crate) fn close_reason(ctx: &str, iter: u32, conn: &quiche::Connection) -> S
     )
 }
 
+pub(crate) fn is_crypto_close(conn: &quiche::Connection) -> bool {
+    conn.peer_error()
+        .or_else(|| conn.local_error())
+        .is_some_and(|e| !e.is_app && (0x0100..=0x01ff).contains(&e.error_code))
+}
+
 pub(super) async fn resolve_peer(
     resolver: &dyn Resolver,
     host: &str,
@@ -299,7 +450,7 @@ pub(super) async fn resolve_peer(
     let addrs = resolver
         .resolve(host, port)
         .await
-        .map_err(|e| QuicError::Dns(format!("dns: {e}")))?;
+        .map_err(|e| QuicError::from_net_dns(crate::net::NetError::from_dns(e)))?;
     addrs
         .iter()
         .find(|a| a.is_ipv4())

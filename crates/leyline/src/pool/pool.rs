@@ -17,7 +17,7 @@ use crate::quic::H3Client;
 use crate::pool::ConnectionStats;
 #[cfg(feature = "bench-internals")]
 use crate::pool::types::MuxHandle;
-use crate::pool::types::{Counter, MuxClient, PoolCounters, PoolKey, Proto};
+use crate::pool::types::{Counter, HostName, MuxClient, PoolCounters, PoolKey, Proto};
 use crate::profile::Carrier;
 use crate::util::{lock, read, write};
 use crate::wire::Scheme;
@@ -79,18 +79,19 @@ impl Drop for Reaping {
     }
 }
 
-async fn reap(conns: Weak<Conns>, idle_timeout: Duration) {
+async fn reap(conns: Weak<Conns>, idle_timeout: Duration, max_lifetime: Option<Duration>) {
     let mut reaping = Reaping {
         conns,
         retired: false,
     };
-    let period = (idle_timeout / 2).max(POOL_REAP_INTERVAL);
+    let bound = max_lifetime.map_or(idle_timeout, |lifetime| idle_timeout.min(lifetime));
+    let period = (bound / 2).max(POOL_REAP_INTERVAL);
     loop {
         tokio::time::sleep(period).await;
         let Some(conns) = reaping.conns.upgrade() else {
             return;
         };
-        if conns.evict(idle_timeout, Instant::now(), true) {
+        if conns.evict(idle_timeout, max_lifetime, Instant::now(), true) {
             reaping.retired = true;
             return;
         }
@@ -109,26 +110,54 @@ struct Conns {
 }
 
 impl Conns {
-    fn evict(&self, idle_timeout: Duration, now: Instant, retire_when_empty: bool) -> bool {
+    fn evict(
+        &self,
+        idle_timeout: Duration,
+        max_lifetime: Option<Duration>,
+        now: Instant,
+        retire_when_empty: bool,
+    ) -> bool {
         let mut idle_evicted = 0u64;
+        let mut dead_evicted = 0u64;
         let mut empty = true;
         for shard in self.shards.iter() {
             let mut entries = write(&shard.entries);
             let before = entries.len();
             entries.h1.retain(|_, entry| {
                 let idle = entry.idle.queue();
-                let before = idle.len();
-                idle.retain(|(_, returned_at)| now.duration_since(*returned_at) < idle_timeout);
-                idle_evicted += (before - idle.len()) as u64;
-                !idle.is_empty() || now.duration_since(entry.last_use) < idle_timeout
+                idle.retain(|(slot, _, returned_at)| {
+                    match slots::h1_stale_for(
+                        slot.opened_at,
+                        *returned_at,
+                        idle_timeout,
+                        max_lifetime,
+                        now,
+                    ) {
+                        None => true,
+                        Some(Counter::EvictionsIdle) => {
+                            idle_evicted += 1;
+                            false
+                        }
+                        Some(_) => {
+                            dead_evicted += 1;
+                            false
+                        }
+                    }
+                });
+                !idle.is_empty() || !slots::is_past_idle(entry.last_use, idle_timeout, now)
             });
             entries.mux.retain(|_, entry| {
-                let keep =
-                    !entry.is_dead() && now.duration_since(entry.last_use.get()) < idle_timeout;
-                if !keep {
-                    idle_evicted += 1;
+                match slots::mux_stale_for(entry, idle_timeout, max_lifetime, now) {
+                    None => true,
+                    Some(Counter::EvictionsIdle) => {
+                        idle_evicted += 1;
+                        false
+                    }
+                    Some(_) => {
+                        dead_evicted += 1;
+                        false
+                    }
                 }
-                keep
             });
             self.shards.removed(before - entries.len());
             empty &= entries.h1.is_empty() && entries.mux.is_empty();
@@ -137,6 +166,9 @@ impl Conns {
         }
         if idle_evicted > 0 {
             self.counters.add(Counter::EvictionsIdle, idle_evicted);
+        }
+        if dead_evicted > 0 {
+            self.counters.add(Counter::EvictionsDead, dead_evicted);
         }
         empty && retire_when_empty && self.retire()
     }
@@ -183,6 +215,8 @@ pub struct Pool {
     partition: Option<u64>,
 }
 
+const MAX_DRAIN_WAIT: Duration = Duration::from_millis(250);
+
 impl Pool {
     pub(crate) fn config(&self) -> &PoolConfig {
         &self.config
@@ -198,7 +232,7 @@ impl Pool {
 
     pub(crate) fn drain_wait(&self) -> Duration {
         if self.config.keepalive {
-            self.config.idle_timeout
+            self.config.idle_timeout.min(MAX_DRAIN_WAIT)
         } else {
             Duration::ZERO
         }
@@ -348,7 +382,7 @@ impl Pool {
     ) -> PoolKey {
         PoolKey {
             scheme,
-            host: host.to_string(),
+            host: HostName::new(host),
             port,
             proxy: proxy.cloned(),
             transport,
@@ -384,7 +418,12 @@ impl Pool {
             now_ms + POOL_REAP_INTERVAL.as_millis() as u64,
             Ordering::Relaxed,
         );
-        conns.evict(self.config.idle_timeout, now, false);
+        conns.evict(
+            self.config.idle_timeout,
+            self.config.max_lifetime,
+            now,
+            false,
+        );
     }
 
     pub(crate) fn watch_idle(&self) {
@@ -398,7 +437,12 @@ impl Pool {
             return;
         }
         let idle_timeout = self.config.idle_timeout;
-        runtime.spawn(reap(Arc::downgrade(&self.conns), idle_timeout));
+        let max_lifetime = self.config.max_lifetime;
+        runtime.spawn(reap(
+            Arc::downgrade(&self.conns),
+            idle_timeout,
+            max_lifetime,
+        ));
     }
 
     pub(crate) fn stale_hit(
@@ -471,7 +515,11 @@ impl Pool {
 }
 
 fn origin_proxy_key(host: &str, port: u16, proxy: Option<&crate::net::ProxyUrl>) -> OriginProxyKey {
-    (host.to_string(), port, proxy.map(|p| p.as_str().to_owned()))
+    (
+        host.to_string(),
+        port,
+        proxy.map(crate::net::ProxyUrl::identity),
+    )
 }
 
 #[cfg(any(test, feature = "bench-internals"))]

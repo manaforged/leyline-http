@@ -4,26 +4,39 @@ use std::time::Duration;
 use tokio::time::Instant;
 use url::Url;
 
-use super::frontier::{Queued, page_key, same_site};
+use super::frontier::{Queued, Scope, page_key, same_site};
 use super::sitemap::SitemapRead;
-use super::{Crawl, Event, MAX_IN_FLIGHT, SkipReason, Task, sitemap};
+use super::{Crawl, Event, SkipReason, Task, origin_cap_for, sitemap};
 use crate::core::config::Origin;
-use crate::core::robots::{Robots, RobotsSource, crawl_retry, fallback};
+use crate::core::robots::{Robots, RobotsSource, fallback};
 use crate::net::normalize_host;
 use crate::util::redact;
 
-const ROBOTS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
-const MAX_CRAWL_DELAY: Duration = Duration::from_secs(30);
-const MAX_SITEMAP_FILES: usize = 50;
-const MAX_SITEMAP_TASKS: usize = 2;
+const DEFAULT_ROBOTS_MAX_AGE: Duration = Duration::from_secs(24 * 60 * 60);
+const DEFAULT_MAX_CRAWL_DELAY: Duration = Duration::from_secs(30);
+const DEFAULT_MAX_SITEMAPS: usize = 50;
+const SITEMAP_SHARE_DIVISOR: usize = 8;
+
+pub(super) fn default_robots_max_age() -> Option<Duration> {
+    Some(DEFAULT_ROBOTS_MAX_AGE)
+}
+
+pub(super) fn default_max_crawl_delay() -> Option<Duration> {
+    Some(DEFAULT_MAX_CRAWL_DELAY)
+}
+
+pub(super) fn default_max_sitemaps() -> Option<usize> {
+    Some(DEFAULT_MAX_SITEMAPS)
+}
 
 pub(super) enum Site {
     Pending,
-    Ready(Robots, Instant),
-}
-
-fn fresh(read: &Instant) -> bool {
-    read.elapsed() < ROBOTS_MAX_AGE
+    Ready {
+        robots: Robots,
+        delay: Option<Duration>,
+        read: Instant,
+        used: bool,
+    },
 }
 
 enum SitemapGate {
@@ -36,6 +49,8 @@ enum SitemapGate {
 pub(super) struct SitemapFile {
     pub(super) url: Url,
     pub(super) attempts: u32,
+    pub(super) hops: usize,
+    pub(super) previous: Vec<Url>,
     pub(super) not_before: Option<Instant>,
 }
 
@@ -46,7 +61,42 @@ pub(super) struct Sitemaps {
     in_flight: usize,
 }
 
+impl Sitemaps {
+    pub(super) fn clear_in_flight(&mut self) {
+        self.in_flight = 0;
+    }
+}
+
 impl Crawl {
+    fn robots_fresh(&self, read: Instant, used: bool) -> bool {
+        !used
+            || self
+                .settings
+                .robots_max_age
+                .is_none_or(|max| read.elapsed() < max)
+    }
+
+    pub(super) fn site_delay(&self, origin: &Origin) -> Option<Duration> {
+        self.settings.respect?;
+        match self.sites.get(origin) {
+            Some(Site::Ready { delay, .. }) => *delay,
+            _ => None,
+        }
+    }
+
+    pub(super) fn sync_floor(&self, origin: &Origin) {
+        if let Some(delay) = self.site_delay(origin) {
+            self.pace.set_floor_origin(origin.clone(), Some(delay));
+        }
+    }
+
+    fn origin_ready(&self, origin: &Origin) -> bool {
+        let delay = self.site_delay(origin);
+        self.busy.get(origin).copied().unwrap_or(0) < self.origin_cap(origin)
+            && self.pace.ready_with(origin, delay)
+            && self.session.host_limits().ready(origin)
+    }
+
     fn verdict(&self, robots: &Robots, url: &Url) -> Option<SkipReason> {
         if self.settings.respect.is_some() && !robots.allows(url) {
             return Some(SkipReason::Robots);
@@ -59,7 +109,7 @@ impl Crawl {
 
     pub(super) fn schedule(&mut self) {
         self.promote_due();
-        while self.active() < MAX_IN_FLIGHT {
+        while self.active() < self.max_active() {
             if self.open_sitemap() {
                 continue;
             }
@@ -77,21 +127,34 @@ impl Crawl {
     fn pop_ready(&mut self) -> Option<Queued> {
         let (sites, busy, pace) = (&self.sites, &self.busy, &self.pace);
         let own = self.session.host_limits();
+        let fallback = self.max_active();
         let obey = self.settings.respect.is_some();
         self.frontier.pop_where(|origin| {
-            let cap = pace.max_in_flight_for(origin).unwrap_or(MAX_IN_FLIGHT);
+            let cap = origin_cap_for(pace, own, origin, fallback);
+            let delay = obey
+                .then(|| match sites.get(origin) {
+                    Some(Site::Ready { delay, .. }) => *delay,
+                    _ => None,
+                })
+                .flatten();
             !(obey && matches!(sites.get(origin), Some(Site::Pending)))
                 && busy.get(origin).copied().unwrap_or(0) < cap
-                && pace.ready(origin)
+                && pace.ready_with(origin, delay)
                 && own.ready(origin)
         })
     }
 
-    fn known_verdict(&self, origin: &Origin, url: &Url) -> Option<Option<SkipReason>> {
-        match self.sites.get(origin) {
-            Some(Site::Ready(robots, read)) if fresh(read) => Some(self.verdict(robots, url)),
-            _ => None,
+    fn take_verdict(&mut self, origin: &Origin, url: &Url) -> Option<Option<SkipReason>> {
+        let verdict = match self.sites.get(origin) {
+            Some(Site::Ready {
+                robots, read, used, ..
+            }) if self.robots_fresh(*read, *used) => self.verdict(robots, url),
+            _ => return None,
+        };
+        if let Some(Site::Ready { used, .. }) = self.sites.get_mut(origin) {
+            *used = true;
         }
+        Some(verdict)
     }
 
     fn start_page(&mut self, queued: Queued) {
@@ -101,10 +164,10 @@ impl Crawl {
         let upgraded = self.session.upgraded(&queued.url);
         if upgraded != queued.url {
             self.forward(page_key(&queued.url), page_key(&upgraded));
-            self.frontier.rekey(queued, upgraded);
+            self.frontier.rekey(queued, upgraded, &mut self.stats);
             return;
         }
-        match self.known_verdict(&origin, &queued.url) {
+        match self.take_verdict(&origin, &queued.url) {
             None if self.settings.respect.is_none() => {
                 let skipped = Robots::empty(RobotsSource::Unavailable);
                 self.robots_read(origin.clone(), queued.url.clone(), skipped);
@@ -135,9 +198,10 @@ impl Crawl {
         let session = self.session.clone();
         let trusted = self.trusted.clone();
         let agent = self.settings.agent.clone();
+        let retry = session.default_retry().for_crawl_robots();
         Box::pin(async move {
             let robots = session
-                .robots_with(url.as_str(), &agent, crawl_retry(), trusted)
+                .robots_with(url.as_str(), &agent, retry, trusted)
                 .await
                 .or_else(fallback);
             Event::Robots {
@@ -150,32 +214,77 @@ impl Crawl {
 
     pub(super) fn robots_read(&mut self, origin: Origin, url: Url, robots: Robots) {
         if self.frontier.in_scope(&url) {
+            let any_scope = self.frontier.scope == Scope::Any;
             for sitemap in sitemap::listed(&url, &robots, self.settings.respect.is_some()) {
-                if same_site(&url, &sitemap) {
+                if any_scope || same_site(&url, &sitemap) {
                     self.queue_sitemap(sitemap, None);
                 }
             }
         }
+        let delay = self.settings.respect.and_then(|_| {
+            let max_delay = self.settings.max_crawl_delay;
+            robots
+                .crawl_delay()
+                .map(|gap| max_delay.map_or(gap, |max| gap.min(max)))
+                .filter(|gap| !gap.is_zero())
+        });
         if self.settings.respect.is_some() {
-            let gap = robots.crawl_delay().map(|gap| gap.min(MAX_CRAWL_DELAY));
-            self.pace.set_floor(&url, gap);
-            self.pace.set_floor(&self.session.upgraded(&url), gap);
+            self.pace.set_floor_origin(origin.clone(), delay);
+            if let Some(upgraded) = Origin::of(&self.session.upgraded(&url))
+                && upgraded != origin
+            {
+                self.pace.set_floor_origin(upgraded, delay);
+            }
         }
-        self.sites
-            .insert(origin, Site::Ready(robots, Instant::now()));
+        self.sites.insert(
+            origin,
+            Site::Ready {
+                robots,
+                delay,
+                read: Instant::now(),
+                used: false,
+            },
+        );
+    }
+
+    fn admits_sitemap(&mut self, url: &Url, parent: Option<&Url>) -> bool {
+        let allowed_host = self.frontier.scope == Scope::Any
+            || parent.is_none_or(|parent| {
+                parent.host_str().map(normalize_host) == url.host_str().map(normalize_host)
+            });
+        let under_cap = self
+            .settings
+            .max_sitemaps
+            .is_none_or(|max| self.sitemaps.files.len() < max);
+        allowed_host && under_cap && self.sitemaps.files.insert(url.as_str().to_owned())
     }
 
     pub(super) fn queue_sitemap(&mut self, url: Url, parent: Option<Url>) {
-        let same_site = parent.as_ref().is_none_or(|parent| {
-            parent.host_str().map(normalize_host) == url.host_str().map(normalize_host)
-        });
-        if same_site
-            && self.sitemaps.files.len() < MAX_SITEMAP_FILES
-            && self.sitemaps.files.insert(url.as_str().to_owned())
-        {
+        if self.admits_sitemap(&url, parent.as_ref()) {
             self.sitemaps.queue.push_back(SitemapFile {
                 url,
                 attempts: 0,
+                hops: 0,
+                previous: Vec::new(),
+                not_before: None,
+            });
+        }
+    }
+
+    fn redirect_sitemap(&mut self, mut file: SitemapFile, status: u16, location: String, to: Url) {
+        let Some(hop) =
+            self.approve_redirect_hop(file.hops, status, &file.url, &location, &file.previous)
+        else {
+            self.stats.skip(SkipReason::Redirects);
+            return;
+        };
+        if self.admits_sitemap(&to, Some(&file.url)) {
+            file.previous.push(hop);
+            self.sitemaps.queue.push_back(SitemapFile {
+                url: to,
+                attempts: 0,
+                hops: file.hops + 1,
+                previous: file.previous,
                 not_before: None,
             });
         }
@@ -187,8 +296,16 @@ impl Crawl {
             .is_some_and(|max| self.frontier.known() >= max)
     }
 
+    fn max_sitemap_tasks(&self) -> usize {
+        if self.frontier.is_empty() {
+            self.max_active()
+        } else {
+            (self.max_active() / SITEMAP_SHARE_DIVISOR).max(1)
+        }
+    }
+
     fn open_sitemap(&mut self) -> bool {
-        if self.sitemaps.in_flight >= MAX_SITEMAP_TASKS {
+        if self.sitemaps.in_flight >= self.max_sitemap_tasks() {
             return false;
         }
         if self.sitemaps_enough() {
@@ -197,7 +314,11 @@ impl Crawl {
         }
         let mut waiting = VecDeque::new();
         let mut opened = false;
-        while let Some(file) = self.sitemaps.queue.pop_front() {
+        while let Some(mut file) = self.sitemaps.queue.pop_front() {
+            let upgraded = self.session.upgraded(&file.url);
+            if upgraded != file.url {
+                file.url = upgraded;
+            }
             let Some(origin) = Origin::of(&file.url) else {
                 continue;
             };
@@ -210,7 +331,7 @@ impl Crawl {
                 }
                 SitemapGate::Drop => self.stats.skip(SkipReason::Robots),
                 SitemapGate::Open => {
-                    self.start_sitemap(file);
+                    self.start_sitemap(origin, file);
                     opened = true;
                     break;
                 }
@@ -221,34 +342,39 @@ impl Crawl {
         opened
     }
 
-    fn sitemap_gate(&self, origin: &Origin, file: &SitemapFile) -> SitemapGate {
+    fn sitemap_gate(&mut self, origin: &Origin, file: &SitemapFile) -> SitemapGate {
         let due = file.not_before.is_none_or(|at| at <= Instant::now());
-        if !due || self.active() >= MAX_IN_FLIGHT {
-            return SitemapGate::Wait;
-        }
-        if !(self.pace.ready(origin) && self.session.host_limits().ready(origin)) {
+        if !due || self.active() >= self.max_active() || !self.origin_ready(origin) {
             return SitemapGate::Wait;
         }
         if self.settings.respect.is_none() {
             return SitemapGate::Open;
         }
-        match self.sites.get(origin) {
-            Some(Site::Ready(_, read)) if !fresh(read) => SitemapGate::Robots,
-            Some(Site::Ready(robots, _)) if !robots.allows(&file.url) => SitemapGate::Drop,
-            Some(Site::Ready(..)) => SitemapGate::Open,
-            Some(Site::Pending) => SitemapGate::Wait,
-            None => SitemapGate::Robots,
+        let gate = match self.sites.get(origin) {
+            Some(Site::Ready { read, used, .. }) if !self.robots_fresh(*read, *used) => {
+                return SitemapGate::Robots;
+            }
+            Some(Site::Ready { robots, .. }) if !robots.allows(&file.url) => SitemapGate::Drop,
+            Some(Site::Ready { .. }) => SitemapGate::Open,
+            Some(Site::Pending) => return SitemapGate::Wait,
+            None => return SitemapGate::Robots,
+        };
+        if let Some(Site::Ready { used, .. }) = self.sites.get_mut(origin) {
+            *used = true;
         }
+        gate
     }
 
-    fn start_sitemap(&mut self, file: SitemapFile) {
+    fn start_sitemap(&mut self, origin: Origin, file: SitemapFile) {
+        self.sync_floor(&origin);
         self.sitemaps.in_flight += 1;
+        *self.busy.entry(origin.clone()).or_default() += 1;
         let session = self.session.clone();
         let (retry, trusted) = (self.page_retry.clone(), self.trusted.clone());
         self.tasks.push(Box::pin(async move {
             let read =
                 sitemap::read(session, file.url.clone(), retry, file.attempts, trusted).await;
-            Event::Sitemap { file, read }
+            Event::Sitemap { origin, file, read }
         }));
     }
 
@@ -256,7 +382,11 @@ impl Crawl {
         self.sitemaps.in_flight -= 1;
         let found = match read {
             SitemapRead::Found(found) => found,
-            SitemapRead::Moved(to) => return self.queue_sitemap(to, Some(file.url)),
+            SitemapRead::Moved {
+                status,
+                location,
+                to,
+            } => return self.redirect_sitemap(file, status, location, to),
             SitemapRead::Later(wait) => {
                 let Some(at) = Instant::now().checked_add(wait) else {
                     return self.stats.error();
@@ -281,7 +411,7 @@ impl Crawl {
             if found.index {
                 self.queue_sitemap(loc, Some(url.clone()));
             } else {
-                self.frontier.add(Queued::link(loc, 0));
+                self.frontier.add(Queued::link(loc, 0), &mut self.stats);
             }
         }
     }

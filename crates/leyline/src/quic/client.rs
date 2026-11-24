@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::error::BodyLimit;
 use crate::profile::PseudoOrder;
-use crate::quic::connection::{EstablishedH3, close_reason, flush_egress};
+use crate::quic::connection::{EgressBatch, EstablishedH3, close_reason, flush_egress};
 use crate::wire::BoxedStream;
 use crate::wire::ResponseMode;
 use crate::wire::{Chunk, Failure, TransportBody, TransportResponse, Upload};
@@ -45,6 +45,7 @@ pub enum H3SendError {
     NotSent(String),
     Rejected(String),
     Closed(String),
+    Tls(String),
     Failed(String),
     BodyLimit(BodyLimit),
     RequestBody(std::io::Error),
@@ -56,6 +57,7 @@ impl H3SendError {
             H3SendError::NotSent(m)
             | H3SendError::Rejected(m)
             | H3SendError::Closed(m)
+            | H3SendError::Tls(m)
             | H3SendError::Failed(m) => Cow::Borrowed(m.as_str()),
             H3SendError::BodyLimit(limit) => Cow::Owned(limit.to_string()),
             H3SendError::RequestBody(error) => {
@@ -69,9 +71,10 @@ impl H3SendError {
             H3SendError::NotSent(_) => Failure::Unsent,
             H3SendError::Rejected(_) => Failure::Refused,
             H3SendError::Closed(_) => Failure::Connection,
-            H3SendError::Failed(_) | H3SendError::BodyLimit(_) | H3SendError::RequestBody(_) => {
-                Failure::Request
-            }
+            H3SendError::Tls(_)
+            | H3SendError::Failed(_)
+            | H3SendError::BodyLimit(_)
+            | H3SendError::RequestBody(_) => Failure::Request,
         }
     }
 }
@@ -89,6 +92,7 @@ pub struct H3Client {
     tx: mpsc::Sender<H3Command>,
     closed: Arc<AtomicBool>,
     open_streams: Arc<AtomicUsize>,
+    last_idle: Arc<crate::pool::types::Stamp>,
     pseudo_order: [PseudoOrder; 4],
 }
 
@@ -100,6 +104,10 @@ impl H3Client {
 
     pub fn open_streams(&self) -> usize {
         self.open_streams.load(Ordering::Relaxed)
+    }
+
+    pub(crate) fn last_idle(&self) -> std::time::Instant {
+        self.last_idle.get()
     }
 
     #[expect(
@@ -182,7 +190,7 @@ struct H3Stream {
     resp_tx: Option<oneshot::Sender<Result<Box<TransportResponse>, H3SendError>>>,
     response: ResponseState,
     status: http::StatusCode,
-    headers: http::HeaderMap,
+    headers: crate::wire::Fields,
     trailers: http::HeaderMap,
     body: Vec<u8>,
     stream_tx: Option<mpsc::Sender<Chunk>>,
@@ -191,7 +199,7 @@ struct H3Stream {
     head_sent: bool,
     stalled: Option<Bytes>,
     peer_finished: bool,
-    body_bytes_seen: usize,
+    body_bytes_seen: u64,
     declared_len: Option<u64>,
     head_request: bool,
     body_limit: BodyLimit,
@@ -209,6 +217,7 @@ struct H3Driver {
     body_chunk_rx: mpsc::Receiver<H3BodyChunk>,
     closed: Arc<AtomicBool>,
     open_streams: Arc<AtomicUsize>,
+    last_idle: Arc<crate::pool::types::Stamp>,
     streams: HashMap<u64, H3Stream>,
 }
 

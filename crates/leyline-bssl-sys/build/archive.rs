@@ -1,6 +1,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 
 use crate::compile::build_boringssl_or_get_prebuilt;
 use crate::config::Config;
@@ -9,6 +10,10 @@ const ARCHIVES: [(&str, &str); 2] = [
     ("ssl", "leyline_bssl_ssl"),
     ("crypto", "leyline_bssl_crypto"),
 ];
+const LINK_DIR: &str = "leyline-bssl-link";
+const PROBE: &str = "cxx-runtime-probe";
+const PROBE_SOURCE: &str = "int main(void) { return 0; }\n";
+const PROBE_LIBS: [&str; 3] = ["-lpthread", "-ldl", "-lm"];
 
 pub(crate) fn archive_file(config: &Config, name: &str) -> String {
     if config.target_env == "msvc" {
@@ -32,7 +37,7 @@ fn find_archive(search_dirs: &[PathBuf], file: &str) -> io::Result<PathBuf> {
 }
 
 fn link_renamed(config: &Config, search_dirs: &[PathBuf]) -> io::Result<()> {
-    let link_dir: &Path = &config.out_dir.join("leyline-bssl-link");
+    let link_dir: &Path = &config.out_dir.join(LINK_DIR);
     fs::create_dir_all(link_dir)?;
     for (source, target) in ARCHIVES {
         let from = find_archive(search_dirs, &archive_file(config, source))?;
@@ -87,6 +92,31 @@ fn msvc_lib_subdir(config: &Config) -> Option<&'static str> {
     }
 }
 
+fn links_without_cpp_runtime(config: &Config) -> bool {
+    let link_dir = config.out_dir.join(LINK_DIR);
+    let source = config.out_dir.join(PROBE).with_extension("c");
+    if fs::write(&source, PROBE_SOURCE).is_err() {
+        return false;
+    }
+    let compiler = cc::Build::new()
+        .cargo_metadata(false)
+        .warnings(false)
+        .get_compiler();
+    let mut link = compiler.to_command();
+    link.arg(&source)
+        .arg("-o")
+        .arg(config.out_dir.join(PROBE))
+        .arg("-Wl,--whole-archive");
+    for (_, target) in ARCHIVES {
+        link.arg(link_dir.join(archive_file(config, target)));
+    }
+    link.arg("-Wl,--no-whole-archive")
+        .args(PROBE_LIBS)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    link.status().is_ok_and(|status| status.success())
+}
+
 fn get_cpp_runtime_lib(config: &Config) -> Option<String> {
     if let Some(ref cpp_lib) = config.env.cpp_runtime_lib {
         return cpp_lib.clone().into_string().ok();
@@ -94,6 +124,7 @@ fn get_cpp_runtime_lib(config: &Config) -> Option<String> {
 
     match &*config.target_os {
         "macos" | "ios" | "tvos" | "freebsd" | "openbsd" | "android" => Some("c++".into()),
+        "linux" if links_without_cpp_runtime(config) => None,
         _ if config.unix || config.target_env == "gnu" => Some("stdc++".into()),
         _ => None,
     }

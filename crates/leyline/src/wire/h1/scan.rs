@@ -43,7 +43,7 @@ impl<'a, P: Pick<'a>> Sink<'a> for Fold<'a, P> {
         let Some(key) = self.pick.key(name) else {
             return Ok(());
         };
-        let value = trim_start(value);
+        let value = trim_ows(value);
         if !is_valid_header_value(value) {
             return Self::invalid(key);
         }
@@ -55,11 +55,12 @@ impl<'a, P: Pick<'a>> Sink<'a> for Fold<'a, P> {
         let Some((key, value)) = self.last.as_mut() else {
             return Ok(());
         };
-        let line = trim_end(trim_start(line));
+        let line = trim_ows(line);
+        if line.is_empty() {
+            return Ok(());
+        }
         if is_valid_header_value(line) {
-            let joined = value.to_mut();
-            joined.push(b' ');
-            joined.extend_from_slice(line);
+            append_fold(value.to_mut(), line);
             return Ok(());
         }
         let key = *key;
@@ -78,8 +79,6 @@ enum Known {
 }
 
 impl Known {
-    const READ: [Self; 3] = [Self::Length, Self::Coding, Self::Connection];
-
     fn name(self) -> Option<&'static str> {
         match self {
             Self::Length => Some("content-length"),
@@ -93,29 +92,26 @@ impl Known {
 #[derive(Default)]
 pub(crate) struct Scanned<'a> {
     pub(crate) body: BodyHeaders<'a>,
-    connection: Option<Cow<'a, [u8]>>,
     seen: Seen,
 }
 
 impl Scanned<'_> {
     pub(crate) fn seen(&self) -> Seen {
         self.seen
-            .connection(self.connection.as_deref().and_then(text))
     }
 }
 
 impl<'a> Pick<'a> for Scanned<'a> {
     type Key = Known;
 
+    #[inline]
     fn key(&self, name: &[u8]) -> Option<Known> {
-        Known::READ
-            .into_iter()
-            .find(|known| {
-                known
-                    .name()
-                    .is_some_and(|n| name.eq_ignore_ascii_case(n.as_bytes()))
-            })
-            .or_else(|| Fact::named(name).map(Known::Fact))
+        match name.len() {
+            10 if name.eq_ignore_ascii_case(b"connection") => Some(Known::Connection),
+            14 if name.eq_ignore_ascii_case(b"content-length") => Some(Known::Length),
+            17 if name.eq_ignore_ascii_case(b"transfer-encoding") => Some(Known::Coding),
+            _ => Fact::named(name).map(Known::Fact),
+        }
     }
 
     fn framing(key: Known) -> Option<&'static str> {
@@ -134,9 +130,7 @@ impl<'a> Pick<'a> for Scanned<'a> {
                 Some(coding) => *coding = Cow::Owned([&**coding, b",", &*value].concat()),
                 None => self.body.coding = Some(value),
             },
-            Known::Connection => {
-                self.connection.get_or_insert(value);
-            }
+            Known::Connection => self.seen.note_connection_bytes(&value),
             Known::Fact(fact) => self.seen.note(fact),
         }
     }
@@ -197,6 +191,16 @@ pub(crate) struct BodyHeaders<'a> {
     coding: Option<Cow<'a, [u8]>>,
 }
 
+enum FramingError<'a> {
+    MultipleLength,
+    NonAsciiLength,
+    CommaLength,
+    BadLength(&'a str),
+    BothLengthAndCoding,
+    NonAsciiCoding,
+    BadCoding(&'a str),
+}
+
 impl BodyHeaders<'_> {
     fn length(&self) -> Option<&str> {
         self.length.as_deref().and_then(text)
@@ -207,43 +211,55 @@ impl BodyHeaders<'_> {
     }
 
     pub(crate) fn validate(&self) -> Result<(), Error> {
+        self.check_framing().map_err(|err| match err {
+            FramingError::MultipleLength => {
+                malformed("response has multiple Content-Length headers (RFC 9112 §6.1)")
+            }
+            FramingError::NonAsciiLength => {
+                malformed("response Content-Length contains non-ASCII bytes (RFC 9112 §8.6)")
+            }
+            FramingError::CommaLength => {
+                malformed("response Content-Length contains multiple values")
+            }
+            FramingError::BadLength(v) => malformed(format!(
+                "response Content-Length `{v}` is not a valid decimal integer (RFC 9112 §8.6)"
+            )),
+            FramingError::BothLengthAndCoding => {
+                malformed("response has both Content-Length and Transfer-Encoding (RFC 9112 §6.1)")
+            }
+            FramingError::NonAsciiCoding => {
+                malformed("response Transfer-Encoding contains non-ASCII bytes")
+            }
+            FramingError::BadCoding(te) => malformed(format!(
+                "response Transfer-Encoding `{te}`: `chunked` must be the final coding, once"
+            )),
+        })
+    }
+
+    fn check_framing(&self) -> Result<(), FramingError<'_>> {
         if self.lengths > 1 {
-            return Err(malformed(
-                "response has multiple Content-Length headers (RFC 9112 §6.1)",
-            ));
+            return Err(FramingError::MultipleLength);
         }
-        if let Some(v) = self.length() {
-            if v.contains(',') {
-                return Err(malformed(
-                    "response Content-Length contains multiple values",
-                ));
+        if self.length.is_some() {
+            let Some(v) = self.length() else {
+                return Err(FramingError::NonAsciiLength);
+            };
+            if v.as_bytes().contains(&b',') {
+                return Err(FramingError::CommaLength);
             }
             if crate::util::content_length(v).is_none() {
-                return Err(malformed(format!(
-                    "response Content-Length `{v}` is not a valid decimal integer (RFC 9112 §8.6)"
-                )));
+                return Err(FramingError::BadLength(v));
             }
         }
-        let te = self.coding();
-        if te.is_some() && self.lengths > 0 {
-            return Err(malformed(
-                "response has both Content-Length and Transfer-Encoding (RFC 9112 §6.1)",
-            ));
+        if self.coding.is_some() && self.lengths > 0 {
+            return Err(FramingError::BothLengthAndCoding);
         }
-        if let Some(te) = te {
-            let last = te
-                .split(',')
-                .map(|t| t.trim())
-                .rfind(|t| !t.is_empty())
-                .unwrap_or("");
-            let chunked = te
-                .split(',')
-                .filter(|t| t.trim().eq_ignore_ascii_case("chunked"))
-                .count();
-            if !last.eq_ignore_ascii_case("chunked") || chunked != 1 {
-                return Err(malformed(format!(
-                    "response Transfer-Encoding `{te}`: `chunked` must be the final coding, once"
-                )));
+        if self.coding.is_some() {
+            let Some(te) = self.coding() else {
+                return Err(FramingError::NonAsciiCoding);
+            };
+            if !is_single_final_chunked(te.as_bytes()) {
+                return Err(FramingError::BadCoding(te));
             }
         }
         Ok(())
@@ -260,6 +276,23 @@ impl BodyHeaders<'_> {
     }
 }
 
+fn is_single_final_chunked(bytes: &[u8]) -> bool {
+    let mut last_is_chunked = false;
+    let mut chunked = 0usize;
+    crate::util::any_token(bytes, |tok| {
+        last_is_chunked = tok.eq_ignore_ascii_case(b"chunked");
+        if last_is_chunked {
+            chunked += 1;
+        }
+        false
+    });
+    chunked == 1 && last_is_chunked
+}
+
 #[cfg(test)]
 #[path = "scan_framing_tests.rs"]
 mod framing_tests;
+
+#[cfg(kani)]
+#[path = "scan_proofs.rs"]
+mod proofs;

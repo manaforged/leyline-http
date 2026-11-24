@@ -34,15 +34,15 @@ pub(crate) async fn open(
             net_proxy::socks(dialer, host, port, proxy).await?,
         )),
         (ProxyScheme::Http, Route::Connect) => Ok(Tunnel::Plain(
-            http_proxy::tunnel(dialer, host, port, url).await?,
+            http_proxy::tunnel(dialer, host, port, proxy).await?,
         )),
         (ProxyScheme::Http, Route::Forward) => Ok(Tunnel::Plain(
             net_proxy::connect_to_proxy(dialer, url).await?,
         )),
-        (ProxyScheme::Https, Route::Connect) => tunnel_via_tls(connector, host, port, url)
+        (ProxyScheme::Https, Route::Connect) => tunnel_via_tls(connector, host, port, proxy)
             .await
             .map(Tunnel::Tls),
-        (ProxyScheme::Https, Route::Forward) => open_tls_to_proxy(connector, url)
+        (ProxyScheme::Https, Route::Forward) => open_tls_to_proxy(connector, proxy)
             .await
             .map(|tls| Tunnel::Tls(tls.stream)),
     }
@@ -52,7 +52,7 @@ async fn tunnel_via_tls(
     connector: &FingerprintConnector,
     host: &str,
     port: u16,
-    proxy: &url::Url,
+    proxy: &ProxyUrl,
 ) -> Result<TlsIo, TlsError> {
     let mut tunnel = open_tls_to_proxy(connector, proxy).await?.stream;
     http_proxy::write_connect_and_validate(&mut tunnel, host, port, proxy).await?;
@@ -61,7 +61,7 @@ async fn tunnel_via_tls(
 
 async fn open_tls_to_proxy(
     connector: &FingerprintConnector,
-    proxy: &url::Url,
+    proxy: &ProxyUrl,
 ) -> Result<TlsStream, TlsError> {
     if connector.has_origin_tls_identity() {
         return Err(NetError::proxy(
@@ -72,12 +72,13 @@ async fn open_tls_to_proxy(
         .into());
     }
 
-    let proxy_host = proxy
+    let url = proxy.url();
+    let proxy_host = url
         .host_str()
         .ok_or_else(|| NetError::proxy("https proxy has no host"))?;
-    let tcp_stream = net_proxy::connect_to_proxy(connector.dialer(), proxy).await?;
+    let tcp_stream = net_proxy::connect_to_proxy(connector.dialer(), url).await?;
 
-    let proxy_key = SessionCache::key(proxy_host, net_proxy::port(proxy), None);
+    let proxy_key = SessionCache::key(proxy_host, net_proxy::port(url), Some(proxy));
     connector
         .tls_handshake(tcp_stream, proxy_host, &proxy_key, AlpnPlan::Http11)
         .await

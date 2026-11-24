@@ -21,20 +21,25 @@ impl Drain<'_> {
         }
     }
 
+    fn fail_protocol(&mut self, id: u64, message: &str) {
+        if let Some(mut stream) = self.streams.remove(&id) {
+            abort_stream(
+                self.h3,
+                self.conn,
+                id,
+                &mut stream,
+                quiche::h3::WireErrorCode::GeneralProtocolError,
+            );
+            stream.deliver_error(H3SendError::Failed, message.into());
+        }
+    }
+
     fn headers(&mut self, id: u64, list: &[quiche::h3::Header]) {
         let Some(stream) = self.streams.get_mut(&id) else {
             return;
         };
         if let Err(message) = stream.headers(list) {
-            abort_stream(
-                self.h3,
-                self.conn,
-                id,
-                stream,
-                quiche::h3::WireErrorCode::GeneralProtocolError,
-            );
-            stream.deliver_error(H3SendError::Failed, message.into());
-            self.streams.remove(&id);
+            self.fail_protocol(id, message);
             return;
         }
         if stream.is_streaming() && stream.response == ResponseState::Final && !stream.head_sent {
@@ -48,15 +53,7 @@ impl Drain<'_> {
             return;
         };
         if let Err(message) = stream.data() {
-            abort_stream(
-                self.h3,
-                self.conn,
-                id,
-                stream,
-                quiche::h3::WireErrorCode::GeneralProtocolError,
-            );
-            stream.deliver_error(H3SendError::Failed, message.into());
-            self.streams.remove(&id);
+            self.fail_protocol(id, message);
             return;
         }
         if stream.is_streaming() {
@@ -91,7 +88,8 @@ impl Drain<'_> {
                     break;
                 }
             };
-            if let Err(limit) = stream.body_limit.admit(stream.body_bytes_seen, n) {
+            let seen = usize::try_from(stream.body_bytes_seen).unwrap_or(usize::MAX);
+            if let Err(limit) = stream.body_limit.admit(seen, n) {
                 abort_stream(
                     self.h3,
                     self.conn,
@@ -103,8 +101,10 @@ impl Drain<'_> {
                 self.streams.remove(&id);
                 break;
             }
-            stream.body_bytes_seen += n;
-            stream.body.extend_from_slice(&self.scratch[..n]);
+            if crate::wire::has_body(stream.head_request, stream.status.as_u16()) {
+                stream.body_bytes_seen = stream.body_bytes_seen.saturating_add(n as u64);
+                stream.body.extend_from_slice(&self.scratch[..n]);
+            }
         }
     }
 
@@ -114,16 +114,7 @@ impl Drain<'_> {
             .get(&id)
             .and_then(|stream| stream.finish().err());
         if let Some(message) = invalid {
-            if let Some(mut stream) = self.streams.remove(&id) {
-                abort_stream(
-                    self.h3,
-                    self.conn,
-                    id,
-                    &mut stream,
-                    quiche::h3::WireErrorCode::GeneralProtocolError,
-                );
-                stream.deliver_error(H3SendError::Failed, message.into());
-            }
+            self.fail_protocol(id, message);
             return;
         }
         let streaming = self.streams.get(&id).map(H3Stream::is_streaming);

@@ -58,7 +58,7 @@ kinds! {
     Request => "request",
     /// Socket I/O failed after the connect, or an HTTP/1.1 response broke the wire format.
     Io => "io",
-    /// Too many requests already wait for a slot, past `max_pending_per_host`, `HostLimits::max_pending`, or `HostLimits::max_total_pending`.
+    /// Too many requests already wait for a slot, past `HostLimits::max_pending` or `HostLimits::max_total_pending`.
     Overloaded => "overloaded",
 }
 

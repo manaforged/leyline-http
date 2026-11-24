@@ -7,7 +7,7 @@ use std::time::Duration;
 use url::Url;
 
 #[cfg(feature = "html")]
-pub(crate) use fetch::{MAX_REDIRECTS, Reply, crawl_retry, fallback, read_capped};
+pub(crate) use fetch::{Reply, fallback, read_capped};
 #[cfg(feature = "html")]
 pub(crate) use pattern::normalize;
 pub(crate) use pattern::{Pattern, path_bytes};

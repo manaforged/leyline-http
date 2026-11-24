@@ -1,7 +1,8 @@
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Duration;
 
-use leyline::{Browser, Encoding, Proxy, Redirect, Session, Timeout};
+use leyline::profile::Encoding;
+use leyline::{Browser, Proxy, Redirect, Session, Timeout};
 
 #[test]
 fn builder_accepts_wreq_parity_transport_knobs() {

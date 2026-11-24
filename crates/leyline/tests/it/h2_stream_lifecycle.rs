@@ -131,8 +131,16 @@ async fn early_end_stream_resets_open_request_body() {
     let handle = leyline::internals::h2::start(client_io, test_config())
         .await
         .expect("handshake");
-    let mut head = get_head("/");
-    head.pseudo.method = "POST".into();
+    let head = leyline::internals::h2::Head::new(
+        leyline::internals::h2::connection::PseudoHeaders {
+            method: "POST".into(),
+            scheme: "https".into(),
+            authority: "example.com".into(),
+            path: "/".into(),
+            protocol: None,
+        },
+        vec![],
+    );
     let (body_tx, body_rx) = tokio::sync::mpsc::channel::<std::io::Result<bytes::Bytes>>(4);
     body_tx
         .send(Ok(bytes::Bytes::from_static(b"first")))

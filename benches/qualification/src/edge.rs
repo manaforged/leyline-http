@@ -443,22 +443,21 @@ fn retry_policy(args: &[String]) -> Retry {
 }
 
 fn builder(args: &[String]) -> leyline::SessionBuilder {
-    let mut builder = Session::builder().retry(retry_policy(args));
+    let mut limits = total_limit(args);
     match args
         .iter()
         .position(|a| a == "--max-pending")
         .and_then(|i| args.get(i + 1))
         .map(String::as_str)
     {
-        Some("none") => builder = builder.max_pending_per_host(None),
-        Some(_) => {
-            builder = builder.max_pending_per_host(number::<usize>(args, "--max-pending", 0))
-        }
+        Some("none") => limits = limits.max_pending(None),
+        Some(_) => limits = limits.max_pending(number::<usize>(args, "--max-pending", 0)),
         None => {}
     }
-    let builder = builder
+    let builder = Session::builder()
+        .retry(retry_policy(args))
         .max_connections(number(args, "--max-connections", 2048))
-        .host_limits(total_limit(args))
+        .host_limits(limits)
         .timeout(Timeout::new().total(Duration::from_millis(number(
             args,
             "--deadline-ms",

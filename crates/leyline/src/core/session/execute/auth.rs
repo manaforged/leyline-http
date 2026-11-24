@@ -1,20 +1,23 @@
-use super::super::helpers::header_values;
+use std::sync::Arc;
+
 use super::journey::Journey;
-use crate::core::digest::{self, Challenge, DigestAuth};
+use crate::core::digest::{self, Challenge, DigestAuth, DigestNonces};
 use crate::core::headers::HeaderList;
 use crate::error::{Error, Kind, Result};
 use crate::util::request_target;
 
 pub(super) struct DigestLeg {
     auth: DigestAuth,
+    nonces: Arc<DigestNonces>,
     answers: u8,
     challenge: Option<Challenge>,
 }
 
 impl DigestLeg {
-    pub(super) fn new(auth: DigestAuth) -> Self {
+    pub(super) fn new(auth: DigestAuth, nonces: Arc<DigestNonces>) -> Self {
         Self {
             auth,
+            nonces,
             answers: 0,
             challenge: None,
         }
@@ -40,7 +43,9 @@ impl DigestLeg {
         if !in_scope(journey) {
             return Ok(None);
         }
-        let challenges: Vec<Challenge> = header_values(headers, http::header::WWW_AUTHENTICATE)
+        let challenges: Vec<Challenge> = headers
+            .get_all(http::header::WWW_AUTHENTICATE)
+            .iter()
             .filter_map(|v| v.to_str().ok())
             .filter_map(|v| digest::parse_challenge(v).ok())
             .collect();
@@ -70,7 +75,7 @@ impl DigestLeg {
 
     fn authorized_headers(&self, journey: &Journey, challenge: &Challenge) -> Result<HeaderList> {
         let cnonce = crate::util::random_hex_token(8);
-        let nc = digest::next_nc_for_nonce(&challenge.nonce);
+        let nc = self.nonces.next_nc(&challenge.nonce);
         let header = challenge
             .build_auth_header(
                 &self.auth,
@@ -88,7 +93,7 @@ impl DigestLeg {
                 )
             })?;
         let mut headers = journey.extra.clone().unwrap_or_default();
-        headers.set("authorization", header)?;
+        headers.set(http::header::AUTHORIZATION, header)?;
         Ok(headers)
     }
 }
@@ -102,13 +107,13 @@ impl super::Session {
         if digest.is_some() {
             return None;
         }
-        let version = self.inner.inputs.bearer.as_ref()?.version()?;
+        let version = self.inner.inputs.credential.as_ref()?.version()?;
         if journey.tainted
-            || !self.bearer_in_scope(&journey.url)
+            || !self.credential_in_scope(&journey.url)
             || journey
                 .extra
                 .as_ref()
-                .is_some_and(|headers| headers.get("authorization").is_some())
+                .is_some_and(|headers| headers.get(http::header::AUTHORIZATION.as_str()).is_some())
         {
             return None;
         }

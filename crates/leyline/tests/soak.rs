@@ -6,7 +6,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use futures_util::StreamExt;
 use leyline::testing;
 use leyline::{Body, HostLimits, Kind, Session, Timeout};
 
@@ -35,7 +34,7 @@ const SCENARIOS: [Scenario; 6] = [
 ];
 
 fn reply(request: &testing::Request) -> testing::Response {
-    match request.target.as_str() {
+    match request.target() {
         "/ok" => testing::Response::new(200).body(vec![b'o'; 2048]),
         "/slow" => {
             testing::Response::new(200).chunks(["a", "b", "c", "d"], Duration::from_millis(150))

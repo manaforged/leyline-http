@@ -4,18 +4,43 @@ use url::Url;
 use super::Response;
 
 /// One entry of a `Link` response header.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Link {
-    /// The target URL, resolved against the response URL.
-    pub url: Url,
-    /// The `rel` values of the link.
-    pub rel: Vec<String>,
-    /// The other parameters of the link.
-    pub params: Vec<(String, String)>,
+    url: Url,
+    rel: Vec<String>,
+    params: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Link")
+            .field("url", &crate::util::redact(self.url.as_str()))
+            .field("rel", &self.rel)
+            .field("params", &self.params)
+            .finish()
+    }
 }
 
 impl Link {
+    /// Returns the target URL, resolved against the response URL.
+    #[must_use]
+    pub fn url(&self) -> &Url {
+        &self.url
+    }
+
+    /// Returns the `rel` values of the link, in the order sent.
+    #[must_use]
+    pub fn rel(&self) -> &[String] {
+        &self.rel
+    }
+
+    /// Returns the link's parameters other than `rel` as name and value pairs, with names in lowercase.
+    #[must_use]
+    pub fn params(&self) -> &[(String, String)] {
+        &self.params
+    }
+
     /// Returns `true` when the link has the given `rel` value, ignoring case.
     pub fn has_rel(&self, rel: &str) -> bool {
         self.rel.iter().any(|r| r.eq_ignore_ascii_case(rel))

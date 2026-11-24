@@ -13,10 +13,68 @@ use crate::pool::types::{
 use crate::util::{read, write};
 use crate::wire::TlsInfo;
 
+pub(super) fn is_past_lifetime(
+    opened: Instant,
+    max_lifetime: Option<Duration>,
+    now: Instant,
+) -> bool {
+    max_lifetime.is_some_and(|lifetime| now.saturating_duration_since(opened) >= lifetime)
+}
+
+pub(super) fn is_past_idle(since: Instant, idle_timeout: Duration, now: Instant) -> bool {
+    now.saturating_duration_since(since) >= idle_timeout
+}
+
+pub(super) fn h1_stale_for(
+    opened: Instant,
+    returned_at: Instant,
+    idle_timeout: Duration,
+    max_lifetime: Option<Duration>,
+    now: Instant,
+) -> Option<Counter> {
+    if is_past_lifetime(opened, max_lifetime, now) {
+        Some(Counter::EvictionsDead)
+    } else if is_past_idle(returned_at, idle_timeout, now) {
+        Some(Counter::EvictionsIdle)
+    } else {
+        None
+    }
+}
+
+pub(super) fn mux_stale_for(
+    entry: &MuxEntry,
+    idle_timeout: Duration,
+    max_lifetime: Option<Duration>,
+    now: Instant,
+) -> Option<Counter> {
+    if entry.is_dead() || is_past_lifetime(entry.opened, max_lifetime, now) {
+        Some(Counter::EvictionsDead)
+    } else if entry.handle.open_streams() == 0
+        && is_past_idle(
+            entry.last_use.get().max(entry.handle.last_idle()),
+            idle_timeout,
+            now,
+        )
+    {
+        Some(Counter::EvictionsIdle)
+    } else {
+        None
+    }
+}
+
 impl Pool {
     pub(crate) fn checkout_mux<C: MuxClient>(&self, key: &PoolKey) -> Option<(C, TlsInfo)> {
         self.checkout_mux_idle(key, Instant::now())
             .map(|(conn, tls, _)| (conn, tls))
+    }
+
+    fn mux_stale(&self, entry: &MuxEntry, now: Instant) -> Option<Counter> {
+        mux_stale_for(
+            entry,
+            self.config.idle_timeout,
+            self.config.max_lifetime,
+            now,
+        )
     }
 
     pub(crate) fn checkout_mux_idle<C: MuxClient>(
@@ -24,24 +82,29 @@ impl Pool {
         key: &PoolKey,
         now: Instant,
     ) -> Option<(C, TlsInfo, Duration)> {
-        let mut dead = false;
+        let mut stale_counter = None;
         let shard = self.conns.shards.of(key);
         let hit = match read(&shard.entries).mux.get(key) {
-            Some(entry) if entry.is_dead() || self.past_lifetime(entry.opened, now) => {
-                dead = true;
-                None
-            }
-            Some(entry) => C::in_handle(&entry.handle)
-                .map(|conn| (conn.clone(), entry.tls.clone(), entry.last_use.touch(now))),
+            Some(entry) => match self.mux_stale(entry, now) {
+                Some(counter) => {
+                    stale_counter = Some(counter);
+                    None
+                }
+                None => C::in_handle(&entry.handle)
+                    .map(|conn| (conn.clone(), entry.tls.clone(), entry.last_use.touch(now))),
+            },
             None => None,
         };
-        if dead {
+        if stale_counter.is_some() {
             let mut entries = write(&shard.entries);
-            let stale = |entry: &MuxEntry| entry.is_dead() || self.past_lifetime(entry.opened, now);
-            if entries.mux.get(key).is_some_and(stale) {
+            if let Some(counter) = entries
+                .mux
+                .get(key)
+                .and_then(|entry| self.mux_stale(entry, now))
+            {
                 entries.mux.remove(key);
                 self.conns.shards.removed(1);
-                self.conns.counters.add(Counter::EvictionsDead, 1);
+                self.conns.counters.add(counter, 1);
             }
         }
         hit
@@ -53,9 +116,12 @@ impl Pool {
         handle: C,
         tls: TlsInfo,
     ) -> (C, TlsInfo) {
-        let mut entries = write(&self.conns.shards.of(&key).entries);
+        let now = Instant::now();
+        let shard = self.conns.shards.of(&key);
+        let mut entries = write(&shard.entries);
         if let Some(existing) = entries.mux.get(&key)
             && !existing.is_dead()
+            && !self.past_lifetime(existing.opened, now)
             && let Some(conn) = C::in_handle(&existing.handle)
         {
             return (conn.clone(), existing.tls.clone());
@@ -74,13 +140,14 @@ impl Pool {
             key,
             MuxEntry {
                 handle: handle.into_handle(),
-                opened: Instant::now(),
+                opened: now,
                 last_use: Stamp::now(),
                 tls,
             },
         );
         drop(entries);
         drop(evicted);
+        self.evict_excess_across_shards(shard);
         self.conns.counters.add(Counter::Installs, 1);
         self.watch_idle();
         out
@@ -89,11 +156,19 @@ impl Pool {
     pub(crate) fn checkout_h1(&self, key: &PoolKey, now: Instant) -> Option<(H1Slot, TlsInfo)> {
         let mut entries = write(&self.conns.shards.of(key).entries);
         let hit = entries.h1.get_mut(key).and_then(|entry| {
-            while let Some((slot, _returned_at)) = entry.idle.queue().pop_back() {
-                if !self.past_lifetime(slot.opened_at, now) {
-                    entry.last_use = now;
-                    return Some((slot, entry.tls.clone()));
+            while let Some((slot, tls, returned_at)) = entry.idle.queue().pop_back() {
+                if let Some(counter) = h1_stale_for(
+                    slot.opened_at,
+                    returned_at,
+                    self.config.idle_timeout,
+                    self.config.max_lifetime,
+                    now,
+                ) {
+                    self.conns.counters.add(counter, 1);
+                    continue;
                 }
+                entry.last_use = now;
+                return Some((slot, tls));
             }
             None
         });
@@ -105,48 +180,72 @@ impl Pool {
         if !self.config.keepalive {
             return false;
         }
-        self.park_h1(key, slot, tls);
-        true
+        self.park_h1(key, slot, tls)
     }
 
-    pub(crate) fn park_h1(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) {
+    pub(crate) fn park_h1(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) -> bool {
         if self.past_lifetime(slot.opened_at, Instant::now()) {
-            return;
+            return false;
         }
-        self.park_h1_locked(key, slot, tls);
+        let parked = self.park_h1_locked(key, slot, tls);
         self.watch_idle();
+        parked
     }
 
-    fn park_h1_locked(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) {
-        let mut entries = write(&self.conns.shards.of(key).entries);
+    fn park_h1_locked(&self, key: &PoolKey, slot: H1Slot, tls: TlsInfo) -> bool {
+        let shard = self.conns.shards.of(key);
+        let mut entries = write(&shard.entries);
         if let Some(entry) = entries.h1.get_mut(key) {
             let now = Instant::now();
-            entry.idle.queue().push_back((slot, now));
+            entry.idle.queue().push_back((slot, tls, now));
             entry.last_use = now;
-            return;
+            return true;
         }
         if entries.mux.contains_key(key) {
-            return;
+            return false;
         }
         let evicted = self.evict_for_new_entry(&mut entries);
         let mut idle = H1Idle::default();
-        idle.queue().push_back((slot, Instant::now()));
+        idle.queue().push_back((slot, tls, Instant::now()));
         entries.h1.insert(
             key.clone(),
             H1Entry {
                 idle,
                 last_use: Instant::now(),
-                tls,
             },
         );
         drop(entries);
         drop(evicted);
+        self.evict_excess_across_shards(shard);
+        true
+    }
+
+    fn evict_excess_across_shards(&self, skip: &super::shards::Shard) {
+        let shards = &self.conns.shards;
+        if shards.over_limit() == 0 {
+            return;
+        }
+        let mut evicted = Vec::new();
+        for shard in shards.evict_order(skip) {
+            let excess = shards.over_limit();
+            if excess == 0 {
+                break;
+            }
+            let mut entries = write(&shard.entries);
+            let removed = entries.evict_lru(excess);
+            if !removed.is_empty() {
+                shards.removed(removed.len());
+                self.conns
+                    .counters
+                    .add(Counter::EvictionsLru, removed.len() as u64);
+                evicted.extend(removed);
+            }
+        }
+        drop(evicted);
     }
 
     fn past_lifetime(&self, opened: Instant, now: Instant) -> bool {
-        self.config
-            .max_lifetime
-            .is_some_and(|lifetime| now.duration_since(opened) >= lifetime)
+        is_past_lifetime(opened, self.config.max_lifetime, now)
     }
 
     fn evict_for_new_entry(&self, entries: &mut Entries) -> Vec<Evicted> {

@@ -22,7 +22,17 @@ mod journey;
 mod response;
 
 impl Session {
-    pub(super) async fn execute_inner(&self, attempt: Box<Draft>) -> Result<Response> {
+    pub(super) async fn execute_inner(&self, mut attempt: Box<Draft>) -> Result<Response> {
+        let overrides = attempt.carry.overrides.as_deref_mut();
+        let (first_hop, initiator, trusted_origin, digest_auth) = match overrides {
+            Some(o) => (
+                o.first_hop.take(),
+                o.initiator.take(),
+                o.trusted_origin.take(),
+                o.digest_auth.take(),
+            ),
+            None => (None, None, None, None),
+        };
         let url = attempt
             .url
             .expect("invariant: send stores the prepared URL before the attempt");
@@ -32,86 +42,144 @@ impl Session {
             attempt.method,
             attempt.body,
             (!attempt.headers.is_empty()).then_some(attempt.headers),
-            attempt.carry.initiator,
+            initiator,
             self.session_referer(),
         )
-        .trusting(attempt.trusted_origin);
+        .trusting(trusted_origin);
         let redirect_policy = attempt
             .carry
-            .redirect
-            .as_ref()
+            .redirect()
             .unwrap_or(&self.inner.inputs.redirect_policy);
-        let request_proxy = attempt.carry.proxy.as_ref();
-        let header_order = attempt.carry.header_order.as_deref();
+        let request_proxy = attempt.carry.proxy();
+        let protocol = attempt
+            .carry
+            .protocol
+            .unwrap_or(self.inner.inputs.protocol_policy);
+        let header_order = attempt.carry.header_order();
 
-        let mut digest = attempt.carry.digest_auth.map(DigestLeg::new);
+        let mut digest = digest_auth
+            .map(|auth| DigestLeg::new(auth, std::sync::Arc::clone(&self.inner.digest_nonces)));
         let mut pass = None;
         let mut answered = false;
         let mut refreshed = false;
+        let mut hop_proxy: Option<Option<crate::net::ProxyUrl>> = first_hop;
+        let mut hop_leased: Option<crate::core::proxy_pool::Leased> = None;
         loop {
             drop(pass.take());
             pass = self.admit_host(&journey.url).await?;
-            let refresh = self
+
+            let proxy = match &hop_proxy {
+                Some(chosen) => chosen.as_ref().map(std::borrow::Cow::Borrowed),
+                None => {
+                    let chosen = if request_proxy.is_none()
+                        && let Some(pool) = self.proxy_pool()
+                        && let Some(leased) = pool
+                            .acquire_session(self, &journey.url, None)
+                            .map_err(leg_error(answered))?
+                    {
+                        let p = leased
+                            .session
+                            .proxy_for(&journey.url, Some(leased.lease.config()))
+                            .map_err(leg_error(answered))?
+                            .map(std::borrow::Cow::into_owned);
+                        hop_leased = Some(leased);
+                        p
+                    } else {
+                        self.proxy_for(&journey.url, request_proxy)
+                            .map_err(leg_error(answered))?
+                            .map(std::borrow::Cow::into_owned)
+                    };
+                    hop_proxy
+                        .insert(chosen)
+                        .as_ref()
+                        .map(std::borrow::Cow::Borrowed)
+                }
+            };
+            let leg_session = hop_leased.as_ref().map_or(self, |l| &l.session);
+
+            let refresh = leg_session
                 .refresh_version(&journey, digest.as_ref())
                 .filter(|_| !refreshed);
-            let headers = self.leg_headers(&journey, attempt.carry.preset, header_order);
+            let headers = leg_session.leg_headers(&journey, attempt.carry.preset, header_order);
             journey.authorized = None;
-            let audit_headers = self.audit_copy(&headers);
+            let audit_headers = leg_session.audit_copy(&headers);
 
             let step_body = std::mem::take(&mut journey.body);
-            let replay_body = step_body.replay();
+            let replay_body = step_body.try_clone();
 
-            let proxy = self
-                .proxy_for(&journey.url, request_proxy)
-                .map_err(leg_error(answered))?;
             let leg = {
-                let send = std::pin::pin!(self.send_with_policy(Prepared {
+                let prepared = Prepared {
                     method: &journey.method,
                     url: &journey.url,
                     headers,
                     body: step_body,
-                    proxy,
+                    proxy: proxy.as_deref(),
                     response,
                     body_limit: crate::error::BodyLimit::session(
-                        attempt.carry.body_rules.max_body_size
+                        attempt.carry.body_rules.max_body_size,
                     ),
                     stale_resend: !attempt.carry.retrying,
-                }));
+                };
+                let send = std::pin::pin!(leg_session.send_with_policy(prepared, protocol));
                 attempt.deadline.response_header(send).await
             }
-            .map_err(leg_error(answered))?;
+            .map_err(leg_error(answered));
+            if let Some(leased) = &hop_leased
+                && proxy.is_some()
+            {
+                let blocked = leg.as_ref().is_ok_and(|leg| {
+                    leg_session
+                        .inner
+                        .inputs
+                        .block_rules
+                        .check_parts(leg.status, &leg.headers)
+                        .is_some()
+                });
+                let outcome = leg.as_ref().map(|leg| leg.status);
+                leased
+                    .lease
+                    .record_result(outcome, leased.origin.as_ref(), blocked);
+            }
+            let leg = match leg {
+                Ok(leg) => leg,
+                Err(mut err) => {
+                    if hop_leased.is_some() && err.proxy().is_none() {
+                        err.set_proxy(proxy.as_deref().map(|p| p.url().as_str()));
+                    }
+                    return Err(err);
+                }
+            };
             answered |= leg.status != http::StatusCode::UNAUTHORIZED;
             journey.timing.add_leg(&leg.timing);
 
             let seen = leg.headers.seen();
             if seen.cookies {
-                self.store_cookies(leg.headers.map(), &journey.url);
+                leg_session.store_cookies(leg.headers.map(), &journey.url);
             }
             if seen.hsts {
-                self.note_hsts(&journey.url, leg.headers.map());
+                leg_session.note_hsts(&journey.url, leg.headers.map());
             }
             #[cfg(feature = "http3")]
             if seen.alt_svc {
-                self.note_alt_svc(&journey.url, leg.headers.map());
+                leg_session.note_alt_svc(&journey.url, leg.headers.map());
             }
             #[cfg(not(feature = "http3"))]
             let _ = seen.alt_svc;
 
             if leg.status == http::StatusCode::UNAUTHORIZED
                 && let Some(version) = refresh
-                && replay_body.is_some()
+                && let Some(replay_body) = replay_body
             {
-                let token = self
+                let token = leg_session
                     .inner
                     .inputs
-                    .bearer
+                    .credential
                     .as_ref()
                     .expect("invariant: refresh version requires bearer auth");
                 drop(leg);
-                self.unless_shut_down(attempt.deadline.total(token.renew(version)))
+                Box::pin(self.unless_shut_down(attempt.deadline.total(token.renew(version))))
                     .await?;
-                journey.body =
-                    replay_body.expect("invariant: replayable body checked before refresh");
+                journey.body = replay_body;
                 refreshed = true;
                 continue;
             }
@@ -121,13 +189,19 @@ impl Session {
                 headers: &leg.headers,
                 redirect_policy,
             };
-            if next.take(&mut journey, digest.as_mut(), replay_body)? {
+            let prev_url = std::sync::Arc::clone(&journey.url);
+            if next.take(&mut journey, digest.as_mut(), replay_body, |u| {
+                self.hsts_upgrade(u)
+            })? {
                 drop(leg.body);
-                journey.url = self.hsts_upgrade(&journey.url);
+                if journey.url != prev_url {
+                    hop_proxy = None;
+                    hop_leased = None;
+                }
                 continue;
             }
 
-            let mut response = self
+            let mut response = leg_session
                 .assemble_response(
                     leg,
                     journey,
@@ -137,6 +211,9 @@ impl Session {
                     &attempt.deadline,
                 )
                 .await?;
+            if hop_leased.is_some() {
+                response.set_proxy(proxy.as_deref().map(|p| p.url().as_str()));
+            }
             if let ResponseBody::Streaming(body) = &mut response.parts.body {
                 body.hold(pass.take());
             }
@@ -241,12 +318,13 @@ impl Turn<'_> {
         journey: &mut Journey,
         digest: Option<&mut DigestLeg>,
         replay_body: Option<Body>,
+        upgrade: impl Fn(&std::sync::Arc<Url>) -> std::sync::Arc<Url>,
     ) -> Result<bool> {
         if is_redirect_status(self.code)
             && let Some(location) = redirect_target(self.code, self.headers.map())
             && let Some(hop) = journey.approved_hop(self.redirect_policy, self.code, &location)
         {
-            journey.follow(hop, self.code, &location, replay_body)?;
+            journey.follow(hop, self.code, &location, replay_body, upgrade)?;
             self.redirect_policy.check_hops(journey.chain.len())?;
             if let Some(digest) = digest {
                 journey.authorized = digest.next_hop(journey)?;

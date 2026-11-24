@@ -3,13 +3,13 @@
 #[non_exhaustive]
 pub enum HeaderPosition {
     /// Inserts the header before `sec-ch-ua`.
-    BeforeCchUa,
+    BeforeSecChUa,
     /// Inserts the header after `sec-ch-ua`.
-    AfterCchUa,
+    AfterSecChUa,
     /// Inserts the header after `sec-ch-ua-mobile`.
-    AfterCchUaMobile,
+    AfterSecChUaMobile,
     /// Inserts the header after `sec-ch-ua-platform`.
-    AfterCchUaPlatform,
+    AfterSecChUaPlatform,
     /// Inserts the header after `user-agent`.
     AfterUserAgent,
     /// Inserts the header after `accept`.
@@ -17,7 +17,7 @@ pub enum HeaderPosition {
     /// Inserts the header after `content-type`.
     AfterContentType,
     /// Inserts the header after `sec-fetch-dest`.
-    AfterFetchDest,
+    AfterSecFetchDest,
     /// Inserts the header before `accept-encoding`.
     BeforeAcceptEncoding,
 }
@@ -25,19 +25,19 @@ pub enum HeaderPosition {
 impl HeaderPosition {
     pub(crate) fn anchor_name(&self) -> &'static str {
         match self {
-            Self::BeforeCchUa | Self::AfterCchUa => "sec-ch-ua",
-            Self::AfterCchUaMobile => "sec-ch-ua-mobile",
-            Self::AfterCchUaPlatform => "sec-ch-ua-platform",
+            Self::BeforeSecChUa | Self::AfterSecChUa => "sec-ch-ua",
+            Self::AfterSecChUaMobile => "sec-ch-ua-mobile",
+            Self::AfterSecChUaPlatform => "sec-ch-ua-platform",
             Self::AfterUserAgent => "user-agent",
             Self::AfterAccept => "accept",
             Self::AfterContentType => "content-type",
-            Self::AfterFetchDest => "sec-fetch-dest",
+            Self::AfterSecFetchDest => "sec-fetch-dest",
             Self::BeforeAcceptEncoding => "accept-encoding",
         }
     }
 
     pub(crate) fn is_before(&self) -> bool {
-        matches!(self, Self::BeforeCchUa | Self::BeforeAcceptEncoding)
+        matches!(self, Self::BeforeSecChUa | Self::BeforeAcceptEncoding)
     }
 }
 

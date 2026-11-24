@@ -2,7 +2,6 @@ use std::time::{Duration, SystemTime};
 
 use url::{Host, Url};
 
-use crate::util::delta_seconds;
 use crate::util::expiring::ExpiringSet;
 use crate::wire::Scheme;
 
@@ -152,5 +151,5 @@ fn seconds(raw: &str) -> Option<Duration> {
         .strip_prefix('"')
         .and_then(|r| r.strip_suffix('"'))
         .unwrap_or(raw);
-    delta_seconds(raw).map(|secs| Duration::from_secs(secs.min(u64::from(u32::MAX))))
+    crate::util::delta_duration(raw)
 }

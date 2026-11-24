@@ -18,10 +18,19 @@ pub(super) struct Date {
 pub(super) fn token(d: &mut Date, tok: &str) {
     if !d.time && tok.contains(':') {
         let parts: Vec<&str> = tok.split(':').collect();
-        if parts.len() >= 2 {
-            d.hour = parts[0].parse().unwrap_or(0);
-            d.minute = parts[1].parse().unwrap_or(0);
-            d.second = parts.get(2).and_then(|s| s.parse().ok()).unwrap_or(0);
+        if (2..=3).contains(&parts.len())
+            && let (Ok(hour), Ok(minute)) = (parts[0].parse::<u32>(), parts[1].parse::<u32>())
+        {
+            let second = match parts.get(2) {
+                Some(s) => match s.parse::<u32>() {
+                    Ok(v) => v,
+                    Err(_) => return,
+                },
+                None => 0,
+            };
+            d.hour = hour;
+            d.minute = minute;
+            d.second = second;
             d.time = true;
         }
         return;

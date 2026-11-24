@@ -1,6 +1,6 @@
 The status, headers, and body of one response.
 
-The body is read once, decoded, and capped by `max_body_size`. Each reader consumes the response. For a large file, send with `.stream()` so the body is not buffered, call `download_to`, and bound it with `Timeout::body`; `total` ends at the response headers of a streamed response.
+The body is read once, decoded, and capped by `max_body_size`. Each reader consumes the response. For a large file, send with `.stream()` so the body is not buffered, call `download_to`, and bound it with `Timeout::body`; `total` ends at the response headers of a streamed response. [`into_http`](crate::Response::into_http) converts the response into an `http::Response` that streams the body.
 
 ```rust,no_run
 use leyline::Session;

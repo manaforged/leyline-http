@@ -28,7 +28,7 @@ pub(crate) use method::{has_body_by_default, is_idempotent, is_retrieval, is_saf
 pub use mode::{ErrorBudget, ResponseMode};
 pub(crate) use request_headers::{HeaderBlock, RequestHeaders};
 pub(crate) use scheme::{Scheme, authority, host_port};
-pub(crate) use state::{BlockReader, ResponseBlock, ResponseState};
+pub(crate) use state::{BlockReader, ResponseBlock, ResponseState, is_valid_h2_field};
 pub(crate) use timing::ResponseTiming;
 pub use tls::{TlsFacts, TlsInfo};
 pub(crate) use upload::Upload;
@@ -37,7 +37,9 @@ pub(crate) use upload::Upload;
 pub type HeaderPair = (std::borrow::Cow<'static, str>, crate::header_str::HeaderStr);
 
 pub(crate) const DEFAULT_MAX_BODY_SIZE: usize = 100 * 1024 * 1024;
+pub(crate) const NO_SIZE_CAP: usize = usize::MAX;
 pub(crate) const DEFAULT_MAX_HEADER_LIST_BYTES: usize = 256 * 1024;
+pub(crate) const BODY_RESERVE_CAP: usize = 64 * 1024;
 
 /// The hop-by-hop fields of RFC 9110 section 7.6.1, which never travel past one connection.
 pub(crate) const HOP_BY_HOP: [&str; 6] = [

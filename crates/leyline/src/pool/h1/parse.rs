@@ -17,10 +17,7 @@ where
         let body_start = header_end + 4;
         head_bytes += body_start;
         if head_bytes > MAX_H1_HEADER_BYTES {
-            return Err(malformed(format!(
-                "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
-            ))
-            .into());
+            return Err(headers_too_large());
         }
         let head = &buf[..header_end];
         let Some((status, minor, framing, seen)) = final_head(head, method, &mut state)? else {
@@ -67,6 +64,17 @@ pub(super) fn classify<'h>(
     Ok((status, minor, scanned))
 }
 
+/// Parses and validates a final HTTP/1.1 response head into its status, fields, and minor version.
+#[cfg(feature = "bench-internals")]
+pub fn parse_validated_h1_head(head: &[u8]) -> Result<(u16, http::HeaderMap, u8), Error> {
+    let mut state = ResponseState::default();
+    let Some((status, minor, _, seen)) = final_head(head, &Method::GET, &mut state)? else {
+        return Err(malformed("informational response without final head"));
+    };
+    let headers = Fields::raw(Bytes::copy_from_slice(head), seen).into_map();
+    Ok((status, headers, minor))
+}
+
 pub(super) struct Buffered {
     pub(super) body: Vec<u8>,
     pub(super) trailers: http::HeaderMap,
@@ -81,7 +89,7 @@ pub(super) async fn read_h1_body<S>(
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    let excess = has_excess(head.framing, head.initial_body.len());
+    let mut excess = has_excess(head.framing, head.initial_body.len());
     let mut trailers = http::HeaderMap::new();
     if let Some(body) = buffered_body(head, limit) {
         return Ok(Buffered {
@@ -94,8 +102,9 @@ where
     let body = match head.framing {
         BodyFraming::None => Vec::new(),
         BodyFraming::Chunked => {
-            let (body, sent) = read_chunked(stream, buf, limit).await?;
+            let (body, sent, trailing) = read_chunked(stream, buf, limit).await?;
             trailers = sent;
+            excess |= trailing;
             body
         }
         BodyFraming::Fixed(len) => {
@@ -132,33 +141,25 @@ pub(super) fn has_excess(framing: BodyFraming, buffered: usize) -> bool {
     }
 }
 
-fn bare_lf(head: &[u8]) -> bool {
-    memchr::memchr_iter(b'\n', head).any(|i| i == 0 || head[i - 1] != b'\r')
-}
 pub(super) async fn read_h1_headers<S>(stream: &mut S, buf: &mut Vec<u8>) -> Result<usize, H1Error>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
     loop {
-        let end = find_header_end(buf);
-        let scanned = end.map_or(buf.len(), |end| end + 4);
-        if bare_lf(&buf[..scanned]) {
-            return Err(malformed("HTTP/1.1 head has a bare LF line ending").into());
-        }
-        if let Some(header_end) = end {
-            if header_end + 4 > MAX_H1_HEADER_BYTES {
-                return Err(malformed(format!(
-                    "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
-                ))
-                .into());
+        match crate::wire::h1::scan_header_end(buf) {
+            crate::wire::h1::HeaderEnd::Found(header_end) => {
+                if header_end + 4 > MAX_H1_HEADER_BYTES {
+                    return Err(headers_too_large());
+                }
+                return Ok(header_end);
             }
-            return Ok(header_end);
+            crate::wire::h1::HeaderEnd::BareLf => {
+                return Err(malformed("HTTP/1.1 head has a bare LF line ending").into());
+            }
+            crate::wire::h1::HeaderEnd::Incomplete => {}
         }
         if buf.len() > MAX_H1_HEADER_BYTES {
-            return Err(malformed(format!(
-                "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
-            ))
-            .into());
+            return Err(headers_too_large());
         }
         if read::read_into(stream, buf, 2048).await? == 0 {
             return Err(closed("before HTTP/1.1 headers"));
@@ -175,6 +176,10 @@ where
     S: AsyncRead + Unpin + ?Sized,
 {
     limit.admit(0, len).map_err(BodyLimit::error)?;
+    body.reserve(
+        len.saturating_sub(body.len())
+            .min(crate::wire::BODY_RESERVE_CAP),
+    );
     read_fixed_into(stream, &mut body, len).await?;
     body.truncate(len);
     Ok(body)
@@ -224,7 +229,7 @@ where
 {
     read_chunked(stream, buf, BodyLimit::session(limit))
         .await
-        .map(|(body, _)| body)
+        .map(|(body, _, _)| body)
         .map_err(H1Error::into_error)
 }
 
@@ -232,7 +237,7 @@ async fn read_chunked<S>(
     stream: &mut S,
     mut buf: Vec<u8>,
     limit: BodyLimit,
-) -> Result<(Vec<u8>, http::HeaderMap), H1Error>
+) -> Result<(Vec<u8>, http::HeaderMap, bool), H1Error>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
@@ -248,9 +253,16 @@ where
                 out.extend_from_slice(&buf[..n]);
                 buf.drain(..n);
             }
-            Step::Done => return Ok((out, chunked.into_trailers())),
+            Step::Done => return Ok((out, chunked.into_trailers(), !buf.is_empty())),
         }
     }
+}
+
+fn headers_too_large() -> H1Error {
+    malformed(format!(
+        "HTTP/1.1 headers exceed {MAX_H1_HEADER_BYTES} bytes"
+    ))
+    .into()
 }
 
 fn oversized(e: &std::num::TryFromIntError, limit: BodyLimit) -> Error {

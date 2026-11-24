@@ -27,10 +27,16 @@ impl Session {
 }
 
 impl Parent {
-    pub(super) fn shared_connector(&self, child: &SessionBuilder) -> Option<FingerprintConnector> {
+    pub(super) fn shared_connector(
+        &self,
+        child: &SessionBuilder,
+    ) -> Option<(
+        FingerprintConnector,
+        Option<Arc<crate::core::doh::DohResolver>>,
+    )> {
         let parent = &self.session.inner;
         let same_inputs = child.pool_inputs() == parent.inputs.pool_inputs();
-        (!self.separate_pool && same_inputs).then(|| parent.connector.clone())
+        (!self.separate_pool && same_inputs).then(|| (parent.connector.clone(), parent.doh.clone()))
     }
 
     pub(super) fn share_with(self, child: &mut Session, shared: Option<TcpProfile>) -> Result<()> {

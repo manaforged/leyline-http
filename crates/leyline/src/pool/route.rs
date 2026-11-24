@@ -48,8 +48,7 @@ async fn send_auto(
         return send_http1(pool, connector, req).await;
     }
     let (host, port) = crate::wire::host_port(req.url)?;
-    let host = host.to_string();
-    match negotiate(pool, connector, h2_config, &host, port, req.proxy).await? {
+    match negotiate(pool, connector, h2_config, host, port, req.proxy).await? {
         Negotiated::H2(opened) => {
             send_h2_or_fall_back(pool, connector, h2_config, req, opened).await
         }
@@ -64,7 +63,7 @@ async fn send_h2_or_fall_back(
     req: Prepared<'_>,
     opened: Opened<H2Client>,
 ) -> Result<Box<TransportResponse>> {
-    let retry = req.body.replay().map(|body| req.again(body));
+    let retry = req.body.try_clone().map(|body| req.again(body));
     match send_request(pool, connector, h2_config, req, Some(opened)).await? {
         H2Outcome::Response(response) => Ok(response),
         H2Outcome::Http1(not_h2) => {
@@ -91,13 +90,13 @@ async fn send_h1_or_upgrade(
     let retry = req.again(Body::default());
     match send_h1(pool, connector, Some((h2_config, ())), req, opened).await? {
         H1Outcome::Response(resp) => Ok(resp),
-        H1Outcome::Upgraded { opened, body, .. } => send_request(
+        H1Outcome::Upgraded { opened, body, .. } => Box::pin(send_request(
             pool,
             connector,
             h2_config,
             Prepared { body, ..retry },
             Some(opened),
-        )
+        ))
         .await?
         .response(),
     }

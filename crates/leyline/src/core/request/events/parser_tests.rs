@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use bytes::Bytes;
 
 use super::Parser;
@@ -43,7 +41,7 @@ fn whatwg(input: &[u8]) -> Vec<(String, String)> {
 }
 
 fn parse(input: &[u8], split: usize, max: usize) -> Result<Vec<(String, String)>, ()> {
-    let mut parser = Parser::new(String::new(), max, Duration::ZERO);
+    let mut parser = Parser::new(String::new(), max);
     let mut events = Vec::new();
     for chunk in [&input[..split], &input[split..]] {
         let mut bytes = Bytes::copy_from_slice(chunk);

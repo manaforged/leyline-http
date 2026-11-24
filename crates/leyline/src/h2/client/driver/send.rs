@@ -62,47 +62,36 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     pub(super) fn try_pump_streaming_body(&mut self, stream_id: u32) -> Result<(), H2Error> {
         loop {
-            let parked = self
-                .streams
-                .get(stream_id)
-                .is_some_and(|a| a.pending_send.is_some());
-            if parked {
+            let Some(actor) = self.streams.get_mut(stream_id) else {
                 return Ok(());
-            }
-            let next_chunk: Option<Bytes> =
-                self.streams
-                    .get_mut(stream_id)
-                    .and_then(|a| match &mut a.send_body_input {
-                        SendBodyInput::Streaming { pending_buf, .. } => pending_buf.pop_front(),
-                        _ => None,
-                    });
-
-            let closed = self
-                .streams
-                .get(stream_id)
-                .is_some_and(|a| match &a.send_body_input {
-                    SendBodyInput::Streaming { closed, .. } => *closed,
-                    SendBodyInput::None => false,
-                });
-
-            let already_closed = self
-                .streams
-                .get(stream_id)
-                .map(|a| !matches!(a.state, StreamState::Open | StreamState::HalfClosedRemote))
-                .unwrap_or(true);
-            if already_closed {
-                return Ok(());
-            }
-
-            if next_chunk.is_none()
-                && let Some(cause) = self.take_body_error(stream_id)
+            };
+            if actor.pending_send.is_some()
+                || !matches!(
+                    actor.state,
+                    StreamState::Open | StreamState::HalfClosedRemote
+                )
             {
-                RstStreamFrame {
-                    stream_id,
-                    error_code: ErrorCode::InternalError,
+                return Ok(());
+            }
+            let (next_chunk, closed, body_error, has_error) = match &mut actor.send_body_input {
+                SendBodyInput::Streaming {
+                    pending_buf,
+                    closed,
+                    error,
+                } => {
+                    let chunk = pending_buf.pop_front();
+                    let err = if chunk.is_none() { error.take() } else { None };
+                    (chunk, *closed, err, error.is_some())
                 }
-                .encode(self.writer.out());
-                self.fail_stream(stream_id, H2Error::RequestBody(cause));
+                SendBodyInput::None => (None, false, None, false),
+            };
+
+            if let Some(cause) = body_error {
+                self.reset_stream(
+                    stream_id,
+                    H2Error::RequestBody(cause),
+                    ErrorCode::InternalError,
+                )?;
                 return Ok(());
             }
 
@@ -112,7 +101,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                         stream_id,
                         chunk,
                         DataEnd::Streaming {
-                            producer_closed: closed,
+                            producer_closed: closed && !has_error,
                         },
                     )?;
                 }
@@ -141,13 +130,6 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
         .encode(self.writer.out());
         Ok(())
-    }
-
-    fn take_body_error(&mut self, stream_id: u32) -> Option<std::io::Error> {
-        match &mut self.streams.get_mut(stream_id)?.send_body_input {
-            SendBodyInput::Streaming { error, .. } => error.take(),
-            SendBodyInput::None => None,
-        }
     }
 
     pub(super) fn write_data_frames(

@@ -5,7 +5,6 @@
 )]
 use crate::h3_support;
 
-use futures_util::StreamExt;
 use h3_support::{H3Server, Limits, Reply, h3_server};
 use leyline::{Kind, Session};
 

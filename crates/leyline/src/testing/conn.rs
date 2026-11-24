@@ -28,11 +28,12 @@ where
             return;
         };
         let close = close_requested || response.closes();
-        if write_response(&mut stream, &response, head_only)
-            .await
-            .is_err()
-            || close
-        {
+        let cut = response.cut().filter(|_| !head_only);
+        let written = write_response(&mut stream, &response, head_only, cut).await;
+        if cut.is_some() {
+            return;
+        }
+        if written.is_err() || close {
             drop(stream.shutdown().await);
             return;
         }
@@ -195,15 +196,24 @@ where
     Ok(())
 }
 
-async fn write_response<S>(stream: &mut S, response: &Response, head_only: bool) -> io::Result<()>
+async fn write_response<S>(
+    stream: &mut S,
+    response: &Response,
+    head_only: bool,
+    cut: Option<usize>,
+) -> io::Result<()>
 where
     S: AsyncWrite + Unpin,
 {
     stream.write_all(head(response).as_bytes()).await?;
     if !head_only {
+        let limit = cut.unwrap_or(usize::MAX);
         match &response.chunks {
-            Some(chunked) => write_chunks(stream, chunked).await?,
-            None => stream.write_all(&response.body).await?,
+            Some(chunked) => write_chunks(stream, chunked, limit).await?,
+            None => {
+                let sent = response.body.len().min(limit);
+                stream.write_all(&response.body[..sent]).await?;
+            }
         }
     }
     stream.flush().await
@@ -222,7 +232,8 @@ fn head(response: &Response) -> String {
         name.eq_ignore_ascii_case("content-length")
             || name.eq_ignore_ascii_case("transfer-encoding")
     });
-    if !framed {
+    let no_body = (100..200).contains(&response.status) || response.status == 204;
+    if !framed && !no_body {
         match response.chunks {
             Some(_) => head.push_str("transfer-encoding: chunked\r\n"),
             None => head.push_str(&format!("content-length: {}\r\n", response.body.len())),
@@ -232,24 +243,33 @@ fn head(response: &Response) -> String {
     head
 }
 
-async fn write_chunks<S>(stream: &mut S, chunked: &ChunkedBody) -> io::Result<()>
+async fn write_chunks<S>(stream: &mut S, chunked: &ChunkedBody, limit: usize) -> io::Result<()>
 where
     S: AsyncWrite + Unpin,
 {
+    let mut left = limit;
     for (index, part) in chunked
         .parts
         .iter()
         .filter(|part| !part.is_empty())
         .enumerate()
     {
+        if left == 0 {
+            return Ok(());
+        }
         if index > 0 {
             tokio::time::sleep(chunked.pause).await;
         }
         stream
             .write_all(format!("{:x}\r\n", part.len()).as_bytes())
             .await?;
-        stream.write_all(part).await?;
-        stream.write_all(b"\r\n").await?;
+        let sent = part.len().min(left);
+        left -= sent;
+        stream.write_all(&part[..sent]).await?;
+        if sent < part.len() {
+            return Ok(());
+        }
+        stream.write_all(CRLF).await?;
         stream.flush().await?;
     }
     stream.write_all(b"0\r\n\r\n").await

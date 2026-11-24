@@ -101,13 +101,14 @@ pub(crate) fn dns(host: &str, port: u16, addrs: usize) {
     });
 }
 
-pub(crate) fn connect(host: &str, port: u16, reused: bool) {
+pub(crate) fn connect(host: &str, port: u16, reused: bool, addr: Option<std::net::SocketAddr>) {
     with(|ctx| {
         ctx.hook.event(&Event::Connect {
             id: ctx.id,
             host,
             port,
             reused,
+            addr,
             elapsed: ctx.start.elapsed(),
         });
     });
@@ -126,31 +127,26 @@ pub(crate) fn tls(host: &str, version: Option<&str>, cipher: Option<&str>, alpn:
     });
 }
 
-pub(crate) fn sent(host: &str, method: &str, path: &str, protocol: http::Version) {
+pub(crate) fn sent(host: &str, method: &str, path: &str, version: http::Version) {
     with(|ctx| {
         ctx.hook.event(&Event::Sent {
             id: ctx.id,
             host,
             method,
             path,
-            protocol,
+            version,
             elapsed: ctx.start.elapsed(),
         });
     });
 }
 
-pub(crate) fn head(
-    host: &str,
-    status: u16,
-    protocol: http::Version,
-    headers: &crate::wire::Fields,
-) {
+pub(crate) fn head(host: &str, status: u16, version: http::Version, headers: &crate::wire::Fields) {
     with(|ctx| {
         ctx.hook.event(&Event::Head {
             id: ctx.id,
             host,
-            status,
-            protocol,
+            status: http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::OK),
+            version,
             elapsed: ctx.start.elapsed(),
             headers: headers.map(),
         });
@@ -168,7 +164,7 @@ pub(crate) fn done(outcome: Result<(), &Error>) {
 }
 
 /// Writes every event to the `tracing` crate under the `leyline::trace` target.
-#[derive(Debug, Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Log;
 
 impl Trace for Log {
@@ -188,9 +184,10 @@ impl Trace for Log {
                 host,
                 port,
                 reused,
+                addr,
                 elapsed,
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, port, reused, elapsed_ms = ResponseTiming::span(elapsed), "connect");
+                tracing::debug!(target: "leyline::trace", id, host, port, reused, addr = ?addr, elapsed_ms = ResponseTiming::span(elapsed), "connect");
             }
             Event::Tls {
                 id,
@@ -207,20 +204,20 @@ impl Trace for Log {
                 host,
                 method,
                 path,
-                protocol,
+                version,
                 elapsed,
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, method, path = %crate::util::mask_query(path), protocol = ?protocol, elapsed_ms = ResponseTiming::span(elapsed), "sent");
+                tracing::debug!(target: "leyline::trace", id, host, method, path = %crate::util::mask_query(path), version = ?version, elapsed_ms = ResponseTiming::span(elapsed), "sent");
             }
             Event::Head {
                 id,
                 host,
                 status,
-                protocol,
+                version,
                 elapsed,
                 ..
             } => {
-                tracing::debug!(target: "leyline::trace", id, host, status, protocol = ?protocol, elapsed_ms = ResponseTiming::span(elapsed), "head");
+                tracing::debug!(target: "leyline::trace", id, host, status = status.as_u16(), version = ?version, elapsed_ms = ResponseTiming::span(elapsed), "head");
             }
             Event::Done {
                 id,

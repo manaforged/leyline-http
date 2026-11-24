@@ -105,9 +105,10 @@ where
         };
         in_flight.push(launch(addr));
         waiting = queue.next();
-        timer
-            .as_mut()
-            .reset(tokio::time::Instant::now() + config.resolve_delay);
+        timer.as_mut().reset(crate::util::saturating_after_tokio(
+            tokio::time::Instant::now(),
+            config.resolve_delay,
+        ));
     }
 }
 

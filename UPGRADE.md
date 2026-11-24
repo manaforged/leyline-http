@@ -1,16 +1,52 @@
-# Upgrading to Leyline 0.2
+# Upgrading to Leyline 0.3
 
-This guide maps the 0.1.6 Rust API to 0.2.0. The API changes are breaking. There is no automatic migration command.
+This guide maps earlier Leyline Rust APIs to 0.3.0. The API changes are breaking. There is no automatic migration command.
 
 ## Migration steps
 
-1. Change the `leyline-http` dependency to `"0.2"` and use Rust 1.96 or later.
+1. Change the `leyline-http` dependency to `"0.3"` and use Rust 1.96 or later.
 2. Find each old name in the table below and update its imports and calls.
 3. Replace typed browser profiles with profile TOML where required.
-4. Check error handling, retries, streaming, and saved-session behavior against the [release notes](CHANGELOG.md#020---2026-11-08).
+4. Check error handling, retries, streaming, and saved-session behavior against the [release notes](CHANGELOG.md#030---2026-11-24).
 5. Run `cargo check` and your application's tests with the features you use.
 
 For new code, start with the [five main types](AGENTS.md#the-five-types). The [user guide](https://manaforged.github.io/leyline-http/) covers current workflows.
+
+## Breaking changes in 0.3.0
+
+These changes clean up `0.2` API rough edges while keeping the same five core types (`Session`, `Tab`, `RequestBuilder`, `Response`, `Error`). Raw fields move behind getters and builders, sibling argument orders align, and every changed call maps 1-to-1 below.
+
+| 0.2.0 | 0.3.0 |
+| --- | --- |
+| `jar.store(set_cookie, &url)` | `jar.store(&url, set_cookie)` |
+| `Tls::pin_sha256(digest)` | `Tls::pin_cert_sha256(digest)` |
+| `Message::Ping`, `Message::Pong` | `Message::Ping(payload)`, `Message::Pong(payload)`; pass `Vec::new()` for an empty payload and match with `Message::Ping(_)` |
+| `testing::Request::text()` for the request line and headers | `testing::Request::head()`; `text()` now returns the body |
+| `request.method`, `.target`, `.headers`, `.body`, `.request_line`, `.raw` on `testing::Request` | `request.method()`, `.target()`, `.headers()`, `.body()`, `.request_line()`, `.raw()`; each returns a borrowed value, so add `.to_owned()` or `.to_vec()` to keep one |
+| `link.url`, `link.rel`, `link.params` | `link.url()`, `link.rel()`, `link.params()` |
+| `cookie.name`, `.value`, `.domain`, `.path`, `.secure`, `.http_only`, `.same_site`, `.expires`, `.creation_time`, `.host_only` | the getter of the same name, such as `cookie.name()` |
+| `let mut c = Cookie::new(n, v); c.path = p; c.secure = true;` | `Cookie::builder(n, v).path(p).secure(true).build()`; `.domain(d)` makes the cookie match subdomains of `d`, and `host_only` has no setter |
+| `jar.set(&"https://example.com/".parse().unwrap(), n, v)` | `jar.set("https://example.com/", n, v)`; every `Jar` method takes a string or a `Url` |
+| `.header("user-agent", ua)` keeping browser `sec-ch-ua*` headers | setting `user-agent` drops the profile's `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform` unless the request sets them |
+| `trace::Event::Sent { protocol, .. }`, `Event::Head { status: u16, protocol, .. }`, `Event::Summary { proxy: Option<String>, .. }` | `version` on `Sent` and `Head`, `status: http::StatusCode` on `Head`, and `proxy: Option<&str>` on `Summary` |
+| `HeaderPosition::{BeforeCchUa, AfterCchUa, AfterCchUaMobile, AfterCchUaPlatform, AfterFetchDest}` | `HeaderPosition::{BeforeSecChUa, AfterSecChUa, AfterSecChUaMobile, AfterSecChUaPlatform, AfterSecFetchDest}` |
+| `TcpProfile` deserializing unknown fields or out-of-range `ttl`/`mss`/`window_size`/`window_scale` | deserialization now rejects unknown fields and out-of-range values |
+| `WebSocket::header` returning lossy UTF-8 for non-ASCII header bytes | returns `None` for non-ASCII header values (matching `Response::header` and `Page::header`) |
+| `Session::builder().retry(0)` / `.redirect(..)` / `.max_body_size(..)` ignored by `Crawl` and `Session::robots` | explicit session limits now carry into `Crawl` and `Session::robots` instead of being overridden by internal defaults |
+| `Session::load` on a 0.2.0 browser-profile `session.json` | saved JSON format is unchanged, but bundled browser `profile_id` digests updated with new brand entries (re-save browser sessions or strip `profile_id` to migrate) |
+| `leyline::{Crawl, Page, Respect, Scope, SkipReason, Purpose, Robots, RobotsSource}` | moved under `leyline::crawl::*` |
+| `leyline::{Event, Events}` | moved under `leyline::sse::*` |
+| `leyline::{Encoding, Fingerprint, HeaderPosition, RequestKind, TcpProfile}` | moved under `leyline::profile::*` |
+| `Respect::AiTraining` | `crawl::Respect::AiTrain` (saved checkpoints with `"AiTraining"` still load) |
+| `Tab::set_current(page)` | `Tab::page(page)` |
+| `RequestBuilder::sha256`, `progress`, or `resume` followed by `send()`, `text()`, `bytes()`, `pages()`, `events()`, or `websocket()` | now fails with `Kind::Config`; use `download_to(path)` |
+| `SessionBuilder::max_pending_per_host(limit)` | `HostLimits::new().max_pending(limit)` via `SessionBuilder::host_limits(..)` |
+| `Tls::tls12_min()`, `Tls::tls13_only()` | `Tls::min_version(TlsVersion::Tls12)`, `Tls::min_version(TlsVersion::Tls13)` |
+| `leyline::TlsMinVersion` | `leyline::TlsVersion` |
+| `leyline::relay_headers(&headers)` | `Response::relay_headers()` (the free function is now private) |
+| `trace::Metrics::new()` returning `Arc<Metrics>` | `Metrics::new()` returns `Metrics`; wrap in `Arc::new(Metrics::new())` to share with `.trace(..)` |
+| `Stats::in_flight(&str)`, `waiting(&str)`, `proxy_in_use(&str)`, `proxy_failures(&str)`, `proxy_banned_until(&str)` | now take `impl IntoUrl` (a URL string or `&Url`); `Stats::proxies()` yields `&Url` |
+| `Session::proxy()`, `Response::proxy()`, `Error::proxy()` returning `Option<&str>` | now return `Option<&Url>` (redacted); call `.map(Url::as_str)` for a string |
 
 ## Breaking changes in 0.2.0
 
@@ -39,7 +75,7 @@ Search for the old type or method name. A row marked removed has no direct repla
 | `Preset`, `HeaderAnchor` | `RequestKind`, `HeaderPosition` |
 | `RequestBuilder::preset`, `anchored`, `initiator`, `tag`, `compress` | `kind`, `header_at`, `from_page`, `label`, `compress_body` |
 | `FetchSite` | removed; `from_page(url)` sets the site and referrer context, `Sec-Fetch-Site` included |
-| `SessionBuilder::user_agent(ua)` | `.headers([("user-agent", ua)])` |
+| `SessionBuilder::user_agent(ua)` | removed in 0.2.0: `.headers([("user-agent", ua)])`; later releases have `user_agent(ua)` again |
 | `SessionBuilder::expect_profile_id(id)` | `Session::load(path)`, whose `build()` fails with `is_profile_changed()`, or a check of `session.profile_id()` |
 | `.headers(&[("a", "b")])` | `.headers([("a", "b")])`, `.headers(vec)`, or `.headers(&header_map)`; each pair converts like `header(name, value)` |
 | `BlockSignal { vendor, kind }`, `BlockKind` | `Block::Challenge(vendor)`, `Block::Captcha(vendor)`, `Block::Denied(vendor)`; `block.vendor()` |

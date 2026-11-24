@@ -194,9 +194,7 @@ impl BodyStream {
         let Some(pump) = self.pump.as_mut() else {
             return;
         };
-        let pump = pump
-            .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let pump = crate::util::get_mut(pump);
         if crate::deadline::expiring(until, || pump.as_mut().poll(cx)).is_ready() {
             self.pump = None;
         }

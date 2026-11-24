@@ -20,8 +20,9 @@ pub struct Tab {
 
 impl std::fmt::Debug for Tab {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let current = self.current().map(|url| crate::util::redact(url.as_str()));
         f.debug_struct("Tab")
-            .field("current", &self.current())
+            .field("current", &current)
             .finish_non_exhaustive()
     }
 }
@@ -45,8 +46,8 @@ impl Tab {
     }
 
     /// Sets the page URL the tab treats as open, or clears it with `None`.
-    pub fn set_current(&self, page: Option<Url>) {
-        *crate::util::lock(&self.page) = page;
+    pub fn page(&self, page: impl Into<Option<Url>>) {
+        *crate::util::lock(&self.page) = page.into();
     }
 
     pub(crate) fn request(
@@ -104,7 +105,7 @@ impl Tab {
         let builder = self
             .request(Method::POST, url, RequestKind::FormNavigate)
             .form(fields);
-        self.navigate(builder).await
+        self.navigate(self.trusted(builder)).await
     }
 
     /// Submits a parsed HTML form with its method and encoding and navigates the tab to the response.
@@ -143,7 +144,7 @@ impl Tab {
 
     pub(crate) async fn navigate(&self, builder: RequestBuilder) -> Result<Response> {
         let response = builder.send().await?;
-        self.set_current(Some(response.url().clone()));
+        self.page(Some(response.url().clone()));
         Ok(response)
     }
 

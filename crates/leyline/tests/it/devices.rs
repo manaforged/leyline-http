@@ -23,12 +23,12 @@ async fn a_session_saves_loads_and_autosaves_its_cookies() {
             .build()
             .unwrap()
             .cookies()
-            .get(&url(), "session-token")
+            .get(url(), "session-token")
     };
     let session = Session::new();
     session
         .cookies()
-        .store("session-token=a; Path=/; Max-Age=3600", &url());
+        .store(url(), "session-token=a; Path=/; Max-Age=3600");
     session.save(&path).unwrap();
     assert_eq!(token(&path).as_deref(), Some("a"));
 
@@ -36,7 +36,7 @@ async fn a_session_saves_loads_and_autosaves_its_cookies() {
     reopened.autosave(&path, Duration::from_secs(3600));
     reopened
         .cookies()
-        .store("session-token=b; Path=/; Max-Age=3600", &url());
+        .store(url(), "session-token=b; Path=/; Max-Age=3600");
     reopened.shutdown().await;
     let deadline = Instant::now() + Duration::from_secs(5);
     while token(&path).as_deref() != Some("b") && Instant::now() < deadline {
@@ -74,7 +74,7 @@ fn a_session_reopens_as_the_same_browser_and_refuses_drift() {
     assert_eq!(reopened.languages(), session.languages());
     let proxy = reopened.proxy();
     assert!(
-        proxy.is_some_and(|proxy| proxy.contains("proxy.example")),
+        proxy.is_some_and(|proxy| proxy.as_str().contains("proxy.example")),
         "{proxy:?}"
     );
 
@@ -90,7 +90,7 @@ fn a_session_reopens_as_the_same_browser_and_refuses_drift() {
 }
 
 fn sts_server_reply(req: &leyline::testing::Request) -> testing::Response {
-    if req.target == "/secure" {
+    if req.target() == "/secure" {
         testing::Response::new(200).header("strict-transport-security", "max-age=3600")
     } else {
         testing::Response::new(200).body(b"upgraded".to_vec())
@@ -147,7 +147,7 @@ async fn hsts_upgrades_later_http_requests_and_survives_a_restart() {
 }
 
 fn site(req: &leyline::testing::Request) -> testing::Response {
-    match req.target.as_str() {
+    match req.target() {
         "/start" => testing::Response::new(302).header("location", "/page"),
         _ => testing::Response::new(200),
     }
@@ -172,13 +172,13 @@ async fn a_tab_tracks_the_page_for_later_requests() {
     assert_eq!(tab.current().map(String::from), Some(server.url("/next")));
 
     let seen = server.requests().await;
-    let api = seen.iter().find(|r| r.target == "/api").unwrap();
+    let api = seen.iter().find(|r| r.target() == "/api").unwrap();
     assert_eq!(api.header("referer"), Some(server.url("/page").as_str()));
     assert_eq!(api.header("sec-fetch-site"), Some("same-origin"));
-    let next = seen.iter().find(|r| r.target == "/next").unwrap();
+    let next = seen.iter().find(|r| r.target() == "/next").unwrap();
     assert_eq!(next.header("referer"), Some(server.url("/page").as_str()));
     assert_eq!(next.header("sec-fetch-site"), Some("same-origin"));
-    let start = seen.iter().find(|r| r.target == "/start").unwrap();
+    let start = seen.iter().find(|r| r.target() == "/start").unwrap();
     assert_eq!(start.header("sec-fetch-site"), Some("none"));
 }
 

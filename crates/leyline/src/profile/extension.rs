@@ -195,20 +195,23 @@ impl TlsProfile {
             .collect()
     }
 
-    pub(crate) fn apply_extensions(&mut self, ids: &[u16]) -> Result<Vec<u16>, String> {
+    pub(crate) fn apply_extensions(
+        &mut self,
+        ids: &[u16],
+        ordered: bool,
+    ) -> Result<Vec<u16>, String> {
         let base = self.clone();
         let mut order = Vec::new();
         for (index, &id) in ids.iter().enumerate() {
             if is_grease(id) {
                 self.grease = true;
             } else if id == PADDING {
-                if index + 1 != ids.len() {
+                if ordered && index + 1 != ids.len() {
                     return Err(format!(
                         "padding (0x{PADDING:04x}) is at entry {index}; BoringSSL always sends it last"
                     ));
                 }
             } else if id == PRE_SHARED_KEY {
-                self.pre_shared_key = true;
             } else if EXTENSIONS.iter().any(|ext| ext.id == id) {
                 order.push(id);
             } else {
@@ -218,10 +221,17 @@ impl TlsProfile {
             }
         }
         self.padding = ids.contains(&PADDING);
+        self.pre_shared_key = ids.contains(&PRE_SHARED_KEY);
         for ext in EXTENSIONS {
-            ext.switch
-                .set(self, &base, order.contains(&ext.id))
-                .map_err(|why| format!("{} (0x{:04x}) is missing: {why}", ext.name, ext.id))?;
+            let on = order.contains(&ext.id);
+            ext.switch.set(self, &base, on).map_err(|why| {
+                let state = if on {
+                    "cannot be enabled"
+                } else {
+                    "is missing"
+                };
+                format!("{} (0x{:04x}) {state}: {why}", ext.name, ext.id)
+            })?;
         }
         Ok(order)
     }

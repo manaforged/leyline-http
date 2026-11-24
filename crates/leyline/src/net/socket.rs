@@ -1,5 +1,7 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -10,11 +12,27 @@ use crate::profile::TcpProfile;
 
 mod platform;
 
+#[cfg(feature = "http3")]
+pub(crate) const MAX_UDP_BATCH: usize = 32;
+
+#[cfg(all(feature = "http3", target_os = "linux"))]
+pub(crate) fn try_send_udp_batch(
+    socket: &tokio::net::UdpSocket,
+    buf: &[u8],
+    slot_len: usize,
+    lens: &[usize],
+) -> io::Result<usize> {
+    platform::try_send_udp_batch(socket, buf, slot_len, lens)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub(crate) struct SocketOptions {
     pub(crate) local_ipv4: Option<Ipv4Addr>,
     pub(crate) local_ipv6: Option<Ipv6Addr>,
+    pub(crate) interface: Option<String>,
+    #[cfg(unix)]
+    pub(crate) unix_socket: Option<PathBuf>,
     pub(crate) tcp_nodelay: Option<bool>,
     pub(crate) tcp_keepalive: Option<Duration>,
     pub(crate) tcp_keepalive_interval: Option<Duration>,
@@ -26,11 +44,54 @@ pub(crate) struct SocketOptions {
     pub(crate) happy_eyeballs: Option<HappyEyeballs>,
 }
 
+impl SocketOptions {
+    pub(crate) fn invalid_interface_name(name: &str) -> io::Error {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("invalid network interface name `{name}`"),
+        )
+    }
+
+    pub(crate) fn validate_interface_name(name: &str) -> io::Result<()> {
+        if name.is_empty() || name.as_bytes().contains(&0) {
+            return Err(Self::invalid_interface_name(name));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn is_interface_config_error(&self, err: &io::Error) -> bool {
+        (self.strict && err.kind() == io::ErrorKind::Unsupported)
+            || (self.interface.is_some()
+                && matches!(
+                    err.kind(),
+                    io::ErrorKind::InvalidInput
+                        | io::ErrorKind::NotFound
+                        | io::ErrorKind::Unsupported
+                ))
+    }
+
+    pub(crate) fn map_io_error<E>(
+        &self,
+        err: io::Error,
+        config: impl FnOnce(io::Error) -> E,
+        other: impl FnOnce(io::Error) -> E,
+    ) -> E {
+        if self.is_interface_config_error(&err) {
+            config(err)
+        } else {
+            other(err)
+        }
+    }
+}
+
 impl Default for SocketOptions {
     fn default() -> Self {
         Self {
             local_ipv4: None,
             local_ipv6: None,
+            interface: None,
+            #[cfg(unix)]
+            unix_socket: None,
             tcp_nodelay: None,
             tcp_keepalive: Some(Duration::from_secs(60)),
             tcp_keepalive_interval: Some(Duration::from_secs(30)),
@@ -111,6 +172,7 @@ pub(super) fn configure(
     options: &SocketOptions,
 ) -> io::Result<()> {
     let is_v6 = peer.is_ipv6();
+    bind_interface(socket, is_v6, options)?;
     bind_local(socket, peer, options)?;
     apply_profile(socket, profile, options, is_v6)?;
     if let Some(size) = options.send_buffer_size {
@@ -125,12 +187,51 @@ pub(super) fn configure(
     user_timeout(socket, options)
 }
 
-fn bind_local(socket: &Socket, peer: SocketAddr, options: &SocketOptions) -> io::Result<()> {
-    let local_ip = match peer {
+fn local_ip_for(peer: SocketAddr, options: &SocketOptions) -> Option<IpAddr> {
+    match peer {
         SocketAddr::V4(_) => options.local_ipv4.map(IpAddr::V4),
         SocketAddr::V6(_) => options.local_ipv6.map(IpAddr::V6),
+    }
+}
+
+pub(super) fn socket_domain(peer: SocketAddr) -> socket2::Domain {
+    if peer.is_ipv6() {
+        socket2::Domain::IPV6
+    } else {
+        socket2::Domain::IPV4
+    }
+}
+
+#[cfg(feature = "http3")]
+pub(crate) fn bind_udp(
+    peer: SocketAddr,
+    options: &SocketOptions,
+) -> io::Result<tokio::net::UdpSocket> {
+    let is_v6 = peer.is_ipv6();
+    let socket = Socket::new(
+        socket_domain(peer),
+        socket2::Type::DGRAM,
+        Some(socket2::Protocol::UDP),
+    )?;
+    bind_interface(&socket, is_v6, options)?;
+    let local = local_ip_for(peer, options).map_or_else(
+        || crate::util::unspecified_for(peer),
+        |ip| SocketAddr::new(ip, 0),
+    );
+    socket.bind(&local.into())?;
+    socket.set_nonblocking(true)?;
+    tokio::net::UdpSocket::from_std(socket.into())
+}
+
+fn bind_interface(socket: &Socket, is_v6: bool, options: &SocketOptions) -> io::Result<()> {
+    let Some(name) = options.interface.as_deref() else {
+        return Ok(());
     };
-    if let Some(ip) = local_ip {
+    platform::bind_interface(socket, name, is_v6)
+}
+
+fn bind_local(socket: &Socket, peer: SocketAddr, options: &SocketOptions) -> io::Result<()> {
+    if let Some(ip) = local_ip_for(peer, options) {
         socket.bind(&SocketAddr::new(ip, 0).into())?;
     }
     Ok(())

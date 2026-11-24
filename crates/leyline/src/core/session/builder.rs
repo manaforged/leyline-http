@@ -19,15 +19,19 @@ use crate::profile::{Browser, BrowserProfile, ChromiumBrand, FingerprintSpec, Pl
 use crate::tls::trust::Tls;
 use crate::trace::Trace;
 
-pub(crate) use self::bearer::BearerToken;
+pub(crate) use self::bearer::Credential;
 use self::derive::{IdentityInputs, IdentitySource, derive_identity};
 use self::inherit::Parent;
 use super::identity::Source;
 use super::proxy::InvalidEnvProxy;
 use super::{Identity, Protocol, Session};
 use crate::error::{Error, Kind, Result};
+use crate::wire::Body;
 
 const AUTHORIZATION: &str = "authorization";
+const USER_AGENT: &str = "user-agent";
+
+pub(crate) type BeforeSend = Arc<dyn Fn(&mut http::Request<Body>) -> Result<()> + Send + Sync>;
 
 mod assemble;
 mod bearer;
@@ -53,9 +57,10 @@ pub struct SessionBuilder {
     platform_pinned: bool,
     pub(in crate::core::session) brand: ChromiumBrand,
     pub(in crate::core::session) proxy_config: Proxy,
-    dns_config: DnsConfig,
+    pub(in crate::core::session) dns_config: DnsConfig,
+    doh_endpoint: Option<url::Url>,
     pub(in crate::core::session) timeouts: Timeout,
-    pool_config: PoolConfig,
+    pub(in crate::core::session) pool_config: PoolConfig,
     socket_config: SocketOptions,
     pub(in crate::core::session) redirect_policy: Redirect,
     pub(in crate::core::session) compression: BodyRules,
@@ -63,13 +68,15 @@ pub struct SessionBuilder {
     pub(in crate::core::session) https_only: bool,
     audit: bool,
     cookie_jar: Option<Jar>,
+    pub(in crate::core::session) stores_cookies: bool,
+    pub(in crate::core::session) before_send: Option<BeforeSend>,
     tcp_profile: Option<TcpProfile>,
     pub(in crate::core::session) protocol_policy: Protocol,
     #[cfg(feature = "http3")]
     protocol_explicit: bool,
     config_error: Option<Arc<Error>>,
     default_headers: Vec<(String, String)>,
-    pub(in crate::core::session) bearer: Option<BearerToken>,
+    pub(in crate::core::session) credential: Option<Credential>,
     refresh_token: Option<bearer::Callback>,
     cache: usize,
     http_identity: Option<Browser>,
@@ -97,27 +104,30 @@ impl SessionBuilder {
             brand: ChromiumBrand::default(),
             proxy_config: Proxy::default(),
             dns_config: DnsConfig::default(),
+            doh_endpoint: None,
             timeouts: Timeout::default(),
             pool_config: PoolConfig::default(),
             socket_config: SocketOptions::default(),
-            redirect_policy: Redirect::default(),
+            redirect_policy: Redirect::unset(),
             compression: BodyRules::default(),
             websocket_config: WebSocketOptions::default(),
             https_only: false,
             audit: false,
             cookie_jar: None,
+            stores_cookies: true,
+            before_send: None,
             tcp_profile: None,
             protocol_policy: Protocol::Auto,
             #[cfg(feature = "http3")]
             protocol_explicit: false,
             config_error: None,
             default_headers: Vec::new(),
-            bearer: None,
+            credential: None,
             refresh_token: None,
             cache: 0,
             http_identity: None,
             tls_trust: Tls::default(),
-            default_retry: crate::core::retry::Retry::new(0),
+            default_retry: crate::core::retry::Retry::unset(),
             trace: None,
             base_url: None,
             languages: None,
@@ -132,6 +142,9 @@ impl SessionBuilder {
     /// Sets the proxy or proxy pool for every request.
     pub fn proxy(mut self, config: impl Into<Proxy>) -> Self {
         let mut config = config.into();
+        if let Err(err) = config.check_headers() {
+            self.reject(err);
+        }
         self.proxy_pool = config.pool.take();
         self.proxy_config = if self.proxy_pool.is_some() {
             Proxy::new().env(false)
@@ -147,9 +160,9 @@ impl SessionBuilder {
         self
     }
 
-    /// Enables a private in-memory HTTP cache with a byte budget; zero disables caching.
-    pub fn cache(mut self, bytes: usize) -> Self {
-        self.cache = bytes;
+    /// Enables a private in-memory HTTP cache with a byte budget; `None` or zero disables caching, which is the default.
+    pub fn cache(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.cache = bytes.into().unwrap_or(0);
         self
     }
 
@@ -159,7 +172,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the maximum number of open connections in the pool, and fails the build on zero.
+    /// Sets the maximum number of pool entries kept across all hosts, and fails the build on zero.
     pub fn max_connections(mut self, n: usize) -> Self {
         if n == 0 {
             self.reject(Error::config("max_connections must be at least 1"));
@@ -175,12 +188,6 @@ impl SessionBuilder {
         }
         self.pool_config.max_h1_conns_per_host = n;
         self.pool_config.max_h2_conns_per_host = Some(n);
-        self
-    }
-
-    /// Fails a request with `Kind::Overloaded` when this many HTTP/1.1 requests already wait for a connection to its host; 1024 by default, and `None` removes the limit.
-    pub fn max_pending_per_host(mut self, limit: impl Into<Option<usize>>) -> Self {
-        self.pool_config.max_h1_pending_per_host = limit.into();
         self
     }
 
@@ -406,21 +413,37 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the cookie jar the session reads and stores cookies in.
-    pub fn cookies(mut self, jar: Jar) -> Self {
-        self.cookie_jar = Some(jar);
+    /// Sets the cookie jar the session reads and stores cookies in; `None` turns cookie storage off, so `Set-Cookie` is ignored.
+    pub fn cookies(mut self, jar: impl Into<Option<Jar>>) -> Self {
+        self.cookie_jar = jar.into();
+        self.stores_cookies = self.cookie_jar.is_some();
         self
     }
 
     /// Sets the TCP fingerprint used for new connections.
-    pub fn tcp_profile(mut self, profile: TcpProfile) -> Self {
-        self.tcp_profile = Some(profile);
+    pub fn tcp_profile(mut self, profile: impl Into<TcpProfile>) -> Self {
+        self.tcp_profile = Some(profile.into());
         self
     }
 
     /// Sets the DNS resolver used for new connections.
     pub fn dns_resolver(mut self, resolver: Arc<dyn Resolver>) -> Self {
+        self.doh_endpoint = None;
         self.dns_config = std::mem::take(&mut self.dns_config).resolver(resolver);
+        self
+    }
+
+    /// Resolves hostnames and HTTPS/ECH records over an RFC 8484 DNS-over-HTTPS `https://` endpoint.
+    pub fn doh(mut self, endpoint: impl IntoUrl) -> Self {
+        match endpoint.into_url() {
+            Ok(url) if url.scheme() == "https" && url.host_str().is_some() => {
+                self.doh_endpoint = Some(url);
+            }
+            Ok(_) => self.reject(Error::config(
+                "doh endpoint must be an https:// URL with a host",
+            )),
+            Err(err) => self.reject(err),
+        }
         self
     }
 
@@ -446,15 +469,16 @@ impl SessionBuilder {
         self
     }
 
-    /// Sets the maximum decoded response body size in bytes.
-    pub fn max_body_size(mut self, bytes: usize) -> Self {
-        self.compression.max_body_size = bytes;
+    /// Sets the maximum decoded response body size in bytes, 100 MiB by default; `None` removes the cap.
+    pub fn max_body_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.compression
+            .set_max_body_size(bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP));
         self
     }
 
-    /// Sets the maximum number of error response body bytes kept in an `Error`.
-    pub fn max_error_body_size(mut self, bytes: usize) -> Self {
-        self.compression.max_error_body = bytes;
+    /// Sets the maximum number of error response body bytes kept in an `Error`, 64 KiB by default; `None` keeps the body up to `max_body_size`.
+    pub fn max_error_body_size(mut self, bytes: impl Into<Option<usize>>) -> Self {
+        self.compression.max_error_body = bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP);
         self
     }
 
@@ -576,6 +600,37 @@ impl SessionBuilder {
         self
     }
 
+    /// Runs `hook` on every HTTP request before each attempt (not on redirect hops or WebSocket handshakes) before session defaults, cookies, and browser headers are applied: edits to method, URL, headers and body are sent while edits to extensions and HTTP version are ignored, and returning an error fails the request.
+    pub fn before_send<F>(mut self, hook: F) -> Self
+    where
+        F: Fn(&mut http::Request<Body>) -> Result<()> + Send + Sync + 'static,
+    {
+        let hook: BeforeSend = match self.before_send.take() {
+            Some(first) => Arc::new(move |request: &mut http::Request<Body>| {
+                first(request)?;
+                hook(request)
+            }),
+            None => Arc::new(hook),
+        };
+        self.before_send = Some(hook);
+        self
+    }
+
+    /// Sets the `User-Agent` header sent on every request, replacing the browser profile's value.
+    pub fn user_agent(mut self, value: impl Into<String>) -> Self {
+        self.remove_default(USER_AGENT);
+        self.header(USER_AGENT, value.into())
+    }
+
+    /// Adds one default header sent on every request, keeping earlier values of the same name, and fails the build when the name or value is invalid.
+    pub fn header(
+        self,
+        name: impl TryInto<http::HeaderName>,
+        value: impl TryInto<http::HeaderValue>,
+    ) -> Self {
+        self.headers([(name, value)])
+    }
+
     /// Adds default headers sent on every request.
     pub fn headers<I, K, V>(mut self, headers: I) -> Self
     where
@@ -584,15 +639,9 @@ impl SessionBuilder {
         V: TryInto<http::HeaderValue>,
     {
         for (name, value) in headers {
-            let name = crate::core::headers::name(name);
-            let value = crate::core::headers::value(value);
-            match (name, value) {
-                (Ok(name), Ok(value)) => match std::str::from_utf8(value.as_bytes()) {
-                    Ok(value) => self.push_default(name.as_str().to_owned(), value.to_owned()),
-                    Err(_) => self.invalid_header(name.as_str()),
-                },
-                (Ok(name), Err(_)) => self.invalid_header(name.as_str()),
-                (Err(error), _) => self.reject(error),
+            match crate::core::headers::utf8_pair(name, value, "header") {
+                Ok((name, value)) => self.push_default(name, value),
+                Err(msg) => self.reject(Error::config(msg)),
             }
         }
         self
@@ -603,7 +652,7 @@ impl SessionBuilder {
         self
     }
 
-    fn invalid_header(&mut self, name: &str) {
+    pub(super) fn invalid_header(&mut self, name: &str) {
         self.reject(Error::config(format!(
             "invalid header `{}`",
             name.escape_debug()
@@ -620,6 +669,11 @@ impl SessionBuilder {
         self.build_with(InvalidEnvProxy::FailBuild)
     }
 
+    /// Builds a `blocking::Session`, whose calls run on the calling thread, and fails with `Kind::Config` when a setting is invalid.
+    pub fn build_blocking(self) -> Result<crate::blocking::Session> {
+        crate::blocking::Session::new(self)
+    }
+
     fn build_with(mut self, on_invalid: InvalidEnvProxy) -> Result<Session> {
         self.validate(on_invalid)?;
         let parent = self.parent.take();
@@ -630,13 +684,13 @@ impl SessionBuilder {
             .as_ref()
             .and_then(|parent| parent.shared_connector(&self));
         let shares = shared.is_some();
-        let connector = match shared {
-            Some(connector) => connector,
+        let (connector, doh) = match shared {
+            Some(pair) => pair,
             None => self
                 .pool_inputs()
                 .connector(&derived.profile, &tcp_profile)?,
         };
-        let mut session = self.into_session(derived, connector);
+        let mut session = self.into_session(derived, connector, doh);
         if let Some(parent) = parent {
             parent.share_with(&mut session, shares.then_some(tcp_profile))?;
         }

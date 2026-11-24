@@ -75,8 +75,7 @@ fn same_authority_h3(entry: &str, host: &str, port: u16) -> Option<Duration> {
         .find(|(name, _)| name.trim().eq_ignore_ascii_case("ma"));
     match ma {
         None => Some(DEFAULT_MAX_AGE),
-        Some((_, secs)) => crate::util::delta_seconds(&value(secs))
-            .map(|secs| Duration::from_secs(secs.min(u64::from(u32::MAX)))),
+        Some((_, secs)) => crate::util::delta_duration(&value(secs)),
     }
 }
 

@@ -76,9 +76,96 @@ impl<C> Opened<C> {
     }
 }
 
+pub(crate) const H1_ONLY_LANE: u8 = u8::MAX;
+
+const INLINE_HOST_MAX: usize = 22;
+
+#[derive(Clone)]
+enum HostRepr {
+    Inline { len: u8, buf: [u8; INLINE_HOST_MAX] },
+    Heap(std::sync::Arc<str>),
+}
+
+#[derive(Clone)]
+pub(crate) struct HostName(HostRepr);
+
+impl HostName {
+    pub(crate) fn new(host: &str) -> Self {
+        let bytes = host.as_bytes();
+        if bytes.len() <= INLINE_HOST_MAX {
+            let mut buf = [0u8; INLINE_HOST_MAX];
+            buf[..bytes.len()].copy_from_slice(bytes);
+            Self(HostRepr::Inline {
+                len: bytes.len() as u8,
+                buf,
+            })
+        } else {
+            Self(HostRepr::Heap(std::sync::Arc::from(host)))
+        }
+    }
+
+    #[inline]
+    pub(crate) fn as_bytes(&self) -> &[u8] {
+        match &self.0 {
+            HostRepr::Inline { len, buf } => &buf[..usize::from(*len)],
+            HostRepr::Heap(s) => s.as_bytes(),
+        }
+    }
+
+    pub(crate) fn as_str(&self) -> &str {
+        match &self.0 {
+            HostRepr::Inline { len, buf } => {
+                std::str::from_utf8(&buf[..usize::from(*len)]).expect("HostName holds valid UTF-8")
+            }
+            HostRepr::Heap(s) => s,
+        }
+    }
+}
+
+impl std::ops::Deref for HostName {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl PartialEq for HostName {
+    #[inline]
+    fn eq(&self, other: &Self) -> bool {
+        self.as_bytes() == other.as_bytes()
+    }
+}
+
+impl Eq for HostName {}
+
+impl std::hash::Hash for HostName {
+    #[inline]
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.as_bytes().hash(state);
+    }
+}
+
+impl std::fmt::Debug for HostName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.as_str(), f)
+    }
+}
+
+impl std::fmt::Display for HostName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+const _: () = assert!(
+    size_of::<HostName>() == size_of::<String>(),
+    "HostName stays the same size as String while avoiding heap allocation for short hosts"
+);
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct PoolKey {
-    pub(crate) host: String,
+    pub(crate) host: HostName,
     pub(crate) port: u16,
     pub(crate) scheme: Scheme,
     pub(crate) proxy: Option<crate::net::ProxyUrl>,
@@ -89,11 +176,12 @@ pub(crate) struct PoolKey {
 
 impl PoolKey {
     pub(crate) fn host_key(&self) -> Cow<'_, PoolKey> {
-        if self.partition.is_none() {
+        if self.partition.is_none() && self.lane == 0 {
             Cow::Borrowed(self)
         } else {
             Cow::Owned(PoolKey {
                 partition: None,
+                lane: 0,
                 ..self.clone()
             })
         }
@@ -164,6 +252,14 @@ impl MuxHandle {
             MuxHandle::H3(handle) => handle.open_streams(),
         }
     }
+
+    pub(crate) fn last_idle(&self) -> std::time::Instant {
+        match self {
+            MuxHandle::H2(handle) => handle.last_idle(),
+            #[cfg(feature = "http3")]
+            MuxHandle::H3(handle) => handle.last_idle(),
+        }
+    }
 }
 
 pub(crate) trait MuxClient: Clone {
@@ -223,13 +319,11 @@ impl MuxClient for H3Client {
 }
 
 #[derive(Default)]
-pub(crate) struct H1Idle(std::sync::Mutex<VecDeque<(H1Slot, Instant)>>);
+pub(crate) struct H1Idle(std::sync::Mutex<VecDeque<(H1Slot, TlsInfo, Instant)>>);
 
 impl H1Idle {
-    pub(crate) fn queue(&mut self) -> &mut VecDeque<(H1Slot, Instant)> {
-        self.0
-            .get_mut()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    pub(crate) fn queue(&mut self) -> &mut VecDeque<(H1Slot, TlsInfo, Instant)> {
+        crate::util::get_mut(&mut self.0)
     }
 
     pub(crate) fn len(&self) -> usize {
@@ -285,7 +379,6 @@ impl MuxEntry {
 pub(crate) struct H1Entry {
     pub(crate) idle: H1Idle,
     pub(crate) last_use: Instant,
-    pub(crate) tls: TlsInfo,
 }
 
 #[derive(Default)]

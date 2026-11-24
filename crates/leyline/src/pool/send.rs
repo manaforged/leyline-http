@@ -5,12 +5,10 @@ use std::time::Instant;
 use http::Method;
 
 use super::Prepared;
-use crate::error::BodyLimit;
 use crate::error::{Error, Kind};
 use crate::h2::H2Config;
 use crate::h2::H2Error;
 use crate::h2::client::{H2Client, Head};
-use crate::h2::connection::PseudoHeaders;
 use crate::header_str::HeaderStr;
 use crate::tls::FingerprintConnector;
 use crate::trace;
@@ -52,32 +50,15 @@ fn method_header(method: &Method) -> HeaderStr {
         .map_or_else(|| HeaderStr::from(method), HeaderStr::from_static)
 }
 
-fn request_pseudo(method: &Method, url: &url::Url) -> crate::error::Result<PseudoHeaders> {
-    if Scheme::of(url) != Some(Scheme::Https) {
-        return Err(Error::config("HTTP/2 requires an https:// URL"));
-    }
-    if !url.has_host() {
-        return Err(Error::config("no host in URL"));
-    }
-    Ok(PseudoHeaders {
-        method: method_header(method),
-        scheme: HeaderStr::from_static("https"),
-        authority: HeaderStr::from(&url[url::Position::BeforeHost..url::Position::AfterPort]),
-        path: HeaderStr::from(request_target(url)),
-        protocol: None,
-    })
-}
-
 struct H2Parts<'a> {
     host: &'a str,
     port: u16,
     method: &'a Method,
-    pseudo: crate::h2::connection::PseudoHeaders,
-    headers: RequestHeaders,
+    path: &'a str,
+    head: Arc<Head>,
     body: Body,
     proxy: Option<&'a crate::net::ProxyUrl>,
     mode: ResponseMode,
-    body_limit: BodyLimit,
     stale_resend: bool,
 }
 
@@ -92,7 +73,12 @@ fn h2_parts(req: Prepared<'_>) -> crate::error::Result<H2Parts<'_>> {
         body_limit,
         stale_resend,
     } = req;
-    let pseudo = request_pseudo(method, url)?;
+    if Scheme::of(url) != Some(Scheme::Https) {
+        return Err(Error::config("HTTP/2 requires an https:// URL"));
+    }
+    if !url.has_host() {
+        return Err(Error::config("no host in URL"));
+    }
     let headers = if h2_ready(&headers) {
         headers
     } else {
@@ -101,16 +87,22 @@ fn h2_parts(req: Prepared<'_>) -> crate::error::Result<H2Parts<'_>> {
         RequestHeaders::from(headers)
     };
     let (host, port) = crate::wire::host_port(url)?;
+    let path = request_target(url);
+    let head = Arc::new(Head::from_url(
+        method_header(method),
+        Arc::clone(url),
+        headers,
+        body_limit,
+    ));
     Ok(H2Parts {
         host,
         port,
         method,
-        pseudo,
-        headers,
+        path,
+        head,
         body,
         proxy,
         mode: response,
-        body_limit,
         stale_resend,
     })
 }
@@ -137,9 +129,9 @@ pub(crate) struct LegTrace<'a> {
 }
 
 impl LegTrace<'_> {
-    fn start(&self, leg: LegKind) {
+    fn start(&self, leg: LegKind, addr: Option<std::net::SocketAddr>) {
         match leg {
-            LegKind::Pooled => trace::connect(self.host, self.port, true),
+            LegKind::Pooled => trace::connect(self.host, self.port, true, addr),
             LegKind::Fresh => {
                 tracing::Span::current().record("pool.hit", false);
             }
@@ -180,7 +172,7 @@ where
             ControlFlow::Break(done) => return Ok(done),
         };
         let leg = opened.leg();
-        trace.start(leg);
+        trace.start(leg, opened.tls.remote_addr);
         match send(opened, body, first).await? {
             Sent::Done(done) => {
                 LegTrace::answered(leg);
@@ -220,21 +212,15 @@ pub(crate) async fn send_request(
         host,
         port,
         method,
-        pseudo,
-        headers,
+        path,
+        head,
         body,
         proxy,
         mode,
-        body_limit,
         stale_resend,
     } = h2_parts(req)?;
     let now = Instant::now();
     let started = opened.as_ref().map_or(now, |o| o.started);
-    let head = Arc::new(Head {
-        pseudo,
-        headers,
-        body_limit,
-    });
     let mut key = pool.key(Scheme::Https, host, port, proxy, Carrier::Tcp);
 
     let opened = match opened {
@@ -264,7 +250,7 @@ pub(crate) async fn send_request(
         host,
         port,
         method,
-        path: head.pseudo.path.as_str(),
+        path,
         version: http::Version::HTTP_2,
     };
     resending(
@@ -272,7 +258,7 @@ pub(crate) async fn send_request(
         Some(opened),
         body,
         move |opened, body, first| send_on(ctx, opened, body, first),
-        move |body| reopen_h2(pool, connector, h2_config, key.clone(), body),
+        move |body| Box::pin(reopen_h2(pool, connector, h2_config, key.clone(), body)),
     )
     .await
 }
@@ -309,7 +295,7 @@ async fn send_on(
     first: bool,
 ) -> Result<Sent<H2Outcome>, Error> {
     let leg = opened.leg();
-    let replay = body.replay();
+    let replay = body.try_clone();
     let mut send_started = match leg {
         LegKind::Pooled => ctx.now,
         LegKind::Fresh => Instant::now(),
@@ -317,7 +303,7 @@ async fn send_on(
     if let Some(probe) = opened.probe.take()
         && !(leg == LegKind::Pooled && replay.is_some() && is_idempotent(ctx.method))
     {
-        if !confirm(ctx.pool, ctx.key, &opened.conn, *probe).await {
+        if !Box::pin(confirm(ctx.pool, ctx.key, &opened.conn, *probe)).await {
             return Ok(Sent::Retry(body));
         }
         send_started = Instant::now();
@@ -363,12 +349,11 @@ pub(super) fn answered(
     let waited = answered.saturating_duration_since(send_started);
     trace::head(host, resp.status.as_u16(), resp.version, &resp.headers);
     resp.tls = Some(tls);
-    resp.timing = ResponseTiming {
-        reused: connect_ms.is_none(),
+    resp.timing = ResponseTiming::measured(
         connect_ms,
-        send_ms: ResponseTiming::span(waited),
-        total_ms: ResponseTiming::span(answered.saturating_duration_since(started)),
-    };
+        ResponseTiming::span(waited),
+        ResponseTiming::span(answered.saturating_duration_since(started)),
+    );
     resp
 }
 

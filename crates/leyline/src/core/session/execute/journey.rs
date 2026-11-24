@@ -4,11 +4,10 @@ use url::Url;
 
 use super::referer_for;
 use crate::core::Redirect;
-use crate::core::attempt::Attempt;
 use crate::core::config::Origin;
 use crate::core::headers::HeaderList;
 use crate::error::{Error, Kind, Result};
-use crate::util::{is_body_header, without_userinfo};
+use crate::util::is_body_header;
 use crate::wire::Body;
 use crate::wire::ResponseTiming;
 use crate::wire::Scheme;
@@ -124,6 +123,9 @@ impl Journey {
     }
 
     pub(super) fn strips_credentials(&self) -> bool {
+        if self.tainted {
+            return true;
+        }
         match &self.trusted_origin {
             Some(trusted) => !Origin::same(trusted, &self.url),
             None => !self.chain.is_empty() && !Origin::same(&self.original, &self.url),
@@ -136,14 +138,7 @@ impl Journey {
         status: u16,
         location: &str,
     ) -> Option<Url> {
-        let hop = without_userinfo(Url::clone(&self.url));
-        let follows = policy.follows(&Attempt::redirect(
-            status,
-            &hop,
-            Some(location),
-            &self.chain,
-        ));
-        follows.then_some(hop)
+        policy.approved_hop(status, &self.url, location, &self.chain)
     }
 
     pub(super) fn follow(
@@ -152,10 +147,12 @@ impl Journey {
         status: u16,
         location: &str,
         replay: Option<Body>,
+        upgrade: impl Fn(&Arc<Url>) -> Arc<Url>,
     ) -> Result<()> {
         self.chain.push(hop);
         let from = Origin::ascii(&self.url).into_owned();
-        self.url = Arc::new(self.url.join(location).map_err(Error::from)?);
+        let next = Arc::new(self.url.join(location).map_err(Error::from)?);
+        self.url = upgrade(&next);
         let to = Origin::ascii(&self.url).into_owned();
         self.tainted |= from != to && self.original_origin() != to;
         self.retarget_referer(&to)?;

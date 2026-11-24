@@ -218,7 +218,7 @@ async fn https_proxy_refused_when_connector_has_origin_identity() {
         .env_roots(false)
         .system_roots(false)
         .ca_der(r#gen.ca_der.clone())
-        .pin_sha256([0u8; 32]);
+        .pin_cert_sha256([0u8; 32]);
     let conn = FingerprintConnector::new_with_trust(
         &load_profile(),
         Platform::Linux.tcp_profile(),

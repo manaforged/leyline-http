@@ -43,16 +43,17 @@ one config. A file or certificate that cannot be parsed fails with
 
 ## Pin a certificate
 
-`pin_sha256` takes the SHA-256 digest of the server's leaf
-certificate in DER form. The handshake succeeds only when the chain verifies
-and the leaf matches a pin. A pin adds no root.
+`pin_cert_sha256` takes the SHA-256 digest of the server's whole leaf
+certificate in DER form. It is a certificate pin, not a public-key pin: a
+digest of the certificate's public key does not match. The handshake succeeds
+only when the chain verifies and the leaf matches a pin. A pin adds no root.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let pin: [u8; 32] = [0; 32];
 let session = leyline::Session::builder()
     .browser(leyline::Browser::default())
-    .tls(leyline::Tls::new().pin_sha256(pin))
+    .tls(leyline::Tls::new().pin_cert_sha256(pin))
     .build()?;
 # let _ = session;
 # Ok(())
@@ -61,8 +62,8 @@ let session = leyline::Session::builder()
 
 Pins apply to every host the session contacts, so give a pinned host its own
 session. Add a pin for each certificate you expect, including the next one
-before a rotation. To read the digest of a live certificate, hash the
-`peer_cert_der` field of `Response::tls()`.
+before a rotation. To read the digest of a live certificate, hash the DER
+bytes that `Response::peer_certificate()` returns.
 
 A saved TLS session resumes only in a session that loaded the same pins,
 roots, and client certificate, compared by content; any other session makes a
@@ -74,8 +75,8 @@ no source.
 
 ## Present a client certificate
 
-For mutual TLS, give `client_cert` a PEM certificate chain and its
-private key.
+For mutual TLS, give `client_cert` two PEM files: the certificate chain, leaf
+first, and its unencrypted private key.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -91,13 +92,54 @@ let session = leyline::Session::builder()
 # }
 ```
 
+When the certificate comes from a secret store and not from disk, give
+`client_cert_pem` the same two PEM documents as bytes in memory, or give
+`client_cert_pkcs12` a DER-encoded PKCS#12 archive and its password. Either
+replaces any earlier client certificate, and `Debug` output never prints the
+key bytes or password.
+
+```rust,no_run
+# fn run(chain_pem: Vec<u8>, key_pem: Vec<u8>, p12_der: Vec<u8>) -> leyline::Result<()> {
+let pem_session = leyline::Session::builder()
+    .browser(leyline::Browser::default())
+    .tls(leyline::Tls::new().client_cert_pem(chain_pem, key_pem))
+    .build()?;
+let p12_session = leyline::Session::builder()
+    .browser(leyline::Browser::default())
+    .tls(leyline::Tls::new().client_cert_pkcs12(p12_der, "archive-password"))
+    .build()?;
+# let _ = (pem_session, p12_session);
+# Ok(())
+# }
+```
+
 A session with pins or a client certificate cannot use an `https://` proxy.
 A request through one fails with `Kind::Proxy`.
 
+## Encrypt SNI with ECH
+
+Pass a raw RFC 9460 `ECHConfigList` to `Tls::ech_config_list` to encrypt the
+TLS 1.3 ClientHello SNI. If the server rejects a stale config and supplies
+fresh `retry_configs`, Leyline retries once automatically. To fetch `HTTPS`
+records automatically through a DoH or custom resolver, pair
+`SessionBuilder::doh` with `Tls::new().ech(true)`. `Response::ech_accepted()`
+reports whether ECH succeeded on the connection.
+
+```rust,no_run
+# fn run() -> leyline::Result<()> {
+let session = leyline::Session::builder()
+    .doh("https://cloudflare-dns.com/dns-query")
+    .tls(leyline::Tls::new().ech(true))
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
 ## Set a TLS version floor
 
-`tls12_min()` refuses TLS 1.0 and 1.1, and `tls13_only()` refuses everything
-below TLS 1.3. With neither, the floor is TLS 1.0. The handshake minimum is
+`min_version(TlsVersion::Tls12)` refuses TLS 1.0 and 1.1, and `min_version(TlsVersion::Tls13)` refuses everything
+below TLS 1.3. Without it, the floor is TLS 1.0. The handshake minimum is
 the higher of the profile's minimum and the floor. A profile that declares no minimum starts at TLS 1.2.
 
 ```rust,no_run
@@ -105,7 +147,7 @@ the higher of the profile's minimum and the floor. A profile that declares no mi
 let session = leyline::Session::builder()
     .browser(leyline::Browser::Safari18).platform(leyline::Platform::MacOS)
     .tls(
-        leyline::Tls::new().tls12_min(),
+        leyline::Tls::new().min_version(leyline::TlsVersion::Tls12),
     )
     .build()?;
 # let _ = session;
@@ -124,16 +166,16 @@ no longer matches its browser profile:
 
 A server that cannot meet the floor fails the handshake with `Kind::Tls`;
 an `https://` proxy that cannot meet it fails with `Kind::Proxy`.
-`Response::tls()` reports the negotiated version in `version`. HTTP/3 always
+`Response::tls_version()` reports the negotiated version. HTTP/3 always
 uses TLS 1.3, so the floor does not change a QUIC handshake.
 
 ## Turn verification off
 
-`danger_accept_invalid_certs(true)` accepts any certificate on TCP
-connections (HTTP/1.1 and HTTP/2). Use it against a local test server only.
-On those connections it also skips pin checks and turns off TLS session
-resumption. It has no effect on HTTP/3: QUIC always verifies the certificate
-and applies pins.
+`danger_accept_invalid_hostnames(true)` skips only hostname matching while
+continuing to verify the CA trust chain and any leaf pins.
+`danger_accept_invalid_certs(true)` accepts any server certificate across
+HTTP/1.1, HTTP/2, and HTTP/3, skipping pin checks and TLS session resumption.
+Use either option against controlled or local servers only.
 
 ## Next
 

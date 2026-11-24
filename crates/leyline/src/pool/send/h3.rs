@@ -119,7 +119,7 @@ async fn send_on(
     first: bool,
 ) -> Result<Sent<Box<TransportResponse>>, Error> {
     let leg = opened.leg();
-    let replay = body.replay();
+    let replay = body.try_clone();
     let request = ctx.request;
     let send_started = Instant::now();
     let (bytes, stream) = body.into_parts();

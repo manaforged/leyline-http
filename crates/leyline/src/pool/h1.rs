@@ -28,8 +28,8 @@ use crate::wire::{TransportBody, TransportResponse};
 use crate::pool::send::{
     Attempt, LegTrace, Reopened, Sent, not_resendable, note_stale, resend, resending,
 };
-use crate::pool::types::PoolKey;
 use crate::pool::types::{Counter, LegKind, Opened};
+use crate::pool::types::{H1_ONLY_LANE, PoolKey};
 use crate::pool::{H1Slot, Pool};
 use crate::profile::Carrier;
 use crate::wire::HeaderPair;
@@ -143,9 +143,10 @@ pub async fn send_request_h1_pooled(
     let method = Method::from_bytes(method.as_bytes())
         .ok()
         .ok_or_else(|| invalid_method(method))?;
+    let url = Arc::new(url.clone());
     let req = Prepared {
         method: &method,
-        url,
+        url: &url,
         headers: headers
             .into_iter()
             .map(|(name, value)| (name.into(), value.into()))
@@ -219,16 +220,16 @@ fn h1_target(
     proxy: Option<&crate::net::ProxyUrl>,
     mut headers: RequestHeaders,
 ) -> (H1Target, RequestHeaders) {
-    let (target, credentials) = proxy_target(scheme, proxy);
+    let (target, extra) = proxy_target(scheme, proxy);
     if target == H1Target::OriginForm && headers.h1_lines().is_some() {
         return (target, headers);
     }
     let pairs = headers.to_mut();
     pairs.retain(|(k, v)| crate::wire::sent_on(http::Version::HTTP_11, k, v));
-    if let Some(credentials) = credentials {
+    for (name, value) in extra {
         pairs.push((
-            "Proxy-Authorization".into(),
-            crate::header_str::HeaderStr::from(credentials),
+            std::borrow::Cow::Owned(name),
+            crate::header_str::HeaderStr::from(value),
         ));
     }
     (target, headers)
@@ -237,18 +238,19 @@ fn h1_target(
 fn proxy_target(
     scheme: Scheme,
     proxy: Option<&crate::net::ProxyUrl>,
-) -> (H1Target, Option<String>) {
+) -> (H1Target, Vec<(String, String)>) {
     let Some(proxy_url) = proxy.filter(|_| scheme == Scheme::Http) else {
-        return (H1Target::OriginForm, None);
+        return (H1Target::OriginForm, Vec::new());
     };
-    let parsed = proxy_url.url();
     if proxy_url.scheme().is_socks() {
-        return (H1Target::OriginForm, None);
+        return (H1Target::OriginForm, Vec::new());
     }
-    (
-        H1Target::AbsoluteForm,
-        crate::util::proxy_basic_auth(parsed),
-    )
+    let mut extra = Vec::new();
+    if let Some(credentials) = proxy_url.basic_auth_header() {
+        extra.push(("Proxy-Authorization".to_owned(), credentials));
+    }
+    extra.extend(proxy_url.headers().iter().cloned());
+    (H1Target::AbsoluteForm, extra)
 }
 
 pub(super) async fn send_h1<W: Copy + Send>(
@@ -264,7 +266,10 @@ pub(super) async fn send_h1<W: Copy + Send>(
         None => &req.headers,
     };
     validate(req.method, checked)?;
-    let key = pool.key(req.scheme, req.host, req.port, req.proxy, Carrier::Tcp);
+    let mut key = pool.key(req.scheme, req.host, req.port, req.proxy, Carrier::Tcp);
+    if offer.is_none() && req.scheme.is_secure() {
+        key.lane = H1_ONLY_LANE;
+    }
     let permit = pool.acquire_h1_permit(&key).await?;
     let now = Instant::now();
     pool.evict_idle(now);

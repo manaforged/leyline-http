@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use leyline::profile::Fingerprint;
 use leyline::testing::{self, queue};
-use leyline::{Browser, Fingerprint, Kind, Retry, Session};
+use leyline::{Browser, Kind, Retry, Session};
 
 fn plain() -> Session {
     Session::builder().build().unwrap()
@@ -64,7 +65,7 @@ async fn retry_if_and_wait_header_handle_a_rate_limit() {
         .requests()
         .await
         .into_iter()
-        .map(|r| r.target)
+        .map(|r| r.target().to_owned())
         .collect();
     assert_eq!(targets, ["/limited", "/limited"]);
 }
@@ -83,8 +84,8 @@ async fn a_response_names_the_proxy_that_carried_it() {
         .await
         .unwrap();
     assert_eq!(
-        resp.proxy(),
-        Some(format!("http://{}", proxy.addr()).as_str())
+        resp.proxy().map(leyline::Url::as_str),
+        Some(format!("http://{}/", proxy.addr()).as_str())
     );
     assert_eq!(plain_direct_proxy().await, None);
 }
@@ -99,7 +100,7 @@ async fn plain_direct_proxy() -> Option<String> {
         .await
         .unwrap()
         .proxy()
-        .map(str::to_owned)
+        .map(|u| u.as_str().to_owned())
 }
 
 #[tokio::test]
@@ -192,22 +193,31 @@ async fn a_status_error_reports_its_header_attempts_and_proxy() {
     );
     assert_eq!(err.attempts(), 2);
     assert_eq!(
-        err.proxy(),
-        Some(format!("http://{}", proxy.addr()).as_str())
+        err.proxy().map(leyline::Url::as_str),
+        Some(format!("http://{}/", proxy.addr()).as_str())
     );
     assert_eq!(err.kind().as_str(), "status");
 }
 
-#[test]
-fn relay_headers_work_on_any_header_map() {
-    let mut headers = leyline::http::HeaderMap::new();
-    headers.insert("connection", "close".parse().unwrap());
-    headers.insert("content-encoding", "gzip".parse().unwrap());
-    headers.insert("content-length", "10".parse().unwrap());
-    headers.insert("x-keep", "1".parse().unwrap());
-    let raw = leyline::relay_headers(&headers);
-    assert_eq!(raw.len(), 3);
+#[tokio::test]
+async fn relay_headers_drops_hop_by_hop_fields_on_response() {
+    let server = testing::Server::http(queue([testing::Response::new(200)
+        .close()
+        .header("content-encoding", "gzip")
+        .header("x-keep", "1")]))
+    .await
+    .unwrap();
+    let resp = Session::builder()
+        .accept_encoding([])
+        .build()
+        .unwrap()
+        .get(server.url("/"))
+        .send()
+        .await
+        .unwrap();
+    let raw = resp.relay_headers();
     assert!(!raw.contains_key("connection"));
+    assert_eq!(raw.get("x-keep").and_then(|v| v.to_str().ok()), Some("1"));
 }
 
 #[test]

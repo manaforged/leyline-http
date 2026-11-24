@@ -147,6 +147,13 @@ async fn equiv_mode(ca: Option<Vec<u8>>, _expected: Arc<[u8]>, _args: Vec<String
 
 async fn paced_mode(ca: Option<Vec<u8>>, expected: Arc<[u8]>, args: Vec<String>, url: String) {
     let plan = paced::Plan::from_args(&args).expect("paced arguments");
+    if let Some(threads) = cores::threads(paced::connections()) {
+        let rows = tokio::task::block_in_place(|| {
+            cores::run_paced(threads, plan, &url, ca.as_deref(), &expected)
+        });
+        paced::report(&plan, rows);
+        return;
+    }
     let sessions: Vec<Session> = (0..paced::connections())
         .map(|_| build(ca.as_deref(), None))
         .collect();

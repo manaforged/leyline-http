@@ -1,0 +1,29 @@
+
+open-loop cells: latency from the scheduled send time when the worker was behind it (coordinated omission), else from the send; first second left out; CPU per request at the same offered rate; medians over runs and rounds; lower is better
+
+c8       lib                 rate achieved   p50_us   p99_us  p999_us cpu_us/req  rss_MiB rounds
+         curl                2000    1.000       25       29       45      11.75      8.3      3
+         leyline-cores       2000    1.000       21       34       47      16.38     10.7      3
+         hyper               2000    1.000       22       43       54      14.78      6.8      3
+         leyline             2000    1.000       21       44       53      12.53     10.5      3
+         ureq                2000    1.000       29       46       56      23.76      8.9      3
+         wreq                2000    1.000       24       48       58      16.36      8.7      3
+         reqwest             2000    1.000       26       50       59      18.92      7.5      3
+         fasthttp            2000    1.000       21       50       53      14.75      8.6      3
+         nethttp             2000    1.000       27       56      122      24.75     13.6      3
+
+open-loop paired ratio, leyline over rival (same run, same round); 95% t-interval on log ratio; below 1 means leyline is lower
+c8       leyline           vs hyper      p99 0.978 [0.843, 1.134] tie; CPU/req 0.850 [0.825, 0.876] less CPU; single-run, 3 rounds
+c8       leyline           vs reqwest    p99 0.860 [0.766, 0.966] lower; CPU/req 0.670 [0.608, 0.738] less CPU; single-run, 3 rounds
+c8       leyline           vs wreq       p99 0.909 [0.888, 0.931] lower; CPU/req 0.760 [0.713, 0.811] less CPU; single-run, 3 rounds
+c8       leyline           vs ureq       p99 0.909 [0.696, 1.188] tie; CPU/req 0.537 [0.470, 0.614] less CPU; single-run, 3 rounds
+c8       leyline           vs curl       p99 1.416 [1.130, 1.774] higher; CPU/req 1.066 [1.016, 1.118] more CPU; single-run, 3 rounds
+c8       leyline           vs nethttp    p99 0.760 [0.672, 0.859] lower; CPU/req 0.512 [0.487, 0.539] less CPU; single-run, 3 rounds
+c8       leyline           vs fasthttp   p99 0.872 [0.834, 0.912] lower; CPU/req 0.846 [0.793, 0.903] less CPU; single-run, 3 rounds
+c8       leyline-cores     vs hyper      p99 0.790 [0.636, 0.979] lower; CPU/req 1.122 [0.982, 1.281] same CPU; single-run, 3 rounds
+c8       leyline-cores     vs reqwest    p99 0.695 [0.605, 0.797] lower; CPU/req 0.884 [0.782, 0.999] less CPU; single-run, 3 rounds
+c8       leyline-cores     vs wreq       p99 0.734 [0.573, 0.941] lower; CPU/req 1.003 [0.859, 1.172] same CPU; single-run, 3 rounds
+c8       leyline-cores     vs ureq       p99 0.735 [0.715, 0.754] lower; CPU/req 0.709 [0.618, 0.813] less CPU; single-run, 3 rounds
+c8       leyline-cores     vs curl       p99 1.144 [0.841, 1.555] tie; CPU/req 1.407 [1.212, 1.633] more CPU; single-run, 3 rounds
+c8       leyline-cores     vs nethttp    p99 0.614 [0.517, 0.728] lower; CPU/req 0.676 [0.593, 0.770] less CPU; single-run, 3 rounds
+c8       leyline-cores     vs fasthttp   p99 0.704 [0.579, 0.857] lower; CPU/req 1.117 [0.948, 1.315] same CPU; single-run, 3 rounds

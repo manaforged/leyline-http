@@ -5,7 +5,7 @@ impl RequestBuilder {
     /// Sets the page that started this request, which sets the site and referrer context.
     pub fn from_page(mut self, page: impl IntoUrl) -> Self {
         match page.into_url_with_base(self.session.base_url()) {
-            Ok(page) => self.draft.carry.initiator = Some(page),
+            Ok(page) => self.draft.carry.overrides_mut().initiator = Some(page),
             Err(err) => self.fail(err),
         }
         self
@@ -13,7 +13,7 @@ impl RequestBuilder {
 
     /// Sets a label that names this request in traces.
     pub fn label(mut self, label: impl Into<String>) -> Self {
-        self.draft.carry.label = Some(label.into());
+        self.draft.carry.overrides_mut().label = Some(label.into());
         self
     }
 

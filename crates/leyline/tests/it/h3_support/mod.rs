@@ -31,10 +31,16 @@ impl Default for Limits {
     }
 }
 
-fn server_config(cert: &X509, key: &PKey<Private>, limits: Limits) -> leyline_quiche::Config {
+fn server_config_with(
+    cert: &X509,
+    key: &PKey<Private>,
+    limits: Limits,
+    configure_tls: impl FnOnce(&mut SslContextBuilder),
+) -> leyline_quiche::Config {
     let mut tls = SslContextBuilder::new(SslMethod::tls()).expect("TLS context");
     tls.set_certificate(cert).expect("certificate");
     tls.set_private_key(key).expect("private key");
+    configure_tls(&mut tls);
     let mut config =
         leyline_quiche::Config::with_boring_ssl_ctx_builder(leyline_quiche::PROTOCOL_VERSION, tls)
             .expect("QUIC config");
@@ -384,8 +390,18 @@ async fn serve(
 
 pub async fn h3_server(replies: Vec<Reply>, limits: Limits) -> H3Server {
     let (cert, key) = crate::tls_support::self_signed();
+    h3_server_with_tls(cert, key, |_| {}, replies, limits).await
+}
+
+pub async fn h3_server_with_tls(
+    cert: X509,
+    key: PKey<Private>,
+    configure_tls: impl FnOnce(&mut SslContextBuilder),
+    replies: Vec<Reply>,
+    limits: Limits,
+) -> H3Server {
     let der = cert.to_der().expect("certificate DER");
-    let config = server_config(&cert, &key, limits);
+    let config = server_config_with(&cert, &key, limits, configure_tls);
     let socket = UdpSocket::bind("127.0.0.1:0").await.expect("bind");
     let port = socket.local_addr().expect("local address").port();
     let seen = Arc::new(Mutex::new(Seen::default()));

@@ -31,8 +31,8 @@ async fn sent(encoding: Encoding) -> (String, Vec<u8>) {
     let token = request
         .header("content-encoding")
         .expect("content-encoding");
-    assert!(request.body.len() < sample().len());
-    (token.to_owned(), request.body.clone())
+    assert!(request.body().len() < sample().len());
+    (token.to_owned(), request.body().to_vec())
 }
 
 #[cfg(feature = "compression-gzip")]

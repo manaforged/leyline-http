@@ -65,16 +65,11 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             match checked_window_add(actor.send_window, w.increment as i64) {
                 Ok(v) => actor.send_window = v,
                 Err(_) => {
-                    RstStreamFrame {
-                        stream_id: w.stream_id,
-                        error_code: ErrorCode::FlowControlError,
-                    }
-                    .encode(self.writer.out());
                     let err = H2Error::Stream {
                         stream_id: w.stream_id,
                         code: ErrorCode::FlowControlError,
                     };
-                    self.fail_stream(w.stream_id, err);
+                    self.reset_stream(w.stream_id, err, ErrorCode::FlowControlError)?;
                 }
             }
         } else {
@@ -157,14 +152,17 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         Ok(())
     }
 
-    pub(super) fn on_push(&mut self, pp: PushPromiseFrame) -> Result<(), H2Error> {
+    pub(super) async fn on_push(&mut self, pp: PushPromiseFrame) -> Result<(), H2Error> {
         if self.local_settings_acked && self.config.setting(SettingId::EnablePush) == Some(0) {
             return Err(H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: "server pushed after acknowledging disabled push".into(),
             });
         }
-        let decoded = self.decoder.decode_block(&pp.fragment, |_, _, _| {});
+        let full_fragment = self
+            .reassemble_fragment(pp.stream_id, pp.end_headers, &pp.fragment)
+            .await?;
+        let decoded = self.decoder.decode_block(&full_fragment, |_, _, _| {});
         RstStreamFrame {
             stream_id: pp.promised_stream_id,
             error_code: ErrorCode::Cancel,

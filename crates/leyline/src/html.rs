@@ -7,7 +7,6 @@ mod page;
 mod scan;
 
 pub use build::forms;
-pub(crate) use directives::X_ROBOTS_TAG;
 pub(crate) use entity::decode;
 pub(crate) use page::base;
 pub use page::{canonical, links, meta, text};

@@ -47,8 +47,8 @@ fn proxy_url_shows_the_exit_without_its_password() {
         .build()
         .unwrap();
     let shown = bound.proxy().unwrap();
-    assert!(shown.contains("127.0.0.1:9000"), "{shown}");
-    assert!(!shown.contains(SECRET), "{shown}");
+    assert!(shown.as_str().contains("127.0.0.1:9000"), "{shown}");
+    assert!(!shown.as_str().contains(SECRET), "{shown}");
     let rebound = bound.to_builder().build().unwrap();
     assert_eq!(rebound.proxy(), Some(shown));
 }
@@ -96,7 +96,7 @@ async fn fingerprint_debug_hides_the_credentials_it_sent() {
 fn cookie_debug_hides_the_value() {
     let jar = leyline::cookie::Jar::new();
     let url = url::Url::parse("https://example.com/").unwrap();
-    jar.store(&format!("sid={SECRET}; Path=/"), &url);
+    jar.store(&url, &format!("sid={SECRET}; Path=/"));
     let shown = format!("{:?}", jar.all());
     assert!(shown.contains("sid"), "{shown}");
     assert!(!shown.contains(SECRET), "{shown}");

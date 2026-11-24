@@ -2,6 +2,8 @@ One request, built from a [`Session`](crate::Session) and sent with `.await`, [`
 
 Request setters override the session for this request only. Sending is lazy.
 
+[`build`](crate::RequestBuilder::build) converts the request into an `http::Request` without sending it, and [`Session::request_from`](crate::Session::request_from) converts one back. [`try_clone`](crate::RequestBuilder::try_clone) copies a request whose body is not a stream.
+
 `download_to(path).await` sends and saves a resumable download. `events()` returns a lazy SSE stream; awaiting its `next()` sends the request.
 
 ```rust,no_run

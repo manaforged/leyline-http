@@ -1,7 +1,8 @@
 use std::time::Duration;
 
+use leyline::crawl::{Purpose, Robots, RobotsSource};
 use leyline::testing;
-use leyline::{Purpose, Robots, RobotsSource, Session, Url};
+use leyline::{Session, Url};
 
 const RFC_EXAMPLE: &str = "User-Agent: *
 Disallow: *.gif$
@@ -110,7 +111,7 @@ fn robots_read_signals_delay_and_sitemaps() {
 
 #[tokio::test]
 async fn session_robots_applies_the_status_rules() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/robots.txt" => testing::Response::new(301).header("location", "/moved.txt"),
         "/moved.txt" => testing::Response::new(200).body("User-agent: *\nDisallow: /secret\n"),
         _ => testing::Response::new(404),
@@ -128,7 +129,7 @@ async fn session_robots_applies_the_status_rules() {
         .requests()
         .await
         .into_iter()
-        .map(|request| request.target)
+        .map(|request| request.target().to_owned())
         .collect();
     assert_eq!(targets, ["/robots.txt", "/moved.txt"]);
 
@@ -256,7 +257,7 @@ async fn session_robots_drops_the_line_cut_at_the_size_limit() {
     let cut = 512 * 1024;
     let filler = "x".repeat(cut - head.len() - "\nAllow: /p".len());
     let body = format!("{head}{filler}{tail}");
-    let server = testing::Server::http(move |request| match request.target.as_str() {
+    let server = testing::Server::http(move |request| match request.target() {
         "/robots.txt" => testing::Response::new(200).body(body.clone()),
         _ => testing::Response::new(404),
     })

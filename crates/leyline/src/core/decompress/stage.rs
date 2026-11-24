@@ -10,7 +10,10 @@ use crate::error::{Kind, Result};
 use crate::profile::Encoding;
 
 #[cfg(feature = "compression-zstd")]
-const ZSTD_WINDOW_LOG_MAX: u32 = 23;
+pub(crate) const ZSTD_WINDOW_LOG_MAX: u32 = 23;
+
+#[cfg(feature = "compression-brotli")]
+const BROTLI_BUFFER_SIZE: usize = 32 * 1024;
 
 pub(super) enum Stage {
     #[cfg(feature = "compression-gzip")]
@@ -53,12 +56,27 @@ fn pump(writer: &mut dyn Write, input: &[u8], name: &str) -> Result<()> {
 }
 
 #[cfg(leyline_any_codec)]
-fn settle(pumped: Result<()>, sink: &mut Sink) -> Result<Vec<u8>> {
-    let out = std::mem::take(&mut sink.buf);
+fn settle_into(pumped: Result<()>, sink: &mut Sink, out: &mut Vec<u8>) -> Result<()> {
+    sink.swap_buf(out);
     if sink.truncated() {
-        return Ok(out);
+        return Ok(());
     }
-    pumped.map(|()| out)
+    pumped
+}
+
+#[cfg(leyline_any_codec)]
+fn run_into<D>(
+    decoder: &mut D,
+    out: &mut Vec<u8>,
+    sink: fn(&mut D) -> &mut Sink,
+    op: impl FnOnce(&mut D) -> Result<()>,
+) -> Result<()> {
+    if sink(decoder).truncated() {
+        return Ok(());
+    }
+    sink(decoder).swap_buf(out);
+    let result = op(decoder);
+    settle_into(result, sink(decoder), out)
 }
 
 #[cfg(feature = "compression-deflate")]
@@ -66,16 +84,41 @@ fn is_zlib_header(cmf: u8, flg: u8) -> bool {
     cmf & 0x0f == 8 && cmf >> 4 <= 7 && (u16::from(cmf) << 8 | u16::from(flg)) % 31 == 0
 }
 
+#[cfg(feature = "compression-deflate")]
+fn pump_deflate<D: Write>(
+    decoder: &mut Box<D>,
+    input: &[u8],
+    out: &mut Vec<u8>,
+    sink: fn(&mut Box<D>) -> &mut Sink,
+) -> Result<()> {
+    run_into(decoder, out, sink, |d| {
+        pump(&mut **d, input, Encoding::Deflate.name())
+    })
+}
+
+#[cfg(feature = "compression-deflate")]
+fn finish_deflate<D: Write>(
+    decoder: &mut Box<D>,
+    out: &mut Vec<u8>,
+    sink: fn(&mut Box<D>) -> &mut Sink,
+    try_finish: impl FnOnce(&mut Box<D>) -> std::io::Result<()>,
+) -> Result<()> {
+    run_into(decoder, out, sink, |d| {
+        try_finish(d)
+            .map_err(|e| decode_error(Encoding::Deflate.name(), e))
+            .and_then(|()| require_end(&mut **d, Encoding::Deflate.name()))
+    })
+}
+
 impl Stage {
     #[cfg(feature = "compression-deflate")]
-    fn finish_pending(&mut self, cap: Cap, head: &[u8]) -> Result<Vec<u8>> {
+    fn finish_pending(&mut self, cap: Cap, head: &[u8], out: &mut Vec<u8>) -> Result<()> {
         if head.is_empty() {
-            return Ok(Vec::new());
+            return Ok(());
         }
         *self = Self::raw_deflate(cap);
-        let mut out = self.write(head)?;
-        out.extend(self.finish()?);
-        Ok(out)
+        self.write_into(head, out)?;
+        self.finish_into(out)
     }
 
     #[cfg(feature = "compression-deflate")]
@@ -131,7 +174,7 @@ impl Stage {
                 {
                     Ok(Self::Brotli(Box::new(brotli::DecompressorWriter::new(
                         Sink::new(cap),
-                        4096,
+                        BROTLI_BUFFER_SIZE,
                     ))))
                 }
                 #[cfg(not(feature = "compression-brotli"))]
@@ -165,96 +208,113 @@ impl Stage {
     }
 
     pub(super) fn write(&mut self, input: &[u8]) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.write_into(input, &mut out)?;
+        Ok(out)
+    }
+
+    pub(super) fn write_into(&mut self, input: &[u8], out: &mut Vec<u8>) -> Result<()> {
         match self {
             #[cfg(not(leyline_any_codec))]
             _ => {
-                let _ = input;
+                let _ = (input, out);
                 match *self {}
             }
             #[cfg(feature = "compression-gzip")]
-            Self::Gzip(d) => {
-                let pumped = pump(&mut **d, input, Encoding::Gzip.name());
-                settle(pumped, d.get_mut())
-            }
+            Self::Gzip(d) => run_into(
+                d,
+                out,
+                |d| d.get_mut(),
+                |d| pump(&mut **d, input, Encoding::Gzip.name()),
+            ),
             #[cfg(feature = "compression-deflate")]
             Self::DeflatePending { cap, head } => {
                 let cap = *cap;
                 if head.is_empty() && input.len() >= 2 {
                     *self = Self::deflate_for(input[0], input[1], cap);
-                    return self.write(input);
+                    return self.write_into(input, out);
                 }
                 head.extend_from_slice(input);
                 let [cmf, flg, ..] = head[..] else {
-                    return Ok(Vec::new());
+                    return Ok(());
                 };
                 let head = std::mem::take(head);
                 *self = Self::deflate_for(cmf, flg, cap);
-                self.write(&head)
+                self.write_into(&head, out)
             }
             #[cfg(feature = "compression-deflate")]
-            Self::Zlib(d) => {
-                let pumped = pump(&mut **d, input, Encoding::Deflate.name());
-                settle(pumped, d.get_mut())
-            }
+            Self::Zlib(d) => pump_deflate(d, input, out, |d| d.get_mut()),
             #[cfg(feature = "compression-deflate")]
-            Self::RawDeflate(d) => {
-                let pumped = pump(&mut **d, input, Encoding::Deflate.name());
-                settle(pumped, d.get_mut())
-            }
+            Self::RawDeflate(d) => pump_deflate(d, input, out, |d| d.get_mut()),
             #[cfg(feature = "compression-brotli")]
-            Self::Brotli(d) => {
-                let pumped = pump(&mut **d, input, Encoding::Brotli.name());
-                settle(pumped, d.get_mut())
-            }
+            Self::Brotli(d) => run_into(
+                d,
+                out,
+                |d| d.get_mut(),
+                |d| pump(&mut **d, input, Encoding::Brotli.name()),
+            ),
             #[cfg(feature = "compression-zstd")]
-            Self::Zstd(d) => {
-                let pumped = pump(&mut **d, input, Encoding::Zstd.name());
-                settle(pumped, d.writer_mut())
-            }
+            Self::Zstd(d) => run_into(
+                d,
+                out,
+                |d| d.writer_mut(),
+                |d| pump(&mut **d, input, Encoding::Zstd.name()),
+            ),
         }
     }
 
     pub(super) fn finish(&mut self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.finish_into(&mut out)?;
+        Ok(out)
+    }
+
+    pub(super) fn finish_into(&mut self, out: &mut Vec<u8>) -> Result<()> {
         match self {
             #[cfg(not(leyline_any_codec))]
-            _ => match *self {},
-            #[cfg(feature = "compression-gzip")]
-            Self::Gzip(d) => {
-                d.try_finish()
-                    .map_err(|e| decode_error(Encoding::Gzip.name(), e))?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
+            _ => {
+                let _ = out;
+                match *self {}
             }
+            #[cfg(feature = "compression-gzip")]
+            Self::Gzip(d) => run_into(
+                d,
+                out,
+                |d| d.get_mut(),
+                |d| {
+                    d.try_finish()
+                        .map_err(|e| decode_error(Encoding::Gzip.name(), e))
+                },
+            ),
             #[cfg(feature = "compression-deflate")]
             Self::DeflatePending { cap, head } => {
                 let (cap, head) = (*cap, std::mem::take(head));
-                self.finish_pending(cap, &head)
+                self.finish_pending(cap, &head, out)
             }
             #[cfg(feature = "compression-deflate")]
-            Self::Zlib(d) => {
-                d.try_finish()
-                    .map_err(|e| decode_error(Encoding::Deflate.name(), e))?;
-                require_end(&mut **d, Encoding::Deflate.name())?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
-            }
+            Self::Zlib(d) => finish_deflate(d, out, |d| d.get_mut(), |d| d.try_finish()),
             #[cfg(feature = "compression-deflate")]
-            Self::RawDeflate(d) => {
-                d.try_finish()
-                    .map_err(|e| decode_error(Encoding::Deflate.name(), e))?;
-                require_end(&mut **d, Encoding::Deflate.name())?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
-            }
+            Self::RawDeflate(d) => finish_deflate(d, out, |d| d.get_mut(), |d| d.try_finish()),
             #[cfg(feature = "compression-brotli")]
-            Self::Brotli(d) => {
-                d.close()
-                    .map_err(|e| decode_error(Encoding::Brotli.name(), e))?;
-                Ok(std::mem::take(&mut d.get_mut().buf))
-            }
+            Self::Brotli(d) => run_into(
+                d,
+                out,
+                |d| d.get_mut(),
+                |d| {
+                    d.close()
+                        .map_err(|e| decode_error(Encoding::Brotli.name(), e))
+                },
+            ),
             #[cfg(feature = "compression-zstd")]
-            Self::Zstd(d) => {
-                d.finish()
-                    .map_err(|e| decode_error(Encoding::Zstd.name(), e))?;
-                Ok(std::mem::take(&mut d.writer_mut().buf))
-            }
+            Self::Zstd(d) => run_into(
+                d,
+                out,
+                |d| d.writer_mut(),
+                |d| {
+                    d.finish()
+                        .map_err(|e| decode_error(Encoding::Zstd.name(), e))
+                },
+            ),
         }
     }
 }

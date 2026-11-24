@@ -53,7 +53,9 @@ fn fails_once(_: &Path, _: &[u8]) -> crate::error::Result<()> {
 }
 
 #[tokio::test]
-async fn a_shutdown_save_that_fails_is_written_again_before_the_task_ends() {
+async fn a_shutdown_save_io_error_is_not_retried_synchronously() {
+    ATTEMPTS.store(0, Ordering::SeqCst);
+    SAVED.store(false, Ordering::SeqCst);
     let session = Session::builder().build().unwrap();
     let (_changes, watch) = tokio::sync::watch::channel(0);
     let target = SessionTarget {
@@ -64,7 +66,8 @@ async fn a_shutdown_save_that_fails_is_written_again_before_the_task_ends() {
         saved_state: None,
     };
     let writer = Autosave::spawn(target, watch, Duration::from_secs(60));
-    writer.shutdown().await.unwrap();
-    assert_eq!(ATTEMPTS.load(Ordering::SeqCst), 2);
-    assert!(SAVED.load(Ordering::SeqCst));
+    let err = writer.shutdown().await.unwrap_err();
+    assert_eq!(err.kind(), crate::error::Kind::Io);
+    assert_eq!(ATTEMPTS.load(Ordering::SeqCst), 1);
+    assert!(!SAVED.load(Ordering::SeqCst));
 }

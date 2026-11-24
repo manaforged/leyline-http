@@ -52,7 +52,7 @@ let resp = session
     .label("listing")
     .send()
     .await?;
-println!("{} via {}", resp.status(), resp.proxy().unwrap_or("direct"));
+println!("{} via {}", resp.status(), resp.proxy().map(leyline::Url::as_str).unwrap_or("direct"));
 # Ok(())
 # }
 ```
@@ -138,7 +138,7 @@ let session = leyline::Session::builder()
 ```
 
 Each `trace` call adds a hook, and every hook sees every event.
-`trace::Metrics::new()` returns an `Arc<Metrics>` that counts them; pass a clone to `.trace(..)` and read its counters, such as `metrics.requests()`. See
+`trace::Metrics::new()` returns a `Metrics` counter; wrap it in an `Arc` to pass a clone to `.trace(..)` and read its counters, such as `metrics.requests()`. See
 [Count requests and watch the queues](crawling.md#count-requests-and-watch-the-queues).
 
 ## Streamed bodies
@@ -207,7 +207,11 @@ impl Trace for OneLine {
 ## Phase events
 
 To handle the phases in your own code, match the other `Event` variants:
-`Dns`, `Connect`, `Tls`, `Sent`, `Head`, and `Done`. `Sent` carries the
+`Dns`, `Connect`, `Tls`, `Sent`, `Head`, and `Done`. `Connect` carries the
+`host`, the `port`, whether the connection was `reused`, and `addr`: the
+socket address the connection was opened to, which is the proxy's address
+through a proxy, or `None` when it is not known. `Response::remote_addr()`
+returns the same address. `Sent` carries the
 method and the path with the query. `Head` carries the status and the response headers as received, before
 decompression, as `&http::HeaderMap`. See
 [Trace the request lifecycle](sessions.md#trace-the-request-lifecycle).

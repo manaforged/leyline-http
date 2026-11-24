@@ -34,9 +34,23 @@ override.
 
 ## Replace the resolver
 
-The default is the system resolver. To use your own, implement
-`tls::Resolver` and pass it to `SessionBuilder::dns_resolver` as an
+The default is the system resolver. To resolve over DNS-over-HTTPS (RFC 8484)
+with built-in TTL caching and `HTTPS`/SVCB record support, pass an `https://`
+endpoint to `SessionBuilder::doh`. Combine it with `resolve` to pin bootstrap
+IPs for the DoH host itself. To plug in your own resolver, implement
+`Resolver` and pass it to `SessionBuilder::dns_resolver` as an
 `Arc<dyn Resolver>`. The overrides from `resolve` still apply first.
+
+```rust,no_run
+# fn run() -> leyline::Result<()> {
+let session = leyline::Session::builder()
+    .doh("https://cloudflare-dns.com/dns-query")
+    .resolve("cloudflare-dns.com", ["1.1.1.1:443".parse().unwrap()])
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
 
 ## Happy Eyeballs
 
@@ -93,6 +107,8 @@ connects.
 | `tcp_user_timeout` | unset | `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged (Linux, Android) |
 | `send_buffer_size`, `recv_buffer_size` | unset | `SO_SNDBUF`, `SO_RCVBUF` |
 | `local_address` | unset | Source IP to bind for that IP's address family; call it once per family |
+| `interface` | unset | Bind sockets to a network interface (`SO_BINDTODEVICE` on Linux, `IP_BOUND_IF` on Apple) |
+| `unix_socket` | unset | Route all HTTP and HTTPS traffic over a Unix domain socket path (Unix) |
 | `strict_socket_options` | `false` | Fail when the platform does not support an option |
 
 The timing and size setters take a value or `None`, which clears it. Leyline
@@ -138,8 +154,7 @@ limits, and every limit applies to one pool.
 | Setter | Default | Effect |
 | --- | --- | --- |
 | `max_connections` | 2048 | Pool entries, one per host, port, scheme, proxy, and transport. Set it above the number of hosts you talk to. At the limit, a new entry replaces the least recently used entry in its shard |
-| `max_connections_per_host` | 256 | HTTP/1.1 connections per host, port, scheme, proxy, and transport. A request over the limit waits for a free slot. HTTP/2 and HTTP/3 share one connection per origin |
-| `max_pending_per_host` | 1024 | HTTP/1.1 requests that wait for a free slot on one host. A request over the limit fails at once with `Kind::Overloaded`, so a slow host cannot build a backlog. `None` removes the limit |
+| `max_connections_per_host` | 256 | HTTP/1.1 connections per host, port, scheme, proxy, and transport. A request over the limit waits for a free slot (bounded by `HostLimits::max_pending`, 1024 by default). HTTP/2 and HTTP/3 share one connection per origin |
 | `pool_idle_timeout` | 300 s | An idle connection closes after this time |
 | `pool_max_lifetime` | no limit | A connection is not reused after this time. In-flight requests finish. Set it so traffic follows a DNS or load balancer change |
 | `keep_alive` | `true` | Keep connections open for reuse |

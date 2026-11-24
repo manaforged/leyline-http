@@ -8,8 +8,8 @@ connects.
 ## Connect, send, and receive
 
 Build a request with `Session::get(url)` and call `websocket()` to open a
-`WebSocket`. `send` takes a `Message`: `Text`, `Binary`, `Ping`, `Pong`, or
-`Close`.
+`WebSocket`. `send` takes a `Message`: `Text(String)`, `Binary(Vec<u8>)`,
+`Ping(Vec<u8>)`, `Pong(Vec<u8>)`, or `Close(Option<(u16, String)>)`.
 
 ```rust,no_run
 use leyline::Message;
@@ -32,11 +32,39 @@ ws.close().await?;
 When the peer closes the connection, `recv` first returns
 `Some(Message::Close(frame))`, where `frame` is an `Option<(u16, String)>`
 with the close code and reason. The next `recv` returns `Ok(None)`.
-`close` sends a close frame and shuts the connection down.
+`close` sends a close frame with no code and shuts the connection down. See
+[Ping, pong, and close](#ping-pong-and-close) to send a code and a reason.
 
 A `send`, `recv`, or `close` that fails on the transport or on a closed
 connection gives `Kind::Io`. A protocol violation, or a message over the
 session's WebSocket limits, gives `Kind::Body`.
+
+## Ping, pong, and close
+
+`Message::Ping(payload)` and `Message::Pong(payload)` carry a payload of at
+most 125 bytes; pass `Vec::new()` for an empty one. A longer payload fails
+`send` with `Kind::Request`. Leyline answers a ping from the peer for you,
+and `recv` also returns it.
+
+To close with a status code and a reason, send
+`Message::Close(Some((code, reason)))` in place of `close()`.
+
+```rust,no_run
+use leyline::Message;
+
+# async fn run() -> leyline::Result<()> {
+let session = leyline::Session::new();
+let mut ws = session.get("wss://example.com/live").websocket().await?;
+
+ws.send(Message::Ping(b"beat-7".to_vec())).await?;
+match ws.recv().await? {
+    Some(Message::Pong(payload)) => println!("pong {payload:?}"),
+    other => println!("{other:?}"),
+}
+ws.send(Message::Close(Some((1000, "done".to_owned())))).await?;
+# Ok(())
+# }
+```
 
 ## Set handshake options
 
@@ -45,6 +73,7 @@ The request builder methods set the handshake:
 | Builder method | Effect |
 | --- | --- |
 | `header(name, value)`, `headers(pairs)` | Append handshake headers. A repeated name adds a value. An invalid name or value fails `websocket()` with `Kind::Request`. A `user-agent` or `origin` header replaces the one Leyline sends |
+| `header("sec-websocket-protocol", "chat.v1, chat.v2")` | Offers subprotocols. `WebSocket::protocol()` returns the one the server selected, or `None`. The handshake fails when the server selects one you did not offer |
 | `proxy(url)` | Overrides the session proxy |
 
 Limits and transport are set on the session, with these `SessionBuilder`
@@ -85,7 +114,7 @@ reason:
 - The peer does not advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
 
 Any other error is returned, not retried. `websocket_http2(false)` skips the
-HTTP/2 attempt. `protocol()` returns the subprotocol the origin selected.
+HTTP/2 attempt.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -93,7 +122,11 @@ let session = leyline::Session::builder()
     .websocket_max_message_size(1 << 20)
     .websocket_http2(false)
     .build()?;
-let ws = session.get("wss://example.com/live").websocket().await?;
+let ws = session
+    .get("wss://example.com/live")
+    .header("sec-websocket-protocol", "chat.v1, chat.v2")
+    .websocket()
+    .await?;
 println!("protocol={:?}", ws.protocol());
 # Ok(())
 # }

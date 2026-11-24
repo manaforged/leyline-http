@@ -26,7 +26,7 @@ impl H3Stream {
             resp_tx: Some(resp_tx),
             response: ResponseState::default(),
             status: http::StatusCode::OK,
-            headers: http::HeaderMap::new(),
+            headers: crate::wire::Fields::default(),
             trailers: http::HeaderMap::new(),
             body: Vec::new(),
             mode,
@@ -80,6 +80,16 @@ impl H3Stream {
                     self.terminal = None;
                 }
                 self.declared_len = length;
+                if !self.is_streaming()
+                    && crate::wire::has_body(self.head_request, status.as_u16())
+                    && let Some(len) = length
+                    && let Ok(cap) = usize::try_from(len)
+                {
+                    self.body.reserve(
+                        cap.min(self.body_limit.room(0))
+                            .min(crate::wire::BODY_RESERVE_CAP),
+                    );
+                }
                 self.headers = headers;
             }
             ResponseBlock::Trailers(headers) => self.trailers = headers,
@@ -103,7 +113,7 @@ impl H3Stream {
         crate::wire::length_mismatch(
             crate::wire::has_body(self.head_request, self.status.as_u16()),
             self.declared_len,
-            self.body_bytes_seen as u64,
+            self.body_bytes_seen,
         )
     }
 
@@ -111,7 +121,7 @@ impl H3Stream {
         Box::new(TransportResponse::new(
             http::Version::HTTP_3,
             self.status,
-            std::mem::take(&mut self.headers).into(),
+            std::mem::take(&mut self.headers),
             std::mem::take(&mut self.trailers),
             TransportBody::Buffered(body),
         ))
@@ -145,7 +155,14 @@ impl H3Stream {
         message: String,
     ) {
         if self.head_sent {
-            self.deliver_terminal(std::io::Error::other(message));
+            let error = match before_head(message) {
+                H3SendError::Tls(msg) => std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    leyline_bssl_tokio::RecordError::new(msg),
+                ),
+                other => std::io::Error::other(other.message().into_owned()),
+            };
+            self.deliver_terminal(error);
         } else {
             self.reply(Err(before_head(message)));
         }

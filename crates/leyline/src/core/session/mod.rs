@@ -14,6 +14,7 @@ mod websocket;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use builder::BeforeSend;
 pub use builder::SessionBuilder;
 pub(crate) use identity::Identity;
 
@@ -27,10 +28,11 @@ use crate::profile::{Browser, Platform};
 use crate::tls::FingerprintConnector;
 
 /// The HTTP version policy a session uses to send requests.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Protocol {
     /// Negotiates HTTP/2 or HTTP/1.1 through ALPN.
+    #[default]
     Auto,
     /// Sends every request over HTTP/1.1.
     Http1,
@@ -97,6 +99,11 @@ pub struct Session {
     inner: Arc<SessionInner>,
 }
 
+pub(super) type AutosaveWriter = (
+    tokio::sync::watch::Sender<bool>,
+    tokio::task::JoinHandle<()>,
+);
+
 #[derive(Clone)]
 pub(crate) struct SessionInner {
     browser: Option<Browser>,
@@ -110,13 +117,15 @@ pub(crate) struct SessionInner {
     header_order: Option<Vec<String>>,
     default_headers: Vec<(String, HeaderStr)>,
     cache: Option<Arc<cache::Cache>>,
-    proxy_shown: Option<String>,
+    proxy_shown: Option<url::Url>,
     connector: FingerprintConnector,
+    doh: Option<Arc<crate::core::doh::DohResolver>>,
     h2_config: H2Config,
     pool: Arc<Pool>,
     hsts: Arc<std::sync::Mutex<crate::core::hsts::HstsStore>>,
+    digest_nonces: Arc<crate::core::digest::DigestNonces>,
     shutdown: Arc<crate::core::shutdown::Shutdown>,
-    writers: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    writers: Arc<std::sync::Mutex<Vec<AutosaveWriter>>>,
     audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     #[cfg(feature = "http3")]
     h3_config: Option<crate::quic::H3Config>,

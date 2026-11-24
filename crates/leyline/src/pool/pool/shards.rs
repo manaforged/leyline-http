@@ -22,6 +22,7 @@ pub(super) struct Shards {
     hasher: RandomState,
     total: AtomicUsize,
     limit: usize,
+    next_evict: AtomicUsize,
 }
 
 impl Shards {
@@ -33,6 +34,7 @@ impl Shards {
             hasher: RandomState::default(),
             total: AtomicUsize::new(0),
             limit: max_connections,
+            next_evict: AtomicUsize::new(0),
         }
     }
 
@@ -45,12 +47,28 @@ impl Shards {
         self.list.iter()
     }
 
+    pub(super) fn evict_order<'a>(&'a self, skip: &'a Shard) -> impl Iterator<Item = &'a Shard> {
+        let len = self.list.len();
+        let start = self.next_evict.fetch_add(1, Ordering::Relaxed) & (len - 1);
+        let (tail, head) = self.list.split_at(start);
+        let rotated = head.iter().chain(tail.iter());
+        rotated
+            .filter(move |shard| !std::ptr::eq(*shard, skip))
+            .chain(std::iter::once(skip))
+    }
+
     pub(super) fn added(&self) {
         self.total.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(super) fn removed(&self, count: usize) {
         self.total.fetch_sub(count, Ordering::Relaxed);
+    }
+
+    pub(super) fn over_limit(&self) -> usize {
+        self.total
+            .load(Ordering::Relaxed)
+            .saturating_sub(self.limit)
     }
 
     pub(super) fn over_limit_with_one_more(&self) -> usize {

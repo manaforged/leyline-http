@@ -133,6 +133,7 @@ fn leg(reused: bool, connect_ms: Option<u32>, send_ms: u32, total_ms: u32) -> Re
         connect_ms,
         send_ms,
         total_ms,
+        from_cache: false,
     }
 }
 

@@ -4,7 +4,6 @@
 )]
 use std::time::Duration;
 
-use futures_util::StreamExt;
 use leyline::{Kind, Session, Timeout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;

@@ -74,6 +74,10 @@ pub(super) fn frame(method: &Method, headers: &[HeaderPair], body: Body) -> (Fra
         BodyKind::Stream {
             stream,
             length_hint: None,
+        } if has_cl && !has_te => (Framing::Fixed { stream }, None),
+        BodyKind::Stream {
+            stream,
+            length_hint: None,
         } => (
             Framing::Chunked { stream },
             (!has_te).then_some(("Transfer-Encoding", Cow::Borrowed("chunked"))),

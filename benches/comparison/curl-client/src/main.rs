@@ -167,18 +167,20 @@ fn drive_paced(
     plan: &paced::Plan,
     start: Instant,
     workers: &[usize],
-) -> Vec<paced::Row> {
+) -> paced::Batch {
     let per = plan.per_worker();
     let total = workers.len() * per as usize;
+    let mut completed = 0usize;
+    let first = plan.warmup_end(start);
+    let mut batch = paced::Batch::new(first, workers.len() * plan.measured_per_worker());
     let mut idle: Vec<Option<Easy2<Collector>>> =
         workers.iter().map(|_| Some(easy(setup))).collect();
     let mut flying: Vec<Option<(Easy2Handle<Collector>, Instant, Instant, Instant)>> =
         workers.iter().map(|_| None).collect();
     let mut next = vec![0u64; workers.len()];
     let mut ready = vec![start; workers.len()];
-    let mut rows = Vec::with_capacity(total);
     let mut done = Vec::new();
-    while rows.len() < total {
+    while completed < total {
         let now = Instant::now();
         let mut wake = now + Duration::from_millis(100);
         for (slot, &worker) in workers.iter().enumerate() {
@@ -209,25 +211,21 @@ fn drive_paced(
             let mut e = m.remove2(h).expect("remove transfer");
             let finished = Instant::now();
             check(&mut e, setup);
-            rows.push(paced::Row {
-                ready: was_ready,
-                intended,
-                sent,
-                done: finished,
-            });
+            batch.record(was_ready, intended, sent, finished);
+            completed += 1;
             ready[slot] = finished;
             idle[slot] = Some(e);
         }
-        if !finished_any && rows.len() < total {
+        if !finished_any && completed < total {
             let micros = wake.saturating_duration_since(Instant::now()).as_micros() as u64;
             let timeout = Duration::from_millis(micros.div_ceil(1000).min(100));
             m.poll(&mut [], timeout).expect("multi poll");
         }
     }
-    rows
+    batch
 }
 
-fn paced_lanes(setup: &Arc<Setup>, plan: paced::Plan) -> Vec<paced::Row> {
+fn paced_lanes(setup: &Arc<Setup>, plan: paced::Plan) -> paced::Batch {
     let lanes = paced::connections();
     let ready = std::sync::Barrier::new(lanes);
     let start = std::sync::OnceLock::new();
@@ -246,10 +244,7 @@ fn paced_lanes(setup: &Arc<Setup>, plan: paced::Plan) -> Vec<paced::Row> {
                 })
             })
             .collect();
-        handles
-            .into_iter()
-            .flat_map(|h| h.join().expect("paced lane"))
-            .collect()
+        paced::Batch::merge(handles.into_iter().map(|h| h.join().expect("paced lane")))
     })
 }
 

@@ -9,6 +9,8 @@ use crate::net::normalize_host;
 pub(super) struct Rule {
     pub(super) max_in_flight: Option<usize>,
     pub(super) interval: Option<Duration>,
+    #[serde(default)]
+    interval_configured: bool,
 }
 
 impl Rule {
@@ -22,6 +24,7 @@ impl Rule {
     }
 
     fn per_second(mut self, rate: f64) -> Self {
+        self.interval_configured = true;
         self.interval = if rate.is_finite() && rate > 0.0 {
             Duration::try_from_secs_f64(rate.recip()).ok()
         } else {
@@ -68,6 +71,8 @@ pub struct HostLimits {
     #[serde(default)]
     max_pending: Option<usize>,
     #[serde(default)]
+    max_pending_unlimited: bool,
+    #[serde(default)]
     max_total_pending: Option<usize>,
     pause: Pause,
 }
@@ -100,6 +105,7 @@ impl Default for HostLimits {
             overrides: Vec::new(),
             max_total: None,
             max_pending: None,
+            max_pending_unlimited: false,
             max_total_pending: None,
             pause: Pause {
                 statuses: Vec::new(),
@@ -154,9 +160,10 @@ impl HostLimits {
         self
     }
 
-    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a `max_in_flight` slot on its host.
-    pub fn max_pending(mut self, n: usize) -> Self {
-        self.max_pending = Some(n);
+    /// Fails a request with `Kind::Overloaded` when `n` requests already wait for a slot or HTTP/1.1 connection on its host; `None` removes the limit.
+    pub fn max_pending(mut self, n: impl Into<Option<usize>>) -> Self {
+        self.max_pending = n.into();
+        self.max_pending_unlimited = self.max_pending.is_none();
         self
     }
 
@@ -220,6 +227,15 @@ impl HostLimits {
         (self.max_pending, self.max_total_pending)
     }
 
+    pub(crate) fn h1_pending_limit(&self) -> Option<usize> {
+        if self.max_pending_unlimited {
+            None
+        } else {
+            self.max_pending
+                .or(Some(crate::pool::DEFAULT_MAX_H1_PENDING_PER_HOST))
+        }
+    }
+
     pub(super) fn max_total(&self) -> Option<usize> {
         self.max_total
     }
@@ -241,12 +257,19 @@ impl HostLimits {
 
     #[cfg(feature = "html")]
     pub(crate) fn filled_from(mut self, defaults: &HostLimits) -> Self {
+        let mut widest = 0;
         for rule in
             std::iter::once(&mut self.rule).chain(self.overrides.iter_mut().map(|(_, rule)| rule))
         {
             rule.max_in_flight = rule.max_in_flight.or(defaults.rule.max_in_flight);
-            rule.interval = rule.interval.or(defaults.rule.interval);
+            if !rule.interval_configured {
+                rule.interval = defaults.rule.interval;
+            }
+            widest = widest.max(rule.max_in_flight.unwrap_or(0));
         }
+        self.max_total = self
+            .max_total
+            .or_else(|| defaults.max_total.map(|total| total.max(widest)));
         if self.pause.statuses.is_empty() {
             self.pause.statuses.clone_from(&defaults.pause.statuses);
         }
@@ -264,12 +287,17 @@ impl HostLimits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HostStats {
+    pub(super) key: super::Origin,
     pub(super) origin: String,
     pub(super) in_flight: usize,
     pub(super) waiting: usize,
 }
 
 impl HostStats {
+    pub(crate) fn key(&self) -> &super::Origin {
+        &self.key
+    }
+
     pub(crate) fn origin(&self) -> &str {
         &self.origin
     }

@@ -2,9 +2,10 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use leyline::profile::RequestKind;
 use leyline::testing::{self, queue};
 use leyline::trace::{Event, Trace};
-use leyline::{Browser, Kind, Platform, Protocol, Proxy, RequestKind, Retry, Session};
+use leyline::{Browser, Kind, Platform, Protocol, Proxy, Retry, Session};
 
 fn gzip(data: &[u8]) -> Vec<u8> {
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
@@ -142,13 +143,13 @@ async fn session_bearer_auth_and_base_url() {
         .unwrap();
 
     let first = server.next_request().await.unwrap();
-    assert_eq!(first.request_line, "GET /api/v1/repos/x HTTP/1.1");
+    assert_eq!(first.request_line(), "GET /api/v1/repos/x HTTP/1.1");
     assert_eq!(
         first.header_values("authorization"),
         ["Bearer session-token"]
     );
     let second = server.next_request().await.unwrap();
-    assert_eq!(second.request_line, "GET /health HTTP/1.1");
+    assert_eq!(second.request_line(), "GET /health HTTP/1.1");
     assert_eq!(
         second.header_values("authorization"),
         ["Bearer request-token"]
@@ -277,7 +278,7 @@ async fn a_retry_moves_to_the_next_pool_proxy() {
         .unwrap();
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(
-        good.next_request().await.unwrap().request_line,
+        good.next_request().await.unwrap().request_line(),
         "GET http://origin.test/item HTTP/1.1"
     );
 }
@@ -420,7 +421,7 @@ async fn each_url_string_reaches_its_own_target() {
     ] {
         let response = session.get(sent.as_str()).send().await.unwrap();
         assert_eq!(response.url().as_str(), url);
-        assert_eq!(server.next_request().await.unwrap().target, target);
+        assert_eq!(server.next_request().await.unwrap().target(), target);
     }
 }
 

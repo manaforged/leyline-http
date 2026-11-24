@@ -7,12 +7,14 @@ mod rules;
 mod scope;
 mod sitemaps;
 mod skips;
+mod tunable;
 
 pub(super) use std::collections::BTreeSet;
 pub(super) use std::time::Duration;
 
+pub(super) use leyline::Session;
+pub(super) use leyline::crawl::{Respect, Scope, SkipReason};
 pub(super) use leyline::testing;
-pub(super) use leyline::{Respect, Scope, Session, SkipReason};
 
 pub(super) fn unpaced() -> leyline::HostLimits {
     leyline::HostLimits::new().max_in_flight(1)
@@ -36,7 +38,7 @@ pub(super) async fn targets(server: &testing::Server) -> BTreeSet<String> {
         .requests()
         .await
         .into_iter()
-        .map(|request| request.target)
+        .map(|request| request.target().to_owned())
         .collect()
 }
 

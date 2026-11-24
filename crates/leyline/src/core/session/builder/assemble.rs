@@ -13,12 +13,13 @@ impl SessionBuilder {
         mut self,
         derived: DerivedIdentity,
         connector: FingerprintConnector,
+        doh: Option<Arc<crate::core::doh::DohResolver>>,
     ) -> Session {
         let impersonates = self.impersonates();
         let pool = Arc::new(self.pool_inputs().pool(impersonates));
         self.cookie_jar.get_or_insert_default();
-        self.bearer = self
-            .bearer
+        self.credential = self
+            .credential
             .take()
             .map(|token| token.refreshing(self.refresh_token.clone()));
         self.layered = false;
@@ -52,11 +53,13 @@ impl SessionBuilder {
                 })
                 .collect(),
             cache: (self.cache > 0).then(|| Arc::new(Cache::new(self.cache))),
-            proxy_shown: self.proxy_config.primary().map(crate::util::redact),
+            proxy_shown: self.proxy_config.shown_url(),
             connector,
+            doh,
             h2_config: derived.h2_config,
             pool,
             hsts: Arc::default(),
+            digest_nonces: Arc::default(),
             shutdown: Arc::default(),
             writers: Arc::default(),
             audit_tls: derived.audit_tls,

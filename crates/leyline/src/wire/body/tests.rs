@@ -5,7 +5,7 @@ use futures_util::stream;
 fn from_vec_keeps_len_hint() {
     let b: Body = vec![1u8, 2, 3].into();
     assert_eq!(b.len_hint(), Some(3));
-    assert!(b.replay().is_some());
+    assert!(b.try_clone().is_some());
 }
 
 #[test]
@@ -24,7 +24,7 @@ fn empty_cases() {
 fn stream_without_length() {
     let s = stream::iter(vec![Ok::<_, io::Error>(Bytes::from_static(b"abc"))]);
     let b = Body::stream(s, None);
-    assert!(b.replay().is_none());
+    assert!(b.try_clone().is_none());
     assert_eq!(b.len_hint(), None);
 }
 

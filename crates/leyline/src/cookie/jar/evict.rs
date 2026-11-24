@@ -41,14 +41,37 @@ impl JarInner {
         removed
     }
 
+    pub(super) fn expire(&mut self, domain: &str, cookie: &Cookie, secure_origin: bool) -> bool {
+        let stored_secure = self.cookies.get(domain).and_then(|entries| {
+            entries
+                .iter()
+                .find(|c| c.same_slot(cookie))
+                .map(|c| c.secure)
+        });
+        match stored_secure {
+            Some(secure) if !secure || secure_origin => {
+                self.remove_in(domain, |c| c.same_slot(cookie)) > 0
+            }
+            _ => false,
+        }
+    }
+
     pub(super) fn insert_loaded(&mut self, cookie: Cookie) {
         if !cookie.within_limits() {
             return;
         }
+        self.put(cookie, |held, new| held.creation_time <= new.creation_time);
+    }
+
+    pub(super) fn put(
+        &mut self,
+        mut cookie: Cookie,
+        replaces: impl FnOnce(&Cookie, &mut Cookie) -> bool,
+    ) -> bool {
         let domain = cookie.domain.to_lowercase();
         let entries = self.cookies.entry(domain.clone()).or_default();
         let added = match entries.iter().position(|c| c.same_slot(&cookie)) {
-            Some(pos) if entries[pos].creation_time > cookie.creation_time => return,
+            Some(pos) if !replaces(&entries[pos], &mut cookie) => return false,
             Some(pos) => {
                 entries[pos] = cookie;
                 false
@@ -59,6 +82,7 @@ impl JarInner {
             }
         };
         settle(self, &domain, added);
+        true
     }
 
     pub(super) fn prune(&mut self) {

@@ -12,7 +12,7 @@ mod pool;
 mod prepared;
 mod route;
 mod send;
-mod types;
+pub(crate) mod types;
 
 pub(crate) use config::{Io, PoolConfig};
 pub use connect::checkout_handle;

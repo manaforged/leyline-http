@@ -31,7 +31,7 @@ fi
 if ! command -v cargo >/dev/null 2>&1 && command -v cargo.exe >/dev/null 2>&1; then
     cargo() { cargo.exe "$@"; }
 fi
-export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$repo_root/target/verify}"
+target_dir="${CARGO_TARGET_DIR:-$repo_root/target}"
 
 step() { printf '\n\033[1;34m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m✓ %s\033[0m\n'  "$*"; }
@@ -121,14 +121,14 @@ g_package() {
     step "cargo package (publishable Rust crates)"
     ensure_msrv
     stage_workspace
-    rm -rf "$CARGO_TARGET_DIR/package"
-    cargo package \
+    rm -rf "$target_dir/package"
+    CARGO_TARGET_DIR="$target_dir" cargo package \
         --manifest-path "$package_stage/Cargo.toml" \
         --workspace \
         --no-verify \
         || fail "cargo package failed"
     local archive
-    for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+    for archive in "$target_dir"/package/*.crate; do
         (( $(wc -c <"$archive") <= MAX_CRATE_BYTES )) \
             || fail "$(basename "$archive") is over the crates.io limit of $MAX_CRATE_BYTES bytes"
     done
@@ -136,7 +136,7 @@ g_package() {
 
     step "packaged leyline consumer smoke check"
     package_root="$(mktemp -d)"
-    for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+    for archive in "$target_dir"/package/*.crate; do
         tar -xzf "$archive" -C "$package_root"
     done
     package_path() { find "$package_root" -maxdepth 1 -type d -name "$1-[0-9]*" -print -quit; }
@@ -254,10 +254,10 @@ g_deny() {
 }
 
 g_kani() {
-    step "cargo kani: HPACK integer, HTTP/2 frame header, SETTINGS, stream state and flow-window proofs"
+    step "cargo kani: H1 framing, response state, ASCII/host utils, HPACK, HTTP/2 frames/flow, cookies, downloads, and DNS wire proofs"
     command -v cargo-kani >/dev/null || fail "cargo-kani not installed: cargo install --locked kani-verifier && cargo kani setup"
-    (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing --jobs --output-format terse) \
-        || fail "a Kani proof failed"
+    (cd crates/leyline && cargo kani --no-default-features --lib -Z stubbing -Z unstable-options --harness-timeout 30s --jobs --output-format terse) \
+        || fail "cargo kani failed"
     ok "Kani proofs verified"
 }
 
@@ -305,6 +305,45 @@ g_subcrates() {
     ok "sub-workspace crates clean"
 }
 
+g_asan() {
+    local host asan_opts="${ASAN_OPTIONS:-}"
+    host="$(rustc -vV | sed -n 's/^host: //p')"
+    if [[ "$(uname -s)" == Linux && -z "$asan_opts" ]]; then
+        asan_opts="detect_leaks=1"
+    fi
+    for manifest in crates/leyline-bssl/Cargo.toml crates/leyline-bssl-tokio/Cargo.toml; do
+        step "AddressSanitizer ($manifest)"
+        ASAN_OPTIONS="$asan_opts" RUSTFLAGS="-Zsanitizer=address" cargo +nightly test \
+            --manifest-path "$manifest" \
+            --lib \
+            --target "$host" \
+            || fail "ASan failed in $manifest"
+    done
+    ok "ASan clean"
+}
+
+g_mutants() {
+    command -v cargo-mutants >/dev/null || fail "cargo-mutants not installed: cargo install --locked cargo-mutants"
+    local base="${MUTANTS_BASE:-origin/main}"
+    local diff_file subcrate
+    diff_file="$(mktemp)"
+    step "cargo mutants --in-diff (base: $base)"
+    git diff "$base"..HEAD -- crates/leyline >"$diff_file"
+    if [[ -s "$diff_file" ]]; then
+        cargo mutants -p leyline-http --in-diff "$diff_file" -- --features full,bench-internals \
+            || { rm -f "$diff_file"; fail "cargo mutants found surviving mutants in leyline-http"; }
+    fi
+    for subcrate in crates/leyline-bssl crates/leyline-bssl-tokio; do
+        git diff "$base"..HEAD --relative="$subcrate" -- "$subcrate" >"$diff_file"
+        if [[ -s "$diff_file" ]]; then
+            (cd "$subcrate" && cargo mutants --in-diff "$diff_file" -- --lib) \
+                || { rm -f "$diff_file"; fail "cargo mutants found surviving mutants in $subcrate"; }
+        fi
+    done
+    rm -f "$diff_file"
+    ok "diff mutants caught"
+}
+
 g_release() {
     step "release qualification (tag, manifests, changelog)"
     local tag="${GITHUB_REF_NAME:-}"
@@ -335,9 +374,9 @@ g_release() {
     git fetch --quiet origin main 2>/dev/null || true
     git rev-parse --quiet --verify origin/main >/dev/null || fail "origin/main is unknown; fetch it before qualifying a release"
     git merge-base --is-ancestor HEAD origin/main || fail "tag $tag is on a commit that is not on main"
-    mkdir -p "$CARGO_TARGET_DIR"
+    mkdir -p "$target_dir"
     awk -v head="## $version " 'index($0, head) == 1 {on = 1; next} on && /^## / {exit} on' CHANGELOG.md \
-        >"$CARGO_TARGET_DIR/release-notes.md"
+        >"$target_dir/release-notes.md"
     ok "release $tag qualified"
 }
 
@@ -370,24 +409,24 @@ g_publish() {
         return 0
     fi
     echo "  publishing: ${pending[*]}"
-    rm -rf "$CARGO_TARGET_DIR/package"
-    cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+    rm -rf "$target_dir/package"
+    CARGO_TARGET_DIR="$target_dir" cargo package --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
         || fail "cargo package failed; nothing was uploaded"
     if [[ -n "${RELEASE_PACKAGES:-}" ]]; then
         local archive
-        for archive in "$CARGO_TARGET_DIR"/package/*.crate; do
+        for archive in "$target_dir"/package/*.crate; do
             cmp -s "$archive" "$RELEASE_PACKAGES/$(basename "$archive")" \
                 || fail "$(basename "$archive") differs from the package the release job tested; nothing was uploaded"
         done
     fi
-    cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
+    CARGO_TARGET_DIR="$target_dir" cargo publish --manifest-path "$package_stage/Cargo.toml" --workspace --no-verify "${excluded[@]}" \
         || fail "cargo publish failed; re-running the publish job publishes only the crates not yet on crates.io"
     ok "crates published"
 }
 
 gate_order=(
     fmt clippy features doc book links msrv test deny benches
-    subcrates package kani live release publish fuzz-timed
+    subcrates package kani asan mutants live release publish fuzz-timed
 )
 quick_gates=(fmt clippy doc)
 full_gates=(fmt clippy features doc book links msrv test deny benches subcrates package)

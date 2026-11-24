@@ -135,14 +135,16 @@ fn secure_cookie_requires_secure_origin() {
 }
 
 #[test]
-fn ip_host_ignores_domain_attribute() {
+fn ip_host_rejects_mismatched_domain_and_keeps_exact_ip_host_only() {
     let url = test_url("https://1.2.3.4/");
-    let c = parse_set_cookie("k=v; Domain=3.4; Path=/", &url).expect("stored");
+    assert!(parse_set_cookie("k=v; Domain=3.4; Path=/", &url).is_none());
+    let c = parse_set_cookie("k=v; Domain=1.2.3.4; Path=/", &url).expect("stored");
     assert!(c.host_only, "IP-host cookie must be host-only");
     assert_eq!(c.domain, "1.2.3.4");
 
     let url6 = test_url("https://[2001:db8::1]/");
-    let c6 = parse_set_cookie("k=v; Domain=db8::1; Path=/", &url6).expect("stored");
+    assert!(parse_set_cookie("k=v; Domain=db8::1; Path=/", &url6).is_none());
+    let c6 = parse_set_cookie("k=v; Domain=[2001:db8::1]; Path=/", &url6).expect("stored");
     assert!(c6.host_only);
 }
 
@@ -151,14 +153,14 @@ fn ip_domain_cookie_does_not_reach_sibling_ip() {
     use crate::cookie::Jar;
     let jar = Jar::new();
     let a = url::Url::parse("https://1.2.3.4/").unwrap();
-    jar.store("k=v; Domain=3.4; Path=/", &a);
+    jar.store(&a, "k=v; Domain=3.4; Path=/");
     assert_eq!(
-        jar.get(&url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
+        jar.get(url::Url::parse("https://5.6.3.4/").unwrap(), "k"),
         None
     );
     assert_eq!(
-        jar.get(&url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
-        Some("v".into())
+        jar.get(url::Url::parse("https://1.2.3.4/").unwrap(), "k"),
+        None
     );
 }
 
@@ -199,4 +201,20 @@ fn a_cookie_date_out_of_range_is_ignored() {
     ] {
         assert_eq!(parse_cookie_date(bad), None, "{bad}");
     }
+}
+
+#[test]
+fn max_age_rejects_leading_plus_and_saturates_overflow() {
+    let url = test_url("https://example.com/");
+    let plus = parse_set_cookie("a=1; Max-Age=+100", &url).expect("cookie parses");
+    assert!(
+        plus.expires.is_none(),
+        "RFC 6265 rejects leading '+' in Max-Age"
+    );
+
+    let huge = parse_set_cookie("b=1; Max-Age=999999999999999999999999999999", &url)
+        .expect("overflowing max-age cookie parses");
+    let max_400_days = SystemTime::now() + Duration::from_secs(400 * 86400 + 2);
+    let expires = huge.expires.expect("saturated max-age sets expiry");
+    assert!(expires <= max_400_days);
 }

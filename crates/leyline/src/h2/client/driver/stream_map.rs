@@ -49,7 +49,11 @@ impl StreamMap {
     }
 
     fn publish(&self) {
-        self.open.open.store(self.inner.len(), Ordering::Relaxed);
+        let len = self.inner.len();
+        let prev = self.open.open.swap(len, Ordering::Relaxed);
+        if prev > 0 && len == 0 {
+            self.open.last_idle.touch(std::time::Instant::now());
+        }
     }
 
     pub(super) fn set_capacity(&self, capacity: usize) {
@@ -88,22 +92,28 @@ impl StreamMap {
     pub(super) fn flush_stalled(&mut self) -> Vec<(u32, bool)> {
         let mut drained = Vec::new();
         for (&sid, actor) in self.inner.iter_mut() {
-            let Some(ResponseSink::StreamingEx { body_tx, .. }) = actor.response_tx.as_ref() else {
+            let Some(ResponseSink::StreamingEx(sink)) = actor.response_tx.as_ref() else {
                 continue;
             };
+            let mut closed = false;
             while let Some(chunk) = actor.stalled.pop_front() {
                 self.stalled -= 1;
-                match body_tx.try_send(Ok(chunk)) {
+                match sink.body_tx.try_send(Ok(chunk)) {
                     Ok(()) => {}
                     Err(TrySendError::Full(Ok(chunk))) => {
                         actor.stalled.push_front(chunk);
                         self.stalled += 1;
                         break;
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        self.stalled -= actor.stalled.len();
+                        actor.stalled.clear();
+                        closed = true;
+                        break;
+                    }
                 }
             }
-            if actor.stalled.is_empty() {
+            if !closed && actor.stalled.is_empty() {
                 drained.push((sid, actor.remote_done));
             }
         }

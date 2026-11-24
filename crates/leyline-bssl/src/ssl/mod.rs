@@ -40,7 +40,9 @@ pub use self::async_callbacks::{
 pub use self::connector::{
     ConnectConfiguration, SslAcceptor, SslAcceptorBuilder, SslConnector, SslConnectorBuilder,
 };
-pub use self::ech::{SslEchKeys, SslEchKeysRef};
+pub use self::ech::{
+    is_ech_rejected, marshal_ech_config, SslEchKeys, SslEchKeysBuilder, SslEchKeysRef,
+};
 pub use self::error::{Error, ErrorCode, HandshakeError};
 
 mod async_callbacks;
@@ -2059,7 +2061,10 @@ impl<S: Read + Write> SslStream<S> {
                 Ok(n) => return Ok(n),
                 Err(ref e) if e.code() == ErrorCode::ZERO_RETURN => return Ok(0),
                 Err(ref e) if e.code() == ErrorCode::SYSCALL && e.io_error().is_none() => {
-                    return Ok(0);
+                    return Err(io::Error::new(
+                        io::ErrorKind::UnexpectedEof,
+                        crate::records::UNCLEAN_EOF_MESSAGE,
+                    ));
                 }
                 Err(ref e) if e.code() == ErrorCode::WANT_READ && e.io_error().is_none() => {}
                 Err(e) => {

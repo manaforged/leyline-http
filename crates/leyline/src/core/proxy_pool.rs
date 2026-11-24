@@ -18,11 +18,11 @@ const DEFAULT_BAN_FOR: Duration = Duration::from_secs(60);
 #[derive(Debug, Clone)]
 struct Entry {
     config: Proxy,
-    label: String,
+    url: Option<url::Url>,
     identity: Option<Identity>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct Settings {
     sticky_for: Duration,
     ban_after: u32,
@@ -39,14 +39,14 @@ pub(crate) struct ProxyPool {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ProxyHealth {
-    proxy: String,
+    proxy: url::Url,
     in_use: u32,
     failures: u32,
     banned_until: Option<Instant>,
 }
 
 impl ProxyHealth {
-    pub(crate) fn proxy(&self) -> &str {
+    pub(crate) fn proxy(&self) -> &url::Url {
         &self.proxy
     }
 
@@ -61,6 +61,12 @@ impl ProxyHealth {
     pub(crate) fn banned_until(&self) -> Option<Instant> {
         self.banned_until
     }
+}
+
+pub(crate) struct Leased {
+    pub(crate) origin: Option<crate::core::config::Origin>,
+    pub(crate) lease: Box<Lease>,
+    pub(crate) session: crate::core::session::Session,
 }
 
 impl ProxyPool {
@@ -80,8 +86,96 @@ impl ProxyPool {
         self.entries.iter().any(|entry| entry.identity.is_some())
     }
 
+    pub(crate) fn len(&self) -> usize {
+        self.entries.len()
+    }
+
     pub(crate) fn configs(&self) -> impl Iterator<Item = &Proxy> {
         self.entries.iter().map(|entry| &entry.config)
+    }
+
+    fn map_entries(mut self, mut f: impl FnMut(&mut Entry)) -> Self {
+        let entries: Arc<[Entry]> = self
+            .entries
+            .iter()
+            .cloned()
+            .map(|mut entry| {
+                f(&mut entry);
+                entry
+            })
+            .collect();
+        self.entries = entries;
+        self
+    }
+
+    pub(crate) fn with_headers(self, headers: &[(String, String)]) -> Self {
+        self.map_entries(|entry| entry.config.push_validated_headers(headers))
+    }
+
+    pub(crate) fn with_no_proxy(self, no_proxy: &crate::core::config::NoProxy) -> Self {
+        self.map_entries(|entry| entry.config.set_no_proxy(no_proxy.clone()))
+    }
+
+    pub(crate) fn bypasses_all_url(&self, url: &url::Url) -> bool {
+        !self.entries.is_empty() && self.entries.iter().all(|e| e.config.bypasses_url(url))
+    }
+
+    pub(crate) fn lease_for(
+        &self,
+        url: &url::Url,
+        last: Option<usize>,
+    ) -> Option<(Option<crate::core::config::Origin>, Lease)> {
+        if self.bypasses_all_url(url) {
+            return None;
+        }
+        let origin = crate::core::config::Origin::of(url);
+        let lease = self.lease(origin.as_ref(), last)?;
+        Some((origin, lease))
+    }
+
+    pub(crate) fn acquire_session(
+        &self,
+        base: &crate::core::session::Session,
+        url: &url::Url,
+        last: Option<usize>,
+    ) -> crate::error::Result<Option<Leased>> {
+        let Some((origin, lease)) = self.lease_for(url, last) else {
+            return Ok(None);
+        };
+        let session = lease.session(base)?;
+        Ok(Some(Leased {
+            origin,
+            lease: Box::new(lease),
+            session,
+        }))
+    }
+
+    pub(crate) fn for_doh(&self) -> Self {
+        let entries: Arc<[Entry]> = self
+            .entries
+            .iter()
+            .map(|entry| Entry {
+                config: entry.config.clone(),
+                url: entry.url.clone(),
+                identity: None,
+            })
+            .collect();
+        Self {
+            state: Arc::new(Mutex::new(PoolState::new(entries.len()))),
+            entries,
+            settings: self.settings.clone(),
+            sessions: Arc::default(),
+        }
+    }
+
+    pub(crate) fn same_for_doh(&self, other: &Self) -> bool {
+        self.settings == other.settings
+            && self.entries.len() == other.entries.len()
+            && self
+                .entries
+                .iter()
+                .zip(other.entries.iter())
+                .all(|(a, b)| a.config.same_for_doh(&b.config))
     }
 
     fn from_entries(entries: impl Iterator<Item = Entry>) -> Self {
@@ -120,11 +214,13 @@ impl ProxyPool {
         self.entries
             .iter()
             .zip(state.health())
-            .map(|(entry, health)| ProxyHealth {
-                proxy: entry.label.clone(),
-                in_use: health.in_use,
-                failures: health.failures,
-                banned_until: health.banned_until,
+            .filter_map(|(entry, health)| {
+                Some(ProxyHealth {
+                    proxy: entry.url.clone()?,
+                    in_use: health.in_use,
+                    failures: health.failures,
+                    banned_until: health.banned_until,
+                })
             })
             .collect()
     }
@@ -135,13 +231,10 @@ impl ProxyPool {
 }
 
 fn entry(config: Proxy, identity: Option<Identity>) -> Entry {
-    let label = config
-        .primary()
-        .map(crate::util::redact)
-        .unwrap_or_default();
+    let url = config.shown_url();
     Entry {
         config,
-        label,
+        url,
         identity,
     }
 }

@@ -10,7 +10,7 @@ use crate::net::{Dialer, NetError, ProxyUrl};
 use crate::profile::BrowserProfile;
 use crate::profile::TcpProfile;
 
-use crate::profile::TlsMinVersion;
+use crate::profile::TlsVersion;
 use crate::tls::AlpnPlan;
 use crate::tls::HelloOptions;
 use crate::tls::TlsStream;
@@ -25,7 +25,7 @@ mod handshake;
 #[cfg(test)]
 mod shared_tests;
 
-const TCP: Transport = Transport::Tcp(TlsMinVersion::Tls12);
+const TCP: Transport = Transport::Tcp(TlsVersion::Tls12);
 
 #[derive(Clone)]
 pub struct FingerprintConnector {
@@ -37,10 +37,7 @@ pub struct FingerprintConnector {
     connect_timeout: Option<Duration>,
 }
 
-const SHARED_CONTEXTS: NonZeroUsize = match NonZeroUsize::new(8) {
-    Some(n) => n,
-    None => NonZeroUsize::MIN,
-};
+const SHARED_CONTEXTS: NonZeroUsize = NonZeroUsize::new(8).unwrap();
 
 static PLAIN_CONTEXTS: LazyLock<Mutex<LruCache<TrustKey, Context>>> =
     LazyLock::new(|| Mutex::new(LruCache::new(SHARED_CONTEXTS)));
@@ -138,7 +135,6 @@ impl FingerprintConnector {
         !self.trust.pinned_leaf_sha256().is_empty() || self.trust.has_client_identity()
     }
 
-    #[cfg(feature = "bench-internals")]
     pub fn with_resolver(mut self, resolver: std::sync::Arc<dyn crate::net::Resolver>) -> Self {
         self.dialer = self.dialer.with_resolver(resolver);
         self
@@ -165,6 +161,26 @@ impl FingerprintConnector {
         }
     }
 
+    pub(crate) async fn resolve_initial_ech(&self, host: &str, port: u16) -> Option<Vec<u8>> {
+        if self.trust.ech_config().is_some() || !self.trust.auto_ech() {
+            return None;
+        }
+        self.dialer.resolver().resolve_ech(host, port).await
+    }
+
+    pub(crate) fn ech_retry_override(
+        retried: &mut bool,
+        had_ech: bool,
+        retry_configs: Option<&[u8]>,
+    ) -> Option<Vec<u8>> {
+        if *retried || !had_ech {
+            return None;
+        }
+        let bytes = retry_configs.filter(|b| !b.is_empty())?;
+        *retried = true;
+        Some(bytes.to_vec())
+    }
+
     async fn connect_via_proxy(
         &self,
         host: &str,
@@ -172,27 +188,8 @@ impl FingerprintConnector {
         proxy: &ProxyUrl,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
-        let started = Instant::now();
-        let tunnel = self
-            .with_timeout(proxy::open(self, host, port, proxy, Route::Connect))
+        self.connect_with_ech_retry(host, port, Some(proxy), plan)
             .await
-            .map_err(TlsError::into_proxy)?;
-        let remaining = self
-            .connect_timeout
-            .map(|budget| budget.saturating_sub(started.elapsed()));
-        let session_key = SessionCache::key(host, port, Some(proxy.url()));
-        let handshake = async {
-            match tunnel {
-                Tunnel::Plain(tcp) => self.tls_handshake(tcp, host, &session_key, plan).await,
-                Tunnel::Tls(io) => {
-                    self.tls_handshake_nested(io, host, &session_key, plan)
-                        .await
-                }
-            }
-        };
-        within(remaining, handshake)
-            .await
-            .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
     }
 
     pub(crate) async fn with_timeout<T, E, F>(&self, fut: F) -> Result<T, E>
@@ -211,10 +208,126 @@ impl FingerprintConnector {
         port: u16,
         plan: AlpnPlan,
     ) -> Result<TlsStream, TlsError> {
+        self.connect_with_ech_retry(host, port, None, plan).await
+    }
+
+    async fn connect_with_ech_retry(
+        &self,
+        host: &str,
+        port: u16,
+        proxy: Option<&ProxyUrl>,
+        plan: AlpnPlan,
+    ) -> Result<TlsStream, TlsError> {
+        let started = Instant::now();
+        let remaining = || {
+            self.connect_timeout
+                .map(|budget| budget.saturating_sub(started.elapsed()))
+        };
+        let session_key = SessionCache::key(host, port, proxy);
+        #[cfg(unix)]
+        let unix_path = proxy.is_none().then(|| self.dialer.unix_socket()).flatten();
+        #[cfg(unix)]
+        let skip_ech = unix_path.is_some();
+        #[cfg(not(unix))]
+        let skip_ech = false;
+        let mut ech_override = if skip_ech {
+            None
+        } else if proxy.is_some() {
+            within(remaining(), self.resolve_initial_ech(host, port))
+                .await
+                .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
+        } else {
+            self.resolve_initial_ech(host, port).await
+        };
+        let mut retried_ech = false;
+        loop {
+            let ech_mode = match ech_override.as_deref() {
+                Some(bytes) => handshake::EchMode::Override(bytes),
+                None => handshake::EchMode::Session,
+            };
+            let result = match proxy {
+                Some(proxy) => {
+                    let tunnel = within(
+                        remaining(),
+                        proxy::open(self, host, port, proxy, Route::Connect),
+                    )
+                    .await
+                    .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()).into_proxy())?
+                    .map_err(TlsError::into_proxy)?;
+                    let handshake = async {
+                        match tunnel {
+                            Tunnel::Plain(tcp) => {
+                                self.tls_handshake_with_ech(tcp, host, &session_key, plan, ech_mode)
+                                    .await
+                            }
+                            Tunnel::Tls(io) => {
+                                self.tls_handshake_nested_with_ech(
+                                    io,
+                                    host,
+                                    &session_key,
+                                    plan,
+                                    ech_mode,
+                                )
+                                .await
+                            }
+                        }
+                    };
+                    within(remaining(), handshake)
+                        .await
+                        .map_err(|Elapsed| TlsError::from(NetError::connect_timeout()))?
+                }
+                None => {
+                    self.dial_direct_with_ech(
+                        #[cfg(unix)]
+                        unix_path,
+                        host,
+                        port,
+                        &session_key,
+                        plan,
+                        ech_mode,
+                    )
+                    .await?
+                }
+            };
+            match result {
+                Ok(stream) => return Ok(stream),
+                Err(handshake::HandshakeFailure::EchRetry {
+                    retry_configs,
+                    error,
+                }) => {
+                    if let Some(next) =
+                        Self::ech_retry_override(&mut retried_ech, true, Some(&retry_configs))
+                    {
+                        ech_override = Some(next);
+                    } else {
+                        return Err(error);
+                    }
+                }
+                Err(other) => return Err(other.into_error()),
+            }
+        }
+    }
+
+    async fn dial_direct_with_ech(
+        &self,
+        #[cfg(unix)] unix_path: Option<&std::path::Path>,
+        host: &str,
+        port: u16,
+        session_key: &str,
+        plan: AlpnPlan,
+        ech_mode: handshake::EchMode<'_>,
+    ) -> Result<Result<TlsStream, handshake::HandshakeFailure>, TlsError> {
+        #[cfg(unix)]
+        if let Some(path) = unix_path {
+            let unix_stream = self.dialer.dial_unix(path).await?;
+            return Ok(self
+                .tls_handshake_unix_with_ech(unix_stream, host, session_key, plan, ech_mode)
+                .await);
+        }
         let tcp_stream = self.dialer.dial(host, port).await?;
-        let session_key = SessionCache::key(host, port, None);
-        self.tls_handshake(tcp_stream, host, &session_key, plan)
-            .await
+        Ok(self
+            .tls_handshake_with_ech(tcp_stream, host, session_key, plan, ech_mode)
+            .await)
     }
 }
 

@@ -44,7 +44,7 @@ default. With either scheme the proxy resolves the host name.
 
 ```toml
 [dependencies]
-leyline-http = { version = "0.2", features = ["socks"] }
+leyline-http = { version = "0.3", features = ["socks"] }
 ```
 
 Without the feature, `build()` refuses a SOCKS URL with `Kind::Config`,
@@ -75,6 +75,28 @@ let proxies = Proxy::new()
     .https("http://secure-proxy.example:8080")
     .http("http://plain-proxy.example:3128");
 let session = Session::builder().proxy(proxies).build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
+## Custom proxy headers
+
+`Proxy::header` and `Proxy::headers` attach extra headers to both plain-HTTP
+proxy requests and `CONNECT` tunnel handshakes (such as sticky-session routing
+tags or a custom `Proxy-Authorization` header that overrides URL userinfo).
+Header values are redacted in `Debug` output, and framing headers (`host`,
+`content-length`, `transfer-encoding`) are rejected at `build()`. Proxy headers
+are not written by `Session::save`, so proxy credentials never land on disk;
+re-apply them on the loaded builder when needed.
+
+```rust,no_run
+use leyline::{Proxy, Session};
+
+# fn run() -> leyline::Result<()> {
+let proxy = Proxy::from("http://proxy.example:8080")
+    .header("x-proxy-session", "sticky-1");
+let session = Session::builder().proxy(proxy).build()?;
 # let _ = session;
 # Ok(())
 # }
@@ -208,6 +230,41 @@ idempotent or allowed, and the body must be replayable. A `Retry-After` wait
 still runs before the next proxy. When retries run out you get the last
 response, for example the 403. See
 [Retries and timeouts](retries-and-timeouts.md).
+
+## Choose the proxy with a closure
+
+`Proxy::custom(choose)` calls your closure with the URL of each request and
+of each redirect hop. Return `Some(proxy)` to send that request through a
+proxy, or `None` to send it direct.
+
+```rust,no_run
+use leyline::{Proxy, Session};
+
+# fn run() -> leyline::Result<()> {
+let session = Session::builder()
+    .proxy(Proxy::custom(|url| {
+        url.path()
+            .starts_with("/geo/")
+            .then(|| Proxy::from("http://user:pass@proxy.example:8080"))
+    }))
+    .build()?;
+# let _ = session;
+# Ok(())
+# }
+```
+
+Limits:
+
+- The returned `Proxy` must hold one proxy. A `Proxy::list`, a
+  `Proxy::identified`, or another `Proxy::custom` fails the request with
+  `Kind::Config`.
+- The environment proxies do not apply to a session with a custom proxy.
+- `no_proxy` on the custom proxy still applies: a host on that list is sent
+  direct and the closure is not called. `all`, `http`, and `https` on it have
+  no effect.
+- The closure runs once for each request and each redirect hop, so it may
+  keep a counter to rotate.
+- `Session::save` does not save the closure.
 
 ## Use a proxy list
 

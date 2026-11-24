@@ -6,7 +6,7 @@ async fn a_crawl_on_a_plain_session_waits_its_turn_per_host() {
     let seen = stamps.clone();
     let server = testing::Server::http(move |request| {
         seen.lock().unwrap().push(std::time::Instant::now());
-        match request.target.as_str() {
+        match request.target() {
             "/" => html(r#"<a href="/a">A</a><a href="/b">B</a>"#),
             path => html(&format!("<p>{path}</p>")),
         }
@@ -30,7 +30,7 @@ async fn a_crawl_on_a_plain_session_waits_its_turn_per_host() {
 
 #[tokio::test]
 async fn a_crawl_requests_one_url_per_normalized_address() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(
             r#"<a href="/p?b=2&a=1">1</a><a href="/p?a=1&b=2">2</a><a href="/%7Euser/">3</a><a href="/~user/">4</a>"#,
         ),
@@ -50,7 +50,7 @@ async fn a_crawl_requests_one_url_per_normalized_address() {
         .requests()
         .await
         .into_iter()
-        .map(|request| request.target)
+        .map(|request| request.target().to_owned())
         .filter(|target| target != "/robots.txt" && target != "/sitemap.xml")
         .collect();
     assert_eq!(sent.len(), 3, "{sent:?}");
@@ -59,7 +59,7 @@ async fn a_crawl_requests_one_url_per_normalized_address() {
 
 #[tokio::test]
 async fn a_crawl_takes_its_own_host_limits_over_the_polite_default() {
-    let server = testing::Server::http(|request| match request.target.as_str() {
+    let server = testing::Server::http(|request| match request.target() {
         "/" => html(r#"<a href="/a">A</a><a href="/b">B</a>"#),
         path => html(&format!("<p>{path}</p>")),
     })

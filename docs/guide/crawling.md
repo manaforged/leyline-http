@@ -30,16 +30,17 @@ and at most one a second, pauses a host that answers 429 or 503 and tries
 that page up to three times, reads the
 site's sitemaps, follows redirects through the same checks as links, skips
 error pages, files, and block pages, and drops copies. It obeys robots.txt
-and each page's robots rules unless you call `respect(None)`. Five
-settings change the rest:
+and each page's robots rules unless you call `respect(None)`. Every default
+limit and policy can be tuned or turned off:
 
 ```rust,no_run
-use leyline::{HostLimits, Respect, Scope, Session};
+use leyline::crawl::{Respect, Scope};
+use leyline::{HostLimits, Session};
 
 # async fn run() -> leyline::Result<()> {
 let mut crawl = Session::new()
     .crawl("https://docs.example/guide/")
-    .respect(Respect::AiTraining)
+    .respect(Respect::AiTrain)
     .scope(Scope::Prefix)
     .limit(500)
     .host_limits(HostLimits::new().max_in_flight(2).per_second(2.0));
@@ -56,29 +57,39 @@ println!("{} pages, {} errors", crawl.pages(), crawl.errors());
 
 | Setter | Default | Effect |
 | --- | --- | --- |
-| `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTraining` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
-| `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; a last path segment with a dot and a letter after it is a file, so end a directory seed with a slash |
-| `limit(n)` | none | Stops after `n` kept pages |
+| `respect(Respect)` or `respect(None)` | `Robots` | `Robots` obeys robots.txt `Disallow` and `Crawl-delay`, the page's `noindex` and `nofollow`, and `rel="nofollow"`. `AiTrain` does all of that and also obeys the site's AI-training opt-outs. `None` obeys no robots rules: no `Disallow`, `Crawl-delay`, `noindex`, or `nofollow` |
+| `scope(Scope)` | `Host` | `Host`: the seed's host. `Domain`: its registrable domain. `Prefix`: its host and directory; see [Filter the links to follow](#filter-the-links-to-follow). `Any`: any host |
+| `filter(keep)` | none | Follows a link only when the closure returns `true` for its URL, on top of the scope |
+| `limit(n)` or `limit(None)` | none | Stops after `n` kept pages, or removes the cap |
 | `agent(name)` | `*` | The robots.txt group and meta robots name the crawl obeys. A full user agent works; its product token is matched. A site with no group for the name falls back to `*` |
-| `max_body_size(n)` | the session's | The largest page body the crawl reads, without a new session |
-| `host_limits(HostLimits)` | one in flight, one a second, and a 429/503 pause per host, wherever the session's own limits leave them unset | The crawl's pace per host. A value you pass replaces the crawl's defaults, so `HostLimits::new()` adds no limits. The session's own limits, which every crawl and request of the session share, still apply on top |
+| `max_body_size(n)` | the session's | The largest page, sitemap, or robots.txt body the crawl reads, without a new session |
+| `redirect(policy)` | the session's, else `5` | Redirect policy for pages, sitemaps, and robots.txt |
+| `max_depth(n)` or `max_depth(None)` | `64` | Furthest link depth from a seed to queue, or unlimited |
+| `max_url_size(n)` or `max_url_size(None)` | `2048` | Longest URL in bytes to queue, or unlimited |
+| `max_sitemaps(n)` or `max_sitemaps(None)` | `50` | Most sitemap files to open (`0` disables sitemaps), or unlimited |
+| `max_crawl_delay(d)` or `max_crawl_delay(None)` | `30 s` | Longest robots.txt `Crawl-delay` to honor (`Duration::ZERO` ignores `Crawl-delay`), or uncapped |
+| `robots_max_age(d)` or `robots_max_age(None)` | `24 h` | How long a fetched robots.txt stays fresh before re-reading, or forever |
+| `dedup(enabled)` | `true` | Skips canonical aliases and duplicate-text pages when `true` |
+| `dedup_min_words(n)` or `dedup_min_words(None)` | `20` | Minimum word count for duplicate-text matching, or `None` to disable text matching |
+| `host_limits(HostLimits)` | 1 per host, 16 total, 1/s, and a 429/503 pause wherever the session's own limits leave them unset | The crawl's pace. A value you pass replaces the crawl's defaults, so `HostLimits::new()` adds no limits (bounded only by `max_connections`). The session's own limits still apply on top |
 
 Unless you call `respect(None)`, the crawl reads each site's robots.txt
-once, and again after 24 hours, obeys its rules, and reads its `Sitemap`
+once, and again after `robots_max_age` (24 hours by default), obeys its rules, and reads its `Sitemap`
 lines. Robots groups and meta robots names are matched for the `*` agent
 unless `agent(name)` names the crawler; a site with no group for that name
-falls back to `*`. At most 16 requests are in flight across all
-hosts.
+falls back to `*`. Across all hosts, concurrency defaults to 16 in flight and scales up or down with `HostLimits::max_total_in_flight` (or `max_connections` when unlimited).
 
 For each URL, in order, the crawl:
 
-1. Skips a URL that is not `http` or `https`, is out of scope, or was queued
-   before. URLs are compared after the fragment is dropped, the query
+1. Skips a URL that is not `http` or `https`, is out of scope, is rejected
+   by the `filter`, or was queued before. An out-of-scope link counts as
+   `SkipReason::Scope`, and a link the filter rejects as
+   `SkipReason::Filter`. URLs are compared after the fragment is dropped, the query
    parameters are sorted, and percent-encoding is normalized; the request
    goes out as written.
 2. Unless robots are ignored, skips a URL that robots.txt disallows, and uses the site's
-   `Crawl-delay` as the least spacing between its requests, up to 30
-   seconds. With `Respect::AiTraining`, it skips a URL whose site refuses AI
+   `Crawl-delay` as the least spacing between its requests, up to `max_crawl_delay` (30
+   seconds by default). With `Respect::AiTrain`, it skips a URL whose site refuses AI
    training in a `Content-Signal` line
    ([Cloudflare's format](https://developers.cloudflare.com/bots/additional-configurations/managed-robots-txt/))
    or a `Content-Usage` line (the IETF
@@ -87,8 +98,8 @@ For each URL, in order, the crawl:
 3. Sends the request without following redirects. A redirect is queued like
    a link, so its target passes the same checks; a seed redirected to
    another host of the same site adds the scope of its target, and a seed
-   redirected to another site yields only that page. A chain longer than
-   five redirects is skipped.
+   redirected to another site yields only that page. A redirect rejected by
+   the crawl's or session's `Redirect` policy (five hops by default) is skipped.
 4. Skips a block page (`Response::block()`), an error status, and a response
    whose `Content-Type` is not HTML. A response without a `Content-Type` is
    kept when its body starts like HTML, by the
@@ -96,24 +107,24 @@ For each URL, in order, the crawl:
 5. Queues the page's links. Unless robots are ignored, it reads the page's directives
    with `html::Directives::read`, queues nothing from a `nofollow` page, and
    skips links marked `rel="nofollow"`.
-6. Unless robots are ignored, skips a `noindex` page. With `Respect::AiTraining`, it
+6. Unless robots are ignored, skips a `noindex` page. With `Respect::AiTrain`, it
    also skips a `noai` page and a page whose `Content-Usage` header refuses
    AI training, counted as `SkipReason::NoAi` and `SkipReason::Signal`. `noai` is a convention some sites use, not a standard. A
    page that names another in-scope page as its canonical URL waits until
    the crawl has that page: it is dropped when the canonical page is kept,
    and kept when the canonical page is skipped or cannot be fetched. A held page counts
    toward `limit`; when the limit leaves no room to fetch the canonical page,
-   the held page is kept. A page
+   the held page is kept. Unless `dedup(false)` or `dedup_min_words` says otherwise, a page
    of 20 words or more is skipped when its text, compared word by word,
    matches a kept page.
 
 The crawl reads the sitemaps that each site's robots.txt lists on the same
-site, or
+site (or any host under `Scope::Any`), or
 `/sitemap.xml` when it lists none (and, unless robots are ignored, when robots.txt
 allows it). Unless robots are ignored, it opens only sitemap files that their own
 site's robots.txt allows, and reads that robots.txt first for a sitemap on
 another host. It follows a sitemap index to the sitemaps it
-names on the same host, reads gzipped and plain-text sitemaps, and reads at most 50 sitemap files and 50 MiB per file;
+names on the same host (or any host under `Scope::Any`), reads gzipped and plain-text sitemaps, and reads at most `max_sitemaps` files (50 by default) and `max_body_size` bytes per file (50 MiB when unset);
 with a `limit`, it opens no new sitemap file once it has queued that many
 URLs. A sitemap that redirects is queued again at its new address and
 passes the same checks. Each `<loc>` URL passes the same checks as a link; image, video, and
@@ -130,6 +141,41 @@ by default.
 `Session::shutdown()` ends the crawl: requests in flight fail with the
 shut-down error and nothing new starts. Dropping the `Crawl` cancels its
 requests. `Session::crawl` needs the `html` feature, which is on by default.
+
+## Filter the links to follow
+
+`Scope::Prefix` keeps the crawl on the seed's host and under the seed's
+directory:
+
+| Seed path | Last segment | Directory |
+| --- | --- | --- |
+| `/docs/a.html` | Has a file extension that contains a letter | `/docs/`, the path up to the last `/` |
+| `/docs/a` | Has no file extension | `/docs/a/`, the whole path |
+
+For any other rule, add `Crawl::filter` with a closure over the URL. The
+crawl applies it on top of the scope to every discovered link, sitemap URL,
+and redirect target, and never to the seed. A rejected link counts under
+`SkipReason::Filter`.
+
+```rust,no_run
+use leyline::Session;
+use leyline::crawl::{Scope, SkipReason};
+
+# async fn run() -> leyline::Result<()> {
+let mut crawl = Session::new()
+    .crawl("https://example.com/docs/")
+    .scope(Scope::Host)
+    .filter(|url| url.path().starts_with("/docs/") && url.query().is_none());
+while let Some(page) = crawl.next().await {
+    println!("{}", page?.url());
+}
+println!("{} links rejected", crawl.skipped(SkipReason::Filter));
+# Ok(())
+# }
+```
+
+A checkpoint does not save the filter. Call `filter` again on the crawl that
+`Crawl::load` returns; see [Save and resume a crawl](#save-and-resume-a-crawl).
 
 ## Build the crawl session
 
@@ -149,7 +195,7 @@ let proxies = Proxy::list([
 .sticky_for(Duration::from_secs(600))
 .ban_after(3)
 .ban_for(Duration::from_secs(120));
-let metrics = Metrics::new();
+let metrics = std::sync::Arc::new(Metrics::new());
 
 let session = Session::builder()
     .browser(Browser::default())
@@ -275,17 +321,17 @@ sitemap fails in a way the retry policy retries (the session's
 `Retry`, or three tries on transient errors, 429, and 503 when it has
 none), the crawl puts it back in the queue and tries again after the policy's
 wait, without holding a slot. A redirect that leaves the scope counts as
-`SkipReason::Scope`. A URL longer than 2048 bytes, or more than 64 links from
+`SkipReason::Scope`. A URL past `max_url_size` (2048 bytes by default), or deeper than `max_depth` (64 links by default) from
 the seed, is dropped without a count.
 
 A crawl that obeys robots rules holds a site's pages until its robots.txt is
-read, and retries an unreachable robots.txt four times, waiting up to 1, 2,
-4, and 8 seconds, before it skips the site. A crawl with `respect(None)` never
-asks for robots.txt; it reads `/sitemap.xml` directly. A missing sitemap is not
+read, and retries an unreachable robots.txt under the session's `Retry` policy (or four times, waiting up to 1, 2,
+4, and 8 seconds, when the session sets none) before it skips the site. A crawl with `respect(None)` never
+asks for robots.txt; it reads `/sitemap.xml` directly unless `max_sitemaps(0)` disables sitemaps. A missing sitemap is not
 an error; a sitemap that fails after its retries counts in `errors()`.
 
-Up to five redirects are followed, and the rules apply to the origin you
-asked about. The first 512 KiB of the file are parsed. `Session::robots`
+The session's `Redirect` policy (or up to five redirects when unset) applies, and the rules apply to the origin you
+asked about. The first 512 KiB of the file (or `max_body_size` when configured) are parsed. `Session::robots`
 returns an error only for an invalid URL or a shut-down session.
 
 The groups that name `agent`, compared without case, are merged; with no such
@@ -295,7 +341,8 @@ sides are compared with percent-encoding normalized. `/robots.txt` itself is
 always allowed.
 
 ```rust,no_run
-use leyline::{Purpose, Url};
+use leyline::Url;
+use leyline::crawl::Purpose;
 
 # async fn run(session: leyline::Session) -> leyline::Result<()> {
 let robots = session.robots("https://shop.example/", "examplebot").await?;
@@ -484,7 +531,7 @@ async fn crawl_one(session: &Session, url: &str) -> Next {
                 "{url}: {} after {} attempts via {}",
                 err.kind(),
                 err.attempts(),
-                err.proxy().unwrap_or("direct"),
+                err.proxy().map(leyline::Url::as_str).unwrap_or("direct"),
             );
             return match err.kind() {
                 leyline::Kind::Timeout
@@ -559,8 +606,8 @@ A `.stream()` request logs its body end as a separate event with the same
 
 ## Count requests and watch the queues
 
-`trace::Metrics` counts what a session does. `Metrics::new()` returns an
-`Arc<Metrics>`; pass a clone to `trace`, which adds it beside any other
+`trace::Metrics` counts what a session does. Wrap `Metrics::new()` in an
+`Arc<Metrics>`, pass a clone to `trace`, which adds it beside any other
 hook, and keep one to read it:
 
 | Method | Count |
@@ -700,7 +747,8 @@ in memory or be dropped
 and loaded with a supplied session:
 
 ```rust,no_run
-use leyline::{Crawl, Session};
+use leyline::Session;
+use leyline::crawl::Crawl;
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::new();
@@ -734,7 +782,8 @@ idempotent. Drain buffered crawl errors through `next()` before saving; otherwis
 Checkpoints are versioned JSON with a 64 MiB size limit, written with mode 0600
 on Unix. They contain URLs and page bodies, so treat them as account data and
 load only files your application wrote. They do not save cookies or application
-callbacks. Use `Session::save` separately and supply the restored session to
+callbacks, the `filter` closure included: call `Crawl::load(&session, path)?.filter(..)`
+to set it again. Use `Session::save` separately and supply the restored session to
 `Crawl::load` when the crawl requires an account.
 
 ## Next

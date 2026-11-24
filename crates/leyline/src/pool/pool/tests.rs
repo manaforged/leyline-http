@@ -1,6 +1,6 @@
 use super::{OriginFlag, POOL_REAP_INTERVAL, Pool};
 use crate::Session;
-use crate::pool::types::PoolKey;
+use crate::pool::types::{HostName, PoolKey};
 use crate::profile::Carrier;
 use crate::testing::{Response, Server, queue};
 use crate::wire::TlsInfo;
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 fn h1_key(host: &str) -> PoolKey {
     PoolKey {
         scheme: crate::wire::Scheme::Http,
-        host: host.to_string(),
+        host: HostName::new(host),
         port: 80,
         proxy: None,
         transport: Carrier::Tcp,

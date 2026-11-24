@@ -9,7 +9,7 @@ use super::prefix::stop_reason;
 use super::{Response, ResponseBody, StopReason};
 use crate::core::body_stream::BodyStream;
 use crate::core::config::Codings;
-use crate::core::decompress::{Decoder, buffer_decoded};
+use crate::core::decompress::{DECODED_HEADERS, Decoder, buffer_decoded};
 use crate::deadline::{Deadline, within};
 use crate::error::BodyLimit;
 use crate::error::{Error, Kind, Result};
@@ -18,7 +18,7 @@ use crate::wire::Body;
 impl Response {
     /// Reads the body as text in the charset from `content-type`, defaulting to UTF-8.
     #[cfg(feature = "charset")]
-    pub fn text(self) -> impl Future<Output = Result<String>> {
+    pub fn text(self) -> impl Future<Output = Result<String>> + Send {
         self.text_with_charset("utf-8")
     }
 
@@ -95,9 +95,26 @@ impl Response {
         coding(&self.parts.headers)
     }
 
-    /// Returns the decoded body as a stream and fails when the declared length exceeds the size limit.
+    /// Returns the decoded body as a stream, or `Err` before any read when the declared `content-length` exceeds `max_body_size` or the `content-encoding` cannot be decoded.
     pub fn bytes_stream(self) -> Result<Body> {
         Ok(Body::shared(self.body_stream()?))
+    }
+
+    /// Converts the response into an `http::Response` that streams the decoded body, with the final `url::Url` in its extensions and without the headers that describe a decoded encoding.
+    pub fn into_http(self) -> Result<http::Response<Body>> {
+        let decoded = self.decodes_body();
+        let mut builder = http::Response::builder()
+            .status(self.status())
+            .version(self.version())
+            .extension(self.url().clone());
+        for (name, value) in self.headers() {
+            if decoded && DECODED_HEADERS.contains(name) {
+                continue;
+            }
+            builder = builder.header(name, value);
+        }
+        let body = self.bytes_stream()?;
+        builder.body(body).map_err(Error::from)
     }
 
     pub(crate) fn body_stream(self) -> Result<BodyStream> {
@@ -162,6 +179,43 @@ impl Response {
             .read_prefix_into(limit, done, &mut bytes, &mut false)
             .await?;
         Ok((bytes, stopped_by == StopReason::PredicateMatched))
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) async fn read_sniffed(
+        mut self,
+        sniff_bytes: usize,
+        accept: fn(&[u8]) -> bool,
+    ) -> Result<Option<Vec<u8>>> {
+        let max_body = self.parts.compression.max_body_size;
+        let uncompressed =
+            self.content_coding() == Codings::Absent || !self.parts.compression.decode;
+        let declared = uncompressed.then(|| self.content_length()).flatten();
+        let declared_exceeds =
+            declared.is_some_and(|len| usize::try_from(len).unwrap_or(usize::MAX) > max_body);
+        let limit = max_body.saturating_add(1).max(sniff_bytes);
+        self.parts.compression.max_body_size = limit;
+        let mut out = Vec::new();
+        self.read_prefix_into(
+            limit,
+            |buf, _| {
+                buf.len() >= sniff_bytes
+                    && (!accept(&buf[..sniff_bytes]) || declared_exceeds || buf.len() > max_body)
+            },
+            &mut out,
+            &mut false,
+        )
+        .await?;
+        if !accept(&out[..out.len().min(sniff_bytes)]) {
+            return Ok(None);
+        }
+        let cap = BodyLimit::session(max_body);
+        if let Some(len) = declared {
+            cap.admit(0, usize::try_from(len).unwrap_or(usize::MAX))
+                .map_err(BodyLimit::error)?;
+        }
+        cap.admit(0, out.len()).map_err(BodyLimit::error)?;
+        Ok(Some(out))
     }
 
     async fn read_prefix_into<F>(

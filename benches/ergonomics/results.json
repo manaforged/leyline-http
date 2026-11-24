@@ -3294,7 +3294,7 @@
     "tokio"
    ],
    "imports": 3,
-   "lines": 11,
+   "lines": 10,
    "output": "42 ada",
    "output_ok": true,
    "passed": true,
@@ -3304,7 +3304,7 @@
    },
    "server_facts": {},
    "stderr_tail": "",
-   "tokens": 81
+   "tokens": 77
   },
   "t02": {
    "concept_names": [
@@ -3312,13 +3312,14 @@
     "Session",
     "Value",
     "as_u16",
+    "is_timeout",
     "json",
     "main",
     "post",
     "status",
     "timeout"
    ],
-   "concepts": 9,
+   "concepts": 10,
    "exit": 0,
    "extra_deps": 2,
    "extras": [
@@ -3326,7 +3327,7 @@
     "tokio"
    ],
    "imports": 6,
-   "lines": 29,
+   "lines": 27,
    "output": "201 7 timeout",
    "output_ok": true,
    "passed": true,
@@ -3339,7 +3340,7 @@
    },
    "server_facts": {},
    "stderr_tail": "",
-   "tokens": 219
+   "tokens": 211
   },
   "t03": {
    "concept_names": [
@@ -3359,7 +3360,7 @@
     "tokio"
    ],
    "imports": 4,
-   "lines": 18,
+   "lines": 16,
    "output": "ada",
    "output_ok": true,
    "passed": true,
@@ -3370,7 +3371,7 @@
    },
    "server_facts": {},
    "stderr_tail": "",
-   "tokens": 123
+   "tokens": 115
   },
   "t04": {
    "concept_names": [
@@ -3392,11 +3393,11 @@
     "tokio"
    ],
    "imports": 3,
-   "lines": 13,
+   "lines": 12,
    "output": "200 3",
    "output_ok": true,
    "passed": true,
-   "seconds": 1.15,
+   "seconds": 1.19,
    "server_checks": {
     "backoff": true,
     "retry_after_honored": true,
@@ -3405,11 +3406,11 @@
    "server_facts": {
     "gaps": [
      1.002,
-     0.139
+     0.181
     ]
    },
    "stderr_tail": "",
-   "tokens": 97
+   "tokens": 93
   },
   "t05": {
    "concept_names": [
@@ -3468,7 +3469,7 @@
    "output": "67108864",
    "output_ok": true,
    "passed": true,
-   "seconds": 0.46,
+   "seconds": 0.53,
    "server_checks": {
     "file_hash": true,
     "no_full_redownload": true,
@@ -3509,7 +3510,7 @@
     "tokio"
    ],
    "imports": 4,
-   "lines": 21,
+   "lines": 20,
    "output": "200 262144 hello",
    "output_ok": true,
    "passed": true,
@@ -3522,7 +3523,7 @@
    },
    "server_facts": {},
    "stderr_tail": "",
-   "tokens": 141
+   "tokens": 137
   },
   "t08": {
    "concept_names": [
@@ -3579,7 +3580,7 @@
     "tokio"
    ],
    "imports": 3,
-   "lines": 13,
+   "lines": 12,
    "output": "200 proxy",
    "output_ok": true,
    "passed": true,
@@ -3593,7 +3594,7 @@
     "host": "ergonomics.invalid"
    },
    "stderr_tail": "",
-   "tokens": 105
+   "tokens": 101
   },
   "t10": {
    "concept_names": [
@@ -3615,7 +3616,7 @@
     "tokio"
    ],
    "imports": 2,
-   "lines": 17,
+   "lines": 15,
    "output": "http://127.0.0.1:18743/t10/final capped",
    "output_ok": true,
    "passed": true,
@@ -3628,7 +3629,7 @@
     "loop_hits": 6
    },
    "stderr_tail": "",
-   "tokens": 111
+   "tokens": 103
   }
  },
  "rust/reqwest": {

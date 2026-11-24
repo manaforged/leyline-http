@@ -2,7 +2,7 @@ use leyline_bssl::ssl::{SslContextBuilder, SslVerifyMode};
 
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 use crate::profile::BrowserProfile;
-use crate::profile::{TlsMinVersion, TlsProfile};
+use crate::profile::{TlsProfile, TlsVersion};
 
 use crate::tls::error::TlsError;
 use crate::tls::keylog::install_from_env;
@@ -15,7 +15,7 @@ mod phase;
 /// The transport a TLS context serves: TCP with the minimum used when the profile declares none, or QUIC, which needs TLS 1.3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Transport {
-    Tcp(TlsMinVersion),
+    Tcp(TlsVersion),
     Quic,
 }
 
@@ -23,7 +23,7 @@ pub(crate) enum Transport {
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub(crate) fn ssl_context(
     profile: &BrowserProfile,
-    min_version: TlsMinVersion,
+    min_version: TlsVersion,
 ) -> Result<SslContextBuilder, TlsError> {
     let mut builder = SslContextBuilder::new(leyline_bssl::ssl::SslMethod::tls())
         .map_err(TlsError::from_stack)?;

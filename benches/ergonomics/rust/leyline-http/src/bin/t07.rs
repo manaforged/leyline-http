@@ -9,7 +9,6 @@ async fn main() -> leyline::Result<()> {
     let response = leyline::Session::new()
         .post("http://127.0.0.1:18743/t07/upload")
         .multipart(form)
-        .send()
         .await?;
     let status = response.status().as_u16();
     let body: Value = response.json().await?;

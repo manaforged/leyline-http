@@ -2,7 +2,7 @@
 use crate::error::{Error, Kind};
 
 /// A content encoding for compressing a request body.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Encoding {
     /// The gzip encoding.
@@ -13,6 +13,12 @@ pub enum Encoding {
     Zstd,
     /// The deflate encoding.
     Deflate,
+}
+
+impl std::fmt::Display for Encoding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.name())
+    }
 }
 
 impl Encoding {

@@ -81,7 +81,10 @@ fn pull_body(
         match h3.recv_body(conn, stream_id, scratch) {
             Ok(0) | Err(quiche::h3::Error::Done) => return Pull::Drained,
             Ok(n) => {
-                stream.body_bytes_seen += n;
+                if !crate::wire::has_body(stream.head_request, stream.status.as_u16()) {
+                    continue;
+                }
+                stream.body_bytes_seen = stream.body_bytes_seen.saturating_add(n as u64);
                 let chunk = Bytes::copy_from_slice(&scratch[..n]);
                 match push_chunk(h3, conn, stream_id, stream, tx, chunk) {
                     Push::Sent => {}
@@ -99,9 +102,7 @@ fn pull_body(
 }
 
 fn finish_stream(conn: &mut quiche::Connection, stream_id: u64, stream: &mut H3Stream) -> bool {
-    let finished = stream.stalled.is_none()
-        && (stream.peer_finished
-            || (conn.stream_finished(stream_id) && !conn.stream_readable(stream_id)));
+    let finished = stream.head_sent && stream.stalled.is_none() && stream.peer_finished;
     if !finished {
         return false;
     }
@@ -127,7 +128,7 @@ pub(in crate::quic::client) fn pump_streaming_bodies(
 ) -> bool {
     let mut to_remove: Vec<u64> = Vec::new();
     for (stream_id, stream) in streams.iter_mut() {
-        if stream.stream_tx.is_none() {
+        if !stream.head_sent || stream.stream_tx.is_none() {
             continue;
         }
         if forward_stream_body(h3, conn, *stream_id, stream, scratch) {

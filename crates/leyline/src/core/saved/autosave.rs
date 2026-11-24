@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
@@ -26,16 +26,24 @@ struct SessionTarget {
 
 impl Session {
     /// Saves the session to `path` in the background once every `every` interval, and once more on `shutdown`.
-    pub fn autosave(&self, path: impl Into<PathBuf>, every: Duration) {
+    pub fn autosave(&self, path: impl AsRef<Path>, every: Duration) {
         let target = SessionTarget {
             session: self.downgrade(),
-            path: Arc::from(path.into()),
+            path: Arc::from(path.as_ref()),
             write: write_private,
             writing: None,
             saved_state: None,
         };
         let writer = Autosave::spawn(target, self.cookies().changes(), every);
-        self.track_writer(tokio::spawn(writer.until(self.stopped())));
+        let (cancel, mut cancelled) = watch::channel(false);
+        let stopped = self.stopped();
+        let handle = tokio::spawn(writer.until(async move {
+            tokio::select! {
+                () = stopped => {}
+                _ = cancelled.changed() => {}
+            }
+        }));
+        self.replace_writer(cancel, handle);
     }
 }
 
@@ -104,14 +112,21 @@ impl WriteOrder {
 
 impl Guard {
     async fn save(&mut self) -> Result<()> {
+        self.save_or_join_failed().await.unwrap_or_else(Err)
+    }
+
+    async fn save_or_join_failed(&mut self) -> std::result::Result<Result<()>, Error> {
         let Some(write) = self.begin() else {
-            return Ok(());
+            return Ok(Ok(()));
         };
-        let written = tokio::task::spawn_blocking(self.order.order(write))
-            .await
-            .map_err(|e| stopped().with_source(e.to_string()))
-            .and_then(|out| out);
-        self.end(written)
+        match tokio::task::spawn_blocking(self.order.order(write)).await {
+            Ok(written) => Ok(self.end(written)),
+            Err(e) => {
+                let err = stopped().with_source(e.to_string());
+                drop(self.end(Err(stopped().with_source(e.to_string()))));
+                Err(err)
+            }
+        }
     }
 
     fn save_now(&mut self) -> Result<()> {
@@ -207,9 +222,10 @@ fn stopped() -> Error {
 }
 
 async fn run(mut guard: Guard, every: Duration) {
+    let every = every.max(Duration::from_millis(1));
     let mut watching = true;
     let mut due: Option<Instant> = None;
-    let mut ticker = tokio::time::interval_at(Instant::now() + every, every);
+    let mut ticker = tokio::time::interval_at(after(every), every);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         tokio::select! {
@@ -217,7 +233,7 @@ async fn run(mut guard: Guard, every: Duration) {
                 watching = changed.is_ok();
                 if watching {
                     guard.dirty = true;
-                    due.get_or_insert_with(|| Instant::now() + every);
+                    due.get_or_insert_with(|| after(every));
                 }
             }
             () = deadline(due) => {
@@ -234,12 +250,20 @@ async fn run(mut guard: Guard, every: Duration) {
                 }
             }
             command = guard.commands.recv() => {
-                handle(command, &mut guard).await;
-                guard.finished = true;
+                if handle(command, &mut guard).await {
+                    guard.finished = true;
+                }
                 return;
             }
         }
     }
+}
+
+fn after(every: Duration) -> Instant {
+    Instant::from_std(crate::util::saturating_after(
+        std::time::Instant::now(),
+        every,
+    ))
 }
 
 async fn deadline(due: Option<Instant>) {
@@ -249,14 +273,14 @@ async fn deadline(due: Option<Instant>) {
     }
 }
 
-async fn handle(command: Option<Command>, guard: &mut Guard) {
-    let saved = match guard.save().await {
-        Err(_) if guard.dirty => guard.save_now(),
-        saved => saved,
-    };
+async fn handle(command: Option<Command>, guard: &mut Guard) -> bool {
+    let outcome = guard.save_or_join_failed().await;
+    let completed = outcome.is_ok();
+    let saved = outcome.unwrap_or_else(Err);
     if let Some(Command::Shutdown(reply)) = command {
         drop(reply.send(saved));
     }
+    completed
 }
 
 #[cfg(test)]

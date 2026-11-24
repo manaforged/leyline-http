@@ -1,10 +1,17 @@
 use std::net::IpAddr;
+#[cfg(unix)]
+use std::path::Path;
 use std::time::Duration;
 
 use super::SessionBuilder;
 use crate::net::{HappyEyeballs, SocketOptions};
 
 impl SessionBuilder {
+    pub(super) fn with_socket_options(mut self, options: SocketOptions) -> Self {
+        self.socket_config = options;
+        self
+    }
+
     fn update_socket(mut self, f: impl FnOnce(&mut SocketOptions)) -> Self {
         f(&mut self.socket_config);
         self
@@ -25,6 +32,20 @@ impl SessionBuilder {
                 s.local_ipv6 = None;
             }
         })
+    }
+
+    /// Binds new sockets to the named network interface (Linux, Android, Fuchsia, and Apple platforms), such as `"eth0"` or `"lo0"`.
+    pub fn interface(self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        self.update_socket(|s| s.interface = Some(name))
+    }
+
+    /// Routes all HTTP and HTTPS connections for this session over a Unix domain socket at `path`.
+    #[cfg(unix)]
+    #[cfg_attr(docsrs, doc(cfg(unix)))]
+    pub fn unix_socket(self, path: impl AsRef<Path>) -> Self {
+        let path = path.as_ref().to_path_buf();
+        self.update_socket(|s| s.unix_socket = Some(path))
     }
 
     /// Sets `TCP_NODELAY` on new sockets; the default leaves the OS setting.
@@ -77,3 +98,7 @@ impl SessionBuilder {
         self.update_happy_eyeballs(|he| he.attempt_limit = n)
     }
 }
+
+#[cfg(test)]
+#[path = "socket_tests.rs"]
+mod tests;

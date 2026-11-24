@@ -70,7 +70,8 @@ empty. `sent.diff(&observed)` lists each difference as a
 `(field, expected, observed)` tuple; an empty list means a match.
 
 ```rust,no_run
-use leyline::{Browser, Fingerprint, Session};
+use leyline::profile::Fingerprint;
+use leyline::{Browser, Session};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::builder()

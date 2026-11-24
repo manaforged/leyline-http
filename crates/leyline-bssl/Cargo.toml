@@ -1,6 +1,6 @@
 [package]
 name = "leyline-bssl"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.96"
 authors = [
@@ -20,7 +20,7 @@ bitflags = "2.11.1"
 foreign-types = "0.5"
 openssl-macros = "0.1.1"
 libc = "0.2.185"
-leyline-bssl-sys = { path = "../leyline-bssl-sys", version = "=0.2.0" }
+leyline-bssl-sys = { path = "../leyline-bssl-sys", version = "=0.3.0" }
 
 [dev-dependencies]
 hex = "0.4"

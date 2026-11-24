@@ -65,6 +65,7 @@ pub(crate) struct BodyRules {
     offered: u8,
     pub(crate) decode: bool,
     pub(crate) max_body_size: usize,
+    max_body_configured: bool,
     pub(crate) max_error_body: usize,
 }
 
@@ -76,12 +77,22 @@ impl Default for BodyRules {
                 .fold(0, |mask, coding| mask | coding.bit()),
             decode: true,
             max_body_size: crate::wire::DEFAULT_MAX_BODY_SIZE,
+            max_body_configured: false,
             max_error_body: 64 * 1024,
         }
     }
 }
 
 impl BodyRules {
+    pub(crate) fn set_max_body_size(&mut self, bytes: usize) {
+        self.max_body_size = bytes;
+        self.max_body_configured = true;
+    }
+
+    pub(crate) fn configured_max_body(&self) -> Option<usize> {
+        self.max_body_configured.then_some(self.max_body_size)
+    }
+
     pub(crate) fn offer(&mut self, codings: impl IntoIterator<Item = Encoding>) {
         self.offered = codings
             .into_iter()

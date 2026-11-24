@@ -41,22 +41,37 @@ where
     where
         F: Future<Output = V> + Send + 'static,
     {
+        let mut guard = RemoveOnDrop {
+            registry: Arc::clone(&self.0),
+            key: Some(key.clone()),
+        };
         let mut map = lock(&self.0);
         if let Some(existing) = map.get(key) {
+            guard.key = None;
             return existing.clone();
         }
-        let registry = Arc::clone(&self.0);
-        let cleanup = key.clone();
         let open = open();
         let handle = tokio::spawn(async move {
-            let value = open.await;
-            lock(&registry).remove(&cleanup);
-            value
+            let _guard = guard;
+            open.await
         });
         let shared = async move { handle.await.unwrap_or_else(panicked) }
             .boxed()
             .shared();
         map.insert(key.clone(), shared.clone());
         shared
+    }
+}
+
+struct RemoveOnDrop<K: Hash + Eq, V> {
+    registry: Arc<Mutex<HashMap<K, Joined<V>>>>,
+    key: Option<K>,
+}
+
+impl<K: Hash + Eq, V> Drop for RemoveOnDrop<K, V> {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            lock(&self.registry).remove(&key);
+        }
     }
 }

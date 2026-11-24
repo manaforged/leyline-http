@@ -1,4 +1,4 @@
-use super::{Plan, Session};
+use super::{Plan, Protocol, Session};
 use crate::core::config::Proxy;
 use crate::error::{Error, Result};
 use crate::net::ProxyUrl;
@@ -38,15 +38,31 @@ fn log_race_proxy_fallback(cause: &'static str) {
     });
 }
 
+#[cfg(unix)]
+pub(crate) const UNIX_SOCKET_PROXY_ERR: &str = "unix_socket cannot be combined with a proxy";
+#[cfg(all(unix, feature = "http3"))]
+pub(crate) const UNIX_SOCKET_H3_ERR: &str = "unix_socket cannot be combined with Protocol::Http3";
+
 impl Session {
     pub(crate) fn proxy_for<'a>(
         &'a self,
         url: &url::Url,
         request: Option<&'a Proxy>,
-    ) -> Result<Option<&'a ProxyUrl>> {
+    ) -> Result<Option<std::borrow::Cow<'a, ProxyUrl>>> {
+        let chosen = request
+            .unwrap_or(&self.inner.inputs.proxy_config)
+            .proxy_for(url)?;
+        #[cfg(unix)]
+        if chosen.is_some() && self.inner.connector.dialer().unix_socket().is_some() {
+            return Err(Error::config(UNIX_SOCKET_PROXY_ERR));
+        }
+        Ok(chosen)
+    }
+
+    pub(crate) fn proxy_is_custom(&self, request: Option<&Proxy>) -> bool {
         request
             .unwrap_or(&self.inner.inputs.proxy_config)
-            .proxy_for(url)
+            .is_custom()
     }
 
     #[cfg(feature = "http3")]
@@ -58,25 +74,40 @@ impl Session {
         }
     }
 
+    pub(super) fn check_https_only(&self, url: &url::Url) -> Result<()> {
+        if self.inner.inputs.https_only
+            && crate::wire::Scheme::of(url) != Some(crate::wire::Scheme::Https)
+        {
+            return Err(Error::config("https_only session rejected non-HTTPS URL"));
+        }
+        Ok(())
+    }
+
     pub(crate) fn send_with_policy<'a>(
         &'a self,
         req: Prepared<'a>,
+        protocol: Protocol,
     ) -> impl Future<Output = Result<Box<TransportResponse>>> + 'a {
-        if self.inner.inputs.https_only
-            && crate::wire::Scheme::of(req.url) != Some(crate::wire::Scheme::Https)
-        {
-            return Either::Left(std::future::ready(Err(Error::config(
-                "https_only session rejected non-HTTPS URL",
-            ))));
+        if let Err(err) = self.check_https_only(req.url) {
+            return Either::Left(std::future::ready(Err(err)));
         }
         Either::Right(match &self.inner.cache {
-            Some(cache) => Either::Left(Box::pin(self.send_cached(req, cache))),
-            None => Either::Right(self.send_transport(req)),
+            Some(cache) if protocol == self.inner.inputs.protocol_policy => Either::Left(
+                Either::Left(Box::pin(self.send_cached(req, cache, protocol))),
+            ),
+            Some(cache) if !crate::wire::is_safe(req.method) => Either::Left(Either::Right(
+                Box::pin(self.send_invalidating(req, cache, protocol)),
+            )),
+            _ => Either::Right(self.send_transport(req, protocol)),
         })
     }
 
-    pub(super) async fn send_transport(&self, req: Prepared<'_>) -> Result<Box<TransportResponse>> {
-        let (route, req) = match self.inner.inputs.protocol_policy.plan() {
+    pub(super) async fn send_transport(
+        &self,
+        req: Prepared<'_>,
+        protocol: Protocol,
+    ) -> Result<Box<TransportResponse>> {
+        let (route, req) = match protocol.plan() {
             Plan::Tcp(route) => (route, req),
             #[cfg(feature = "http3")]
             Plan::H3Only => return self.send_h3_only(req).await,
@@ -98,6 +129,10 @@ impl Session {
 
     #[cfg(feature = "http3")]
     async fn send_h3_only(&self, req: Prepared<'_>) -> Result<Box<TransportResponse>> {
+        #[cfg(unix)]
+        if self.inner.connector.dialer().unix_socket().is_some() {
+            return Err(Error::config(UNIX_SOCKET_H3_ERR));
+        }
         if let Some(cause) = h3_proxy_blocker(req.proxy) {
             return Err(Error::config(cause));
         }
@@ -133,6 +168,10 @@ impl Session {
 
     #[cfg(feature = "http3")]
     fn h3_usable(&self, req: &Prepared<'_>) -> bool {
+        #[cfg(unix)]
+        if self.inner.connector.dialer().unix_socket().is_some() {
+            return false;
+        }
         let pool = &self.inner.pool;
         crate::wire::host_port(req.url)
             .ok()
@@ -145,6 +184,9 @@ impl Session {
     #[cfg(feature = "http3")]
     async fn send_raced<'r>(&self, h3_config: &H3Config, req: Prepared<'r>) -> Raced<'r> {
         let pool = &self.inner.pool;
+        if !self.inner.inputs.pool_config.keepalive {
+            return ControlFlow::Continue((Route::Auto, req));
+        }
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;
         let Ok((host, port)) = crate::wire::host_port(req.url) else {
@@ -163,6 +205,7 @@ impl Session {
 
         let mut h3_done = false;
         let mut h2_done = false;
+        let mut h2_err: Option<Error> = None;
         let winner = loop {
             tokio::select! {
                 biased;
@@ -185,7 +228,14 @@ impl Session {
                 },
                 r = &mut h2_connect, if !h2_done => match r {
                     Ok(Some(_)) => break Some(Winner::H2),
-                    Ok(None) | Err(_) => {
+                    Ok(None) => {
+                        h2_done = true;
+                        if h3_done {
+                            break None;
+                        }
+                    }
+                    Err(error) => {
+                        h2_err = Some(error);
                         h2_done = true;
                         if h3_done {
                             break None;
@@ -198,7 +248,10 @@ impl Session {
         match winner {
             Some(Winner::H3) => ControlFlow::Break(Box::pin(send_h3(pool, &target, req)).await),
             Some(Winner::H2) => ControlFlow::Continue((Route::Http2, req)),
-            None => ControlFlow::Continue((Route::Auto, req)),
+            None => match h2_err {
+                Some(error) => ControlFlow::Break(Err(error)),
+                None => ControlFlow::Continue((Route::Auto, req)),
+            },
         }
     }
 }

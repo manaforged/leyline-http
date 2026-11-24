@@ -23,7 +23,7 @@ impl Response {
 }
 
 /// Returns a copy of `headers` without hop-by-hop headers.
-pub fn relay_headers(headers: &HeaderMap) -> HeaderMap {
+pub(crate) fn relay_headers(headers: &HeaderMap) -> HeaderMap {
     let mut out = headers.clone();
     let listed: Vec<String> = headers
         .get_all(CONNECTION)

@@ -45,7 +45,7 @@ fn forms_parse_hidden_fields_and_controls() {
 
 #[cfg(feature = "html")]
 fn site(req: &testing::Request) -> testing::Response {
-    match req.target.as_str() {
+    match req.target() {
         "/login" => testing::Response::new(200).body(LOGIN_PAGE),
         _ => testing::Response::new(200),
     }
@@ -70,10 +70,10 @@ async fn a_tab_submits_a_parsed_form_like_a_click() {
         .requests()
         .await
         .into_iter()
-        .find(|r| r.target == "/session")
+        .find(|r| r.target() == "/session")
         .unwrap();
-    assert_eq!(posted.method, "POST");
-    let body = String::from_utf8(posted.body.clone()).unwrap();
+    assert_eq!(posted.method(), "POST");
+    let body = String::from_utf8(posted.body().to_vec()).unwrap();
     assert!(body.contains("csrf=tok%26en"), "{body}");
     assert!(body.contains("email=a%40shop.example"), "{body}");
     assert_eq!(posted.header("sec-fetch-mode"), Some("navigate"));
@@ -108,7 +108,7 @@ async fn autosave_writes_a_cookie_change() {
     let path = dir.join("device.json");
     session.autosave(&path, Duration::from_millis(20));
     let url = url::Url::parse("https://shop.example/").unwrap();
-    session.cookies().store("sid=1; Path=/; Max-Age=3600", &url);
+    session.cookies().store(&url, "sid=1; Path=/; Max-Age=3600");
     assert_eq!(saved_cookie_soon(&path, &url).await.as_deref(), Some("1"));
     session.shutdown().await;
     drop(std::fs::remove_dir_all(&dir));
@@ -121,7 +121,7 @@ async fn autosave_writes_a_final_save_on_shutdown() {
     let path = dir.join("device.json");
     session.autosave(&path, Duration::from_secs(3600));
     let url = url::Url::parse("https://shop.example/").unwrap();
-    session.cookies().store("sid=2; Path=/; Max-Age=3600", &url);
+    session.cookies().store(&url, "sid=2; Path=/; Max-Age=3600");
     session.shutdown().await;
     assert_eq!(saved_cookie_soon(&path, &url).await.as_deref(), Some("2"));
     drop(std::fs::remove_dir_all(&dir));
@@ -152,7 +152,7 @@ async fn a_blocking_test_handler_does_not_stall_client_timeouts() {
 #[tokio::test]
 async fn test_responses_can_wait_and_arrive_in_chunks() {
     let server = testing::Server::http(|req: &testing::Request| {
-        if req.target == "/slow" {
+        if req.target() == "/slow" {
             testing::Response::new(200).delay(Duration::from_millis(400))
         } else {
             testing::Response::new(200).chunks(["ab", "cd", "ef"], Duration::from_millis(10))

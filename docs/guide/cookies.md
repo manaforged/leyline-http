@@ -6,10 +6,10 @@ covers reading and seeding the jar, sharing it, and saving it between runs.
 
 ## Read and seed the jar
 
-`Session::cookies()` borrows the jar. Every jar method that takes a URL takes
-a parsed `&Url` and returns no `Result`. `leyline::Url` is the `url` crate's
-`Url`, so parse once with `leyline::Url::parse(..)?` and pass the same value
-to each call.
+`Session::cookies()` borrows the jar. Every jar method that takes a URL accepts
+`impl IntoUrl` (a URL string such as `"https://www.example.com/"` or a parsed
+`&leyline::Url`) and returns no `Result`. Parse once with
+`leyline::Url::parse(..)?` if you reuse the same URL across many calls.
 
 ```rust,no_run
 # async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -25,7 +25,7 @@ if let Some(header) = jar.header_for(&url) {
     println!("cookie: {header}");
 }
 
-jar.store("token=abc; Domain=.example.com; Path=/; Secure", &url);
+jar.store(&url, "token=abc; Domain=.example.com; Path=/; Secure");
 assert_eq!(jar.remove(&url, "token"), 1);
 # Ok(())
 # }
@@ -35,17 +35,52 @@ assert_eq!(jar.remove(&url, "token"), 1);
 | --- | --- |
 | `get(url, name)`, `set(url, name, value)` | Read or set one cookie scoped to a URL |
 | `header_for(url)` | The `Cookie` header the jar sends to a URL |
-| `store(set_cookie, url)` | Stores a full `Set-Cookie` value, with `Domain`, `Path`, `Secure`, `HttpOnly`, `SameSite`, `Max-Age`, and `Expires`, through the parser the session uses. `Max-Age=0` deletes the matching cookie |
+| `store(url, set_cookie)` | Stores a full `Set-Cookie` value, with `Domain`, `Path`, `Secure`, `HttpOnly`, `SameSite`, `Max-Age`, and `Expires`, through the parser the session uses. `Max-Age=0` deletes the matching cookie |
+| `insert(url, cookie)` | Stores a `Cookie` you built, as if a response from `url` had set it. See [Build a cookie from its fields](#build-a-cookie-from-its-fields) |
 | `remove(url, name)` | Deletes every cookie of that name the host of `url` receives, on every path. Returns the number removed |
 | `remove_everywhere(name)` | Deletes every cookie of that name on every host. Returns the number removed |
 | `clear()` | Deletes every cookie |
 | `all()` | Every stored cookie, sorted by domain then name, expired ones included |
 | `snapshot()`, `merge(other)` | Fork and merge. See [Share or fork a jar](#share-or-fork-a-jar) |
 
-A `Cookie` has the public fields `name`, `value`, `domain`, `path`, `secure`,
-`http_only`, `same_site` (`Strict`, `Lax`, or `None`), `expires`,
-`creation_time`, and `host_only`. `Cookie::is_expired()` tells whether the
+A `Cookie` has a getter for each attribute: `name()`, `value()`, `domain()`,
+`path()`, `secure()`, `http_only()`, `same_site()` (`Strict`, `Lax`, or
+`None`), `expires()`, `creation_time()`, and `host_only()`.
+`Cookie::is_expired()` tells whether the
 expiry has passed.
+
+### Build a cookie from its fields
+
+`Cookie::new(name, value)` makes a session cookie with the path `/`, for one
+host only, with `SameSite::Lax`. To set more, start with
+`Cookie::builder(name, value)`, call the setters you need (`domain`, `path`,
+`expires`, `secure`, `http_only`, and `same_site`), then `build()` and
+`jar.insert(url, cookie)`. Every `Jar` method takes the URL as a string or a
+`Url`; a URL that does not parse is ignored.
+
+```rust,no_run
+use leyline::cookie::Cookie;
+
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
+let session = leyline::Session::new();
+let cookie = Cookie::builder("sid", "abc")
+    .path("/app")
+    .secure(true)
+    .http_only(true)
+    .build();
+session.cookies().insert("https://www.example.com/", cookie);
+println!("{} cookies", session.cookies().all().len());
+# Ok(())
+# }
+```
+
+Without `domain` the cookie matches only the host of the URL; with it the
+cookie also matches subdomains. The jar applies the rules it
+applies to a `Set-Cookie` header from that URL, and ignores a cookie the URL
+may not set: for example, it drops a `secure` cookie for an `http://` URL.
+
+To run a session with no cookies at all, see
+[Turn cookies off](sessions.md#turn-cookies-off).
 
 ## Read the cookies a response set
 
@@ -60,7 +95,7 @@ jar.
 let session = leyline::Session::new();
 let resp = session.get("https://shop.example/login").send().await?;
 for cookie in resp.cookies() {
-    println!("set {}={} for {}", cookie.name, cookie.value, cookie.domain);
+    println!("set {}={} for {}", cookie.name(), cookie.value(), cookie.domain());
 }
 # Ok(())
 # }

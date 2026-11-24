@@ -43,16 +43,6 @@ pub enum TlsError {
     Net(#[from] NetError),
 }
 
-fn peer_closed(kind: io::ErrorKind) -> bool {
-    matches!(
-        kind,
-        io::ErrorKind::UnexpectedEof
-            | io::ErrorKind::ConnectionReset
-            | io::ErrorKind::ConnectionAborted
-            | io::ErrorKind::BrokenPipe
-    )
-}
-
 impl TlsError {
     pub(crate) fn kind(&self) -> Kind {
         match self {
@@ -69,8 +59,8 @@ impl TlsError {
 
     pub(crate) fn from_handshake<S>(e: &leyline_bssl_tokio::HandshakeError<S>) -> Self {
         if let Some(io) = e.as_io_error() {
-            let copy = io::Error::new(io.kind(), io.to_string());
-            if peer_closed(io.kind()) {
+            let copy = crate::error::copy_io(io);
+            if crate::error::is_peer_closed(io.kind()) {
                 return Self::Rejected(copy);
             }
             return Self::HandshakeIo(copy);
@@ -103,7 +93,7 @@ impl TlsError {
     }
 
     fn copy(&self) -> Self {
-        let io = |e: &io::Error| io::Error::new(e.kind(), e.to_string());
+        let io = crate::error::copy_io;
         match self {
             Self::SslConfig(m) => Self::SslConfig(m.clone()),
             Self::Profile(m) => Self::Profile(m.clone()),

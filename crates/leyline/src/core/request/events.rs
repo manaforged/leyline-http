@@ -1,11 +1,11 @@
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt};
+use futures_util::Stream;
 use http::{Method, StatusCode, header};
 
 use super::{Draft, RequestBuilder};
@@ -96,6 +96,7 @@ impl RequestBuilder {
                 "events requires a GET request without a body",
             ));
         }
+        self.reject_download_options()?;
         self.prepare_in_place()?;
         self.draft.carry.stream_response = true;
         self.draft
@@ -119,7 +120,7 @@ impl RequestBuilder {
                 request: self.draft,
                 body: None,
                 bytes: Bytes::new(),
-                parser: Parser::new(id, DEFAULT_EVENT_BYTES, RECONNECT_WAIT),
+                parser: Parser::new(id, DEFAULT_EVENT_BYTES),
                 settings,
                 reconnects: 0,
             }))),
@@ -133,25 +134,31 @@ impl Events {
         crate::util::lock(&self.settings).retry = retry.into();
         self
     }
-    /// Caps the bytes held for one event; the default is one MiB.
-    pub fn max_event_size(self, bytes: usize) -> Self {
-        crate::util::lock(&self.settings).max = bytes;
+    /// Caps the bytes held for one event, one MiB by default; `None` removes the cap.
+    pub fn max_event_size(self, bytes: impl Into<Option<usize>>) -> Self {
+        crate::util::lock(&self.settings).max = bytes.into().unwrap_or(crate::wire::NO_SIZE_CAP);
+        self
+    }
+    /// Sets the id of the last event already received, sent as `Last-Event-ID` on the first connection and replaced by each newer event id on reconnection.
+    pub fn last_event_id(mut self, id: impl Into<String>) -> Self {
+        let state = crate::util::get_mut(&mut self.state);
+        if let State::Ready(source) = state {
+            let wait = source.parser.wait;
+            source.parser = Parser::new(id.into(), source.parser.max);
+            source.parser.wait = wait;
+        }
         self
     }
     /// Returns the next event, a terminal error, or `None` after the stream stops.
     pub async fn next(&mut self) -> Option<Result<Event>> {
-        std::future::poll_fn(|cx| Pin::new(&mut *self).poll_next(cx)).await
+        futures_util::StreamExt::next(self).await
     }
 }
 
 impl Stream for Events {
     type Item = Result<Event>;
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let state = self
-            .get_mut()
-            .state
-            .get_mut()
-            .unwrap_or_else(PoisonError::into_inner);
+        let state = crate::util::get_mut(&mut self.get_mut().state);
         let mut future = match std::mem::replace(state, State::Done) {
             State::Ready(source) => {
                 Box::pin(source.advance()) as Pin<Box<dyn Future<Output = Step> + Send>>
@@ -182,6 +189,11 @@ impl std::fmt::Debug for Events {
     }
 }
 
+enum ReadFailure {
+    Status(crate::core::response::Response),
+    Error(Error),
+}
+
 impl Source {
     async fn advance(mut self: Box<Self>) -> Step {
         loop {
@@ -191,8 +203,8 @@ impl Source {
                     return (Some(Ok(event)), Some(self));
                 }
                 Ok(None) => return (None, None),
-                Err(error) => {
-                    if let Err(error) = self.reconnect(error).await {
+                Err(failure) => {
+                    if let Err(error) = self.reconnect(failure).await {
                         return (Some(Err(error)), None);
                     }
                 }
@@ -200,46 +212,58 @@ impl Source {
         }
     }
 
-    async fn connect(&mut self) -> Result<bool> {
+    async fn connect(&mut self) -> std::result::Result<bool, ReadFailure> {
         let mut draft = self
             .request
             .again(Body::default(), self.request.headers.clone());
-        if self.parser.last_id.is_empty() {
+        draft.carry.overrides_mut().retry_policy = Some(Retry::unset());
+        if self.parser.last_id.is_empty()
+            || http::HeaderValue::from_str(&self.parser.last_id).is_err()
+        {
             draft.headers.remove_all("last-event-id");
         } else {
             draft
                 .headers
-                .set("last-event-id", self.parser.last_id.as_str())?;
+                .set("last-event-id", self.parser.last_id.as_str())
+                .map_err(ReadFailure::Error)?;
         }
         let response = RequestBuilder {
             session: self.session.clone(),
             draft,
         }
         .send()
-        .await?;
+        .await
+        .map_err(ReadFailure::Error)?;
         if response.status() == StatusCode::NO_CONTENT {
             return Ok(false);
         }
-        response.error_for_status()?;
+        if crate::wire::is_error_status(response.status().as_u16()) {
+            return Err(ReadFailure::Status(response));
+        }
         if response.status() != StatusCode::OK
             || !response
                 .media_type()
                 .is_some_and(|media| media.eq_ignore_ascii_case("text/event-stream"))
         {
-            return Err(Error::new(Kind::Request)
-                .with_message("SSE response is not text/event-stream with status 200"));
+            return Err(ReadFailure::Error(Error::new(Kind::Request).with_message(
+                "SSE response is not text/event-stream with status 200",
+            )));
         }
-        self.body = Some(response.bytes_stream()?);
+        self.body = Some(response.bytes_stream().map_err(ReadFailure::Error)?);
         Ok(true)
     }
 
-    async fn read(&mut self) -> Result<Option<Event>> {
+    async fn read(&mut self) -> std::result::Result<Option<Event>, ReadFailure> {
         if self.body.is_none() && !self.connect().await? {
             return Ok(None);
         }
         loop {
             self.parser.max = crate::util::lock(&self.settings).max;
-            if let Some(event) = self.parser.read(&mut self.bytes)? {
+            if let Some(event) = self
+                .parser
+                .read(&mut self.bytes)
+                .map_err(ReadFailure::Error)?
+            {
                 return Ok(Some(event));
             }
             match self
@@ -249,29 +273,49 @@ impl Source {
                 .next()
                 .await
             {
-                Some(chunk) => self.bytes = chunk?,
-                None => return Err(Error::new(Kind::Connect).with_message("event stream closed")),
+                Some(chunk) => self.bytes = chunk.map_err(ReadFailure::Error)?,
+                None => {
+                    return Err(ReadFailure::Error(
+                        Error::new(Kind::Connect).with_message("event stream closed"),
+                    ));
+                }
             }
         }
     }
 
-    async fn reconnect(&mut self, error: Error) -> Result<()> {
-        let result = Err(error);
+    async fn reconnect(&mut self, failure: ReadFailure) -> Result<()> {
+        let result = match failure {
+            ReadFailure::Status(response) => Ok(response),
+            ReadFailure::Error(error) => Err(error),
+        };
+        let to_error = |outcome: Result<crate::core::response::Response>| match outcome {
+            Ok(response) => match response.error_for_status() {
+                Err(error) => Err(error),
+                Ok(_) => Err(Error::new(Kind::Status)),
+            },
+            Err(error) => Err(error),
+        };
         let retry = crate::util::lock(&self.settings).retry.clone();
         let plan = retry.plan(&result, self.reconnects);
         let RetryPlan::Backoff(backoff) = plan else {
-            return result.map(|_: crate::core::response::Response| ());
+            return to_error(result);
         };
-        let wait = self.parser.wait.max(backoff);
+        let wait = match self.parser.wait {
+            Some(server_wait) => {
+                if !retry.allows_wait(server_wait) {
+                    return to_error(result);
+                }
+                server_wait.max(backoff)
+            }
+            None => RECONNECT_WAIT.min(retry.max_wait_limit()).max(backoff),
+        };
         if !retry.allows_wait(wait) {
-            return result.map(|_: crate::core::response::Response| ());
+            return to_error(result);
         }
         let Some(at) = tokio::time::Instant::now().checked_add(wait) else {
-            return result
-                .map(|_: crate::core::response::Response| ())
-                .map_err(|error| {
-                    error.with_message("event reconnect wait exceeds the supported clock range")
-                });
+            return to_error(result).map_err(|error| {
+                error.with_message("event reconnect wait exceeds the supported clock range")
+            });
         };
         self.body = None;
         self.bytes = Bytes::new();

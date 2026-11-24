@@ -108,4 +108,29 @@ fn tcp_user_timeout_unsupported_errors_under_strict() {
     };
     let err = configure(&socket, V4, &TcpProfile::default(), &config).unwrap_err();
     assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
+    assert!(config.is_interface_config_error(&err));
+}
+
+#[test]
+fn strict_unsupported_maps_to_config_and_send_buffer_applies() {
+    let strict = SocketOptions {
+        strict: true,
+        ..SocketOptions::default()
+    };
+    let loose = SocketOptions {
+        strict: false,
+        ..SocketOptions::default()
+    };
+    let unsupported = std::io::Error::from(std::io::ErrorKind::Unsupported);
+    assert!(strict.is_interface_config_error(&unsupported));
+    assert!(!loose.is_interface_config_error(&unsupported));
+
+    let socket = Socket::new(Domain::IPV4, Type::STREAM, None).unwrap();
+    let sized = SocketOptions {
+        send_buffer_size: Some(64 * 1024),
+        strict: true,
+        ..SocketOptions::default()
+    };
+    configure(&socket, V4, &TcpProfile::default(), &sized).unwrap();
+    assert!(socket.send_buffer_size().unwrap() >= 64 * 1024);
 }

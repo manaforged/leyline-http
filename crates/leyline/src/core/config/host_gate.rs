@@ -87,12 +87,16 @@ impl Room {
     }
 }
 
+const MAX_CRAWL_FLOORS: std::num::NonZeroUsize =
+    std::num::NonZeroUsize::new(1024).expect("non-zero capacity");
+const MAX_ORIGIN_GATES: usize = 4096;
+
 #[derive(Debug)]
 struct Gates {
     by_origin: Mutex<HashMap<Origin, Arc<HostGate>>>,
     total: Option<Arc<Semaphore>>,
     total_waiting: Arc<AtomicUsize>,
-    floors: Mutex<HashMap<Origin, Duration>>,
+    floors: Mutex<lru::LruCache<Origin, Duration>>,
     floored: AtomicBool,
     room: Arc<Room>,
     #[cfg(feature = "html")]
@@ -105,7 +109,7 @@ impl Gates {
             by_origin: Mutex::default(),
             total: max_total.map(|n| Arc::new(Semaphore::new(n))),
             total_waiting: Arc::default(),
-            floors: Mutex::default(),
+            floors: Mutex::new(lru::LruCache::new(MAX_CRAWL_FLOORS)),
             floored: AtomicBool::new(false),
             room: Arc::default(),
             #[cfg(feature = "html")]
@@ -114,7 +118,7 @@ impl Gates {
     }
 
     fn floor(&self, origin: &Origin) -> Option<Duration> {
-        let floors = crate::util::lock(&self.floors);
+        let mut floors = crate::util::lock(&self.floors);
         floors.get(origin).copied()
     }
 
@@ -127,10 +131,10 @@ impl Gates {
         let mut floors = crate::util::lock(&self.floors);
         match gap {
             Some(gap) => {
-                floors.insert(origin, gap);
+                floors.put(origin, gap);
             }
             None => {
-                floors.remove(&origin);
+                floors.pop(&origin);
             }
         }
         self.floored.store(!floors.is_empty(), Ordering::Release);
@@ -144,9 +148,19 @@ impl Gates {
         let now = Instant::now();
         let floors = crate::util::lock(&self.floors);
         map.retain(|kept, gate| {
-            Arc::strong_count(gate) > 1 || gate.busy_after(now, floors.get(kept).copied())
+            Arc::strong_count(gate) > 1 || gate.busy_after(now, floors.peek(kept).copied())
         });
         drop(floors);
+        if map.len() >= MAX_ORIGIN_GATES {
+            let evict = map
+                .iter()
+                .filter(|(_, gate)| Arc::strong_count(gate) == 1)
+                .min_by_key(|(_, gate)| (*crate::util::lock(&gate.quiet)).max(gate.paused_until()))
+                .map(|(key, _)| key.clone());
+            if let Some(evict) = evict {
+                map.remove(&evict);
+            }
+        }
         let gate = Arc::new(HostGate::new(max_in_flight, Arc::clone(&self.room)));
         map.insert(origin, Arc::clone(&gate));
         gate
@@ -295,15 +309,18 @@ impl HostGates {
     }
 
     #[cfg(feature = "html")]
-    pub(crate) fn set_floor(&self, url: &url::Url, gap: Option<Duration>) {
-        if let Some(origin) = Origin::of(url) {
-            self.gates.set_floor(origin, gap);
-        }
+    pub(crate) fn set_floor_origin(&self, origin: Origin, gap: Option<Duration>) {
+        self.gates.set_floor(origin, gap);
     }
 
     #[cfg(feature = "html")]
     pub(crate) fn ready(&self, origin: &Origin) -> bool {
-        self.ready_at(origin).is_none() && self.has_room(origin)
+        self.ready_with(origin, None)
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn ready_with(&self, origin: &Origin, floor: Option<Duration>) -> bool {
+        self.ready_at_with(origin, floor).is_none() && self.has_room(origin)
     }
 
     #[cfg(feature = "html")]
@@ -324,10 +341,21 @@ impl HostGates {
 
     #[cfg(feature = "html")]
     pub(crate) fn ready_at(&self, origin: &Origin) -> Option<Instant> {
+        self.ready_at_with(origin, None)
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn ready_at_with(
+        &self,
+        origin: &Origin,
+        floor: Option<Duration>,
+    ) -> Option<Instant> {
         let gate = crate::util::lock(&self.gates.by_origin)
             .get(origin)
             .cloned()?;
-        let interval = self.interval_for(origin, self.limits.rule_for(&origin.host));
+        let interval = self
+            .interval_for(origin, self.limits.rule_for(&origin.host))
+            .max(self.floors.then_some(floor).flatten());
         gate.ready_at(interval, Instant::now())
     }
 
@@ -339,6 +367,11 @@ impl HostGates {
     #[cfg(feature = "html")]
     pub(crate) fn max_in_flight_for(&self, origin: &Origin) -> Option<usize> {
         self.limits.rule_for(&origin.host).max_in_flight
+    }
+
+    #[cfg(feature = "html")]
+    pub(crate) fn max_total(&self) -> Option<usize> {
+        self.limits.max_total()
     }
 
     fn gate(&self, origin: Origin) -> Arc<HostGate> {
@@ -434,6 +467,7 @@ impl HostGates {
         crate::util::lock(&self.gates.by_origin)
             .iter()
             .map(|(origin, gate)| HostStats {
+                key: origin.clone(),
                 origin: origin.to_string(),
                 in_flight: gate.in_flight.load(Ordering::Relaxed),
                 waiting: gate.waiting.load(Ordering::Relaxed),

@@ -40,6 +40,7 @@ pub(crate) async fn open_fresh_h3(
     let (body_chunk_tx, body_chunk_rx) = mpsc::channel(STREAM_REQ_CAPACITY);
     let closed = Arc::new(AtomicBool::new(false));
     let open_streams = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let last_idle = Arc::new(crate::pool::types::Stamp::now());
 
     let driver = H3Driver {
         established,
@@ -48,6 +49,7 @@ pub(crate) async fn open_fresh_h3(
         body_chunk_rx,
         closed: Arc::clone(&closed),
         open_streams: Arc::clone(&open_streams),
+        last_idle: Arc::clone(&last_idle),
         streams: HashMap::new(),
     };
     drop(tokio::spawn(driver.run()));
@@ -57,6 +59,7 @@ pub(crate) async fn open_fresh_h3(
             tx,
             closed,
             open_streams,
+            last_idle,
             pseudo_order: h3_cfg.pseudo_order,
         },
         tls,

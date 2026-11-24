@@ -7,13 +7,13 @@ use http_cache_semantics::{AfterResponse, BeforeRequest, CacheOptions, CachePoli
 use lru::LruCache;
 use sha2::{Digest, Sha256};
 
-use super::Session;
 use super::header_merge::apply_extra_headers;
+use super::{Protocol, Session};
 use crate::core::headers::HeaderList;
 use crate::error::{Error, Kind, Result};
 use crate::pool::Prepared;
 use crate::util::lock;
-use crate::wire::{ResponseMode, TransportBody, TransportResponse};
+use crate::wire::{ResponseMode, ResponseTiming, TransportBody, TransportResponse};
 
 pub(super) struct Cache {
     capacity: usize,
@@ -56,7 +56,10 @@ const VOLATILE: [HeaderName; 3] = [
 impl Key {
     fn of(request: &Prepared<'_>) -> Self {
         let mut hash = Sha256::new();
-        let proxy = request.proxy.map_or("", |proxy| proxy.url().as_str());
+        let proxy = request
+            .proxy
+            .map(crate::net::ProxyUrl::identity)
+            .unwrap_or_default();
         hash.update((proxy.len() as u64).to_be_bytes());
         hash.update(proxy.as_bytes());
         for (name, value) in &request.headers {
@@ -66,10 +69,13 @@ impl Key {
             {
                 continue;
             }
-            for bytes in [name.as_bytes(), value.as_str().as_bytes()] {
-                hash.update((bytes.len() as u64).to_be_bytes());
-                hash.update(bytes);
+            hash.update((name.len() as u64).to_be_bytes());
+            for byte in name.as_bytes() {
+                hash.update([byte.to_ascii_lowercase()]);
             }
+            let val = value.as_str().as_bytes();
+            hash.update((val.len() as u64).to_be_bytes());
+            hash.update(val);
         }
         Self {
             url: request.url[..url::Position::AfterQuery].to_owned(),
@@ -114,6 +120,16 @@ impl Cache {
         }
     }
 
+    fn remove_key(&self, key: &Key, generation: u64) {
+        let mut state = lock(&self.state);
+        if state.generation != generation {
+            return;
+        }
+        if let Some(entry) = state.entries.pop(key) {
+            state.bytes -= entry.cost;
+        }
+    }
+
     fn store(&self, key: Key, entry: Entry, generation: u64) {
         let mut state = lock(&self.state);
         if state.generation != generation {
@@ -151,6 +167,7 @@ impl Session {
         &self,
         mut req: Prepared<'_>,
         cache: &Cache,
+        protocol: Protocol,
     ) -> Result<Box<TransportResponse>> {
         let request = request(&req)?;
         let key = Key::of(&req);
@@ -158,7 +175,7 @@ impl Session {
             if only_cached(&request) {
                 return Ok(cache_miss());
             }
-            let response = self.send_transport(req).await?;
+            let response = self.send_transport(req, protocol).await?;
             self.invalidate(cache, &request, &response);
             return Ok(response);
         }
@@ -183,19 +200,47 @@ impl Session {
         if only_cached(&request) {
             return Ok(cache_miss());
         }
-        let response = self.send_transport(req).await?;
+        let response = self.send_transport(req, protocol).await?;
         lookup.entry = stale;
         finish(cache, key, &request, response, lookup)
     }
 
+    pub(super) async fn send_invalidating(
+        &self,
+        req: Prepared<'_>,
+        cache: &Cache,
+        protocol: Protocol,
+    ) -> Result<Box<TransportResponse>> {
+        let method = req.method.clone();
+        let uri = req.url[..url::Position::AfterQuery].to_owned();
+        let response = self.send_transport(req, protocol).await?;
+        self.invalidate_target(cache, &method, &uri, &response);
+        Ok(response)
+    }
+
     fn invalidate(&self, cache: &Cache, request: &Request<()>, response: &TransportResponse) {
-        if crate::wire::is_safe(request.method())
+        self.invalidate_target(
+            cache,
+            request.method(),
+            &request.uri().to_string(),
+            response,
+        );
+    }
+
+    fn invalidate_target(
+        &self,
+        cache: &Cache,
+        method: &Method,
+        uri: &str,
+        response: &TransportResponse,
+    ) {
+        if crate::wire::is_safe(method)
             || !(response.status.is_success() || response.status.is_redirection())
         {
             return;
         }
-        cache.remove(&request.uri().to_string());
-        let Ok(base) = url::Url::parse(&request.uri().to_string()) else {
+        cache.remove(uri);
+        let Ok(base) = url::Url::parse(uri) else {
             return;
         };
         for name in [header::LOCATION, header::CONTENT_LOCATION] {
@@ -254,8 +299,7 @@ fn only_cached(request: &Request<()>) -> bool {
         .get_all(header::CACHE_CONTROL)
         .iter()
         .filter_map(|v| v.to_str().ok())
-        .flat_map(|v| v.split(','))
-        .any(|value| value.trim().eq_ignore_ascii_case("only-if-cached"))
+        .any(|v| crate::util::has_token(v, "only-if-cached"))
 }
 
 fn finish(
@@ -283,7 +327,7 @@ fn finish(
                 let actual = std::mem::take(&mut response.headers);
                 let timing = response.timing;
                 response = old.response(parts);
-                response.timing = timing;
+                response.timing = timing.cached();
                 let mut headers = std::mem::take(&mut response.headers).into_map();
                 for name in VOLATILE {
                     for value in actual.map().get_all(&name) {
@@ -306,12 +350,12 @@ fn finish(
         ),
     };
     if response.headers.seen().cookies {
-        cache.remove(&key.url);
+        cache.remove_key(&key, lookup.generation);
         return Ok(response);
     }
     match Entry::capture(policy, &key, request, &response, cache.capacity) {
         Some(entry) => cache.store(key, entry, lookup.generation),
-        None => cache.remove(&key.url),
+        None => cache.remove_key(&key, lookup.generation),
     }
     Ok(response)
 }
@@ -365,7 +409,7 @@ impl Entry {
             body: TransportBody::Buffered(self.body.clone()),
             version: self.version,
             tls: self.tls.clone(),
-            timing: Default::default(),
+            timing: ResponseTiming::default().cached(),
         })
     }
 }
@@ -381,3 +425,7 @@ fn cache_miss() -> Box<TransportResponse> {
         timing: Default::default(),
     })
 }
+
+#[cfg(test)]
+#[path = "cache_tests.rs"]
+mod key_tests;

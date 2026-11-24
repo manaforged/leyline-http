@@ -76,7 +76,8 @@ pub(crate) mod audit;
 pub mod blocking;
 /// Cookie storage and `Set-Cookie` parsing.
 pub mod cookie;
-pub(crate) mod profile;
+/// Fingerprint, TCP profile, header ordering, and encoding types.
+pub mod profile;
 pub(crate) mod tls;
 /// Trace hooks that observe connection and request events.
 pub mod trace;
@@ -99,7 +100,7 @@ pub mod internals {
 
     pub use crate::core::saved::ConnectionState;
     pub use crate::net::NetError;
-    pub use crate::profile::BrowserProfile;
+    pub use crate::profile::types::BrowserProfile;
     #[cfg(feature = "http3")]
     pub use crate::quic::H3Config;
     pub use crate::tls::error::TlsError;
@@ -141,12 +142,8 @@ pub mod internals {
     pub mod fuzz {
         pub use crate::cookie::parse::parse_cookie_date;
         pub use crate::net::proxy::http::validate_connect_response;
+        pub use crate::pool::h1::parse::parse_validated_h1_head as parse_h1_head;
         pub use crate::pool::h1::parse::read_chunked_body;
-
-        /// Parses an HTTP/1.1 response head into its status, fields, and minor version.
-        pub fn parse_h1_head(head: &[u8]) -> crate::Result<(u16, http::HeaderMap, u8)> {
-            crate::wire::h1::parse_h1_head(head)
-        }
 
         /// Parses a `Set-Cookie` value received from `request_url`.
         pub fn parse_set_cookie(header: &str, request_url: &str) -> Option<crate::cookie::Cookie> {
@@ -164,6 +161,23 @@ pub mod internals {
             url::Url::parse(base)
                 .map(|base| crate::core::parse_links(header, &base))
                 .unwrap_or_default()
+        }
+
+        /// Parses a DNS wire response packet and extracts addresses and SVCB/HTTPS ECH configs.
+        pub fn parse_dns_response(packet: &[u8]) {
+            drop(crate::net::dns_wire::parse_response(packet));
+            let _ = crate::net::dns_wire::extract_ech_from_svcb(packet);
+            if let Ok(text) = std::str::from_utf8(packet) {
+                drop(crate::net::dns_wire::encode_query(
+                    text,
+                    crate::net::dns_wire::TYPE_HTTPS,
+                ));
+            }
+        }
+
+        /// Parses a DER-encoded PKCS#12 archive with `password`.
+        pub fn parse_pkcs12(der: &[u8], password: &str) {
+            drop(leyline_bssl::pkcs12::parse(der, password));
         }
     }
 
@@ -192,9 +206,10 @@ pub mod internals {
 
     /// Browser profiles and their registry.
     pub mod profile {
-        pub use crate::profile::{
-            H2Profile, ProfileRegistry, PseudoOrder, SettingId, akamai_fingerprint,
-        };
+        pub use crate::profile::fingerprint::akamai_fingerprint;
+        pub use crate::profile::h2::{PseudoOrder, SettingId};
+        pub use crate::profile::registry::ProfileRegistry;
+        pub use crate::profile::types::H2Profile;
     }
 
     /// The fingerprinting TLS connector.
@@ -204,7 +219,7 @@ pub mod internals {
         /// Builds the TLS context for a custom `profile`, with `min_version` as the floor when it declares none.
         pub fn context(
             profile: &crate::profile::BrowserProfile,
-            min_version: crate::profile::TlsMinVersion,
+            min_version: crate::profile::TlsVersion,
         ) -> Result<crate::tls::TlsContext, crate::tls::error::TlsError> {
             crate::tls::builder::ssl_context(profile, min_version)
                 .map(crate::tls::TlsContext::from_builder)
@@ -222,21 +237,31 @@ pub(crate) mod quic;
 pub mod testing;
 mod util;
 
+pub use bytes::Bytes;
 pub use http;
 pub use url::Url;
 
 pub use crate::core::{
-    Attempt, Block, Event, Events, HostLimits, IntoUrl, Link, Protocol, Proxy, Purpose, Redirect,
-    RequestBuilder, Response, Retry, Robots, RobotsSource, Session, SessionBuilder, Stats, Tab,
-    relay_headers,
+    Attempt, Block, HostLimits, IntoUrl, Link, Protocol, Proxy, Redirect, RequestBuilder, Response,
+    Retry, Session, SessionBuilder, Stats, Tab,
 };
 pub use crate::deadline::Timeout;
 pub use crate::error::{Error, Kind, Result};
 pub use crate::wire::Body;
 
-#[cfg(feature = "html")]
-pub use crate::core::{Crawl, Page, Respect, Scope, SkipReason};
 pub use crate::util::redact as redact_url;
+
+/// Crawling, robots.txt parsing, and content-use rules.
+pub mod crawl {
+    #[cfg(feature = "html")]
+    pub use crate::core::{Crawl, Page, Respect, Scope, SkipReason};
+    pub use crate::core::{Purpose, Robots, RobotsSource};
+}
+
+/// Server-sent event streams and parsed events.
+pub mod sse {
+    pub use crate::core::{Event, Events};
+}
 
 /// Multipart form bodies built from `Form` and `Part`.
 #[cfg(feature = "multipart")]
@@ -244,21 +269,14 @@ pub mod multipart {
     pub use crate::core::multipart::{Form, Part};
 }
 
-pub use crate::profile::anchor::HeaderPosition;
 pub use crate::profile::browser::Browser;
 pub use crate::profile::platform::Platform;
-pub use crate::profile::preset::RequestKind;
-
-pub use crate::profile::Encoding;
-pub use crate::profile::TcpProfile;
 
 #[cfg(feature = "websocket")]
 pub use crate::core::{Message, WebSocket};
 
-pub use crate::audit::Fingerprint;
 pub use crate::net::Resolver;
-#[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
-pub use crate::profile::TlsMinVersion;
+pub use crate::profile::types::TlsVersion;
 #[cfg(any(leyline_unstable_bssl, feature = "bench-internals"))]
 pub use crate::tls::TlsContext;
 pub use crate::tls::trust::Tls;

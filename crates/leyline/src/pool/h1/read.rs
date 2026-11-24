@@ -2,7 +2,7 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 
 use super::*;
 
-pub(super) const READ_CHUNK: usize = 8192;
+pub(super) const READ_CHUNK: usize = 64 * 1024;
 
 pub(super) const MAX_H1_CHUNK_LINE_BYTES: usize = 16 * 1024;
 
@@ -119,34 +119,50 @@ impl Chunked {
         if end == 0 {
             self.state = State::Done;
         } else {
-            self.trailer(&buf[..end]);
+            self.trailer(&buf[..end])?;
         }
         buf.drain(..end + 2);
         Ok(true)
     }
 
-    fn trailer(&mut self, line: &[u8]) {
+    fn trailer(&mut self, line: &[u8]) -> Result<(), Error> {
+        const INVALID_TRAILER_NAME: &str = "invalid HTTP/1.1 trailer name";
         let Some(colon) = memchr::memchr(b':', line) else {
-            return;
+            return Err(malformed("HTTP/1.1 trailer line has no colon"));
         };
-        let value = trim_end(trim_start(&line[colon + 1..]));
-        if let (Ok(name), Ok(value)) = (
-            HeaderName::from_bytes(&line[..colon]),
-            HeaderValue::from_bytes(value),
-        ) {
-            self.trailers.append(name, value);
+        let raw_name = &line[..colon];
+        if !crate::wire::h1::is_valid_token_bytes(raw_name) {
+            return Err(malformed(INVALID_TRAILER_NAME));
         }
+        let name = HeaderName::from_bytes(raw_name)
+            .map_err(|err| malformed(INVALID_TRAILER_NAME).with_source(err))?;
+        let raw_value = crate::wire::h1::trim_ows(&line[colon + 1..]);
+        let value = HeaderValue::from_bytes(raw_value)
+            .map_err(|err| malformed("invalid HTTP/1.1 trailer value").with_source(err))?;
+        self.trailers.append(name, value);
+        Ok(())
     }
 }
 
+fn chunk_line_too_long() -> Error {
+    malformed(format!(
+        "chunked size/trailer line exceeds {MAX_H1_CHUNK_LINE_BYTES} bytes"
+    ))
+}
+
 fn line_end(buf: &[u8]) -> Result<Option<usize>, Error> {
-    if let Some(pos) = memchr::memmem::find(buf, b"\r\n") {
+    if let Some(lf) = memchr::memchr(b'\n', buf) {
+        if lf == 0 || buf[lf - 1] != b'\r' {
+            return Err(malformed("chunked framing has a bare LF line ending"));
+        }
+        let pos = lf - 1;
+        if pos > MAX_H1_CHUNK_LINE_BYTES {
+            return Err(chunk_line_too_long());
+        }
         return Ok(Some(pos));
     }
     if buf.len() > MAX_H1_CHUNK_LINE_BYTES {
-        return Err(malformed(format!(
-            "chunked size/trailer line exceeds {MAX_H1_CHUNK_LINE_BYTES} bytes"
-        )));
+        return Err(chunk_line_too_long());
     }
     Ok(None)
 }
@@ -165,12 +181,18 @@ where
     Ok(())
 }
 
+pub(super) async fn read_limit<S, B>(stream: &mut S, buf: &mut B, max: usize) -> io::Result<usize>
+where
+    S: AsyncRead + Unpin + ?Sized,
+    B: bytes::BufMut,
+{
+    stream.read_buf(&mut bytes::BufMut::limit(buf, max)).await
+}
+
 pub(super) async fn read_into<S>(stream: &mut S, buf: &mut Vec<u8>, max: usize) -> io::Result<usize>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
     buf.reserve(max);
-    stream
-        .read_buf(&mut bytes::BufMut::limit(&mut *buf, max))
-        .await
+    read_limit(stream, buf, max).await
 }

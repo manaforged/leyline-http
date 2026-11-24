@@ -62,19 +62,27 @@ async fn send_h1_request(
             stream.flush().await?;
             Upload::idle(buf)
         }
-        Framing::Buffered(b) => upload::upload(stream, VecDeque::from([b]), None, buf).await?,
+        Framing::Buffered(b) => {
+            Box::pin(upload::upload(stream, VecDeque::from([b]), None, buf)).await?
+        }
         Framing::Fixed { stream: chunks } => {
-            upload::upload(
+            Box::pin(upload::upload(
                 stream,
                 VecDeque::new(),
                 Some((chunks, body::Encoder::Fixed)),
                 buf,
-            )
+            ))
             .await?
         }
         Framing::Chunked { stream: chunks } => {
             let encoder = body::Encoder::Chunked;
-            upload::upload(stream, VecDeque::new(), Some((chunks, encoder)), buf).await?
+            Box::pin(upload::upload(
+                stream,
+                VecDeque::new(),
+                Some((chunks, encoder)),
+                buf,
+            ))
+            .await?
         }
     };
 

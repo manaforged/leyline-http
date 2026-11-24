@@ -2,11 +2,9 @@ use bytes::Bytes;
 use http::HeaderMap;
 
 use crate::deadline::{Elapsed, within};
-use crate::wire::{BlockReader, ResponseBlock};
+use crate::wire::{BODY_RESERVE_CAP, BlockReader, ResponseBlock};
 
 use super::*;
-
-const BODY_RESERVE_CAP: usize = 64 * 1024;
 
 impl StreamActor {
     fn reserve_body(&mut self) {
@@ -14,7 +12,7 @@ impl StreamActor {
         if !self.has_body {
             return;
         }
-        if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+        if matches!(self.response_tx, Some(ResponseSink::StreamingEx(_))) {
             return;
         }
         if let Some(len) = self.declared_len {
@@ -26,7 +24,9 @@ impl StreamActor {
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_headers(&mut self, h: HeadersFrame) -> Result<(), H2Error> {
-        let full_fragment = self.reassemble(&h).await?;
+        let full_fragment = self
+            .reassemble_fragment(h.stream_id, h.end_headers, &h.fragment)
+            .await?;
 
         let Some(response) = self
             .streams
@@ -42,7 +42,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         let mut block = BlockReader::new(response);
         self.decoder
             .decode_block(&full_fragment, |name, value, typed| {
-                block.field(name, value, || typed);
+                block.field_hpack(name, value, typed);
             })
             .map_err(H2Error::Hpack)?;
         self.on_block(&h, block)
@@ -64,21 +64,26 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    async fn reassemble(&mut self, h: &HeadersFrame) -> Result<Bytes, H2Error> {
+    pub(super) async fn reassemble_fragment(
+        &mut self,
+        expected_stream_id: u32,
+        end_headers: bool,
+        fragment: &Bytes,
+    ) -> Result<Bytes, H2Error> {
         let max_header_block = self.decoder.max_header_list_size();
         let oversized = || H2Error::Connection {
             code: ErrorCode::CompressionError,
             reason: format!("header block exceeds the header list limit ({max_header_block})"),
         };
-        if h.fragment.len() > max_header_block {
+        if fragment.len() > max_header_block {
             return Err(oversized());
         }
-        if h.end_headers {
-            return Ok(h.fragment.clone());
+        if end_headers {
+            return Ok(fragment.clone());
         }
         let reassembly_timeout = self.config.limits().header_block_reassembly_timeout;
         let started = tokio::time::Instant::now();
-        let mut assembled = h.fragment.to_vec();
+        let mut assembled = fragment.to_vec();
         loop {
             let remaining = reassembly_timeout.saturating_sub(started.elapsed());
             match self
@@ -89,7 +94,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     stream_id,
                     end_headers,
                     fragment,
-                } if stream_id == h.stream_id => {
+                } if stream_id == expected_stream_id => {
                     if fragment.is_empty() && !end_headers {
                         self.control_flood.record(std::time::Instant::now())?;
                     }
@@ -146,25 +151,39 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         })
     }
 
-    fn respond(
-        &mut self,
-        h: &HeadersFrame,
-        head: Option<(http::StatusCode, HeaderMap, Option<u64>)>,
-    ) -> Result<(), H2Error> {
-        let stream_id = h.stream_id;
+    fn transition_or_reset(&mut self, stream_id: u32, event: StreamEvent) -> Result<bool, H2Error> {
         let Some(actor) = self.streams.get_mut(stream_id) else {
-            return Ok(());
+            return Ok(false);
         };
-        if let Err(error) = actor.state.transition(StreamEvent::RecvHeaders {
-            end_stream: h.end_stream,
-        }) {
-            return self.reset_stream(
+        if let Err(error) = actor.state.transition(event) {
+            self.reset_stream(
                 stream_id,
                 map_state_err(stream_id, error),
                 ErrorCode::StreamClosed,
-            );
+            )?;
+            return Ok(false);
+        }
+        Ok(true)
+    }
+
+    fn respond(
+        &mut self,
+        h: &HeadersFrame,
+        head: Option<(http::StatusCode, crate::wire::Fields, Option<u64>)>,
+    ) -> Result<(), H2Error> {
+        let stream_id = h.stream_id;
+        if !self.transition_or_reset(
+            stream_id,
+            StreamEvent::RecvHeaders {
+                end_stream: h.end_stream,
+            },
+        )? {
+            return Ok(());
         }
         let Some((status, headers, length)) = head else {
+            return Ok(());
+        };
+        let Some(actor) = self.streams.get_mut(stream_id) else {
             return Ok(());
         };
         actor.status = status;
@@ -174,7 +193,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         actor.response_tx = actor.response_tx.take().map(|sink| sink.settle(status));
         actor.has_body = crate::wire::has_body(actor.head_request, status.as_u16());
         actor.reserve_body();
-        if matches!(actor.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+        if matches!(actor.response_tx, Some(ResponseSink::StreamingEx(_))) {
             actor.deliver_headers_streaming();
         }
         if h.end_stream {
@@ -185,17 +204,12 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     fn on_trailers(&mut self, h: &HeadersFrame, trailers: HeaderMap) -> Result<(), H2Error> {
         let stream_id = h.stream_id;
-        let Some(actor) = self.streams.get_mut(stream_id) else {
+        if !self.transition_or_reset(stream_id, StreamEvent::RecvTrailers)? {
             return Ok(());
-        };
-        if let Err(error) = actor.state.transition(StreamEvent::RecvTrailers) {
-            return self.reset_stream(
-                stream_id,
-                map_state_err(stream_id, error),
-                ErrorCode::StreamClosed,
-            );
         }
-        actor.trailers = trailers;
+        if let Some(actor) = self.streams.get_mut(stream_id) {
+            actor.trailers = trailers;
+        }
         self.finish_remote(stream_id)
     }
 }

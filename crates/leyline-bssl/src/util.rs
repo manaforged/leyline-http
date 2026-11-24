@@ -34,6 +34,11 @@ impl<F> Drop for CallbackState<F> {
     }
 }
 
+/// Runs `f` inside `catch_unwind` at an FFI boundary.
+pub(crate) fn catch_unwind_ffi<T>(f: impl FnOnce() -> T) -> std::thread::Result<T> {
+    panic::catch_unwind(AssertUnwindSafe(f))
+}
+
 /// Password callback function, passed to private key loading functions.
 ///
 /// `cb_state` is expected to be a pointer to a `CallbackState`.
@@ -49,10 +54,10 @@ where
     unsafe {
         let callback = &mut *cb_state.cast::<CallbackState<F>>();
 
-        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+        let result = catch_unwind_ffi(|| {
             let pass_slice = slice::from_raw_parts_mut(buf.cast::<u8>(), size as usize);
             callback.cb.take().unwrap()(pass_slice)
-        }));
+        });
 
         match result {
             Ok(Ok(len)) => len as c_int,

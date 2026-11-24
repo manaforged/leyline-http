@@ -101,11 +101,7 @@ impl<'a> Attempt<'a> {
     /// Returns true for a 429 or gateway status response or a retryable error, and false for a redirect.
     pub fn is_transient(&self) -> bool {
         match self.kind {
-            Kind::Sent(Ok(response)) => {
-                let status = response.status();
-                status == StatusCode::TOO_MANY_REQUESTS
-                    || crate::error::is_gateway_status(status.as_u16())
-            }
+            Kind::Sent(Ok(response)) => crate::error::is_transient_status(response.status()),
             Kind::Sent(Err(error)) => error.is_retryable(),
             Kind::Redirect { .. } => false,
         }

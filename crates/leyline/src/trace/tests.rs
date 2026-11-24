@@ -35,7 +35,9 @@ impl Trace for Recorder {
         match *event {
             Event::Connect { id, reused, .. } => self.push(id, format!("connect reused={reused}")),
             Event::Sent { id, .. } => self.push(id, "sent".to_string()),
-            Event::Head { id, status, .. } => self.push(id, format!("head status={status}")),
+            Event::Head { id, status, .. } => {
+                self.push(id, format!("head status={}", status.as_u16()))
+            }
             Event::Done { id, outcome, .. } => {
                 self.push(id, format!("done ok={}", outcome.is_ok()))
             }

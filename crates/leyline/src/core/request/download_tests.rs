@@ -90,3 +90,19 @@ async fn a_206_with_any_other_content_range_fails_without_a_file() {
         assert_eq!(file, None, "{content_range}");
     }
 }
+
+#[test]
+fn strong_etag_rejects_weak_and_ctl_exhaustively() {
+    let alphabet: &[&[u8]] = &[b"\"", b"W", b"/", b"!", b"a", b" ", b"\x7f", b"\x00"];
+    crate::util::every_input(alphabet, 5, |slice| {
+        let s = std::str::from_utf8(slice).expect("ascii");
+        let ok = super::strong_etag(s);
+        let expected = slice.len() >= 2
+            && slice[0] == b'"'
+            && slice[slice.len() - 1] == b'"'
+            && slice[1..slice.len() - 1]
+                .iter()
+                .all(|&b| b == 0x21 || (0x23..=0x7e).contains(&b));
+        assert_eq!(ok, expected, "{s:?}");
+    });
+}

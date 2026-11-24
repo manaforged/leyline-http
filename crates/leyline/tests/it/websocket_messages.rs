@@ -120,11 +120,46 @@ async fn text_and_binary_frames_round_trip_and_close_reaches_the_server() {
 }
 
 #[tokio::test]
+async fn a_ping_payload_reaches_the_server_and_comes_back_in_the_pong() {
+    let seen = Seen::default();
+    let mut socket = connect(Arc::clone(&seen)).await;
+
+    socket
+        .send(Message::Ping(b"beat-7".to_vec()))
+        .await
+        .unwrap();
+    assert_eq!(
+        socket.recv().await.unwrap(),
+        Some(Message::Pong(b"beat-7".to_vec()))
+    );
+    socket.close().await.unwrap();
+
+    let seen = frames_through_close(&seen).await;
+    assert_eq!(seen[0], Wire::Ping(b"beat-7".to_vec().into()));
+}
+
+#[tokio::test]
+async fn a_ping_larger_than_a_control_frame_is_refused_before_it_is_sent() {
+    let seen = Seen::default();
+    let mut socket = connect(Arc::clone(&seen)).await;
+
+    let refused = socket.send(Message::Ping(vec![0; 126])).await;
+    socket.close().await.unwrap();
+
+    assert_eq!(refused.unwrap_err().kind(), leyline::Kind::Request);
+    let seen = frames_through_close(&seen).await;
+    assert!(matches!(seen[0], Wire::Close(_)), "{seen:?}");
+}
+
+#[tokio::test]
 async fn a_split_socket_sends_on_the_sink_and_reads_on_the_stream() {
     let seen = Seen::default();
     let (sink, stream) = connect(Arc::clone(&seen)).await.split();
     let mut sink = std::pin::pin!(sink);
     let mut stream = std::pin::pin!(stream);
+
+    let refused = sink.send(Message::Ping(vec![0; 126])).await.unwrap_err();
+    assert_eq!(refused.kind(), leyline::Kind::Request);
 
     sink.send(Message::Text("split".into())).await.unwrap();
     assert_eq!(

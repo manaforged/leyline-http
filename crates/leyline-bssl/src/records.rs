@@ -19,6 +19,8 @@ pub const MAX_PLAINTEXT: usize = 16 * 1024;
 pub const HEADER_LEN: usize = 5;
 /// The largest record body a peer may send: plaintext, content type, padding, and tag.
 pub const MAX_BODY: usize = MAX_PLAINTEXT + 256;
+/// The error message used when a TLS peer closes the transport without `close_notify`.
+pub const UNCLEAN_EOF_MESSAGE: &str = "TLS peer closed connection without close_notify";
 
 const TAG_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
@@ -121,7 +123,10 @@ impl Direction {
         Self::new(suite, secret, 0)
     }
 
-    fn nonce(&mut self) -> [u8; NONCE_LEN] {
+    fn nonce(&mut self) -> Result<[u8; NONCE_LEN], ErrorStack> {
+        let next_seq = self.seq.checked_add(1).ok_or_else(|| {
+            ErrorStack::internal_error_str("TLS record sequence number exhausted")
+        })?;
         let mut nonce = self.iv;
         for (byte, seq) in nonce[NONCE_LEN - 8..]
             .iter_mut()
@@ -129,8 +134,8 @@ impl Direction {
         {
             *byte ^= seq;
         }
-        self.seq += 1;
-        nonce
+        self.seq = next_seq;
+        Ok(nonce)
     }
 }
 
@@ -230,8 +235,13 @@ impl Records {
 
     /// Decrypts one whole record in place and returns its content type and the plaintext range within `record`.
     pub fn open(&mut self, record: &mut [u8]) -> Result<(u8, Range<usize>), ErrorStack> {
+        if record.len() < HEADER_LEN + 1 + TAG_LEN {
+            return Err(ErrorStack::internal_error_str(
+                "TLS record shorter than header and tag",
+            ));
+        }
         let (header, body) = record.split_at_mut(HEADER_LEN);
-        let nonce = self.read.nonce();
+        let nonce = self.read.nonce()?;
         let mut len = 0;
         // SAFETY: the context is live; input and output are the same buffer, which BoringSSL allows.
         cvt(unsafe {
@@ -265,17 +275,23 @@ impl Records {
         plaintext: &[u8],
         out: &mut Vec<u8>,
     ) -> Result<(), ErrorStack> {
+        if plaintext.len() > MAX_PLAINTEXT {
+            return Err(ErrorStack::internal_error_str(
+                "TLS record plaintext exceeds 16 KiB",
+            ));
+        }
         let body = plaintext.len() + 1 + TAG_LEN;
+        let body_len = u16::try_from(body).unwrap_or(u16::MAX);
+        let nonce = self.write.nonce()?;
         let start = out.len();
         out.reserve(HEADER_LEN + body);
         out.push(APPLICATION_DATA);
         out.extend_from_slice(&[3, 3]);
-        out.extend_from_slice(&u16::try_from(body).unwrap_or(u16::MAX).to_be_bytes());
+        out.extend_from_slice(&body_len.to_be_bytes());
         out.extend_from_slice(plaintext);
         out.push(content_type);
         out.resize(start + HEADER_LEN + body, 0);
         let (header, sealed) = out[start..].split_at_mut(HEADER_LEN);
-        let nonce = self.write.nonce();
         let mut len = 0;
         // SAFETY: the context is live; input and output are the same buffer, which BoringSSL allows.
         cvt(unsafe {

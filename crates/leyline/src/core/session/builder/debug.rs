@@ -15,6 +15,13 @@ impl fmt::Debug for SessionBuilder {
             .field("protocol_policy", &self.protocol_policy)
             .field("proxy", &self.proxy_config)
             .field("dns", &self.dns_config)
+            .field(
+                "doh_endpoint",
+                &self
+                    .doh_endpoint
+                    .as_ref()
+                    .map(|url| crate::util::redact(url.as_str())),
+            )
             .field("timeouts", &self.timeouts)
             .field("pool", &self.pool_config)
             .field("socket", &self.socket_config)
@@ -25,6 +32,8 @@ impl fmt::Debug for SessionBuilder {
             .field("https_only", &self.https_only)
             .field("audit", &self.audit)
             .field("cookie_jar", &self.cookie_jar)
+            .field("stores_cookies", &self.stores_cookies)
+            .field("before_send", &self.before_send.is_some())
             .field("tcp_profile", &self.tcp_profile)
             .field("tls_trust", &self.tls_trust)
             .field(
@@ -35,7 +44,7 @@ impl fmt::Debug for SessionBuilder {
                         .map(|(k, v)| (k.as_str(), v.as_bytes())),
                 ),
             )
-            .field("bearer", &self.bearer.is_some())
+            .field("credential", &self.credential.is_some())
             .field(
                 "base_url",
                 &self

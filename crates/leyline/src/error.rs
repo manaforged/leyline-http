@@ -16,7 +16,8 @@ mod marker;
 mod profile;
 
 pub(crate) use cause::Cause;
-pub(crate) use classify::is_gateway_status;
+pub(crate) use classify::{is_gateway_status, is_peer_closed, is_transient_status};
+pub(crate) use from::{copy_io, is_tls_record_error};
 pub(crate) use limit::BodyLimit;
 pub(crate) use profile::ProfileChanged;
 
@@ -50,7 +51,7 @@ struct Inner {
     body: Option<Bytes>,
     headers: Option<HeaderMap>,
     attempts: u32,
-    proxy: Option<String>,
+    proxy: Option<Url>,
     policy_wait: Option<std::time::Duration>,
     retries_exhausted: bool,
     after_response: bool,
@@ -69,7 +70,9 @@ impl Error {
         if let Some(copy) = self.facts().and_then(Cause::duplicate) {
             out.inner.source = Some(Source::Cause(copy));
         } else if let Some(io) = self.io() {
-            out = out.with_source(std::io::Error::new(io.kind(), io.to_string()));
+            out = out.with_source(copy_io(io));
+        } else if let Some(source) = self.source() {
+            out = out.with_source(source.to_string());
         } else {
             sourced = false;
         }
@@ -112,6 +115,12 @@ impl Error {
 
     pub(crate) fn config(message: impl Into<Cow<'static, str>>) -> Self {
         Self::new(Kind::Config).with_message(message)
+    }
+
+    /// Creates a `Kind::Request` error from a caller-supplied cause, such as a `before_send` or `refresh_token` failure.
+    #[must_use]
+    pub fn request(source: impl Into<Box<dyn StdError + Send + Sync>>) -> Self {
+        Self::new(Kind::Request).with_source(source)
     }
 
     pub(crate) fn with_source(mut self, source: impl Into<Boxed>) -> Self {
@@ -183,15 +192,15 @@ impl Error {
     }
 
     /// Returns the redacted URL of the proxy the last attempt used.
-    pub fn proxy(&self) -> Option<&str> {
-        self.inner.proxy.as_deref()
+    pub fn proxy(&self) -> Option<&Url> {
+        self.inner.proxy.as_ref()
     }
 
     pub(crate) fn set_proxy(&mut self, proxy: Option<&str>) {
-        self.inner.proxy = proxy.map(crate::util::redact);
+        self.inner.proxy = proxy.and_then(crate::util::parse_redacted_url);
     }
 
-    pub(crate) fn with_trail(mut self, attempts: u32, proxy: Option<String>) -> Self {
+    pub(crate) fn with_trail(mut self, attempts: u32, proxy: Option<Url>) -> Self {
         self.inner.attempts = attempts;
         self.inner.proxy = proxy;
         self
@@ -225,14 +234,20 @@ impl Error {
         self.headers().and_then(crate::util::wait::retry_after)
     }
 
-    /// Returns the first `Error` in the source chain of `error`, starting with `error` itself.
+    /// Returns the first `Error` in the source chain of `error`, starting with `error` itself and looking inside each `std::io::Error` in the chain.
     pub fn find<'a>(error: &'a (dyn StdError + 'static)) -> Option<&'a Error> {
         let mut current = Some(error);
         while let Some(err) = current {
             if let Some(found) = err.downcast_ref::<Error>() {
                 return Some(found);
             }
-            current = err.source();
+            current = match err.downcast_ref::<io::Error>().and_then(io::Error::get_ref) {
+                Some(inner) => {
+                    let inner: &(dyn StdError + 'static) = inner;
+                    Some(inner)
+                }
+                None => err.source(),
+            };
         }
         None
     }
@@ -329,7 +344,7 @@ impl fmt::Debug for Error {
             out.field("attempts", &self.inner.attempts);
         }
         if let Some(proxy) = &self.inner.proxy {
-            out.field("proxy", proxy);
+            out.field("proxy", &proxy.as_str());
         }
         if self.inner.retries_exhausted {
             out.field("retries_exhausted", &true);

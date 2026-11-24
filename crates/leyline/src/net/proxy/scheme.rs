@@ -32,6 +32,7 @@ pub struct ProxyUrl {
     raw: String,
     url: url::Url,
     scheme: ProxyScheme,
+    headers: Vec<(String, String)>,
 }
 
 impl TryFrom<String> for ProxyUrl {
@@ -44,7 +45,14 @@ impl TryFrom<String> for ProxyUrl {
 
 impl std::fmt::Debug for ProxyUrl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("ProxyUrl").field(&redact(&self.raw)).finish()
+        if self.headers.is_empty() {
+            f.debug_tuple("ProxyUrl").field(&redact(&self.raw)).finish()
+        } else {
+            f.debug_struct("ProxyUrl")
+                .field("url", &redact(&self.raw))
+                .field("headers", &Self::masked_headers(&self.headers))
+                .finish()
+        }
     }
 }
 
@@ -67,6 +75,7 @@ impl ProxyUrl {
             raw: raw.to_string(),
             url,
             scheme,
+            headers: Vec::new(),
         })
     }
 
@@ -82,6 +91,64 @@ impl ProxyUrl {
         self.scheme
     }
 
+    pub(crate) fn headers(&self) -> &[(String, String)] {
+        &self.headers
+    }
+
+    pub(crate) fn identity(&self) -> String {
+        use sha2::{Digest, Sha256};
+        let mut bare = self.url.clone();
+        let has_creds = !self.url.username().is_empty() || self.url.password().is_some();
+        let stripped = bare.set_username("").is_ok() && bare.set_password(None).is_ok();
+        if (!stripped || !has_creds) && self.headers.is_empty() {
+            return bare.to_string();
+        }
+        let mut hash = Sha256::new();
+        hash.update(self.url.username().as_bytes());
+        hash.update(b":");
+        hash.update(self.url.password().unwrap_or("").as_bytes());
+        if !self.headers.is_empty() {
+            hash.update((self.headers.len() as u64).to_be_bytes());
+            for (name, value) in &self.headers {
+                hash.update((name.len() as u64).to_be_bytes());
+                for b in name.as_bytes() {
+                    hash.update([b.to_ascii_lowercase()]);
+                }
+                hash.update((value.len() as u64).to_be_bytes());
+                hash.update(value.as_bytes());
+            }
+        }
+        let digest = hex::encode(hash.finalize());
+        format!("{bare}#proxy-identity={digest}")
+    }
+
+    pub(crate) fn basic_auth_header(&self) -> Option<String> {
+        let custom_auth = self
+            .headers
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case("proxy-authorization"));
+        if custom_auth {
+            None
+        } else {
+            crate::util::proxy_basic_auth(&self.url)
+        }
+    }
+
+    pub(crate) fn masked_headers(
+        headers: &[(String, String)],
+    ) -> Vec<(&str, std::borrow::Cow<'_, str>)> {
+        crate::util::masked(headers.iter().map(|(k, _)| (k.as_str(), &b"***"[..])))
+    }
+
+    pub(crate) fn extend_headers(&mut self, headers: &[(String, String)]) {
+        self.headers.extend(headers.iter().cloned());
+    }
+
+    pub(crate) fn with_headers(mut self, headers: Vec<(String, String)>) -> Self {
+        self.headers = headers;
+        self
+    }
+
     pub(crate) fn with_password(&self, password: &str) -> Result<Self> {
         let mut url = self.url.clone();
         url.set_password(Some(password))
@@ -90,6 +157,7 @@ impl ProxyUrl {
             raw: url.to_string(),
             url,
             scheme: self.scheme,
+            headers: self.headers.clone(),
         })
     }
 
@@ -102,6 +170,7 @@ impl ProxyUrl {
             raw: url.to_string(),
             url,
             scheme: self.scheme,
+            headers: self.headers.clone(),
         }
     }
 }

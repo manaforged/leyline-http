@@ -1,7 +1,9 @@
 use std::time::{Duration, SystemTime};
 
-use crate::cookie::record::{Cookie, MAX_NAME_VALUE_OCTETS, SameSite, capped_expiry};
-use crate::util::epoch_plus;
+use crate::cookie::record::{
+    Cookie, DEFAULT_SAME_SITE, MAX_NAME_VALUE_OCTETS, SameSite, capped_expiry,
+};
+use crate::util::{epoch_plus, since_epoch};
 use crate::wire::Scheme;
 
 mod attr;
@@ -63,6 +65,9 @@ fn compute_expiry(
     max_age: Option<Duration>,
     expires_after_epoch: Option<Duration>,
 ) -> Option<SystemTime> {
+    if max_age == Some(Duration::ZERO) {
+        return Some(SystemTime::UNIX_EPOCH);
+    }
     let requested = match max_age {
         Some(age) => now.checked_add(age),
         None => epoch_plus(expires_after_epoch?),
@@ -87,8 +92,16 @@ fn resolve_cookie_domain(request_url: &url::Url, domain: Option<String>) -> Opti
 fn split_pair(header: &str) -> Option<(&str, &str, &str)> {
     let (name_value, attrs) = header.split_once(';').unwrap_or((header, ""));
     let (name, value) = name_value.split_once('=')?;
+    let (name, value) = trimmed_pair(name, value)?;
+    Some((name, value, attrs))
+}
+
+pub(crate) fn has_ctl(s: &str) -> bool {
+    s.bytes().any(|b| b < 0x20 || b == 0x7F)
+}
+
+fn trimmed_pair<'a>(name: &'a str, value: &'a str) -> Option<(&'a str, &'a str)> {
     let (name, value) = (name.trim(), value.trim());
-    let has_ctl = |s: &str| s.bytes().any(|b| b < 0x20 || b == 0x7F);
     if name.is_empty()
         || has_ctl(name)
         || has_ctl(value)
@@ -96,7 +109,7 @@ fn split_pair(header: &str) -> Option<(&str, &str, &str)> {
     {
         return None;
     }
-    Some((name, value, attrs))
+    Some((name, value))
 }
 
 fn admitted_same_site(
@@ -110,14 +123,49 @@ fn admitted_same_site(
     match attrs.same_site {
         Some(SameSite::None) if !attrs.secure => None,
         Some(same_site) => Some(same_site),
-        None => Some(SameSite::Lax),
+        None => Some(DEFAULT_SAME_SITE),
     }
 }
 
 pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> {
-    let now = SystemTime::now();
     let (name, value, attrs_str) = split_pair(header)?;
-    let attrs = parse_attributes(attrs_str);
+    admit(name, value, parse_attributes(attrs_str), request_url)
+}
+
+/// Checks a caller-built cookie as if `request_url` had sent it in a `Set-Cookie` header.
+pub(crate) fn admit_cookie(cookie: &Cookie, request_url: &url::Url) -> Option<Cookie> {
+    let (name, value) = trimmed_pair(&cookie.name, &cookie.value)?;
+    let mut attrs = CookieAttributes {
+        secure: cookie.secure,
+        http_only: cookie.http_only,
+        same_site: Some(cookie.same_site),
+        expires_after_epoch: cookie.expires.map(since_epoch),
+        ..CookieAttributes::default()
+    };
+    attrs.set("path", Some(cookie.path.as_str()));
+    let own_host = request_url
+        .host_str()
+        .is_some_and(|host| host.eq_ignore_ascii_case(&cookie.domain));
+    if cookie.host_only {
+        if !cookie.domain.is_empty() && !own_host {
+            return None;
+        }
+    } else {
+        attrs.set("domain", Some(cookie.domain.as_str()));
+    }
+    let mut admitted = admit(name, value, attrs, request_url)?;
+    admitted.creation_time = cookie.creation_time;
+    admitted.last_access = cookie.last_access;
+    Some(admitted)
+}
+
+fn admit(
+    name: &str,
+    value: &str,
+    attrs: CookieAttributes,
+    request_url: &url::Url,
+) -> Option<Cookie> {
+    let now = SystemTime::now();
     let same_site = admitted_same_site(name, &attrs, request_url)?;
 
     let computed_expires = compute_expiry(now, attrs.max_age, attrs.expires_after_epoch);
@@ -126,6 +174,13 @@ pub fn parse_set_cookie(header: &str, request_url: &url::Url) -> Option<Cookie> 
         request_url.host(),
         Some(url::Host::Ipv4(_) | url::Host::Ipv6(_))
     ) {
+        if let Some(d) = attrs.domain.as_deref()
+            && !request_url
+                .host_str()
+                .is_some_and(|host| host.eq_ignore_ascii_case(d))
+        {
+            return None;
+        }
         None
     } else {
         attrs.domain
@@ -185,3 +240,7 @@ pub fn parse_cookie_date(s: &str) -> Option<Duration> {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(kani)]
+#[path = "parse/expiry_proofs.rs"]
+mod expiry_proofs;

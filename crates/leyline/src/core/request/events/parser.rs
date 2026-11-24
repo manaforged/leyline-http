@@ -10,21 +10,21 @@ pub(super) struct Parser {
     event: String,
     id: String,
     pub(super) last_id: String,
-    pub(super) wait: Duration,
+    pub(super) wait: Option<Duration>,
     pub(super) max: usize,
     first: bool,
     cr: bool,
 }
 
 impl Parser {
-    pub(super) fn new(id: String, max: usize, wait: Duration) -> Self {
+    pub(super) fn new(id: String, max: usize) -> Self {
         Self {
             line: Vec::new(),
             data: String::new(),
             event: String::new(),
             id: id.clone(),
             last_id: id,
-            wait,
+            wait: None,
             max,
             first: true,
             cr: false,
@@ -50,8 +50,7 @@ impl Parser {
 
     pub(super) fn read(&mut self, bytes: &mut Bytes) -> Result<Option<Event>> {
         if self.buffered() > self.max {
-            return Err(Error::new(Kind::BodyLimit)
-                .with_message("server-sent event exceeds max_event_size"));
+            return Err(oversized());
         }
         while bytes.has_remaining() {
             let byte = bytes.get_u8();
@@ -65,8 +64,7 @@ impl Parser {
                 }
             } else {
                 if self.buffered() >= self.max {
-                    return Err(Error::new(Kind::BodyLimit)
-                        .with_message("server-sent event exceeds max_event_size"));
+                    return Err(oversized());
                 }
                 self.line.push(byte);
             }
@@ -103,8 +101,7 @@ impl Parser {
         let value = value.strip_prefix(' ').unwrap_or(value);
         self.field(field, value);
         if self.buffered() > self.max {
-            return Err(Error::new(Kind::BodyLimit)
-                .with_message("server-sent event exceeds max_event_size"));
+            return Err(oversized());
         }
         Ok(None)
     }
@@ -117,14 +114,18 @@ impl Parser {
             }
             "event" => self.event = value.into(),
             "id" if !value.contains('\0') => self.id = value.into(),
-            "retry" if !value.is_empty() && value.bytes().all(|b| b.is_ascii_digit()) => {
-                if let Ok(ms) = value.parse::<u64>() {
-                    self.wait = Duration::from_millis(ms);
+            "retry" => {
+                if let Some(ms) = crate::util::parse_ascii_u64(value) {
+                    self.wait = Some(Duration::from_millis(ms));
                 }
             }
             _ => {}
         }
     }
+}
+
+fn oversized() -> Error {
+    Error::new(Kind::BodyLimit).with_message("server-sent event exceeds max_event_size")
 }
 
 #[cfg(test)]

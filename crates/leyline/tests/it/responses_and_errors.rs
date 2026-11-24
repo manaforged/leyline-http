@@ -104,7 +104,7 @@ async fn link_headers_resolve_against_the_response_url() {
         resp.links()
             .into_iter()
             .find(|link| link.has_rel(rel))
-            .map(|link| String::from(link.url))
+            .map(|link| link.url().to_string())
     };
     assert_eq!(url("next"), Some(next.clone()));
     assert_eq!(url("LAST"), Some(next));
@@ -200,7 +200,7 @@ async fn decode_false_keeps_a_buffered_body_raw_and_the_offer_unchanged() {
     assert_eq!(raw.bytes().await.unwrap(), gzipped);
     let offer = |request: leyline::testing::Request| {
         request
-            .headers
+            .headers()
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case("accept-encoding"))
             .map(|(_, value)| value.clone())

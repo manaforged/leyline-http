@@ -17,7 +17,7 @@ pub struct Floor {
 fn floor_ssl() -> io::Result<Ssl> {
     let mut context = crate::tls::builder::ssl_context(
         &crate::profile::BrowserProfile::bare_shared(),
-        crate::profile::TlsMinVersion::Tls12,
+        crate::profile::TlsVersion::Tls12,
     )
     .map_err(|e| io::Error::other(e.to_string()))?;
     context.set_verify(SslVerifyMode::NONE);

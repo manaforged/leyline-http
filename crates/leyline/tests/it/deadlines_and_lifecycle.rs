@@ -104,7 +104,7 @@ async fn shutdown_interrupts_a_retry_backoff() {
 #[tokio::test(flavor = "multi_thread")]
 async fn a_paused_host_does_not_hold_the_total_cap() {
     let paused = testing::Server::http(|req| {
-        if req.target == "/first" {
+        if req.target() == "/first" {
             testing::Response::new(429).header("retry-after", "5")
         } else {
             testing::Response::new(200)

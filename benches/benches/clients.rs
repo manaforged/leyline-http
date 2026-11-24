@@ -114,14 +114,14 @@ async fn ley_stream(session: &Session, url: &str) -> Bytes {
     Bytes::from(out)
 }
 
-async fn req(client: &reqwest13::Client, url: &str) -> (Bytes, reqwest13::Version) {
+async fn req(client: &reqwest::Client, url: &str) -> (Bytes, reqwest::Version) {
     let resp = client.get(url).send().await.expect("reqwest request");
     let version = resp.version();
     let body = resp.bytes().await.expect("reqwest body");
     (body, version)
 }
 
-async fn req_stream(client: &reqwest13::Client, url: &str) -> Bytes {
+async fn req_stream(client: &reqwest::Client, url: &str) -> Bytes {
     let resp = client.get(url).send().await.expect("reqwest request");
     let mut stream = resp.bytes_stream();
     let mut out = Vec::with_capacity(BIG);
@@ -131,7 +131,7 @@ async fn req_stream(client: &reqwest13::Client, url: &str) -> Bytes {
     Bytes::from(out)
 }
 
-async fn verify(session: &Session, client: &reqwest13::Client, h1: &str, h2: &str, big: &str) {
+async fn verify(session: &Session, client: &reqwest::Client, h1: &str, h2: &str, big: &str) {
     let (body, version) = ley(session, h1).await;
     assert_eq!(body, *SMALL_BODY, "leyline h1 16k body mismatch");
     assert_eq!(
@@ -142,7 +142,7 @@ async fn verify(session: &Session, client: &reqwest13::Client, h1: &str, h2: &st
 
     let (body, version) = req(client, h1).await;
     assert_eq!(body, *SMALL_BODY, "reqwest h1 16k body mismatch");
-    assert_eq!(version, reqwest13::Version::HTTP_11, "reqwest h1 version");
+    assert_eq!(version, reqwest::Version::HTTP_11, "reqwest h1 version");
 
     let (body, version) = ley(session, h2).await;
     assert_eq!(body, *SMALL_BODY, "leyline h2 16k body mismatch");
@@ -154,7 +154,7 @@ async fn verify(session: &Session, client: &reqwest13::Client, h1: &str, h2: &st
 
     let (body, version) = req(client, h2).await;
     assert_eq!(body, *SMALL_BODY, "reqwest h2 16k body mismatch");
-    assert_eq!(version, reqwest13::Version::HTTP_2, "reqwest h2 version");
+    assert_eq!(version, reqwest::Version::HTTP_2, "reqwest h2 version");
 
     assert_eq!(
         ley_stream(session, big).await,
@@ -180,7 +180,7 @@ fn bench(c: &mut Criterion) {
         .tls(leyline::Tls::new().danger_accept_invalid_certs(true))
         .build()
         .expect("leyline session");
-    let client = reqwest13::Client::builder()
+    let client = reqwest::Client::builder()
         .danger_accept_invalid_certs(true)
         .build()
         .expect("reqwest client");

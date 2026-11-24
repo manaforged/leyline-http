@@ -1,7 +1,7 @@
 use leyline::internals::BrowserProfile;
 use leyline::internals::h2::H2Config;
 use leyline::internals::profile::ProfileRegistry;
-use leyline::{Browser, Platform, TlsContext, TlsMinVersion};
+use leyline::{Browser, Platform, TlsContext, TlsVersion};
 
 const ALL_PLATFORMS: [Platform; 5] = [
     Platform::Windows,
@@ -153,7 +153,7 @@ fn chrome150_identity_matches_capture_on_every_supported_platform() {
 ))]
 fn every_builtin_profile_builds_ssl_context() {
     for browser in Browser::all().iter().copied() {
-        for min in [TlsMinVersion::Tls12, TlsMinVersion::Tls13] {
+        for min in [TlsVersion::Tls12, TlsVersion::Tls13] {
             TlsContext::new(browser, min).unwrap_or_else(|e| {
                 panic!("{browser} failed TlsContext::new (min {min:?}) after hardening: {e}")
             });

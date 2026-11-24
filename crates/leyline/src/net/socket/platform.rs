@@ -131,3 +131,116 @@ pub(super) fn apply(socket: &Socket, profile: &TcpProfile, is_v6: bool) -> io::R
 pub(super) fn apply(_socket: &Socket, _profile: &TcpProfile, _is_v6: bool) -> io::Result<()> {
     Ok(())
 }
+
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "fuchsia"))]
+pub(super) fn bind_interface(socket: &Socket, name: &str, _is_v6: bool) -> io::Result<()> {
+    super::SocketOptions::validate_interface_name(name)?;
+    socket.bind_device(Some(name.as_bytes())).map_err(|err| {
+        if err.raw_os_error() == Some(libc::ENODEV) {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("unknown network interface `{name}`"),
+            )
+        } else if err.raw_os_error() == Some(libc::EINVAL) {
+            super::SocketOptions::invalid_interface_name(name)
+        } else {
+            err
+        }
+    })
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "visionos"
+))]
+pub(super) fn bind_interface(socket: &Socket, name: &str, is_v6: bool) -> io::Result<()> {
+    super::SocketOptions::validate_interface_name(name)?;
+    let c_name = std::ffi::CString::new(name)
+        .map_err(|err| io::Error::new(io::ErrorKind::InvalidInput, err))?;
+    // SAFETY: `c_name` is a valid NUL-terminated C string for the duration of this call.
+    let index = unsafe { libc::if_nametoindex(c_name.as_ptr()) };
+    let Some(index) = std::num::NonZeroU32::new(index) else {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("unknown network interface `{name}`"),
+        ));
+    };
+    if is_v6 {
+        socket.bind_device_by_index_v6(Some(index))
+    } else {
+        socket.bind_device_by_index_v4(Some(index))
+    }
+}
+
+#[cfg(all(feature = "http3", target_os = "linux"))]
+pub(super) fn try_send_udp_batch(
+    socket: &tokio::net::UdpSocket,
+    buf: &[u8],
+    slot_len: usize,
+    lens: &[usize],
+) -> io::Result<usize> {
+    use std::os::fd::AsRawFd;
+
+    let count = lens.len().min(super::MAX_UDP_BATCH);
+    if count == 0 {
+        return Ok(0);
+    }
+    let mut iovecs = [libc::iovec {
+        iov_base: std::ptr::null_mut(),
+        iov_len: 0,
+    }; super::MAX_UDP_BATCH];
+    // SAFETY: libc::mmsghdr is a plain C struct where zero-initialization is a valid empty header.
+    let mut msgs: [libc::mmsghdr; super::MAX_UDP_BATCH] = unsafe { std::mem::zeroed() };
+    for (i, &len) in lens[..count].iter().enumerate() {
+        let offset = i * slot_len;
+        let slice = &buf[offset..offset + len];
+        iovecs[i] = libc::iovec {
+            iov_base: slice.as_ptr().cast_mut().cast::<libc::c_void>(),
+            iov_len: len,
+        };
+        msgs[i].msg_hdr.msg_iov = &raw mut iovecs[i];
+        msgs[i].msg_hdr.msg_iovlen = 1;
+    }
+    let n_msgs = u32::try_from(count).unwrap_or(u32::MAX);
+    socket.try_io(tokio::io::Interest::WRITABLE, || {
+        // SAFETY: fd is valid for this borrow, msgs[..count] and iovecs[..count] point to live slices in buf, and sendmmsg reads at most count entries.
+        let ret = unsafe {
+            libc::sendmmsg(
+                socket.as_raw_fd(),
+                msgs.as_mut_ptr(),
+                n_msgs,
+                libc::MSG_DONTWAIT,
+            )
+        };
+        if ret < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if ret == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "sendmmsg sent zero messages",
+            ));
+        }
+        Ok(usize::try_from(ret).unwrap_or(0))
+    })
+}
+
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "android",
+    target_os = "fuchsia",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "tvos",
+    target_os = "watchos",
+    target_os = "visionos"
+)))]
+pub(super) fn bind_interface(_socket: &Socket, _name: &str, _is_v6: bool) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "binding sockets to a network interface is not supported on this platform",
+    ))
+}

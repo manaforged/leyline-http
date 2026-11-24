@@ -39,14 +39,14 @@ fn enforce_odd(sid: u32) -> Result<(), H2Error> {
 
 impl StreamActor {
     fn forward_chunk(&mut self, d: &DataFrame) -> Result<usize, Failure> {
-        let Some(ResponseSink::StreamingEx { body_tx, .. }) = self.response_tx.as_ref() else {
+        let Some(ResponseSink::StreamingEx(sink)) = self.response_tx.as_ref() else {
             return Ok(0);
         };
         if d.data.is_empty() {
             return Ok(0);
         }
         let sent = if self.stalled.is_empty() {
-            body_tx.try_send(Ok(d.data.clone()))
+            sink.body_tx.try_send(Ok(d.data.clone()))
         } else {
             Err(mpsc::error::TrySendError::Full(Ok(d.data.clone())))
         };
@@ -77,7 +77,7 @@ impl StreamActor {
     fn store_chunk(&mut self, d: &DataFrame) -> Result<usize, Failure> {
         if !self.has_body {
             Ok(0)
-        } else if matches!(self.response_tx, Some(ResponseSink::StreamingEx { .. })) {
+        } else if matches!(self.response_tx, Some(ResponseSink::StreamingEx(_))) {
             self.forward_chunk(d)
         } else {
             self.buffer_chunk(d)
@@ -170,7 +170,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             Frame::Ping(p) => self.on_ping(p),
             Frame::GoAway(g) => self.on_goaway(g),
             Frame::RstStream(r) => self.on_rst(r),
-            Frame::PushPromise(pp) => self.on_push(pp),
+            Frame::PushPromise(pp) => self.on_push(pp).await,
             Frame::Continuation { .. } => Err(H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: "unexpected CONTINUATION".into(),
@@ -233,9 +233,10 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     fn settle_data(&mut self, stream_id: u32, end_stream: bool) -> Result<(), H2Error> {
         self.maybe_top_up_conn_window();
-        self.maybe_top_up_stream_window(stream_id);
         if end_stream {
             self.finish_remote(stream_id)?;
+        } else {
+            self.maybe_top_up_stream_window(stream_id);
         }
         Ok(())
     }

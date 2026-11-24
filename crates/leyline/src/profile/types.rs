@@ -149,7 +149,7 @@ impl CertCompression {
 /// The lowest TLS version a handshake accepts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[non_exhaustive]
-pub enum TlsMinVersion {
+pub enum TlsVersion {
     /// TLS 1.0.
     Tls10,
     /// TLS 1.2.
@@ -158,7 +158,7 @@ pub enum TlsMinVersion {
     Tls13,
 }
 
-impl TlsMinVersion {
+impl TlsVersion {
     pub(crate) fn parse(id: &str) -> Result<Self, String> {
         match id {
             "1.0" => Ok(Self::Tls10),
@@ -191,10 +191,10 @@ impl TlsProfile {
     }
 
     /// Parses `min_tls_version`, which is `None` when the profile declares no minimum.
-    pub(crate) fn min_version(&self) -> Result<Option<TlsMinVersion>, String> {
+    pub(crate) fn min_version(&self) -> Result<Option<TlsVersion>, String> {
         self.min_tls_version
             .as_deref()
-            .map(TlsMinVersion::parse)
+            .map(TlsVersion::parse)
             .transpose()
     }
 

@@ -33,6 +33,17 @@ impl RequestBuilder {
         self.send().await?.bytes().await
     }
 
+    pub(super) fn send_prepared(
+        mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
+        let Some(url) = self.draft.url.take() else {
+            return Box::pin(std::future::ready(Err(Error::from(
+                url::ParseError::EmptyHost,
+            ))));
+        };
+        Box::pin(self.respond_prepared(url))
+    }
+
     fn run(self) -> Pin<Box<dyn Future<Output = Result<Response>> + Send>> {
         match self.respond() {
             Ok(respond) => Box::pin(respond),
@@ -41,21 +52,47 @@ impl RequestBuilder {
     }
 
     fn respond(mut self) -> Result<impl Future<Output = Result<Response>> + Send + 'static> {
+        self.reject_download_options()?;
         let url = self.prepare()?;
-        let carry = &mut self.draft.carry;
-        let retry_policy = std::mem::take(&mut carry.retry_policy);
-        let label = carry.label.take();
-        let status_errors = carry.status_errors;
-        let streamed = carry.stream_response;
-        let deadline = self.session.deadline(carry.timeouts.as_ref());
+        Ok(self.respond_prepared(url))
+    }
+
+    pub(super) fn reject_download_options(&self) -> Result<()> {
+        if self
+            .draft
+            .build
+            .as_deref()
+            .and_then(|b| b.download.as_ref())
+            .is_some()
+        {
+            return Err(Error::config(
+                "sha256, progress, and resume only apply to download_to",
+            ));
+        }
+        Ok(())
+    }
+
+    fn respond_prepared(
+        mut self,
+        url: Arc<url::Url>,
+    ) -> impl Future<Output = Result<Response>> + Send + 'static {
+        let retry_policy = self.draft.carry.take_retry_policy(&self.session);
+        let label = self
+            .draft
+            .carry
+            .overrides
+            .as_deref_mut()
+            .and_then(|o| o.label.take());
+        let status_errors = self.draft.carry.status_errors;
+        let streamed = self.draft.carry.stream_response;
+        let deadline = self.session.deadline(self.draft.carry.timeouts());
         let (session, attempt) = self.into_attempt(deadline, Arc::clone(&url));
-        Ok(async move {
+        async move {
             let method = attempt.method.clone();
             let mut exhausted = false;
             let attempts = run_attempts(
                 &session,
                 attempt,
-                &url,
                 &retry_policy,
                 &deadline,
                 label,
@@ -79,7 +116,7 @@ impl RequestBuilder {
                     error.set_retry_outcome(policy_wait, exhausted);
                     error
                 })
-        })
+        }
     }
 
     fn into_attempt(self, deadline: Deadline, url: Arc<url::Url>) -> (Session, Box<Draft>) {
@@ -97,17 +134,21 @@ impl RequestBuilder {
     }
 
     pub(super) fn resolve(&mut self) -> Result<Arc<url::Url>> {
-        if let Some(err) = self.draft.builder_error.take() {
+        if let Some(build) = self.draft.build.as_deref_mut()
+            && let Some(err) = build.builder_error.take()
+        {
             return Err(err);
         }
         let Some(mut url) = self.draft.url.take() else {
             return Err(Error::from(url::ParseError::EmptyHost));
         };
-        let params = std::mem::take(&mut self.draft.query_params);
-        if !params.is_empty() {
-            Arc::make_mut(&mut url)
-                .query_pairs_mut()
-                .extend_pairs(&params);
+        if let Some(build) = self.draft.build.as_deref_mut() {
+            let params = std::mem::take(&mut build.query_params);
+            if !params.is_empty() {
+                Arc::make_mut(&mut url)
+                    .query_pairs_mut()
+                    .extend_pairs(&params);
+            }
         }
         Ok(url)
     }
@@ -120,15 +161,15 @@ impl RequestBuilder {
 
     pub(super) fn prepare(&mut self) -> Result<Arc<url::Url>> {
         let url = self.resolve()?;
-        if Scheme::of(&url).is_none() {
-            return Err(Error::config(format!(
-                "unsupported URL scheme `{}`: requests need http or https",
-                url.scheme()
-            )));
-        }
+        http_scheme(&url)?;
         self.infer_from_content_type();
 
-        if let Some(encoding) = self.draft.compress {
+        if let Some(encoding) = self
+            .draft
+            .build
+            .as_deref_mut()
+            .and_then(|b| b.compress.take())
+        {
             match &self.draft.body.0 {
                 BodyKind::Bytes(b) => {
                     let compressed = super::compress::encode(encoding, b)?;
@@ -159,22 +200,30 @@ impl std::future::IntoFuture for RequestBuilder {
     }
 }
 
+pub(super) fn http_scheme(url: &url::Url) -> Result<()> {
+    if Scheme::of(url).is_none() {
+        return Err(Error::config(format!(
+            "unsupported URL scheme `{}`: requests need http or https",
+            url.scheme()
+        )));
+    }
+    Ok(())
+}
+
 async fn run_attempts(
     session: &crate::core::session::Session,
     mut attempt: Box<Draft>,
-    url: &Arc<url::Url>,
     retry_policy: &Retry,
     deadline: &Deadline,
     label: Option<String>,
     exhausted: &mut bool,
 ) -> (Result<Response>, u32) {
     crate::trace::note_label(label);
-    let mut route = Route::new(session, Arc::clone(url), &attempt, retry_policy);
+    let mut route = Route::new(session, &attempt, retry_policy);
     if retry_policy.is_none() {
         return (counted(route.send(attempt).await, 1), 1);
     }
-    let retryable_method = retry_policy.allows(&attempt.method);
-    let replay = attempt.body.replay();
+    let replay = attempt.body.try_clone();
     let mut rewind = Rewind::wrap(&mut attempt.body);
     let base_headers = attempt.headers.clone();
 
@@ -188,6 +237,7 @@ async fn run_attempts(
         this.carry.retrying = n > 0;
         let result = route.send(this).await;
 
+        let retryable_method = retry_policy.allows(route.last_method().unwrap_or(&attempt.method));
         let body_retryable = || replay.is_some() || rewind.as_mut().is_some_and(Rewind::reclaim);
         let sleep = match retry_policy.plan_resend(&result, n, retryable_method, body_retryable) {
             RetryPlan::Backoff(sleep) if sleep < deadline.remaining() => sleep,
@@ -201,22 +251,29 @@ async fn run_attempts(
         };
         drop(result);
 
-        let slept = session
-            .unless_shut_down(async {
-                deadline.sleep(sleep).await;
-                Ok(())
-            })
-            .await;
-        if let Err(err) = slept {
+        if let Err(err) = sleep_backoff(session, deadline, sleep).await {
             return (counted(Err(err), n + 1), n + 1);
         }
         n += 1;
         attempt.body = replay
             .as_ref()
-            .and_then(Body::replay)
+            .and_then(Body::try_clone)
             .or_else(|| rewind.as_mut().and_then(Rewind::again))
             .unwrap_or_default();
     }
+}
+
+pub(super) async fn sleep_backoff(
+    session: &Session,
+    deadline: &Deadline,
+    wait: std::time::Duration,
+) -> Result<()> {
+    session
+        .unless_shut_down(async {
+            deadline.sleep(wait).await;
+            Ok(())
+        })
+        .await
 }
 
 fn counted(result: Result<Response>, attempts: u32) -> Result<Response> {
