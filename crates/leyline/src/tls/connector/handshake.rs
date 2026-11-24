@@ -1,6 +1,6 @@
 use std::future::Future;
 
-use leyline_bssl::ssl::{SslVerifyMode, is_ech_rejected};
+use leyline_bssl::ssl::SslVerifyMode;
 use leyline_bssl::x509::X509VerifyError;
 use tokio::net::TcpStream;
 
@@ -128,10 +128,7 @@ impl FingerprintConnector {
             Ok(stream) => stream,
             Err(e) => {
                 let verify_error = e.ssl().and_then(|ssl| ssl.verify_result().err());
-                let retry_configs = crate::tls::ech_retry_configs(
-                    e.ssl(),
-                    e.ssl_error().is_some_and(is_ech_rejected),
-                );
+                let retry_configs = crate::tls::ech_retry_configs(e.ssl(), e.ssl_error());
                 let error = classify_handshake(verification_failure.as_ref(), verify_error, e);
                 return Err(match retry_configs {
                     Some(retry_configs) => HandshakeFailure::EchRetry {

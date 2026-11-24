@@ -16,6 +16,7 @@ pub struct SslEchKeysBuilder {
 
 impl SslEchKeysBuilder {
     pub fn new() -> Result<SslEchKeysBuilder, ErrorStack> {
+        // SAFETY: `SSL_ECH_KEYS_new` allocates a fresh refcounted key container or returns null.
         unsafe {
             ffi::init();
             let keys = cvt_p(ffi::SSL_ECH_KEYS_new())?;
@@ -26,6 +27,7 @@ impl SslEchKeysBuilder {
 
     pub unsafe fn from_ptr(keys: *mut ffi::SSL_ECH_KEYS) -> Self {
         Self {
+            // SAFETY: caller transfers ownership of a valid `SSL_ECH_KEYS` pointer.
             keys: unsafe { SslEchKeys::from_ptr(keys) },
         }
     }
@@ -67,6 +69,21 @@ impl SslEchKeys {
     }
 }
 
+unsafe fn take_openssl_buf(out: *mut u8, out_len: usize) -> Vec<u8> {
+    if out.is_null() {
+        return Vec::new();
+    }
+    // SAFETY: `out` was allocated by BoringSSL with `OPENSSL_malloc` and has `out_len` initialized bytes.
+    let bytes = if out_len == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(out, out_len).to_vec() }
+    };
+    // SAFETY: `out` is non-null and owned by the caller to free with `OPENSSL_free`.
+    unsafe { ffi::OPENSSL_free(out.cast()) };
+    bytes
+}
+
 impl SslEchKeysRef {
     #[corresponds(SSL_ECH_KEYS_marshal_retry_configs)]
     pub fn marshal_retry_configs(&self) -> Result<Vec<u8>, ErrorStack> {
@@ -79,14 +96,7 @@ impl SslEchKeysRef {
                 &mut out,
                 &mut out_len,
             ))?;
-            let copy = if out.is_null() {
-                Vec::new()
-            } else {
-                let bytes = slice::from_raw_parts(out, out_len).to_vec();
-                ffi::OPENSSL_free(out.cast());
-                bytes
-            };
-            Ok(copy)
+            Ok(take_openssl_buf(out, out_len))
         }
     }
 }
@@ -112,14 +122,7 @@ pub fn marshal_ech_config(
             name.as_ptr(),
             max_name_len,
         ))?;
-        let copy = if out.is_null() {
-            Vec::new()
-        } else {
-            let bytes = slice::from_raw_parts(out, out_len).to_vec();
-            ffi::OPENSSL_free(out.cast());
-            bytes
-        };
-        Ok(copy)
+        Ok(take_openssl_buf(out, out_len))
     }
 }
 
@@ -176,12 +179,16 @@ impl SslRef {
         }
     }
 
+    /// Returns the authenticated ECH retry configs after `stack` reports `SSL_R_ECH_REJECTED`.
     #[corresponds(SSL_get0_ech_retry_configs)]
     #[must_use]
-    pub fn ech_retry_configs(&self) -> Option<&[u8]> {
+    pub fn ech_retry_configs(&self, stack: &ErrorStack) -> Option<&[u8]> {
+        if !is_ech_rejected(stack) || self.ech_name_override().is_none() {
+            return None;
+        }
         let mut ptr: *const u8 = ptr::null();
         let mut len: usize = 0;
-        // SAFETY: ssl is valid; returned slice borrows memory owned by ssl.
+        // SAFETY: `ssl` is valid and `SSL_R_ECH_REJECTED` with an ECH name override confirms an authenticated rejection; returned slice borrows memory owned by `ssl`.
         unsafe {
             ffi::SSL_get0_ech_retry_configs(self.as_ptr(), &mut ptr, &mut len);
             if ptr.is_null() || len == 0 {

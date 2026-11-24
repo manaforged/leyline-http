@@ -217,7 +217,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RecordStream<S> {
             let next = if self.end == self.inbound.len() {
                 INBOUND.max(2 * self.inbound.len())
             } else {
-                (2 * self.inbound.len()).max(INBOUND).min(INBOUND_MAX)
+                (2 * self.inbound.len()).clamp(INBOUND, INBOUND_MAX)
             };
             if next > self.inbound.len() {
                 let mut grown = vec![0; next].into_boxed_slice();
@@ -274,7 +274,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncRead for RecordStream<S> {
                 Poll::Ready(0) if this.start == this.end => {
                     return Poll::Ready(Err(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
-                        "TLS peer closed connection without close_notify",
+                        leyline_bssl::records::UNCLEAN_EOF_MESSAGE,
                     )));
                 }
                 Poll::Ready(0) => {

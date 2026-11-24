@@ -33,11 +33,10 @@ pub(crate) fn apply_ech(
 
 pub(crate) fn ech_retry_configs(
     ssl: Option<&leyline_bssl::ssl::SslRef>,
-    rejected: bool,
+    stack: Option<&leyline_bssl::error::ErrorStack>,
 ) -> Option<Vec<u8>> {
-    rejected
-        .then(|| ssl.and_then(leyline_bssl::ssl::SslRef::ech_retry_configs))
-        .flatten()
+    ssl.zip(stack)
+        .and_then(|(ssl, stack)| ssl.ech_retry_configs(stack))
         .filter(|bytes| !bytes.is_empty())
         .map(<[u8]>::to_vec)
 }

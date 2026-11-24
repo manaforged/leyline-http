@@ -161,7 +161,13 @@ where
         Ok(RecordStream::new(stream, ssl, records, &inbound[unread]))
     }
 
+    /// Creates an `SslStream` from an owned raw BoringSSL `SSL` handle and underlying async transport.
+    ///
+    /// # Safety
+    ///
+    /// `ssl` must be a valid, uniquely owned BoringSSL `SSL` pointer ready to be attached to `stream`.
     pub unsafe fn from_raw_parts(ssl: *mut ffi::SSL, stream: S) -> Self {
+        // SAFETY: caller guarantees `ssl` is a valid, uniquely owned BoringSSL `SSL` pointer.
         unsafe {
             Self(ssl::SslStream::from_raw_parts(
                 ssl,
@@ -184,6 +190,7 @@ where
             // SAFETY: read_uninit does not de-initialize the buffer.
             match cvt(s.read_uninit(unsafe { buf.unfilled_mut() }))? {
                 Poll::Ready(nread) => {
+                    // SAFETY: `read_uninit` initialized the first `nread` bytes of the unfilled buffer.
                     unsafe {
                         buf.assume_init(nread);
                     }

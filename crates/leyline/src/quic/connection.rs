@@ -281,10 +281,8 @@ async fn handshake(
                     Ok(_) => {}
                     Err(quiche::Error::TlsFail) => {
                         let stack = leyline_bssl::error::ErrorStack::get();
-                        let retry_configs = crate::tls::ech_retry_configs(
-                            Some(conn.ssl_mut()),
-                            leyline_bssl::ssl::is_ech_rejected(&stack),
-                        );
+                        let retry_configs =
+                            crate::tls::ech_retry_configs(Some(conn.ssl_mut()), Some(&stack));
                         return Err((QuicError::Tls(format!("quic tls: {stack}")), retry_configs));
                     }
                     Err(e) => return Err((QuicError::Protocol(format!("quic recv: {e}")), None)),

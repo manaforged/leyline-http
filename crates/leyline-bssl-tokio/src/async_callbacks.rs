@@ -13,6 +13,11 @@ pub trait SslContextBuilderExt: private::Sealed {
 
     fn set_async_private_key_method(&mut self, method: impl AsyncPrivateKeyMethod);
 
+    /// Installs an asynchronous TLS session lookup callback on this context builder.
+    ///
+    /// # Safety
+    ///
+    /// Caller must uphold the safety contract of `SslContextBuilder::set_async_get_session_callback`.
     unsafe fn set_async_get_session_callback<F>(&mut self, callback: F)
     where
         F: Fn(&mut SslRef, &[u8]) -> Option<BoxGetSessionFuture> + Send + Sync + 'static;
@@ -37,6 +42,7 @@ impl SslContextBuilderExt for SslContextBuilder {
     where
         F: Fn(&mut SslRef, &[u8]) -> Option<BoxGetSessionFuture> + Send + Sync + 'static,
     {
+        // SAFETY: caller upholds the `SslContextBuilder::set_async_get_session_callback` contract.
         unsafe {
             self.set_async_get_session_callback(callback);
         }

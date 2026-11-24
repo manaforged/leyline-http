@@ -198,9 +198,14 @@ async fn tls13_post_handshake_mtls_alert_normalizes_on_both_ssl_and_record_strea
             StreamMode::SslTls12 => unreachable!(),
         };
 
-        let _ = client.write_all(b"GET / HTTP/1.1\r\n\r\n").await;
-        let _ = client.flush().await;
-        assert!(server_task.await.unwrap().is_err());
+        drop(client.write_all(b"GET / HTTP/1.1\r\n\r\n").await);
+        drop(client.flush().await);
+        drop(
+            server_task
+                .await
+                .unwrap()
+                .expect_err("server rejects missing post-handshake cert"),
+        );
 
         let mut buf = [0u8; 64];
         let err = client

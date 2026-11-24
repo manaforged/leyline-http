@@ -2063,7 +2063,7 @@ impl<S: Read + Write> SslStream<S> {
                 Err(ref e) if e.code() == ErrorCode::SYSCALL && e.io_error().is_none() => {
                     return Err(io::Error::new(
                         io::ErrorKind::UnexpectedEof,
-                        "TLS peer closed connection without close_notify",
+                        crate::records::UNCLEAN_EOF_MESSAGE,
                     ));
                 }
                 Err(ref e) if e.code() == ErrorCode::WANT_READ && e.io_error().is_none() => {}
