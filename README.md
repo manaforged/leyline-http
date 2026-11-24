@@ -76,26 +76,28 @@ better.
 
 | Client | Sequential | 8 connections, 256 in flight |
 | --- | ---: | ---: |
-| **Leyline** | **57,985** | **1,430,815** |
-| hyper-util | 45,010 | 1,120,042 |
-| reqwest | 36,318 | 898,811 |
-| libcurl | 46,682 | 786,210 |
-| Go net/http | 41,835 | 619,826 |
+| **Leyline** | **59,009** | **1,438,580** |
+| hyper-util | 46,667 | 1,124,148 |
+| reqwest | 39,015 | 891,623 |
+| libcurl | 48,412 | 793,204 |
+| Go net/http | 42,896 | 615,231 |
 
 Leyline also uses less client CPU per request than each of them in all four
 measured HTTP/2 workloads (and fewer user-space instructions per request than
 the bare `h2` crate). At a fixed offered rate of 50,000 HTTP/2 requests per
-second, its p99 latency is 120 µs at 8.18 µs client CPU/req, against 134 µs
-(12.29 µs CPU) for libcurl, 154 µs (13.82 µs CPU) for hyper-util, and 159 µs
-(19.92 µs CPU) for reqwest. [BENCHMARKS.md](BENCHMARKS.md) has every workload,
-HTTP/1.1, confidence intervals, and the commands to reproduce them.
+second, its p99 latency is 119 µs at 8.15 µs client CPU/req (77 µs p99 at
+4.23 µs CPU with `run_per_core`), against 128 µs (12.17 µs CPU) for libcurl,
+153 µs (13.78 µs CPU) for hyper-util, and 154 µs (20.00 µs CPU) for reqwest.
+[BENCHMARKS.md](BENCHMARKS.md) has every workload, HTTP/1.1, confidence
+intervals, and the commands to reproduce them.
 
-For the highest request rate, `SessionBuilder::run_per_core` runs one runtime
-per CPU core; the cores share cookies, cache and tokens and keep their own
-connections. In that layout Leyline reaches 912k HTTP/1.1 req/s in the long
-64-worker runs (ahead of fasthttp at 8 workers and tied at 64, at 0.79–0.83×
-CPU) and leads the bare `h2` crate at 8 and 256 requests in flight over eight
-HTTP/2 connections.
+For the highest request rate and lowest tail latency, `SessionBuilder::run_per_core`
+runs one runtime per CPU core; the cores share cookies, cache and tokens and
+keep their own connections. In that layout Leyline reaches 921k HTTP/1.1 req/s
+at 64 workers (903k in the 1M-request runs, ahead of fasthttp at 8 workers and
+tied at 64 at 0.79–0.84× CPU), leads the bare `h2` crate at 8 and 256 requests
+in flight over eight HTTP/2 connections, and drops open-loop HTTP/1.1 `c64`
+(20k req/s) p99 to 28 µs at 9.66 µs CPU/req.
 
 ## Browser profiles
 
@@ -113,8 +115,8 @@ let session = Session::builder().browser(Browser::Chrome154).build()?;
 ```
 
 Profiles send larger headers, so they cost 4% to 21% of throughput. With
-profiles on, Leyline handles 1.57 times the requests per second of wreq and 5.92
-times those of tls-client at 256 in flight, using 0.38× and 0.11× their client
+profiles on, Leyline handles 1.55 times the requests per second of wreq and 5.79
+times those of tls-client at 256 in flight, using 0.39× and 0.12× their client
 CPU per request.
 
 ## Documentation

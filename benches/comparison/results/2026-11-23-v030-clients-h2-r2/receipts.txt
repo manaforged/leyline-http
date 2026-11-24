@@ -1,20 +1,20 @@
 stop_ref leyline stop_min_rounds 3 stop_margin 0.05
-date_utc 2026-11-23T15:27:50Z
+date_utc 2026-11-23T20:08:16Z
 kernel 7.0.0-38-generic
-loadavg_before 6.85 5.32 3.91
-loadavg_after 8.99 6.80 4.66
+loadavg_before 1.08 4.21 5.18
+loadavg_after 5.75 4.89 5.29
 governor performance
 cpu AMD Ryzen 9 9950X3D 16-Core Processor
 server_cpus 3-7,19-23 client_cpus 8-15,24-31
 server_addr 127.0.0.1:0 netns none link loopback
-leyline_source_hash 8ee131096a62ede53d7a97439247f8a8f0d55fc424d62da4fe0ac5229448d3d6
-leyline_commit e6030d83
+leyline_source_hash 8381ed83d4c0bb893837f77167878e815494efaf6a153285d2e4737a65da3d4c
+leyline_commit c75e85e8
 profile bare
 timeout 30s
 leyline_chrome bare
 tls matched
 certificate_verification trusted-ca
-ca_sha256 fa071fcc6ccc16a32254a9dcc5fbd2623bf4101fe8946cf1e640e93ce7c875d1
+ca_sha256 59a5668c6cdf5070a3828aff802f86320c5bedbb2b541f6f8e1d0cb568b5fb67
 curl-client/Cargo.lock name = "curl-sys" version = "0.4.91+curl-8.22.0"
 h2-client/Cargo.lock name = "h2" version = "0.4.20"
 hyper-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.21"
@@ -31,15 +31,15 @@ okhttp
 dotnet 
 proto h2
 mode throughput paced_seconds 10
-940c88bd1f711dd5bc9bd99033d5e48294aa3947113fefb133c27af93a3e0289  server
-f5fd28636b597b00598691263c0831ef4f1badbb392631140e641affe50111a1  leyline
-bc14fbc68794a760727088e4e8824a1e9ccf6459ea56ab2fcda82f3d8336a957  leyline-blocking
-d9740903a827be50aef127b7b8358e94415e65a960e8ad354f84c6fdd8e2faa5  reqwest
-b49406005494ca3526b3b234b3c31c7042b0bb4407df88636ee19bff31e848d2  hyper
-0e08cfe632ee25bac54305815ae228de00c41d1f6103b33375a3b9f147e8b1d5  h2
-cc0a9b7982dc8a2f4520d10c54ddb9d424b431afbb4406cec6918ec20b63e659  curl
-d6bb3c1c513ae5fe2183aa459d975059e7be055a37245e62802c01afbbaa9dad  wreq
-d0e629a0cceaa08211262724fa54d7172c9f77eb7df2991a3f5b480722bacce9  ureq
-25cd25aa9d09a2d683b9a1fc4ac432c125d9d99406b8a40640962c8c822237b4  nethttp
-05bccb8cc05f35eeb30835fb90e11c982f5c78bbb6b72436ca16ca3fb0d2593d  tlsclient
-a576d85a8882d4b62742c4bd8b6fdb9023843b2ee5ad38af9ddfbdf744743747  fasthttp
+8f5282e8ee78b9a29e63e77f1c5010eff469a5ccd1082e1d867b29983b82137e  server
+a53c5dc919c8e427b78e33cab544c66d681f589a2a1a52d614b362b93d36a2c6  leyline
+994e0e610f481185d0f131508a110f82497b928241b6c561fd939c952339c77b  leyline-blocking
+dc6347adf95c0494499a28d6f8623d7f78979d9ffe7ae53977b85a6e8bb4b570  reqwest
+e4d40b42c1ffd0b9ab951865be63d8b0351779b5d2e4fe4fc22bb94f30be5bfc  hyper
+749f99a8147aacfddfa23831a1b72e4b9a3bf366aadbeec2b8e19415343dfd43  h2
+a89fab90e2e32abdedb8b81fa619c3a9d71eab61e1d81a4c9156289596057e93  curl
+e376ae1da7e685a2c450ba5f4520c71cbbca39d2ea1c7bb8a7e92652235e516d  wreq
+08f9caaccf8395d1dc9e5fa3873cfda224e5d683af38941528903b2770020e42  ureq
+8da74b33f39a216a8d1118973bfac92e75c24798aa9e1f4424e59ef32845c2b3  nethttp
+b0632a1e99bdb62221becdefece583a5f3abb45b174e3a1c532527dc00acc0e8  tlsclient
+38d61a359431c12d7499cda8181489ef9b1743f47772af43fecc4a2371eb40d7  fasthttp

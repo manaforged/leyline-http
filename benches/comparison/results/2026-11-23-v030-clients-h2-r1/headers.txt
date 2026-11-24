@@ -23,10 +23,10 @@ curl header names (hyper map order; pseudo-headers not shown): user-agent accept
   accept: */*
   accept-encoding: gzip, deflate, br, zstd
 curl TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
-nethttp header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding
+nethttp header names (hyper map order; pseudo-headers not shown): accept-encoding user-agent accept
+  accept-encoding: gzip, deflate, br, zstd
   user-agent: bench/1.0
   accept: */*
-  accept-encoding: gzip, deflate, br, zstd
 nethttp TLS version=Some(TLSv1_3) cipher=Some(TLS13_AES_128_GCM_SHA256) group=Some(X25519) alpn=h2 handshake=Some(Full)
 h2 header names (hyper map order; pseudo-headers not shown): user-agent accept accept-encoding
   user-agent: bench/1.0

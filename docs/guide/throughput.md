@@ -43,7 +43,10 @@ The future does not need to be `Send`, because it never leaves its core.
 
 Each request then runs start to finish on one thread. Tokio never moves it to
 another worker or wakes a sleeping worker for it, and each session's
-connection pool is used by one thread only.
+connection pool is used by one thread only. That also removes cross-thread
+wakeup jitter under open-loop load: in the repository's benchmarks,
+`run_per_core` cuts HTTP/1.1 `c64` (20k req/s) p99 from 62 µs to 28 µs and
+HTTP/2 `c8x256` (50k req/s) p99 from 119 µs to 77 µs at 4.23 µs CPU/req.
 
 The gain needs at least as many connections as cores. Requests that share one
 HTTP/2 connection all run on the core that opened it, so a program that sends

@@ -1,27 +1,27 @@
 1 runs; req/s = (2m - m) / (wall_2m - wall_m); medians pooled over runs and rounds; spread = median within-run (max - min) / median
 
 seq    lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
-       leyline              54883    2.8%      35334          -       9.45     11.7      4     -
-       wreq                 35138    0.7%      91939          -      24.15      8.5      3     -
-       tlsclient            30240    8.4%     259110          -      32.08     18.8      3     -
+       leyline              57472    7.5%      35575          -       8.94     10.9      4     -
+       wreq                 37150    1.0%      91986          -      22.56      8.1      3     -
+       tlsclient            31409    1.7%     259683          -      30.69     18.9      3     -
 
 1c64   lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
-       leyline             185683    2.8%      31381          -       7.37     14.5      4     1
-       wreq                153776    3.5%      74574          -      20.22     17.0      3     1
-       tlsclient            44569    2.2%     346451          -      45.85     22.2      3     1
+       leyline             188701    2.9%      31467          -       7.32     13.1      4     1
+       wreq                158536    1.7%      74526          -      20.05     16.2      3     1
+       tlsclient            47161    1.1%     343218          -      42.31     22.4      3     1
 
 8c8    lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
-       leyline             282864    4.3%      35770          -       9.98     13.0      4     8
-       wreq                215989    3.0%      83889          -      27.36     10.3      3     8
-       tlsclient           113145    3.6%     369564          -      56.57     23.9      3     8
+       leyline             287985   15.3%      35854          -      10.19     12.5      4     8
+       wreq                218625    4.7%      83902          -      26.34     10.1      4     8
+       tlsclient           115876    4.4%     369494          -      55.64     24.3      3     8
 
 8c256  lib                  req/s  spread  instr/req     over - cpu_us/req  rss_MiB rounds conns
-       leyline            1132268    1.5%      27920          -       5.92     24.1      4     8
-       wreq                714355    2.6%      67747          -      15.61     26.9      3     8
-       tlsclient           191171    3.1%     341307          -      51.59     31.3      3     8
+       leyline            1126560    3.9%      28081          -       6.04     23.3      4     8
+       wreq                718890    0.8%      67755          -      15.65     27.2      3     8
+       tlsclient           193160    1.1%     341871          -      51.46     31.1      3     8
 
 geometric-mean paired ratio (same run, same round); 95% t-interval on log ratio: across per-run means with >=3 runs, across rounds of one run otherwise (single-run, not cross-run evidence)
-seq    leyline           vs wreq       req/s 1.574 [1.506, 1.644] ahead; CPU/req 0.385 [0.368, 0.402] less CPU; single-run, 3 rounds
-1c64   leyline           vs wreq       req/s 1.205 [1.178, 1.232] ahead; CPU/req 0.367 [0.340, 0.396] less CPU; single-run, 3 rounds
-8c8    leyline           vs wreq       req/s 1.332 [1.301, 1.364] ahead; CPU/req 0.362 [0.339, 0.387] less CPU; single-run, 3 rounds
-8c256  leyline           vs wreq       req/s 1.584 [1.540, 1.630] ahead; CPU/req 0.377 [0.374, 0.380] less CPU; single-run, 3 rounds
+seq    leyline           vs wreq       req/s 1.553 [1.425, 1.693] ahead; CPU/req 0.398 [0.390, 0.407] less CPU; single-run, 3 rounds
+1c64   leyline           vs wreq       req/s 1.192 [1.167, 1.218] ahead; CPU/req 0.362 [0.347, 0.378] less CPU; single-run, 3 rounds
+8c8    leyline           vs wreq       req/s 1.281 [1.120, 1.465] ahead; CPU/req 0.388 [0.378, 0.399] less CPU; single-run, 4 rounds
+8c256  leyline           vs wreq       req/s 1.548 [1.487, 1.611] ahead; CPU/req 0.386 [0.374, 0.399] less CPU; single-run, 3 rounds

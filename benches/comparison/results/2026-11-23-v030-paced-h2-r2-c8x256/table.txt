@@ -2,16 +2,22 @@
 open-loop cells: latency from the scheduled send time when the worker was behind it (coordinated omission), else from the send; first second left out; CPU per request at the same offered rate; medians over runs and rounds; lower is better
 
 c8x256   lib                 rate achieved   p50_us   p99_us  p999_us cpu_us/req  rss_MiB rounds
-         leyline            50000    1.000       67      127      152       8.46     17.6      3
-         h2                 50000    1.000       67      128      152      11.21     11.1      3
-         curl               50000    1.000       74      137      166      12.47     11.9      3
-         wreq               50000    1.000       87      160      188      20.17     17.3      3
-         hyper              50000    1.000       86      161      185      14.45     13.7      3
-         reqwest            50000    1.000       93      167      200      20.57     16.4      3
+         leyline-cores      50000    1.000       44       78       97       4.14     14.4      3
+         h2                 50000    1.000       66      112      139      10.75     11.3      3
+         leyline            50000    1.000       66      116      145       8.16     17.2      3
+         curl               50000    1.000       71      125      154      12.17     11.6      3
+         wreq               50000    1.000       82      148      171      20.21     16.8      3
+         reqwest            50000    1.000       89      150      182      20.06     15.7      3
+         hyper              50000    1.000       84      153      175      13.77     13.1      3
 
 open-loop paired ratio, leyline over rival (same run, same round); 95% t-interval on log ratio; below 1 means leyline is lower
-c8x256   leyline           vs hyper      p99 0.802 [0.678, 0.950] lower; CPU/req 0.576 [0.519, 0.639] less CPU; single-run, 3 rounds
-c8x256   leyline           vs reqwest    p99 0.762 [0.612, 0.948] lower; CPU/req 0.414 [0.381, 0.450] less CPU; single-run, 3 rounds
-c8x256   leyline           vs wreq       p99 0.819 [0.651, 1.030] tie; CPU/req 0.420 [0.391, 0.452] less CPU; single-run, 3 rounds
-c8x256   leyline           vs curl       p99 1.031 [0.512, 2.074] tie; CPU/req 0.671 [0.486, 0.927] less CPU; single-run, 3 rounds
-c8x256   leyline           vs h2         p99 1.001 [0.891, 1.125] tie; CPU/req 0.762 [0.698, 0.831] less CPU; single-run, 3 rounds
+c8x256   leyline           vs hyper      p99 0.757 [0.686, 0.837] lower; CPU/req 0.595 [0.582, 0.607] less CPU; single-run, 3 rounds
+c8x256   leyline           vs reqwest    p99 0.764 [0.684, 0.854] lower; CPU/req 0.408 [0.404, 0.412] less CPU; single-run, 3 rounds
+c8x256   leyline           vs wreq       p99 0.765 [0.713, 0.819] lower; CPU/req 0.407 [0.395, 0.420] less CPU; single-run, 3 rounds
+c8x256   leyline           vs curl       p99 0.989 [0.756, 1.293] tie; CPU/req 0.695 [0.601, 0.805] less CPU; single-run, 3 rounds
+c8x256   leyline           vs h2         p99 0.995 [0.792, 1.251] tie; CPU/req 0.759 [0.756, 0.762] less CPU; single-run, 3 rounds
+c8x256   leyline-cores     vs hyper      p99 0.504 [0.488, 0.522] lower; CPU/req 0.302 [0.288, 0.316] less CPU; single-run, 3 rounds
+c8x256   leyline-cores     vs reqwest    p99 0.509 [0.484, 0.535] lower; CPU/req 0.207 [0.196, 0.218] less CPU; single-run, 3 rounds
+c8x256   leyline-cores     vs wreq       p99 0.509 [0.432, 0.600] lower; CPU/req 0.207 [0.201, 0.213] less CPU; single-run, 3 rounds
+c8x256   leyline-cores     vs curl       p99 0.658 [0.453, 0.956] lower; CPU/req 0.353 [0.289, 0.431] less CPU; single-run, 3 rounds
+c8x256   leyline-cores     vs h2         p99 0.663 [0.577, 0.761] lower; CPU/req 0.386 [0.366, 0.406] less CPU; single-run, 3 rounds
