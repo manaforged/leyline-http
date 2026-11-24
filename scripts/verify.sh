@@ -224,7 +224,7 @@ g_book() {
 g_links() {
     step "lychee --offline (README, docs, crate pages)"
     command -v lychee >/dev/null || fail "lychee not found (cargo install --locked lychee)"
-    lychee --offline --no-progress README.md CHANGELOG.md UPGRADE.md CONTRIBUTING.md SECURITY.md \
+    lychee --offline --no-progress --exclude-path docs/theme README.md CHANGELOG.md UPGRADE.md CONTRIBUTING.md SECURITY.md \
         BENCHMARKS.md AGENTS.md docs crates/leyline/docs || fail "broken links"
     ok "links resolve"
 }
