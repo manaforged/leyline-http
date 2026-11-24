@@ -41,7 +41,7 @@ impl Outliers {
             let time = BASE_EJECTION
                 .saturating_mul(record.ejections)
                 .min(MAX_EJECTION);
-            record.until = Some(Instant::now() + time);
+            record.until = Some(crate::util::saturating_after_tokio(Instant::now(), time));
         }
     }
 

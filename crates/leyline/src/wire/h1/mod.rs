@@ -243,7 +243,7 @@ pub(crate) fn parse<'a, S: Sink<'a>>(head: &'a [u8], sink: &mut S) -> Result<(u1
             )));
         };
         let name = &line[..colon];
-        if name.is_empty() || matches!(name.last(), Some(b' ' | b'\t')) {
+        if !is_valid_token_bytes(name) {
             return Err(malformed(format!(
                 "invalid HTTP/1.1 header name: {}",
                 String::from_utf8_lossy(name)
@@ -290,8 +290,12 @@ pub(crate) fn trim_ows(bytes: &[u8]) -> &[u8] {
     trim_end(trim_start(bytes))
 }
 
+pub(crate) fn is_valid_token_bytes(bytes: &[u8]) -> bool {
+    !bytes.is_empty() && bytes.iter().all(|&b| TOKEN[usize::from(b)])
+}
+
 pub(crate) fn is_valid_token(s: &str) -> bool {
-    !s.is_empty() && s.bytes().all(|b| TOKEN[usize::from(b)])
+    is_valid_token_bytes(s.as_bytes())
 }
 
 static TOKEN: [bool; 256] = {

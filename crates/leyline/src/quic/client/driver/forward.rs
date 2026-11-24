@@ -81,7 +81,10 @@ fn pull_body(
         match h3.recv_body(conn, stream_id, scratch) {
             Ok(0) | Err(quiche::h3::Error::Done) => return Pull::Drained,
             Ok(n) => {
-                stream.body_bytes_seen += n;
+                if !crate::wire::has_body(stream.head_request, stream.status.as_u16()) {
+                    continue;
+                }
+                stream.body_bytes_seen = stream.body_bytes_seen.saturating_add(n as u64);
                 let chunk = Bytes::copy_from_slice(&scratch[..n]);
                 match push_chunk(h3, conn, stream_id, stream, tx, chunk) {
                     Push::Sent => {}

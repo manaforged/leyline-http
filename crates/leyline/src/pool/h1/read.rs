@@ -119,28 +119,41 @@ impl Chunked {
         if end == 0 {
             self.state = State::Done;
         } else {
-            self.trailer(&buf[..end]);
+            self.trailer(&buf[..end])?;
         }
         buf.drain(..end + 2);
         Ok(true)
     }
 
-    fn trailer(&mut self, line: &[u8]) {
+    fn trailer(&mut self, line: &[u8]) -> Result<(), Error> {
         let Some(colon) = memchr::memchr(b':', line) else {
-            return;
+            return Err(malformed("HTTP/1.1 trailer line has no colon"));
         };
-        let value = crate::wire::h1::trim_ows(&line[colon + 1..]);
-        if let (Ok(name), Ok(value)) = (
-            HeaderName::from_bytes(&line[..colon]),
-            HeaderValue::from_bytes(value),
-        ) {
-            self.trailers.append(name, value);
+        let raw_name = &line[..colon];
+        if !crate::wire::h1::is_valid_token_bytes(raw_name) {
+            return Err(malformed("invalid HTTP/1.1 trailer name"));
         }
+        let name = HeaderName::from_bytes(raw_name)
+            .map_err(|err| malformed("invalid HTTP/1.1 trailer name").with_source(err))?;
+        let raw_value = crate::wire::h1::trim_ows(&line[colon + 1..]);
+        let value = HeaderValue::from_bytes(raw_value)
+            .map_err(|err| malformed("invalid HTTP/1.1 trailer value").with_source(err))?;
+        self.trailers.append(name, value);
+        Ok(())
     }
 }
 
 fn line_end(buf: &[u8]) -> Result<Option<usize>, Error> {
-    if let Some(pos) = memchr::memmem::find(buf, b"\r\n") {
+    if let Some(lf) = memchr::memchr(b'\n', buf) {
+        if lf == 0 || buf[lf - 1] != b'\r' {
+            return Err(malformed("chunked framing has a bare LF line ending"));
+        }
+        let pos = lf - 1;
+        if pos > MAX_H1_CHUNK_LINE_BYTES {
+            return Err(malformed(format!(
+                "chunked size/trailer line exceeds {MAX_H1_CHUNK_LINE_BYTES} bytes"
+            )));
+        }
         return Ok(Some(pos));
     }
     if buf.len() > MAX_H1_CHUNK_LINE_BYTES {

@@ -207,6 +207,8 @@ pub struct Pool {
     partition: Option<u64>,
 }
 
+const MAX_DRAIN_WAIT: Duration = Duration::from_millis(250);
+
 impl Pool {
     pub(crate) fn config(&self) -> &PoolConfig {
         &self.config
@@ -222,7 +224,7 @@ impl Pool {
 
     pub(crate) fn drain_wait(&self) -> Duration {
         if self.config.keepalive {
-            self.config.idle_timeout
+            self.config.idle_timeout.min(MAX_DRAIN_WAIT)
         } else {
             Duration::ZERO
         }

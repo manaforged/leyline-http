@@ -218,7 +218,9 @@ pub(crate) struct Tick {
 impl Tick {
     pub(crate) fn every(period: Duration) -> Self {
         Self {
-            sleep: Box::pin(tokio::time::sleep_until(Instant::now() + period)),
+            sleep: Box::pin(tokio::time::sleep_until(
+                crate::util::saturating_after_tokio(Instant::now(), period),
+            )),
             period,
             armed: false,
         }
@@ -231,7 +233,12 @@ impl Tick {
         match self.sleep.as_mut().poll(cx) {
             Poll::Ready(()) => {
                 self.armed = false;
-                self.sleep.as_mut().reset(Instant::now() + self.period);
+                self.sleep
+                    .as_mut()
+                    .reset(crate::util::saturating_after_tokio(
+                        Instant::now(),
+                        self.period,
+                    ));
                 Poll::Ready(())
             }
             Poll::Pending => {

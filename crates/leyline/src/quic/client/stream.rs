@@ -113,7 +113,7 @@ impl H3Stream {
         crate::wire::length_mismatch(
             crate::wire::has_body(self.head_request, self.status.as_u16()),
             self.declared_len,
-            self.body_bytes_seen as u64,
+            self.body_bytes_seen,
         )
     }
 

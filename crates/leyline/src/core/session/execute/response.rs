@@ -95,14 +95,17 @@ impl Session {
 
     #[cfg(feature = "http3")]
     pub(super) fn note_alt_svc(&self, url: &Url, resp_headers: &http::HeaderMap) {
-        let owned: Vec<String> = header_values(resp_headers, http::header::ALT_SVC)
-            .map(|v| String::from_utf8_lossy(v.as_bytes()).into_owned())
+        let fields: Vec<&str> = resp_headers
+            .get_all(http::header::ALT_SVC)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
             .collect();
-        let fields: Vec<&str> = owned.iter().map(String::as_str).collect();
         if fields.is_empty() {
             return;
         }
-        let age = header_values(resp_headers, http::header::AGE)
+        let age = resp_headers
+            .get_all(http::header::AGE)
+            .iter()
             .next()
             .and_then(|v| v.to_str().ok())
             .and_then(|v| crate::util::delta_seconds(v.split(',').next().unwrap_or_default()))

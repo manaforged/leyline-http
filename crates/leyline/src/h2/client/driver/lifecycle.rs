@@ -163,6 +163,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
 
     fn take_queued_commands(&mut self) {
         while let Ok(ping) = self.ping_rx.try_recv() {
+            self.ping_armed = false;
             self.on_command(DriverCommand::Ping(ping));
         }
         for _ in 0..self.command_rx.len() {

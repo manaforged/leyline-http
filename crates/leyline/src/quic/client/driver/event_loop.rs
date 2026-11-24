@@ -155,7 +155,7 @@ impl H3Loop {
     }
 
     fn arm_sleep(&mut self, timeout: Duration) {
-        let target = tokio::time::Instant::now() + timeout;
+        let target = crate::util::saturating_after_tokio(tokio::time::Instant::now(), timeout);
         let reset = self.sleep_deadline.is_none_or(|current| {
             target < current || target.saturating_duration_since(current) >= TIMER_RESET_SLACK
         });

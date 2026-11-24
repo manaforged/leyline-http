@@ -199,7 +199,7 @@ struct H3Stream {
     head_sent: bool,
     stalled: Option<Bytes>,
     peer_finished: bool,
-    body_bytes_seen: usize,
+    body_bytes_seen: u64,
     declared_len: Option<u64>,
     head_request: bool,
     body_limit: BodyLimit,

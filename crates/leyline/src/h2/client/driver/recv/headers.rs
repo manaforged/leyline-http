@@ -24,7 +24,9 @@ impl StreamActor {
 
 impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
     pub(super) async fn on_headers(&mut self, h: HeadersFrame) -> Result<(), H2Error> {
-        let full_fragment = self.reassemble(&h).await?;
+        let full_fragment = self
+            .reassemble_fragment(h.stream_id, h.end_headers, &h.fragment)
+            .await?;
 
         let Some(response) = self
             .streams
@@ -62,21 +64,26 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
         }
     }
 
-    async fn reassemble(&mut self, h: &HeadersFrame) -> Result<Bytes, H2Error> {
+    pub(super) async fn reassemble_fragment(
+        &mut self,
+        expected_stream_id: u32,
+        end_headers: bool,
+        fragment: &Bytes,
+    ) -> Result<Bytes, H2Error> {
         let max_header_block = self.decoder.max_header_list_size();
         let oversized = || H2Error::Connection {
             code: ErrorCode::CompressionError,
             reason: format!("header block exceeds the header list limit ({max_header_block})"),
         };
-        if h.fragment.len() > max_header_block {
+        if fragment.len() > max_header_block {
             return Err(oversized());
         }
-        if h.end_headers {
-            return Ok(h.fragment.clone());
+        if end_headers {
+            return Ok(fragment.clone());
         }
         let reassembly_timeout = self.config.limits().header_block_reassembly_timeout;
         let started = tokio::time::Instant::now();
-        let mut assembled = h.fragment.to_vec();
+        let mut assembled = fragment.to_vec();
         loop {
             let remaining = reassembly_timeout.saturating_sub(started.elapsed());
             match self
@@ -87,7 +94,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
                     stream_id,
                     end_headers,
                     fragment,
-                } if stream_id == h.stream_id => {
+                } if stream_id == expected_stream_id => {
                     if fragment.is_empty() && !end_headers {
                         self.control_flood.record(std::time::Instant::now())?;
                     }

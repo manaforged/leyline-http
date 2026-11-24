@@ -107,7 +107,10 @@ where
         waiting = queue.next();
         timer
             .as_mut()
-            .reset(tokio::time::Instant::now() + config.resolve_delay);
+            .reset(crate::util::saturating_after_tokio(
+                tokio::time::Instant::now(),
+                config.resolve_delay,
+            ));
     }
 }
 

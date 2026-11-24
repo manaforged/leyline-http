@@ -46,10 +46,17 @@ fn same_site(v: &str) -> Option<SameSite> {
 }
 
 fn max_age(v: &str) -> Option<Duration> {
-    let secs = v.parse::<i64>().ok()?;
-    if secs <= 0 {
-        Some(Duration::ZERO)
-    } else {
-        Some(Duration::from_secs(secs as u64))
+    let bytes = v.as_bytes();
+    let (negative, digits) = match bytes.first() {
+        Some(b'-') => (true, &bytes[1..]),
+        _ => (false, bytes),
+    };
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
     }
+    if negative {
+        return Some(Duration::ZERO);
+    }
+    let secs = v.parse::<i64>().unwrap_or(i64::MAX);
+    Some(Duration::from_secs(secs.max(0) as u64))
 }

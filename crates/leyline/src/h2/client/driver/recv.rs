@@ -170,7 +170,7 @@ impl<T: AsyncRead + AsyncWrite + Unpin + Send + 'static> Driver<T> {
             Frame::Ping(p) => self.on_ping(p),
             Frame::GoAway(g) => self.on_goaway(g),
             Frame::RstStream(r) => self.on_rst(r),
-            Frame::PushPromise(pp) => self.on_push(pp),
+            Frame::PushPromise(pp) => self.on_push(pp).await,
             Frame::Continuation { .. } => Err(H2Error::Connection {
                 code: ErrorCode::ProtocolError,
                 reason: "unexpected CONTINUATION".into(),

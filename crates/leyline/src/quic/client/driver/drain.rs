@@ -91,7 +91,8 @@ impl Drain<'_> {
                     break;
                 }
             };
-            if let Err(limit) = stream.body_limit.admit(stream.body_bytes_seen, n) {
+            let seen = usize::try_from(stream.body_bytes_seen).unwrap_or(usize::MAX);
+            if let Err(limit) = stream.body_limit.admit(seen, n) {
                 abort_stream(
                     self.h3,
                     self.conn,
@@ -104,7 +105,7 @@ impl Drain<'_> {
                 break;
             }
             if crate::wire::has_body(stream.head_request, stream.status.as_u16()) {
-                stream.body_bytes_seen += n;
+                stream.body_bytes_seen = stream.body_bytes_seen.saturating_add(n as u64);
                 stream.body.extend_from_slice(&self.scratch[..n]);
             }
         }

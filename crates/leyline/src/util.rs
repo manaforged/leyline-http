@@ -247,6 +247,15 @@ pub(crate) fn saturating_after(
         .unwrap_or(now)
 }
 
+pub(crate) fn saturating_after_tokio(
+    now: tokio::time::Instant,
+    after: std::time::Duration,
+) -> tokio::time::Instant {
+    now.checked_add(after)
+        .or_else(|| now.checked_add(FAR_FUTURE.min(after)))
+        .unwrap_or(now)
+}
+
 pub(crate) fn epoch_plus(after: std::time::Duration) -> Option<std::time::SystemTime> {
     std::time::SystemTime::UNIX_EPOCH.checked_add(after)
 }

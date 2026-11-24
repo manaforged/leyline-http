@@ -136,7 +136,7 @@ impl H2Client {
             });
         }
         let (ack_tx, ack_rx) = oneshot::channel();
-        let deadline = std::time::Instant::now() + timeout;
+        let deadline = crate::util::saturating_after(std::time::Instant::now(), timeout);
         self.shared
             .ping_tx
             .send((ack_tx, deadline))
