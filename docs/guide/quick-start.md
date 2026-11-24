@@ -11,7 +11,7 @@ the name you import. Leyline is async and runs on Tokio.
 ```toml
 [dependencies]
 leyline-http = "0.3"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ```
@@ -21,14 +21,18 @@ compiles BoringSSL, so it needs a C and C++ compiler and Git. [Supported platfor
 
 ## Send a GET request
 
-`leyline::get` sends one GET from a plain session. For more than one request,
-build a `Session` and reuse it: it holds the connection pool and the cookie
-jar.
+`leyline::get` sends one GET from a temporary plain session. For more than one
+request, build a `Session` once and reuse it so requests share the connection
+pool and cookie jar.
 
 ```rust,no_run
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
-    let resp = leyline::Session::new().get("https://example.com/").await?;
+    let body = leyline::get("https://example.com/").text().await?;
+    println!("{} bytes", body.len());
+
+    let session = leyline::Session::new();
+    let resp = session.get("https://example.com/").await?;
     println!("{} {}", resp.status(), resp.url());
     Ok(())
 }
@@ -44,8 +48,8 @@ does the same as awaiting the builder and returns a named future.
 | Session | Build it with | Sends |
 | --- | --- | --- |
 | Plain | `Session::new()` or `Session::builder().build()` | `user-agent: leyline/<version>`, `accept: */*`, and no `sec-*` headers |
-| Browser | `Session::from(Browser::default())` | The TLS, HTTP/2, and headers of the newest bundled Chrome on Windows |
-| Pinned browser | `Session::builder().browser(Browser::Chrome154).build()` | One fixed browser profile |
+| Browser | `Session::from(Browser::default())` | The TLS, HTTP/2, HTTP/3, and headers of the newest bundled Chrome on Windows |
+| Pinned browser | `Session::builder().browser(Browser::Chrome158).build()` | One fixed browser profile |
 
 Use a plain session for APIs. Use a browser session when the server checks
 that the client is a browser. `SessionBuilder::user_agent` replaces the
@@ -57,20 +61,20 @@ use leyline::{Browser, Session};
 # fn run() -> leyline::Result<()> {
 let plain = Session::builder().user_agent("my-app/1.0").build()?;
 let chrome = Session::from(Browser::default());
-let pinned = Session::builder().browser(Browser::Chrome154).build()?;
+let pinned = Session::builder().browser(Browser::Chrome158).build()?;
 # drop((plain, chrome, pinned));
 # Ok(())
 # }
 ```
 
-[Sessions](sessions.md) lists the headers each kind sends.
+[Sessions](sessions.md#plain-and-browser-sessions) lists the exact headers each kind sends.
 
 ## Read the body
 
-`text()` decodes the body with the charset from `Content-Type`, and falls
-back to UTF-8. `json::<T>()` deserializes into any `DeserializeOwned` type. A
-body that does not parse is an `Kind::Decode` error. Each body call
-consumes the response, so read `status()` and `headers()` first.
+`text()` decodes the body with the charset from `Content-Type`, falling back to
+UTF-8. `json::<T>()` deserializes into any `DeserializeOwned` type and fails
+with `Kind::Json` on invalid JSON. Each body call consumes the response, so read
+`status()` and `headers()` first.
 
 ```rust,no_run
 use serde::Deserialize;
@@ -96,12 +100,12 @@ println!("{} {} {}", page.len(), state.name, state.ready);
 
 ## Send JSON, a form, and query parameters
 
-`json` serializes the value and sets `content-type: application/json`. `form`
-sends `application/x-www-form-urlencoded`. `query` appends pairs to the URL.
-`query` and `form` take any iterator of `(key, value)` pairs where both sides
-are `AsRef<str>`. `timeout` with a `Duration` bounds the whole request,
-retries included; for a streamed body or a download, add
-`Timeout::body`.
+| Method | Effect |
+| --- | --- |
+| `json(&value)` | Serializes as JSON and sets `content-type: application/json` |
+| `form(pairs)` | Sends `application/x-www-form-urlencoded` from any iterator of `(AsRef<str>, AsRef<str>)` |
+| `query(pairs)` | Appends query pairs to the URL |
+| `timeout(Duration)` | Sets `Timeout::total` across retries; use `Timeout::new().body(..)` for streamed bodies and downloads |
 
 ```rust,no_run
 use std::time::Duration;
@@ -179,25 +183,26 @@ std::fs::write("me.json", body)?;
 
 ## Download a file
 
-`Response::download_to` streams the decoded body to a file in one atomic
-step and returns the number of bytes written. With `error_for_status()`, a
-status of 400 or more is an error and nothing is written. The request's
-`max_body_size` caps the decoded size; without it, the session's (100 MiB by
-default) applies. See [Streaming](streaming.md#download-a-file).
+`RequestBuilder::download_to(path)` streams directly to disk, commits atomically,
+and resumes across dropped transfers when the server sends a strong `ETag`. Pass
+`Timeout::new().body(...)` to bound the transfer time (`Duration` alone stops at
+the response head for streamed transfers) and `max_body_size` to raise or remove
+the 100 MiB cap. See [Streaming](streaming.md#resume-a-download) for checksums,
+progress callbacks, and one-shot `Response::download_to`.
 
 ```rust,no_run
 use std::time::Duration;
+
+use leyline::Timeout;
 
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let bytes = session
     .get("https://example.com/archive.tar.gz")
-    .timeout(Duration::from_secs(600))
+    .timeout(Timeout::new().body(Duration::from_secs(600)))
     .error_for_status()
+    .retry(3)
     .max_body_size(512 * 1024 * 1024)
-    .stream()
-    .send()
-    .await?
     .download_to("archive.tar.gz")
     .await?;
 println!("{bytes} bytes");
@@ -210,17 +215,17 @@ println!("{bytes} bytes");
 | I want to | Read |
 | --- | --- |
 | Build a client for a JSON API, end to end | [API clients](api-clients.md) |
-| Set a token, a base URL, or share a session across tasks | [Sessions](sessions.md) |
-| Send headers, forms, or the requests of a browser page | [Requests](requests.md) |
-| Read headers, the final URL, the redirect chain, or timing | [Responses](responses.md) |
-| Download a large file with a size limit | [Streaming](streaming.md) |
+| Set a token, base URL, `before_send`, or blocking session | [Sessions](sessions.md) |
+| Send headers, forms, `http::Request`, or browser page requests | [Requests](requests.md) |
+| Read headers, `Link` pagination, cache hits, or timing | [Responses](responses.md) |
+| Stream bodies, resume downloads, or read SSE | [Streaming](streaming.md) |
 | Read or stop redirects | [Redirects](redirects.md) |
-| Retry failed requests | [Retries and timeouts](retries-and-timeouts.md) |
+| Retry failed requests and set timeouts | [Retries and timeouts](retries-and-timeouts.md) |
 | Map failures to my own errors or HTTP statuses | [Errors](errors.md) |
 | Keep a login between runs | [Cookies](cookies.md) |
 | Keep an account's session, tab, and cookies between runs | [Accounts](accounts.md) |
 | Crawl many hosts with rate limits and proxy pools | [Crawling](crawling.md) |
 | Send traffic through a proxy | [Proxies](proxies.md) |
 | Stop a request early | [Cancellation](cancellation.md) |
-| Use Leyline inside a web service | [Service integration](service-integration.md) |
+| Use Leyline inside a web service or Tower stack | [Service integration](service-integration.md) |
 | Test against a local server | [Testing](testing.md) |

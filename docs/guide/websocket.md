@@ -30,24 +30,34 @@ ws.close().await?;
 ```
 
 When the peer closes the connection, `recv` first returns
-`Some(Message::Close(frame))`, where `frame` is an `Option<(u16, String)>`
-with the close code and reason. The next `recv` returns `Ok(None)`.
-`close` sends a close frame with no code and shuts the connection down. See
-[Ping, pong, and close](#ping-pong-and-close) to send a code and a reason.
+`Some(Message::Close(frame))` (`Option<(u16, String)>` with code and reason),
+then `Ok(None)`. `close()` sends a close frame with no code and shuts the
+connection down.
 
-A `send`, `recv`, or `close` that fails on the transport or on a closed
-connection gives `Kind::Io`. A protocol violation, or a message over the
-session's WebSocket limits, gives `Kind::Body`.
+| Error `Kind` | When it happens |
+| --- | --- |
+| `Kind::Request` | Non-`wss://` scheme, bad handshake headers, non-101/non-200 upgrade, subprotocol mismatch, or ping/pong payload > 125 B |
+| `Kind::Body` | Frame/message protocol violation, invalid UTF-8, or message/frame size limit exceeded |
+| `Kind::Tls` | TLS handshake or post-handshake record alert |
+| `Kind::Timeout` | Connect or handshake (`Timeout::total`) timeout |
+| `Kind::Io` | Transport error or I/O on a closed connection |
+
+## Inspect the handshake
+
+| Method | Returns | Meaning |
+| --- | --- | --- |
+| `version()` | `http::Version` | Negotiated protocol (`HTTP_2` or `HTTP_11`) |
+| `protocol()` | `Option<&str>` | Server-selected `Sec-WebSocket-Protocol`, if any |
+| `headers()` | `&HeaderMap` | All handshake response headers |
+| `header(name)` | `Option<&str>` | First visible-ASCII value for `name` (`None` if absent or non-ASCII) |
 
 ## Ping, pong, and close
 
-`Message::Ping(payload)` and `Message::Pong(payload)` carry a payload of at
-most 125 bytes; pass `Vec::new()` for an empty one. A longer payload fails
-`send` with `Kind::Request`. Leyline answers a ping from the peer for you,
-and `recv` also returns it.
-
-To close with a status code and a reason, send
-`Message::Close(Some((code, reason)))` in place of `close()`.
+`Message::Ping(payload)` and `Message::Pong(payload)` carry at most 125 bytes
+(longer payloads fail `send` with `Kind::Request`). Leyline answers incoming
+pings automatically and still returns them from `recv`. Send
+`Message::Close(Some((code, reason)))` instead of `close()` to include a close
+code and reason.
 
 ```rust,no_run
 use leyline::Message;
@@ -66,55 +76,46 @@ ws.send(Message::Close(Some((1000, "done".to_owned())))).await?;
 # }
 ```
 
-## Set handshake options
+## Set handshake and session options
 
-The request builder methods set the handshake:
+Request-level setters on `RequestBuilder`:
 
 | Builder method | Effect |
 | --- | --- |
-| `header(name, value)`, `headers(pairs)` | Append handshake headers. A repeated name adds a value. An invalid name or value fails `websocket()` with `Kind::Request`. A `user-agent` or `origin` header replaces the one Leyline sends |
-| `header("sec-websocket-protocol", "chat.v1, chat.v2")` | Offers subprotocols. `WebSocket::protocol()` returns the one the server selected, or `None`. The handshake fails when the server selects one you did not offer |
-| `proxy(url)` | Overrides the session proxy |
+| `header(name, value)`, `headers(pairs)` | Append handshake headers; invalid values fail with `Kind::Request`. `user-agent` or `origin` replaces Leyline's value |
+| `header("sec-websocket-protocol", "chat.v1, chat.v2")` | Offers subprotocols; fails with `Kind::Request` if the server picks an unoffered protocol, none, or more than one |
+| `header_order(&[..])` | Pins regular handshake header wire order |
+| `timeout(d)` | Bounds the handshake with `Timeout::total` |
+| `protocol(Protocol)` | `Http1` skips H2; `Http2` requires extended `CONNECT` (fails with `Kind::Http2` without H1 fallback); `Http3` fails with `Kind::Config` |
+| `proxy(url)` | Overrides the session proxy (`wss://` follows `https://` proxy and `NO_PROXY` rules) |
 
-Limits and transport are set on the session, with these `SessionBuilder`
-setters:
+Session-level limits on `SessionBuilder` (for the 5 size/buffer setters,
+passing `None` keeps `tungstenite::WebSocketConfig::default()`, not unlimited):
 
-| Setter | Effect |
-| --- | --- |
-| `websocket_http2(bool)` | Try HTTP/2 first; see below |
-| `websocket_max_message_size`, `websocket_max_frame_size` | Largest message and frame accepted |
-| `websocket_read_buffer_size`, `websocket_write_buffer_size`, `websocket_max_write_buffer_size` | Buffer sizes |
-| `websocket_accept_unmasked_frames(bool)` | Accept unmasked frames from the peer |
+| Setter | Default | Effect |
+| --- | --- | --- |
+| `websocket_http2(bool)` | `true` | Try RFC 8441 HTTP/2 extended `CONNECT` before HTTP/1.1 upgrade |
+| `websocket_max_message_size`, `websocket_max_frame_size` | 64 MiB / 16 MiB | Largest accepted message and frame |
+| `websocket_read_buffer_size`, `websocket_write_buffer_size`, `websocket_max_write_buffer_size` | 128 KiB / 128 KiB / unlimited | Socket read/write buffer limits |
+| `websocket_accept_unmasked_frames(bool)` | `false` | Accept unmasked frames from the peer |
 
-The handshake sends the cookies that the jar holds for the URL, matched as
-for an `https://` request. A `Cookie` header from the session default headers
-or from `header()` replaces them. A `Set-Cookie` header in the handshake
-response does not update the jar.
-
-A `wss://` URL follows the proxy rules of an `https://` URL, including
-environment discovery and `NO_PROXY`. See [Proxies](proxies.md).
+The handshake sends matching cookies from the session jar (unless overridden by
+a `Cookie` header) and stores any `Set-Cookie` headers from the handshake
+response in the jar (unless `SessionBuilder::cookies(None)` was set).
 
 ## Shutdown and host limits
 
-The handshake takes a host-limit slot for its origin, the same slot an
-`https://` request to that host takes, and releases it when the handshake
-completes or fails. An open connection holds no slot. `Session::shutdown()`
-stops a handshake in flight and fails new ones with the shut-down error. It
-does not close an established connection.
+The handshake takes a host-limit slot for its origin (shared with `https://`
+requests) and releases it once open. `Session::shutdown()` stops in-flight
+handshakes and fails new ones with `err.is_shut_down() == true`; established
+connections remain open until closed.
 
 ## HTTP/2 or HTTP/1.1
 
-`websocket_http2` defaults to `true`: Leyline first tries RFC
-8441 extended `CONNECT` on a pooled HTTP/2 connection. It falls back to the
-RFC 6455 HTTP/1.1 upgrade on a fresh connection in two cases, and logs the
-reason:
-
-- The TLS handshake does not select `h2`. Later WebSockets to that origin
-  skip the HTTP/2 attempt.
-- The peer does not advertise `SETTINGS_ENABLE_CONNECT_PROTOCOL`.
-
-Any other error is returned, not retried. `websocket_http2(false)` skips the
-HTTP/2 attempt.
+With `websocket_http2(true)`, Leyline tries RFC 8441 extended `CONNECT` on a
+pooled HTTP/2 connection and falls back to an HTTP/1.1 RFC 6455 upgrade if ALPN
+does not negotiate `h2` or the peer does not advertise
+`SETTINGS_ENABLE_CONNECT_PROTOCOL`. Other errors are returned directly.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -127,17 +128,16 @@ let ws = session
     .header("sec-websocket-protocol", "chat.v1, chat.v2")
     .websocket()
     .await?;
-println!("protocol={:?}", ws.protocol());
+println!("version={:?} protocol={:?}", ws.version(), ws.protocol());
 # Ok(())
 # }
 ```
 
 ## Split the connection
 
-`split()` returns a `futures_util::Sink<Message>` and a
-`futures_util::Stream<Item = leyline::Result<Message>>`, so one task can write
-while another reads. Pin each half before you use it. Closing the sink does
-not send a close frame; send `Message::Close` instead.
+`split()` returns `(impl Sink<Message> + Send + Unpin, impl Stream<Item = leyline::Result<Message>> + Send + Unpin)`
+so one task can write while another reads. Closing the sink does not send a
+close frame; send `Message::Close` instead.
 
 ```rust,no_run
 use futures_util::{SinkExt, StreamExt};
@@ -146,9 +146,7 @@ use leyline::Message;
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let ws = session.get("wss://example.com/live").websocket().await?;
-let (sink, stream) = ws.split();
-let mut sink = Box::pin(sink);
-let mut stream = Box::pin(stream);
+let (mut sink, mut stream) = ws.split();
 
 let reader = tokio::spawn(async move {
     while let Some(Ok(msg)) = stream.next().await {

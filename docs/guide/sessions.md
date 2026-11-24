@@ -16,7 +16,7 @@ use leyline::{Browser, Platform, Session};
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::Firefox154).platform(Platform::MacOS)
+    .browser(Browser::Firefox160).platform(Platform::MacOS)
     .user_agent("my-tool/1.0 (+https://my-tool.example)")
     .header("accept", "application/json")
     .build()?;
@@ -25,30 +25,28 @@ let session = Session::builder()
 # }
 ```
 
-`Session::new()` and `Session::default()` build a plain session and do not
-fail. `Session::from(b)` builds a session for browser `b` and does not fail
-either. A trust-store problem then fails each request that needs it with
-`Kind::Tls`, and an invalid proxy in the environment fails each request with
-`Kind::Proxy`. To add settings to a browser session, start from
-`Session::builder().browser(b)`, whose `build()` reports those problems.
+`Session::new()`, `Session::default()`, and `Session::from(b)` do not return
+`Result`: a trust-store problem fails requests with `Kind::Tls`, and an invalid
+proxy environment variable fails requests with `Kind::Proxy`. Use
+`Session::builder()` to validate configuration at startup.
 
 Three setters add default headers, which go out on every request:
 
 | Setter | Effect |
 | --- | --- |
-| `user_agent(value)` | Sets the `User-Agent`, in place of the default or the browser profile's value |
-| `header(name, value)` | Adds one default header |
-| `headers(pairs)` | Adds each `(name, value)` pair of an iterator |
+| `user_agent(value)` | Replaces the default or browser profile `User-Agent`; a later call wins |
+| `header(name, value)` | Replaces the profile default for `name` and appends each value you add |
+| `headers(pairs)` | Appends each `(name, value)` pair from an iterator |
 
-An entry replaces a default or profile header of the same name, compared
-without case. A `user-agent` entry replaces the default `user-agent`, and a
-later one wins. An invalid name or value fails `build()`. On a browser session, a session `user-agent` also removes the
-profile's `sec-ch-ua` client hint, so the user agent and the hint never name
-different browsers.
+Invalid header names or values fail `build()` with `Kind::Config`. On a browser
+session, setting `user_agent` on the session (or a `user-agent` header on one
+request) drops the profile's `sec-ch-ua*` client hints (`sec-ch-ua`,
+`sec-ch-ua-mobile`, `sec-ch-ua-platform`) unless explicitly set, so the user
+agent and hints never disagree.
 
-When a session has a browser and you do not call `protocol`, it uses
-`Protocol::Race` if the `http3` feature is on and the profile's `[h3]`
-table sets `race = true`, as the bundled Chrome profiles do, and
+When a session has a browser and you do not call `protocol`, it defaults to
+`Protocol::Race` if the `http3` feature is enabled and the profile sets
+`race = true` (bundled desktop and iOS 18+ browser profiles), and
 `Protocol::Auto` otherwise. See [HTTP/3](http3.md).
 
 ## Plain and browser sessions
@@ -76,19 +74,11 @@ request adds the headers it needs, such as `content-type`, `origin`,
 
 ## Set a token and a base URL
 
-`bearer_auth(token)` sends `authorization: Bearer <token>` and replaces an
-`authorization` header set earlier on the builder. With a `base_url`, the
-token goes only to requests whose origin (scheme, host, and port) matches the
-base URL. Without one, it goes to every host. A redirect to another origin
-drops it. `RequestBuilder::bearer_auth` overrides it for one request, which
-is how to reach a second host. An `authorization` header set with `headers`
-is not scoped. `Debug` output masks the token.
-
-`basic_auth(user, password)` sends `authorization: Basic <credentials>` with
-the same scope as `bearer_auth`: every origin, or only the `base_url` origin
-when one is set, and never across a redirect to another origin. It replaces a
-bearer token or a default `authorization` header set before it. `basic_auth`
-together with `refresh_token` fails `build()` with `Kind::Config`.
+| Setter | Header sent | Origin scope | Notes |
+| --- | --- | --- | --- |
+| `bearer_auth(token)` | `authorization: Bearer <token>` | `base_url` origin only (or all hosts if no `base_url`); dropped on cross-origin redirects | Replaces earlier auth; masked in `Debug`; pairs with `refresh_token` |
+| `basic_auth(user, pass)` | `authorization: Basic <creds>` | Same as `bearer_auth` | Replaces earlier auth; fails `build()` with `Kind::Config` if paired with `refresh_token` |
+| `header("authorization", v)` | As given | Sent to every host (not scoped to `base_url`), dropped on cross-origin redirects | Use `RequestBuilder::bearer_auth` or `basic_auth` to authenticate a second host |
 
 `base_url(url)` resolves a relative `&str` or `String` request URL by the
 rules of `Url::join` (RFC 3986). A `Url` value goes out unchanged.
@@ -160,18 +150,19 @@ The hook sees:
 - The absolute URL.
 - The headers you set on the request. It does not see the session's default
   headers, the profile headers, `Cookie`, `Host`, or `Content-Length`.
-- The body. `Body::as_bytes()` returns its bytes, or `None` for a stream.
+- The body. `Body::as_bytes()` returns its bytes (`None` for a stream); `Body::content_length()` returns the known byte length for buffered, `Body::file`, and sized-stream bodies.
 
-Leyline sends the method, the URL, the headers, and the body the hook leaves,
-so a hook can sign the query string. The URL must stay an absolute `http` or
-`https` URL, or the request fails. Leyline ignores changes to the
+Leyline sends the method, URL, headers, and body the hook leaves, so a hook can
+sign the query string. The URL must stay an absolute `http` or `https` URL, or
+the request fails. Leyline ignores edits to `http::Request::version` and
 extensions.
 
-- The hook runs before every attempt: the first send and each retry. It does
-  not run again for a redirect hop.
-- Each retry starts again from your original method, URL, headers and body,
-  so a hook that adds a header does not add it twice.
-- An error from the hook fails the request.
+- The hook runs before every attempt (first send and each retry), not on
+  redirect hops.
+- Each retry starts from your original method, URL, headers, and body, so a
+  hook that inserts a header does not duplicate it.
+- Returning an error aborts the request without retrying; wrap custom errors
+  with `Err(leyline::Error::request(cause))`.
 - A second `before_send` call adds a hook that runs after the first.
 - A WebSocket handshake from `RequestBuilder::websocket()` does not pass
   through the hook.
@@ -230,24 +221,25 @@ let langs = session.languages().map(<[String]>::to_vec);
 
 The `Browser` enum has a variant for each bundled profile. The
 [API reference](https://docs.rs/leyline-http/latest/leyline/enum.Browser.html) lists them, and
-[Browser profiles](profiles.md) gives the capture kind of each.
+[Profile reference](profiles.md) gives the capture kind of each.
 
-- One function per product returns its newest build that is not deprecated
-  and whose capture kind the product accepts: `Browser::chrome()`,
-  `edge()`, `opera()`, `brave()`, `firefox()`, `safari()`, `safari_ios()`,
-  `cfnetwork()`, and `okhttp()`. A release can move them to newer captures;
-  pin a variant such as `Browser::Chrome154` to keep one fingerprint.
+- One function per product returns its newest non-deprecated build:
+  `Browser::chrome()`, `edge()`, `opera()`, `brave()`, `firefox()`, `safari()`,
+  `safari_ios()`, `cfnetwork()`, and `okhttp()`. A release can move them to
+  newer captures; pin a variant such as `Browser::Chrome158` to keep one
+  fingerprint.
 - `Browser::default()` is `Browser::chrome()`.
-- `Browser::version()` returns the product's major version, and
-  `Browser::id()` a stable id such as `chrome-154` or `edge-154`. The engine
-  family is the `meta.family` field of `Browser::profile()`.
+- `Browser::version()` returns the product's major version, `Browser::id()`
+  returns a stable id such as `chrome-158` or `edge-158`, and
+  `Browser::chromium_major()` returns the underlying Chromium major version for
+  Chromium-based browsers (`None` for Firefox, Safari, CFNetwork, and OkHttp).
 
 ```rust
 use leyline::Browser;
 
 assert_eq!(Browser::default(), Browser::chrome());
-assert_eq!(Browser::Edge154.id(), "edge-154");
-assert_eq!(Browser::Opera139.version(), 139);
+assert_eq!(Browser::Edge158.id(), "edge-158");
+assert_eq!(Browser::Opera140.version(), 140);
 ```
 
 ## Choose a platform
@@ -276,8 +268,8 @@ compiled for, or `Windows` for an unrecognized target. The platform drives
 ## Pick Edge or Opera
 
 Edge and Opera are `Browser` variants built on the Chrome captures:
-`Browser::Edge145` to `Browser::Edge156`, and `Browser::Opera129` to
-`Browser::Opera139`. The TLS and HTTP/2 fingerprint stays Chrome's, and the
+`Browser::Edge145` to `Browser::Edge158`, and `Browser::Opera129` to
+`Browser::Opera140`. The TLS and HTTP/2 fingerprint stays Chrome's, and the
 `User-Agent` and `sec-ch-ua` brand list change. Edge also leaves out the
 trust anchors extension of the ClientHello.
 
@@ -287,18 +279,18 @@ use leyline::{Browser, Platform, Session};
 # fn run() -> leyline::Result<()> {
 let edge = Session::from(Browser::edge());
 let opera = Session::builder()
-    .browser(Browser::Opera139).platform(Platform::MacOS)
+    .browser(Browser::Opera140).platform(Platform::MacOS)
     .build()?;
 # let _ = (edge, opera);
 # Ok(())
 # }
 ```
 
-An Edge version equals its Chrome version. Each Opera version runs on the
-Chrome version that `profiles/brands.toml` maps it to: `Browser::Opera139`
-sends Chrome 155's TLS. Both exist on Windows, macOS, and
-Linux only; `Platform::Android` or `Platform::IOS` fails `build()` with
-`Kind::Config`. Brave has its own profiles, such as `Browser::Brave146`.
+An Edge version equals its Chrome version. Each Opera version maps to its
+underlying Chromium release (for example, `Browser::Opera140` sends Chrome 157's
+TLS). Both exist on Windows, macOS, and Linux only; `Platform::Android` or
+`Platform::IOS` fails `build()` with `Kind::Config`. Brave has its own profiles,
+such as `Browser::Brave158`.
 
 `Browser::headers(platform)` returns the identity headers a session
 sends as `(name, value)` pairs: `user-agent` first, then `sec-ch-ua` when the
@@ -315,7 +307,7 @@ returns the `User-Agent` the session sends, including one from
 ```rust,no_run
 use leyline::{Browser, Platform};
 
-let edge = Browser::Edge154.headers(Platform::Windows);
+let edge = Browser::Edge158.headers(Platform::Windows);
 assert!(edge.is_some_and(|headers| headers[0].1.contains("Edg/")));
 
 let session = leyline::Session::from(Browser::default());
@@ -345,35 +337,37 @@ and sessions made with `to_builder()` too. See [Crawling](crawling.md#limit-each
 
 ## Block the calling thread
 
-Code without an async runtime uses `blocking::Session`. It owns a small runtime and runs each call on the calling thread. Everything a `Session` offers is available through it, and `block_on` waits for the result.
+Code without an async runtime uses `blocking::Session`. It owns a small runtime
+and runs each call on the calling thread through `block_on`.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder().build_blocking()?;
-let body = session.block_on(async {
-    session.get("https://example.com/").text().await
-})?;
+let body = session.block_on(session.get("https://example.com/").text())?;
 println!("{body}");
 # Ok(())
 # }
 ```
 
-Build one blocking session per thread: it is `Send` but not `Sync`. Call `block_on` from a thread outside any tokio runtime. Direct HTTP/1.1 connections read and write blocking sockets, so a request costs no task switch. HTTP/2, TLS 1.2, and proxied connections keep the runtime's reactor. Every timeout applies; while a streamed body is read, each read waits at most the session's read or total timeout.
+- Build one blocking session per thread (`Send`, not `Sync`) and call `block_on` outside any Tokio runtime.
+- Direct HTTP/1.1 connections read and write blocking sockets directly (no task switch per request).
+- HTTP/2, TLS 1.2, and proxied connections run on the internal reactor.
+- All timeouts apply; while reading a streamed body, each read waits at most the session's `read` or `total` timeout.
 
 ## Derive a session
 
-`session.to_builder()` returns a `SessionBuilder` that holds the session's
-settings and its cookie jar. Change any setting, then call `build()`. The
-new session shares the rest with its parent, and `build()` checks the
-settings as it does for a new session.
+`session.to_builder()` returns a `SessionBuilder` initialized with the session's
+settings and cookie jar. Change any setting, then call `build()`. The new
+session gets its own HTTP `cache` if caching is enabled, and shares the rest
+according to what changed:
 
 | Change | Cookie jar | Pool | TLS session cache |
 | --- | --- | --- | --- |
 | None (`clone()`) | Shared | Shared | Shared |
-| `proxy`, `redirect`, `base_url`, `headers`, `retry`, `timeout` with the same connect limit, and other request settings | Shared | Shared | Shared |
-| `cookies(jar)` | The new jar | Shared | Shared |
-| `identity` | Shared | Shared, own partition | New |
-| A connection setting: `max_connections`, `max_connections_per_host`, `pool_idle_timeout`, `keep_alive`, `http2_ping_after_idle`, `http2_ping_timeout`, `dns_resolver`, `resolve`, a socket setter such as `local_address`, `tcp_nodelay`, or `happy_eyeballs_delay`, `tls`, `tcp_profile`, `accept_encoding`, `max_body_size`, `protocol`, or a `timeout` with another connect limit | Shared | New | New |
+| `proxy` (without `doh`), `redirect`, `base_url`, `headers`, `retry`, `accept_encoding`, `max_body_size`, `timeout` with the same `connect` limit, and other request settings | Shared | Shared | Shared |
+| `cookies(jar)` | New jar | Shared | Shared |
+| `browser`, `platform`, `hello`, `profile`, `ja3`, `ja4_r`, `akamai`, or `header_order` | Shared | Shared, own partition | New |
+| A connection setting: `max_connections`, `max_connections_per_host`, `pool_idle_timeout`, `pool_max_lifetime`, `keep_alive`, `http2_ping_after_idle`, `http2_ping_timeout`, `dns_resolver`, `doh` (or `proxy` while `doh` is set), `resolve`, socket setters (`local_address`, `interface`, `unix_socket`, `tcp_nodelay`, `happy_eyeballs_delay`, etc.), `tls`, `tcp_profile`, `protocol`, `host_limits`, or a `timeout` with another `connect` limit | Shared | New | New |
 
 Every derived session keeps the shutdown state. It keeps the host limits
 unless you set `host_limits`.
@@ -440,28 +434,26 @@ assert!(err.is_shut_down());
 ## Save and restore a session
 
 `Session` implements `Serialize`, and `SessionBuilder` implements
-`Deserialize`. `Browser` and `Platform`
-serialize as stable lowercase ids, such as `chrome-154`, `edge-154`, and
-`windows`; `id()` returns the id and `str::parse`
-reads it back. `Display` prints a label for people, not the id.
+`Deserialize`. `Browser` and `Platform` serialize as stable lowercase ids, such
+as `chrome-158`, `edge-158`, and `windows`; `id()` returns the id and
+`str::parse` reads it back. `Display` prints a human label, not the id.
 
 `serde_json::to_string(&session)` saves the session, and
 `serde_json::from_str::<SessionBuilder>(&json)?.build()?` rebuilds it.
 `Session::save(path)` and `Session::load(path)` do the same with a file.
 
-`profile_id()` returns 16 hex characters: a hash of the profile data the
-session sends, with the browser and the platform. The same data gives the same
-id in every release. It is `None` for a plain session. A profile loaded from
-TOML gets an id from its TOML text. Compare it with a saved id after
-`build()` to catch a profile change. `build()` on the builder from `Session::load` makes the same check for
-a saved session, and `Error::is_profile_changed()` is `true` for its error.
+`profile_id()` returns a 16-hex-character hash of the resolved profile data,
+browser, and platform (`None` for a plain session; hashes the TOML text for a
+loaded profile). Compare it across releases to detect profile updates. `build()`
+on a builder from `Session::load` checks it automatically and returns an error
+with `Error::is_profile_changed() == true` if the data changed.
 
 ```rust,no_run
 use leyline::{Browser, Platform, Session, SessionBuilder};
 
 # fn run() -> Result<(), Box<dyn std::error::Error>> {
 let session = Session::builder()
-    .browser(Browser::Chrome154).platform(Platform::MacOS)
+    .browser(Browser::Chrome158).platform(Platform::MacOS)
     .build()?;
 let saved = serde_json::to_string(&session)?;
 let profile_id = session.profile_id().ok_or("plain session")?;
@@ -501,11 +493,10 @@ println!("{:?}", session.stats());
 
 ## Trace the request lifecycle
 
-`trace()` installs a listener for each phase of every request: name
-resolution, connect, TLS handshake, request sent, response head, and
-completion. Implement `leyline::trace::Trace` and override only the events you
-want; every method has a no-op default. `Log` is the bundled
-listener; see [Logging and tracing](logging.md).
+`trace()` installs a listener for each phase of every request: name resolution,
+connect, TLS handshake, request sent, response head, and completion. Implement
+`leyline::trace::Trace::event` and match the `Event` variants you want. `Log`
+and `Metrics` are bundled listeners; see [Logging and tracing](logging.md).
 
 ```rust,no_run
 use leyline::Session;

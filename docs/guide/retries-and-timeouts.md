@@ -3,7 +3,7 @@
 A `Retry` decides whether a whole request runs again, and a `Timeout`
 bounds how long each part of it may take. Retries are off by default: a
 request is sent once unless you set a retry count. Every timeout except
-`total` and `connect` is off by default.
+`total` (300 s), `connect` (10 s), and `error_body` (10 s) is off by default.
 
 ## Retry a request
 
@@ -27,7 +27,7 @@ number or a `Retry`.
 
 ## Choose what to retry
 
-`Retry::new(n).when(rule)` replaces the default rule. The rule gets a
+`Retry::new(n).when(rule)` replaces the default rule. The rule gets an
 `Attempt` and returns `true` to try again:
 
 | `Attempt` | Returns |
@@ -47,22 +47,29 @@ let not_blocks = Retry::new(3).when(|attempt| attempt.is_transient() && !attempt
 # let _ = (also_408, not_blocks);
 ```
 
-`Error::is_retryable()` is true for a failed connect, a timeout, a reset,
-aborted, or closed connection, an I/O error on the way to a proxy, and a
-proxy answer of 502, 503, or 504 to `CONNECT`.
+See [Predicates](errors.md#predicates) for the exact `Error::is_retryable()`
+rules. `Kind::Overloaded` and local `Kind::Body` stream failures are never
+retried by default.
 
-## Backoff
+## Backoff and retry budget
 
-`Retry::backoff(min, max)` waits between half of and all of
-`min * 2^n` before try `n + 1`, capped at `max` (equal jitter). The fixed
-half bounds how fast retries come; the random half spreads them out.
+`Retry::backoff(min, max)` waits between half and all of `min * 2^n` before
+attempt `n + 1`, capped at `max` (equal jitter). Call `retry.delay(attempt)` to
+sample the wait for a 0-based retry index.
+
+`Retry::budget(ratio)` caps retries to a fraction of total requests (for
+example `0.2` for 20%) after a 100-retry burst allowance, preventing retry
+storms during outages. Clones of a `Session` share the budget; when the budget
+stops a retry, `Error::retries_exhausted()` is `true`.
 
 ```rust
 use std::time::Duration;
 
 use leyline::Retry;
 
-let retry = Retry::new(5).backoff(Duration::from_millis(50), Duration::from_secs(2));
+let retry = Retry::new(5)
+    .backoff(Duration::from_millis(50), Duration::from_secs(2))
+    .budget(0.2);
 # let _ = retry;
 ```
 
@@ -153,14 +160,8 @@ can be sent again. A streaming request body is retried only when no byte of
 it was read, for example after a connect error. See
 [Streaming](streaming.md).
 
-A request of any method that never reached the server is retried when the
-rule allows it: a DNS, connect, TLS, or proxy error, a connect timeout, an
-HTTP/2 `REFUSED_STREAM` reset, or an HTTP/3 request that the server reports
-it did not process. The server never processed it, so a retry cannot repeat
-a write. After a redirect got a response, an error on a later leg does not
-count: the server may already have processed the original request. A 401
-digest challenge is not an answer, so an error on the authorized leg still
-counts.
+- **Retried for any method (never reached server):** DNS, connect, TLS, or proxy errors, connect timeouts, HTTP/2 `REFUSED_STREAM`, or HTTP/3 requests the server reports it did not process. A 401 Digest challenge is not a final answer, so an unsent error on the authorized leg still counts.
+- **Not treated as unsent:** An error on a redirect leg after the original request already received a response.
 
 `any_method(true)` retries every failure of any method. Use it only when the
 endpoint is safe to repeat.
@@ -181,40 +182,30 @@ not retried. To try again, send a new request.
 
 ## Resends outside the policy
 
-Connection setup has no retry loop of its own. These cases send a request or
-connect again without asking the policy. Each happens at most once for one
-attempt, and the result then goes to `Retry` like any other:
+Connection setup has no retry loop of its own. These transport-level resends
+run automatically before handing the outcome to `Retry`:
 
-- HTTP/1.1: a pooled keep-alive connection fails before the response. An
-  idempotent request with a buffered or empty body goes once more on a new
-  connection.
-- HTTP/2: a pooled connection fails before the response. A request with a
-  buffered or empty body goes once more on a new connection when the method
-  is idempotent, or for any method after a `REFUSED_STREAM` reset.
-- HTTP/3: a pooled connection reports that it did not send the request, for
-  example after `GOAWAY`. A request with a buffered or empty body goes once
-  more on a new connection, for any method. After an `H3_REQUEST_REJECTED`
-  reset before the response head, a buffered request goes once more on the
-  same connection.
-- `Protocol::Race`: when both the HTTP/3 and the HTTP/2 connect fail,
-  Leyline falls back to `Auto` and connects again.
+- **Stale pooled connection (first attempt only, at most once):** On HTTP/1.1 or HTTP/2, if a reused connection fails before a response, an idempotent request with a buffered or empty body replays once on a fresh connection.
+- **Unsent or rejected stream (at most once per attempt, any method):** On HTTP/2 after `REFUSED_STREAM`, or on HTTP/3 after `GOAWAY` (new connection) or `H3_REQUEST_REJECTED` before headers (same connection), a buffered or empty request resends once.
+- **`Protocol::Race` fallback:** If HTTP/3 fails and the TCP/TLS leg negotiated HTTP/1.1, Leyline falls back to `Auto` for HTTP/1.1. If both HTTP/3 and TCP/TLS fail with errors, Leyline returns the TCP/TLS error without dialing again.
 
 ALPN needs no second send. See
 [One handshake per connection](network.md#one-handshake-per-connection).
 
 ## The timeouts
 
-`Timeout` holds every timeout. Each setter takes a `Duration` or
-`None`, and `None` turns that timeout off.
+`Timeout` holds all six timeouts. Each setter takes a `Duration` or `None`
+(`None` disables that timeout). Deadlines of 2 s or more for `total` use a
+shared 250 ms coarse ticker.
 
 | Setter | Default | Covers |
 | --- | --- | --- |
-| `total` | 300 s | One `send`: every redirect, retry, backoff sleep, and buffered body read. For a `.stream()` response it ends at the response head. Expiry gives `Kind::Timeout` |
-| `connect` | 10 s | One new connection: DNS, TCP connect, proxy negotiation, and TLS, or on HTTP/3 the DNS lookup, UDP setup, and QUIC handshake. Each new connection gets a full window, and `total` bounds the sum. Pooled reuse is not covered |
-| `response_header` | none | From dispatch to the transport response, per redirect, connection setup included. On a buffered response the body arrives inside this window |
-| `read` | none | The longest gap between two body chunks of a `.stream()` response, or of a body that the transport delivers in pieces. It does not apply to a body that the transport buffers; `response_header` and `total` bound that body |
-| `body` | none | The whole body of a `.stream()` response, or of a body that the transport delivers in pieces, counted from the first read of the body. It does not apply to a body that the transport buffers; `response_header` and `total` bound that body |
-| `error_body` | 10 s | The body that `RequestBuilder::error_for_status()` keeps in a status error. `total` also bounds it. See [Responses](responses.md#turn-a-status-into-an-error) |
+| `total` | 300 s | Whole `send`: redirects, retries, backoff, and buffered body read (ends at response head for `.stream()`). Also bounds WebSocket handshakes |
+| `connect` | 10 s | One new connection (DNS, TCP/UDP, proxy negotiation, TLS/QUIC handshake). Session-wide; not applied to pooled reuse |
+| `response_header` | none | Dispatch to response head per redirect leg, including connect (also covers the body when buffered) |
+| `read` | none | Longest idle gap between chunks on a `.stream()` or chunk-delivered body |
+| `body` | none | Total time to read a `.stream()` or chunk-delivered body from its first read |
+| `error_body` | 10 s | Body prefix captured by `RequestBuilder::error_for_status()`, bounded by `total`. See [Responses](responses.md#turn-a-status-into-an-error) |
 
 `Timeout::total`, and `.timeout(duration)`, bound the whole call, every retry and wait included. To bound each attempt, set `Timeout::response_header` or `read`.
 
@@ -248,10 +239,10 @@ Every timeout gives an error of kind `Kind::Timeout`. For a connect timeout,
 
 ## Per-request timeouts
 
-`RequestBuilder::timeout` merges over the session timeouts, setting by
-setting. A setting that the request sets wins, `None` included, and the rest
-keep the session value. A `Duration` sets `total`. `connect` stays
-session-wide, because connections are pooled across requests.
+`RequestBuilder::timeout` merges `total`, `read`, `body`, `response_header`,
+and `error_body` over the session defaults (`None` disables a timeout). A
+`Duration` sets `total` (which also bounds WebSocket handshakes). A per-request
+`connect` timeout is ignored because connections are pooled session-wide.
 
 ```rust,no_run
 use leyline::Timeout;
@@ -283,11 +274,10 @@ let streamed = session
 
 ## Bound a whole download
 
-`Timeout::body` bounds the whole body from its first read, so it bounds a
-`.stream()` body and `Response::download_to`, which streams. A plain
-`Duration` passed to `.timeout` sets only `total`, which ends at the head of
-a streamed response, so set `body` for a download. No outer timeout is
-needed.
+`Timeout::body` bounds the whole transfer from its first read for both
+resumable `RequestBuilder::download_to` and one-shot `Response::download_to`. A
+plain `Duration` passed to `.timeout` sets only `total` (which stops at the
+response head for streamed downloads), so set `Timeout::body`.
 
 ```rust,no_run
 use std::time::Duration;
@@ -299,9 +289,7 @@ let written = session
     .get("https://example.com/archive.zip")
     .timeout(Timeout::new().body(Duration::from_secs(600)))
     .error_for_status()
-    .stream()
-    .send()
-    .await?
+    .retry(3)
     .download_to("archive.zip")
     .await;
 match written {
@@ -313,9 +301,8 @@ match written {
 # }
 ```
 
-A failed or cancelled download removes its temporary `.part` file and leaves
-the target path as it was. See [Streaming](streaming.md) and
-[Cancellation](cancellation.md).
+See [Streaming](streaming.md#resume-a-download) and
+[Cancellation](cancellation.md) for checkpoint and partial-file behavior.
 
 ## Next
 

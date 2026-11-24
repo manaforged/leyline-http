@@ -29,13 +29,18 @@ that does not parse does not panic: `send` returns `Kind::Url` with the
 
 ## Headers
 
-Header setters take anything that converts to an `http::HeaderName` and an
-`http::HeaderValue`, such as `&str`, `String`, or a `HeaderName` constant. An
-invalid name or value is an error from `send`. `header` appends: a second
-call with the same name adds a second value. `headers` takes an iterator of
-pairs. `bearer_auth` and `basic_auth` build the `Authorization` header. `digest_auth(user, password)` answers an HTTP Digest challenge: the first request gets the `401`, and the session sends it again with the computed `Authorization` header.
-On HTTP/2 and HTTP/3 the session does not send a `Host` header you set,
-because the request authority carries the host.
+| Setter | Effect |
+| --- | --- |
+| `header(name, value)` | Appends a value (accepts `&str`, `String`, or `http::HeaderName`/`HeaderValue`) |
+| `headers(pairs)` | Appends each `(name, value)` pair from an iterator |
+| `bearer_auth(token)` | Sets `Authorization: Bearer <token>` for this request |
+| `basic_auth(user, pass)` | Sets `Authorization: Basic <credentials>` for this request |
+| `digest_auth(user, pass)` | Answers an HTTP Digest `401` challenge automatically |
+
+Invalid header names or values fail `send()`. On a browser session, setting a
+per-request `user-agent` header drops the profile's `sec-ch-ua*` client hints
+unless the request sets them too. On HTTP/2 and HTTP/3, a custom `Host` header
+is ignored because `:authority` carries the host.
 
 ```rust,no_run
 use leyline::http::header::ACCEPT_LANGUAGE;
@@ -127,8 +132,9 @@ let raw = session
 # }
 ```
 
-`Body::file(path)?` streams a file from disk and sends its size as
-`Content-Length`. It fails when the file cannot be inspected.
+`Body::file(path)?` streams a regular file from disk and sends its size as
+`Content-Length`; it fails with `Kind::Io` if the path cannot be opened or is
+not a regular file.
 
 ```rust,no_run
 use leyline::Body;
@@ -144,9 +150,11 @@ let resp = session
 # }
 ```
 
-`Body::as_bytes()` returns the bytes of a body held in memory, and `None` for
-a streamed body. To stream a request body from any source, pass
-`Body::stream`; see [Streaming](streaming.md#stream-a-request-body).
+`Body::as_bytes()` returns buffered bytes (`None` for a stream),
+`Body::content_length()` returns the known byte length for buffered, file, and
+sized-stream bodies, and `Body::try_clone()` clones a buffered body. To stream
+from any async source, pass `Body::stream`; see
+[Streaming](streaming.md#stream-a-request-body).
 
 ### Upload multipart forms
 
@@ -176,13 +184,10 @@ let resp = session.post("https://api.example/upload").multipart(form).send().awa
 # }
 ```
 
-`Part::file(path)` uses the last component of `path` as the filename, or
-`file` when it has none or is not UTF-8. The part has no `Content-Type`, so
-the server reads it as `text/plain` (RFC 7578); use
-`Part::file(path)?.mime(..)` to send a type. A file that cannot be opened is a
-`leyline::Error` with `Kind::Io`.
-[`examples/multipart.rs`](../../crates/leyline/examples/multipart.rs) is a
-complete program.
+`Part::file(path)` uses the last component of `path` as the filename (or `file`
+when missing or non-UTF-8) and sends no part `Content-Type` by default (RFC 7578
+`text/plain`); call `.mime(..)` to set one. Unopenable files fail with
+`Kind::Io`. See `examples/multipart.rs` for a complete example.
 
 ## Request kinds
 
@@ -244,6 +249,8 @@ target:
 | Same site or cross site | The page origin and `/` |
 | P is `https`, T is `http` | None |
 
+`Origin` follows the request kind and relationship between P and T:
+
 | RequestKind | No `from_page` | Same origin | Same site or cross site | P is `https`, T is `http` |
 | --- | --- | --- | --- | --- |
 | `Xhr` GET | None | None | P origin | P origin |
@@ -251,10 +258,9 @@ target:
 | `FormNavigate` | T origin | T origin | P origin | `null` |
 | `Image`, `Script` | None | None | None | None |
 
-The second table gives the `Origin` header. `sec-fetch-site` is computed from
-the page and every redirect, by the same rules for Chromium and Gecko
-profiles. `sec-fetch-user: ?1` goes only with `Navigate` and `FormNavigate`.
-A `referer` header you set wins over the computed value.
+`sec-fetch-site` is computed from the page and every redirect by the same rules
+for Chromium and Gecko profiles. `sec-fetch-user: ?1` goes only with `Navigate`
+and `FormNavigate`. An explicit `referer` header wins over the computed value.
 
 ## Keep the page with a tab
 
@@ -270,13 +276,9 @@ that page as its `from_page`, and each navigation sets the next page.
 | `submit_form(&form)` | A parsed `html::Form`, with its own method and action | Yes |
 | `fetch(method, url)` | A script request, `RequestKind::Xhr`; `.kind(..)` makes it an image or script | No |
 
-The page changes after each navigation response, 4xx and 5xx included, to
-the final URL after redirects. A transport error leaves it unchanged.
-Relative URLs resolve against the current page, or else the base URL. A
-`.stream()` navigation changes the page when the response head arrives.
-`page(url)` sets the page by hand. A `fetch` on
-a tab with no page fails with `Kind::Request` and sends nothing: open a page
-first.
+- Each navigation response (including `4xx`/`5xx`) updates the current page to the final URL after redirects; transport errors leave it unchanged.
+- Relative URLs resolve against the current page, or else the session `base_url`.
+- `page(url)` sets the current page manually. `fetch` on a tab with no current page fails with `Kind::Request` without sending anything.
 
 ```rust,no_run
 use leyline::profile::RequestKind;
@@ -302,31 +304,20 @@ of a page.
 | Call | Effect for this request |
 | --- | --- |
 | `proxy(url)` | Sends through this proxy |
-| `timeout(..)` | Overrides the session timeouts |
+| `timeout(..)` | Overrides `total`, `read`, `body`, `response_header`, and `error_body` (`connect` stays session-wide) |
 | `redirect(policy)` | Overrides the redirect policy; see [Redirects](redirects.md) |
 | `retry(policy)` | Overrides the retry policy |
-| `protocol(Protocol)` | Forces the HTTP version for this request and the redirects it follows, on the session's connection pool |
-| `label(text)` | Names the request in the trace summary and the `Log` line; see [Logging and tracing](logging.md) |
+| `protocol(Protocol)` | Forces the HTTP version for this request and its redirects on the session's pool |
+| `max_body_size(n_or_none)` | Overrides or removes (`None`) the decoded body cap |
+| `decode(bool)` | Turns automatic content decompression on or off |
+| `label(text)` | Names the request in the trace summary and `Log` output; see [Logging and tracing](logging.md) |
 
 To use another cookie jar for some requests, derive a session with
 `session.to_builder().cookies(jar).build()?`; see
 [Derive a session](sessions.md#derive-a-session).
 
-`timeout` takes a `Duration` or a `Timeout`. A `Duration` sets `total`,
-which bounds the request up to the head of a streamed response; set
-`Timeout::body` to bound a streamed body or a download. A
-`Timeout` sets `total`, `read`, `body`, and `response_header`; an unset
-field keeps the session value, and `None` turns that timeout off. `connect`
-is session-wide, because connections are pooled. See
-[Retries and timeouts](retries-and-timeouts.md).
-
-`protocol` takes a `Protocol`, such as `Protocol::Http1`. A version the
-server cannot speak fails the request: a forced HTTP/2 request to an
-HTTP/1.1 server fails with `Kind::Http2`. A request with a forced version
-does not read or fill the session's HTTP cache, and a WebSocket handshake
-follows it too. Requests forced to HTTP/1.1 keep and reuse their own
-connections to an `https` host, apart from the session's HTTP/2 connection
-to it.
+- **`timeout(..)`**: A `Duration` sets `total` (which ends at the response head for `.stream()`); a `Timeout` merges `total`, `read`, `body`, `response_header`, and `error_body` over the session defaults (`None` turns a timeout off). See [Retries and timeouts](retries-and-timeouts.md).
+- **`protocol(..)`**: A version the server cannot speak fails the request (for example, `Protocol::Http2` against an HTTP/1.1 server fails with `Kind::Http2`). Requests with a forced version bypass reading/filling the HTTP cache (unsafe writes still invalidate cached entries), and WebSocket handshakes honor it too. Forced HTTP/1.1 requests keep their own pooled connections apart from HTTP/2 connections to the same `https` host.
 
 ```rust,no_run
 use std::time::Duration;
@@ -350,7 +341,7 @@ let resp = session
     )
     .label("account-7")
     .send().await?;
-println!("{} cookies", guest.all().len());
+println!("{} cookies", guest.len());
 let legacy = session
     .get("https://example.com/legacy")
     .protocol(leyline::Protocol::Http1)
@@ -362,20 +353,9 @@ let legacy = session
 
 ## Read, change, or copy a request
 
-`RequestBuilder::build()?` converts a request into an `http::Request<Body>`
-without sending it. The result holds the absolute URL with the query, the
-headers you set on the request, the body, and the per-request options as
-typed extensions: `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`, and
-`Protocol`. The download options `sha256`, `progress`, and `resume` travel
-with it too. `build` returns the error a setter recorded, such as an invalid
-header.
-
-`Session::request_from(request)` turns an `http::Request<Body>` back into a
-`RequestBuilder`, so `.stream()`, `.send()`, and `.text()` work on it.
-
-`RequestBuilder::try_clone()` copies a request with every option, so you can
-send it more than once. It returns `None` when the body is a stream or a
-setter recorded an error.
+- `RequestBuilder::build()?` converts a request into an `http::Request<Body>` without sending it, carrying `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`, `Protocol`, and download options (`sha256`, `progress`, `resume`) as extensions. Download options are only valid with `download_to()` and fail with `Kind::Config` if sent with `send()`, `text()`, `bytes()`, `pages()`, `events()`, or `websocket()`.
+- `Session::request_from(request)` turns an `http::Request<Body>` back into a `RequestBuilder`.
+- `RequestBuilder::try_clone()` copies a buffered request and all its options (`None` for a stream body or recorded setter error).
 
 ```rust,no_run
 use leyline::http::HeaderValue;

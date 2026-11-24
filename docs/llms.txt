@@ -1,0 +1,69 @@
+# Leyline (`leyline-http`)
+
+> Async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust with sessions, crawling, resumable downloads, DNS-over-HTTPS (DoH) and TLS 1.3 ECH, proxies, and optional browser TLS profiles. Package: `leyline-http`. Library import: `leyline`. MSRV: Rust 1.96.
+
+## Core types
+
+- `Session`: owns the connection pool, cookie jar, cache, TLS context, and settings. Build once and clone across tasks. Plain client: `Session::new()`. Browser profile: `Session::from(Browser::default())` or `Session::builder().browser(Browser::Chrome158).build()?`.
+- `Tab`: browser-tab navigation (`open`, `follow`, `submit`, `submit_form`, `fetch`) tracking `Referer`, `Origin`, and `sec-fetch-*`.
+- `RequestBuilder`: per-request headers, body, timeouts, retry/redirect/proxy/protocol overrides, `.stream()`, `.pages()`, `.events()`, `.download_to(path)`, `.websocket()`, `.build()`, `.try_clone()`.
+- `Response`: status, headers, `text`, `json`, `bytes`, `bytes_stream`, `read_until`, `download_to`, `into_http`, `from_cache`, `remote_addr`, `ech_accepted`, `block`, `links`, timing, and audit headers/fingerprints.
+- `Error`: match on `err.kind()` (`Kind`, 19 variants) or predicates (`is_connect`, `is_proxy`, `is_retryable`, `is_timeout`, `is_shut_down`, `is_profile_changed`). Construct custom hook errors with `Error::request(cause)`.
+
+## Module layout
+
+- Crate root `leyline`: `Session`, `SessionBuilder`, `Tab`, `RequestBuilder`, `Response`, `Body`, `Error`, `Kind`, `Result`, `Browser`, `Platform`, `Protocol`, `Proxy`, `Redirect`, `Retry`, `Timeout`, `Attempt`, `Block`, `HostLimits`, `Link`, `Stats`, `Tls`, `TlsVersion`, `Resolver`, `WebSocket`, `Message`, `Bytes`, `Url`, `http`, `get`, `redact_url`.
+- `leyline::blocking`: `Session` (`SessionBuilder::build_blocking()`) for synchronous callers outside Tokio.
+- `leyline::cookie`: `Jar`, `Cookie`, `CookieBuilder`, `SameSite`.
+- `leyline::crawl`: `Robots`, `RobotsSource`, `Purpose`; with feature `html`: `Crawl`, `Page`, `Respect`, `Scope`, `SkipReason`.
+- `leyline::html` (feature `html`): HTML link, form, and metadata extraction.
+- `leyline::multipart` (default feature `multipart`): `Form`, `Part`.
+- `leyline::profile`: `RequestKind`, `HeaderPosition`, `Encoding`, `TcpProfile`, `Fingerprint`.
+- `leyline::sse`: `Events`, `Event`.
+- `leyline::trace`: `Trace`, `Event`, `Log`, `Metrics`.
+- `leyline::testing` (feature `test-util`): `Server`, `Request`, `Response`, `queue`.
+
+## Rules that prevent mistakes
+
+- Pin a browser variant such as `Browser::Chrome158` when fingerprints must not change across releases; `Browser::default()` advances to the newest Chrome.
+- `4xx`/`5xx` responses are `Ok` until `.error_for_status()` is called on the request or response (`Kind::Status`).
+- JSON parse/serialize errors are `Kind::Json`, not `Kind::Decode`.
+- `RequestBuilder::timeout(Duration)` sets `Timeout::total`, which stops at the response head for `.stream()` requests; use `Timeout::new().body(...)` and `.read(...)` for streamed bodies and downloads.
+- `max_body_size` (100 MiB default) applies to both buffered and `.stream()` responses; pass `None` to remove the cap.
+- `RequestBuilder::download_to(path)` supports `.retry(n)`, `.sha256(...)`, `.progress(...)`, and strong-ETag resume; those options fail with `Kind::Config` on `send()`/`text()`/`bytes()`/`pages()`/`events()`/`websocket()`.
+- Setting `user_agent` on the session or a `user-agent` header on a request drops browser `sec-ch-ua*` client hints automatically.
+- `Proxy` scheme rules (`http`, `https`) take precedence over `all` regardless of call order; `no_proxy` matching is port-aware (`host:port`, `[::1]:8080`).
+
+## Guide pages
+
+- [Introduction](https://manaforged.github.io/leyline-http/index.html): Plain vs browser sessions and guide map.
+- [Quick start](https://manaforged.github.io/leyline-http/guide/quick-start.html): Dependency setup, GET/POST, JSON, status errors, downloads.
+- [API clients](https://manaforged.github.io/leyline-http/guide/api-clients.html): `base_url`, `bearer_auth`, rate-limit retries, `pages()`, HTTP cache, `refresh_token`.
+- [Sessions](https://manaforged.github.io/leyline-http/guide/sessions.html): Auth scoping, `before_send`, `cookies(None)`, `build_blocking`, `to_builder`, `shutdown`, `save`/`load`.
+- [Choosing a profile](https://manaforged.github.io/leyline-http/guide/choosing-a-profile.html): Browser families, platforms, stability, JA4 labels.
+- [Requests](https://manaforged.github.io/leyline-http/guide/requests.html): Methods, headers, `Body::file`, multipart, `RequestKind`, `Tab`, `protocol`, `build`/`request_from`/`execute`.
+- [Responses](https://manaforged.github.io/leyline-http/guide/responses.html): Status, headers, `relay_headers`, `Link` pagination, body caps, `from_cache`, `ech_accepted`, `into_http`.
+- [Streaming](https://manaforged.github.io/leyline-http/guide/streaming.html): `Body::stream`, `bytes_stream`, `StreamReader`, resumable `download_to`, `read_until`, SSE (`leyline::sse`).
+- [Cancellation](https://manaforged.github.io/leyline-http/guide/cancellation.html): Wire behavior when dropping requests, streams, or downloads.
+- [Redirects](https://manaforged.github.io/leyline-http/guide/redirects.html): `Redirect` limits, credential/body-header stripping, custom policies.
+- [Retries and timeouts](https://manaforged.github.io/leyline-http/guide/retries-and-timeouts.html): `Retry` policies, `budget`, `wait_header`, idempotency, and all 6 `Timeout` fields.
+- [Errors](https://manaforged.github.io/leyline-http/guide/errors.html): Complete 19-variant `Kind` table, `gateway_status()`, 6 predicates, `Error::request`, `Error::find`.
+- [Proxies](https://manaforged.github.io/leyline-http/guide/proxies.html): HTTP/HTTPS/SOCKS5 proxies, custom headers, port-aware `no_proxy`, env discovery, `Proxy::list`, `Proxy::identified`, `Proxy::custom`.
+- [Crawling](https://manaforged.github.io/leyline-http/guide/crawling.html): `Session::crawl`, `robots.txt`, `HostLimits`, `Block`, `SkipReason`, checkpoints.
+- [Cookies](https://manaforged.github.io/leyline-http/guide/cookies.html): `Jar`, `Cookie::parse`, `CookieBuilder`, `cookies(None)`, persistence.
+- [Accounts](https://manaforged.github.io/leyline-http/guide/accounts.html): `Tab` sessions, `Session::save`/`load`, `autosave`, TLS/HSTS/Alt-Svc state.
+- [WebSocket](https://manaforged.github.io/leyline-http/guide/websocket.html): HTTP/2 extended `CONNECT` and HTTP/1.1 upgrades, `version`/`headers`/`header`, tuning.
+- [HTTP/3](https://manaforged.github.io/leyline-http/guide/http3.html): `http3` feature, `Protocol::Race` vs `Auto`, per-request `.protocol(...)`.
+- [TLS trust](https://manaforged.github.io/leyline-http/guide/tls-trust.html): `Tls` setters (`ca_file`, `ca_der`, `ca_pem`, pins, PEM/PKCS#12 mTLS, ECH, `min_version`).
+- [Network](https://manaforged.github.io/leyline-http/guide/network.html): DNS overrides, DoH, Happy Eyeballs, `unix_socket`, `interface`, `TcpProfile`, pool tuning, HSTS.
+- [Logging and tracing](https://manaforged.github.io/leyline-http/guide/logging.html): `tracing` targets, `trace::Log`, `trace::Metrics`, `Trace::event`.
+- [Service integration](https://manaforged.github.io/leyline-http/guide/service-integration.html): `tower::Service`, `http` interop, shared sessions, gateway status mapping.
+- [Throughput](https://manaforged.github.io/leyline-http/guide/throughput.html): Default async vs `run_per_core` vs `build_blocking`, Tokio tuning, allocators.
+- [Testing](https://manaforged.github.io/leyline-http/guide/testing.html): `testing::Server` (`http`, `https`, `http_on`, `https_on`), `queue`, wire assertions.
+- [Fingerprints](https://manaforged.github.io/leyline-http/guide/fingerprints.html): TLS, HTTP/2, HTTP/3, `TcpProfile::from_ja4t`, live session auditing (`akamai()`).
+- [Cargo features and linking](https://manaforged.github.io/leyline-http/guide/features-and-targets.html): Default and optional features, dependency implications.
+- [Supported platforms](https://manaforged.github.io/leyline-http/guide/platforms.html): Targets, build prerequisites, `LEYLINE_BSSL_*` env vars.
+- [Profile reference](https://manaforged.github.io/leyline-http/guide/profiles.html): Bundled profiles, stability, custom TOML profiles.
+- [MSRV](https://manaforged.github.io/leyline-http/guide/msrv.html): Rust 1.96 MSRV and edition policy.
+- [API reference (docs.rs)](https://docs.rs/leyline-http): Full rustdoc for every public item.
+- [Repository AGENTS.md](https://github.com/manaforged/leyline-http/blob/main/AGENTS.md): Concise coding-agent cheat sheet.

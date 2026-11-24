@@ -1,18 +1,39 @@
 # TLS trust
 
-Leyline verifies every server certificate. All trust settings live in one
-`Tls` that you pass to `SessionBuilder::tls`: the roots, the
-pins, the client certificate, and the TLS version floor. The browser profile
-decides what the ClientHello looks like; trust settings decide which
-certificates the session accepts.
+Leyline verifies every server certificate by default. All trust settings live
+in one `Tls` value passed to `SessionBuilder::tls`. The browser profile sets
+what the ClientHello looks like; `Tls` decides which certificates, client
+identities, ECH configs, and TLS versions the session accepts.
+
+## `Tls` setters at a glance
+
+| Setter | Default | Effect |
+| --- | --- | --- |
+| `system_roots(bool)` | `true` | Trust the OS certificate store |
+| `env_roots(bool)` | `true` | Trust `SSL_CERT_FILE` and `SSL_CERT_DIR` when set |
+| `ca_file(path)` | none | Add CA certificates from a PEM file |
+| `ca_pem(bytes)` | none | Add CA certificates from in-memory PEM bytes |
+| `ca_der(bytes)` | none | Add one CA certificate from DER bytes |
+| `pin_cert_sha256([u8; 32])` | none | Require the verified leaf certificate's DER SHA-256 to match a pin |
+| `client_cert(cert_path, key_path)` | none | Mutual TLS from PEM files (leaf-first chain + unencrypted key) |
+| `client_cert_pem(chain, key)` | none | Mutual TLS from in-memory PEM bytes |
+| `client_cert_pkcs12(der, password)` | none | Mutual TLS from a DER PKCS#12 archive |
+| `ech(bool)` | `false` | Fetch RFC 9460 `HTTPS`/SVCB records via DoH or custom resolver for ECH |
+| `ech_config_list(bytes)` | none | Use a raw RFC 9460 `ECHConfigList` (takes precedence over `ech(true)`) |
+| `min_version(TlsVersion)` | `Tls10` | Minimum TLS version floor (`Tls10`, `Tls12`, or `Tls13`) |
+| `danger_accept_invalid_hostnames(bool)` | `false` | Skip hostname matching while keeping CA and pin checks |
+| `danger_accept_invalid_certs(bool)` | `false` | Accept any server certificate (skips CA, pins, and resumption) |
+
+`Tls` is a `Clone` value; calling `SessionBuilder::tls` replaces the previous
+`Tls` config, so combine all trust settings in one value. Unreadable files or
+invalid certificates fail `build()` with `Kind::Config`.
 
 ## Choose the roots
 
-By default a session trusts the system trust store and the files named by
-`SSL_CERT_FILE` and `SSL_CERT_DIR` when they are set. `ca_file` adds a
-PEM file and `ca_der` adds the DER bytes of one certificate; both add to
-the default roots. `build()` reads each file and fails when one is missing or not valid PEM. Turn a default source off with `system_roots(false)` or
-`env_roots(false)`. With both off, the session trusts only the roots you add.
+By default a session trusts the system store and `SSL_CERT_FILE` /
+`SSL_CERT_DIR`. `ca_file`, `ca_pem`, and `ca_der` add roots on top of the
+defaults; turn defaults off with `system_roots(false)` and `env_roots(false)`
+to trust only the roots you supply.
 
 ```rust,no_run
 use leyline::{Browser, Session, Tls};
@@ -23,36 +44,26 @@ let trust = Tls::new()
     .system_roots(false)
     .ca_file("/etc/myorg/ca.pem");
 
+let api = Session::builder().tls(trust.clone()).build()?;
 let chrome = Session::builder()
-    .browser(Browser::default())
-    .tls(trust.clone())
-    .build()?;
-let firefox = Session::builder()
-    .browser(Browser::firefox())
+    .browser(Browser::Chrome158)
     .tls(trust)
     .build()?;
-# let _ = (chrome, firefox);
+# let _ = (api, chrome);
 # Ok(())
 # }
 ```
 
-`Tls` is a value: build it once and pass a clone to each builder.
-`tls` replaces the builder's trust settings, so put every setting in
-one config. A file or certificate that cannot be parsed fails with
-`Kind::Config`.
-
 ## Pin a certificate
 
 `pin_cert_sha256` takes the SHA-256 digest of the server's whole leaf
-certificate in DER form. It is a certificate pin, not a public-key pin: a
-digest of the certificate's public key does not match. The handshake succeeds
-only when the chain verifies and the leaf matches a pin. A pin adds no root.
+certificate in DER form (not a public-key pin). The handshake succeeds only
+when the chain verifies **and** the leaf matches a pin; a pin adds no root.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let pin: [u8; 32] = [0; 32];
 let session = leyline::Session::builder()
-    .browser(leyline::Browser::default())
     .tls(leyline::Tls::new().pin_cert_sha256(pin))
     .build()?;
 # let _ = session;
@@ -60,70 +71,44 @@ let session = leyline::Session::builder()
 # }
 ```
 
-Pins apply to every host the session contacts, so give a pinned host its own
-session. Add a pin for each certificate you expect, including the next one
-before a rotation. To read the digest of a live certificate, hash the DER
-bytes that `Response::peer_certificate()` returns.
-
-A saved TLS session resumes only in a session that loaded the same pins,
-roots, and client certificate, compared by content; any other session makes a
-full handshake.
-
-A pin failure is a `Kind::Tls` error.
-With `Protocol::Http3` it is a `Kind::Http3` error with a message and
-no source.
+- Pins apply to every host the session contacts, so give a pinned host its own session and include the next rotation pin before cutover. Hash `Response::peer_certificate()` to inspect a live leaf's DER digest.
+- A saved TLS session resumes only when loaded into a session with matching roots, pins, and client certificate.
+- A pin failure is `Kind::Tls` across HTTP/1.1, HTTP/2, and HTTP/3.
 
 ## Present a client certificate
 
-For mutual TLS, give `client_cert` two PEM files: the certificate chain, leaf
-first, and its unencrypted private key.
-
-```rust,no_run
-# fn run() -> leyline::Result<()> {
-let session = leyline::Session::builder()
-    .browser(leyline::Browser::default())
-    .tls(
-        leyline::Tls::new()
-            .client_cert("/etc/myorg/client.pem", "/etc/myorg/client.key"),
-    )
-    .build()?;
-# let _ = session;
-# Ok(())
-# }
-```
-
-When the certificate comes from a secret store and not from disk, give
-`client_cert_pem` the same two PEM documents as bytes in memory, or give
-`client_cert_pkcs12` a DER-encoded PKCS#12 archive and its password. Either
-replaces any earlier client certificate, and `Debug` output never prints the
-key bytes or password.
+For mutual TLS, pass PEM files to `client_cert(chain_path, key_path)`,
+in-memory PEM bytes to `client_cert_pem(chain_pem, key_pem)`, or a DER PKCS#12
+archive and password to `client_cert_pkcs12(der, password)`. Each call replaces
+any earlier client certificate, and `Debug` output never prints key bytes or
+passwords.
 
 ```rust,no_run
 # fn run(chain_pem: Vec<u8>, key_pem: Vec<u8>, p12_der: Vec<u8>) -> leyline::Result<()> {
-let pem_session = leyline::Session::builder()
-    .browser(leyline::Browser::default())
+let from_files = leyline::Session::builder()
+    .tls(leyline::Tls::new().client_cert("/etc/myorg/client.pem", "/etc/myorg/client.key"))
+    .build()?;
+let from_pem = leyline::Session::builder()
     .tls(leyline::Tls::new().client_cert_pem(chain_pem, key_pem))
     .build()?;
-let p12_session = leyline::Session::builder()
-    .browser(leyline::Browser::default())
+let from_p12 = leyline::Session::builder()
     .tls(leyline::Tls::new().client_cert_pkcs12(p12_der, "archive-password"))
     .build()?;
-# let _ = (pem_session, p12_session);
+# let _ = (from_files, from_pem, from_p12);
 # Ok(())
 # }
 ```
 
-A session with pins or a client certificate cannot use an `https://` proxy.
-A request through one fails with `Kind::Proxy`.
+A session with pins or a client certificate cannot use an `https://` proxy
+(requests fail with `Kind::Proxy`; see [Proxies](proxies.md#socks5-and-https-proxies)).
 
 ## Encrypt SNI with ECH
 
-Pass a raw RFC 9460 `ECHConfigList` to `Tls::ech_config_list` to encrypt the
-TLS 1.3 ClientHello SNI. If the server rejects a stale config and supplies
-fresh `retry_configs`, Leyline retries once automatically. To fetch `HTTPS`
-records automatically through a DoH or custom resolver, pair
-`SessionBuilder::doh` with `Tls::new().ech(true)`. `Response::ech_accepted()`
-reports whether ECH succeeded on the connection.
+Pass a raw RFC 9460 `ECHConfigList` to `Tls::ech_config_list`, or pair
+`SessionBuilder::doh` (or a custom `Resolver::resolve_ech`) with
+`Tls::new().ech(true)` to encrypt the TLS 1.3 ClientHello SNI. If a server
+rejects a stale config and sends `retry_configs`, Leyline retries once
+automatically. `Response::ech_accepted()` reports whether ECH succeeded.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -136,46 +121,37 @@ let session = leyline::Session::builder()
 # }
 ```
 
+- `ech_config_list` takes precedence over `ech(true)` when both are set.
+- ECH works over TCP (HTTP/1.1, HTTP/2), HTTP/3, and proxies; it is skipped on `unix_socket` connections.
+
 ## Set a TLS version floor
 
-`min_version(TlsVersion::Tls12)` refuses TLS 1.0 and 1.1, and `min_version(TlsVersion::Tls13)` refuses everything
-below TLS 1.3. Without it, the floor is TLS 1.0. The handshake minimum is
-the higher of the profile's minimum and the floor. A profile that declares no minimum starts at TLS 1.2.
+`min_version` accepts `TlsVersion::Tls10` (default), `TlsVersion::Tls12`, or
+`TlsVersion::Tls13`. The handshake minimum is the higher of the profile's
+minimum and the floor (a profile with no minimum starts at TLS 1.2).
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
 let session = leyline::Session::builder()
     .browser(leyline::Browser::Safari18).platform(leyline::Platform::MacOS)
-    .tls(
-        leyline::Tls::new().min_version(leyline::TlsVersion::Tls12),
-    )
+    .tls(leyline::Tls::new().min_version(leyline::TlsVersion::Tls12))
     .build()?;
 # let _ = session;
 # Ok(())
 # }
 ```
 
-A floor above the profile's minimum changes the ClientHello, so the session
-no longer matches its browser profile:
-
-- Some Safari and CFNetwork profiles declare a TLS 1.0 minimum. A `Tls12`
-  floor removes TLS 1.0 and 1.1 from `supported_versions`.
-- A `Tls13` floor removes TLS 1.2 from `supported_versions` in every
-  profile, with the TLS 1.2 cipher suites and the extensions only TLS 1.2
-  and earlier use.
-
-A server that cannot meet the floor fails the handshake with `Kind::Tls`;
-an `https://` proxy that cannot meet it fails with `Kind::Proxy`.
-`Response::tls_version()` reports the negotiated version. HTTP/3 always
-uses TLS 1.3, so the floor does not change a QUIC handshake.
+Raising the floor above a profile's minimum alters its ClientHello (for example,
+removing TLS 1.0/1.1 from Safari/CFNetwork profiles or stripping TLS 1.2 cipher
+suites and extensions under `Tls13`). A server that cannot meet the floor fails
+with `Kind::Tls` (`Kind::Proxy` for an `https://` proxy). HTTP/3 always uses
+TLS 1.3.
 
 ## Turn verification off
 
-`danger_accept_invalid_hostnames(true)` skips only hostname matching while
-continuing to verify the CA trust chain and any leaf pins.
-`danger_accept_invalid_certs(true)` accepts any server certificate across
-HTTP/1.1, HTTP/2, and HTTP/3, skipping pin checks and TLS session resumption.
-Use either option against controlled or local servers only.
+- `danger_accept_invalid_hostnames(true)` skips hostname matching while still verifying CA roots and leaf pins.
+- `danger_accept_invalid_certs(true)` accepts any server certificate across HTTP/1.1, HTTP/2, and HTTP/3, skipping pins and TLS session resumption.
+- Both options disable HSTS recording (see [Network](network.md#hsts)). Use them against controlled or local servers only.
 
 ## Next
 

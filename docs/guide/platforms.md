@@ -29,30 +29,18 @@ build can claim Windows or macOS. See
 
 ## Build BoringSSL
 
-The build compiles the BoringSSL source that ships in `leyline-bssl-sys`.
-`LEYLINE_BSSL_SOURCE_PATH` points the build at another BoringSSL source tree.
-The build applies Leyline's patches to that tree in place.
+By default, `leyline-bssl-sys` compiles the BoringSSL source shipped in the
+crate. Any `LEYLINE_BSSL_*` variable also accepts a target-specific suffix
+(`LEYLINE_BSSL_*_<TARGET>`).
 
-`LEYLINE_BSSL_PATH` links a BoringSSL that you built yourself. The build
-applies no patches to it, so it must carry Leyline's patches and be built
-with `-DBORINGSSL_PREFIX=LEYLINE`.
-
-Other variables:
-
-- `LEYLINE_BSSL_ASSUME_PATCHED` skips the patches for a tree that already
-  carries them. It needs `LEYLINE_BSSL_PATH` or `LEYLINE_BSSL_SOURCE_PATH`.
-- `LEYLINE_BSSL_RUST_CPPLIB` replaces the C++ standard library that the
-  build links: by default `c++` on macOS and none on Windows. On Linux the
-  build links none when a trial link of the BoringSSL archives succeeds
-  without one, and `stdc++` otherwise.
-- `LEYLINE_BSSL_SYSROOT` gives `bindgen` a sysroot when the `bindgen`
-  feature is on.
-
-The committed bindings match the headers that ship in `leyline-bssl-sys`.
-`LEYLINE_BSSL_INCLUDE_PATH` needs the `bindgen` feature of
-`leyline-bssl-sys`; without it the build stops with an error. When
-`LEYLINE_BSSL_PATH` links a BoringSSL whose headers differ, turn on the
-`bindgen` feature too.
+| Variable | Purpose | Notes |
+| --- | --- | --- |
+| `LEYLINE_BSSL_SOURCE_PATH` | Compile an alternate BoringSSL source tree | Applies Leyline's patches in place; requires NASM on Windows |
+| `LEYLINE_BSSL_PATH` | Link a prebuilt BoringSSL | Applies no patches; must carry Leyline's patches and `-DBORINGSSL_PREFIX=LEYLINE` (enable `bindgen` if headers differ) |
+| `LEYLINE_BSSL_ASSUME_PATCHED` | Skip `git apply` for an already-patched tree | Requires `LEYLINE_BSSL_PATH` or `LEYLINE_BSSL_SOURCE_PATH` |
+| `LEYLINE_BSSL_RUST_CPPLIB` | Override C++ standard library link | Default: `c++` on macOS, none on Windows, none on Linux when trial link passes (else `stdc++`) |
+| `LEYLINE_BSSL_INCLUDE_PATH` | Custom header path for `bindgen` | Requires the `bindgen` feature of `leyline-bssl-sys` |
+| `LEYLINE_BSSL_SYSROOT` | Sysroot passed to `bindgen` | Used when the `bindgen` feature is enabled |
 
 The build needs:
 
@@ -106,8 +94,9 @@ ships.
    ```
 
 The build finds `<arch>-linux-musl-gcc` and `<arch>-linux-musl-g++` on
-`PATH`; set `CC_<target>` and `CXX_<target>` to use another compiler. The
-musl `libstdc++` links statically.
+`PATH`; set `CC_<target>` and `CXX_<target>` to use another compiler. By
+default the Linux trial link drops `libstdc++`; when a fallback or
+`LEYLINE_BSSL_RUST_CPPLIB=stdc++` links it, musl links it statically.
 
 ## Next
 

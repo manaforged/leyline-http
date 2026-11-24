@@ -27,8 +27,30 @@ OS applies what it can:
 Every OS sets `TCP_NODELAY` when the profile asks for it. The SYN option
 order in `options` is chosen by the kernel and cannot be set from a socket,
 so only the audit's JA4T reads it. `platforms.toml` has rows for Windows,
-macOS, Linux, and iOS. Android has none, so its `TcpProfile` is empty and the
-kernel defaults apply.
+macOS, Linux, and iOS; Android leaves `TcpProfile` empty and uses kernel
+defaults.
+
+### Customize `TcpProfile`
+
+Construct a custom `leyline::profile::TcpProfile` from a JA4T string with
+`TcpProfile::from_ja4t`, from TOML via `FromStr`, or programmatically with
+`TcpProfile::new()`. Inspect fields with `ja4t()`, `ttl()`, `mss()`,
+`window_size()`, `window_scale()`, `df()`, and `nodelay()`. Unknown TOML keys
+or out-of-range values return an error.
+
+```rust,no_run
+use leyline::Session;
+use leyline::profile::TcpProfile;
+
+# fn run() -> Result<(), Box<dyn std::error::Error>> {
+let from_ja4t = TcpProfile::from_ja4t("64240_2-4-8-1-3_1380_10")?;
+let from_toml: TcpProfile = "ttl = 64\nmss = 1380\ndf = true".parse()?;
+let session = Session::builder().tcp_profile(from_ja4t).build()?;
+println!("{} ttl={:?}", from_toml.ja4t(), from_toml.ttl());
+# drop(session);
+# Ok(())
+# }
+```
 
 ## Audit a session
 
@@ -40,7 +62,7 @@ use leyline::{Browser, Platform, Session};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::Chrome152).platform(Platform::Linux)
+    .browser(Browser::Chrome158).platform(Platform::Linux)
     .audit(true)
     .build()?;
 
@@ -115,7 +137,7 @@ of a new name.
 | `referer` | Safe. `RequestBuilder::from_page` is better: it also sets `origin` and `sec-fetch-site` |
 | `authorization`, `content-type`, application headers such as `x-api-key` | Safe |
 | `cookie` | Safe. The jar adds no cookies to that request |
-| `user-agent` | Changes the fingerprint. A session `user-agent` drops the profile's `sec-ch-ua*` hints, so the two never name different browsers |
+| `user-agent` | Changes the fingerprint. Setting `user-agent` on the session or on one request drops the profile's `sec-ch-ua*` hints unless explicitly set, so the two never disagree |
 | `sec-ch-ua*`, `accept-encoding`, header order | Changes the fingerprint |
 | `accept` | Changes the fingerprint on a navigation. See [Set accept on a script request](#set-accept-on-a-script-request) |
 | `sec-fetch-*` | Your value replaces the computed one. Use `kind` and `from_page` instead |
@@ -124,8 +146,8 @@ of a new name.
 
 ### Set accept on a script request
 
-Keep the profile's `accept` on `open`, `follow`, and the navigation presets.
-A page script sets its own `accept` on a `fetch()` or an XHR, for example
+Keep the profile's `accept` on `open`, `follow`, and the navigation request
+kinds. A page script sets its own `accept` on a `fetch()` or an XHR, for example
 `application/json`. The `Xhr` kind sends what a `fetch()` without an
 explicit `accept` sends. When the site's script sets one, set the same value:
 the browser sends it too, so the fingerprint does not change.
@@ -147,8 +169,8 @@ let cart = tab
 ## Mix the hello and the headers
 
 A browser session sends two browsers and a platform. The hello browser
-supplies the ClientHello, the HTTP/2 and HTTP/3 settings, and the `ja3`,
-`ja4`, and `h2_fingerprint` audit values. The header browser supplies the
+supplies the ClientHello, the HTTP/2 and HTTP/3 settings, and the `ja3()`,
+`ja4()`, and `akamai()` audit values. The header browser supplies the
 `User-Agent`, `sec-ch-ua`, `Accept-Language`, the header shape, and the
 header order. The platform selects the OS that the `User-Agent` names, the
 HTTP/2 platform overrides, and the `TcpProfile`.
@@ -171,20 +193,20 @@ another version; its `[meta]` table names that version in `hello`.
 
 ### Set the browser and platform
 
-This session sends the headers of Chrome 154 on Linux over the ClientHello,
-HTTP/2 settings, and HTTP/3 settings of Chrome 152:
+This session sends the headers of Chrome 158 on Linux over the ClientHello,
+HTTP/2 settings, and HTTP/3 settings of Chrome 157:
 
 ```rust,no_run
 use leyline::{Browser, Platform, Session};
 
 # fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::Chrome154)
+    .browser(Browser::Chrome158)
     .platform(Platform::Linux)
-    .hello(Browser::Chrome152)
+    .hello(Browser::Chrome157)
     .build()?;
-assert_eq!(session.browser(), Some(Browser::Chrome154));
-assert_eq!(session.hello(), Some(Browser::Chrome152));
+assert_eq!(session.browser(), Some(Browser::Chrome158));
+assert_eq!(session.hello(), Some(Browser::Chrome157));
 # Ok(())
 # }
 ```
@@ -195,23 +217,13 @@ for the platform, for example Safari 26 on Windows. A session built with
 
 ### Change the browser of a session
 
-`session.to_builder().browser(b).build()` derives a session that sends
-another browser; the parent keeps its own. `hello` and `platform` work on
-the derived builder as they do on `Session::builder()`. The derived session
-takes the ClientHello, the HTTP/2 and HTTP/3 settings, the headers, and the
-audit values from the new setters.
-
-| Part | In the derived session |
-| --- | --- |
-| Connection pool | Shared with the parent, in its own partition, so connections never cross identities |
-| HSTS store and `Alt-Svc` knowledge | Shared with the parent |
-| TLS session cache | Its own, empty |
-| Cookie jar | The parent's. Give it another with `to_builder().cookies` |
-| Proxy, timeouts, `TcpProfile`, other settings | Kept |
-
-A `user-agent` header from `SessionBuilder::headers` still replaces the
-browser's `User-Agent`. `Session::browser()`, `hello()`, and `platform()`
-report what the derived session sends. See [Sessions](sessions.md#derive-a-session).
+`session.to_builder().browser(b).build()` derives a session that sends another
+browser (leaving the parent unchanged) in its own partition of the shared
+connection pool with a fresh TLS session cache; see
+[Derive a session](sessions.md#derive-a-session) for the full sharing table.
+A `user-agent` from `SessionBuilder::user_agent` or `SessionBuilder::headers`
+still replaces the browser's `User-Agent`. `Session::browser()`, `hello()`,
+and `platform()` report the resolved identity.
 
 ```rust,no_run
 use leyline::{Browser, Platform, Session};
@@ -245,8 +257,8 @@ let switched = session.to_builder().browser(Browser::firefox()).build()?;
 
 ## Read and test the bundled profiles
 
-A variant such as `Browser::Chrome152` names a bundled browser, and
-`profiles/chrome/152.toml` in the repository holds its profile.
+A variant such as `Browser::Chrome158` names a bundled browser, and
+`crates/leyline/profiles/chrome/158.toml` in the repository holds its profile.
 `Session::profile()` returns the profile TOML a session uses. The
 [profile reference](profiles.md) lists what ships and how to load your own.
 
@@ -254,7 +266,7 @@ A variant such as `Browser::Chrome152` names a bundled browser, and
 use leyline::{Browser, Session};
 
 # fn main() -> leyline::Result<()> {
-let session = Session::builder().browser(Browser::Chrome152).build()?;
+let session = Session::builder().browser(Browser::Chrome158).build()?;
 let toml = session.profile().expect("bundled profile");
 assert!(toml.contains("[tls]"));
 # Ok(())

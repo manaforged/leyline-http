@@ -34,8 +34,9 @@ no host with `Kind::Config`. A URL given to a request or a WebSocket is
 validated when a request picks it, and an invalid one fails that `send()`
 with `Kind::Config`.
 
-`Session::proxy()` returns the session proxy with the password replaced by
-`***`. `Debug` of `Proxy` and `Session` hides it the same way.
+`Session::proxy()` returns `Option<&Url>` with the password replaced by `***`
+(`None` for `Proxy::list`, `Proxy::identified`, and `Proxy::custom`). `Debug`
+of `Proxy` and `Session` masks credentials the same way.
 
 ## SOCKS5 and HTTPS proxies
 
@@ -61,11 +62,12 @@ combination, and every request routed through the `https://` proxy fails with
 
 ## Rules per scheme
 
-`Proxy` holds a list of proxy rules. `all(url)` applies to every
-scheme, `http(url)` to `http` only, and `https(url)` to `https` only. The
-first matching rule wins, in the order you added them. A `wss://` WebSocket URL matches as
-`https://`; a `ws://` URL fails with `Kind::Request` before any proxy is
-chosen. See [WebSocket](websocket.md).
+`Proxy` holds per-scheme proxy rules: `http(url)` for `http://`, `https(url)`
+for `https://`, and `all(url)` as the fallback for both. Scheme-specific rules
+(`http`/`https`) take precedence over `all` regardless of call order, and
+calling a setter again replaces that scheme's rule. A `wss://` WebSocket URL
+matches as `https://`; a `ws://` URL fails with `Kind::Request` before any
+proxy is chosen. See [WebSocket](websocket.md).
 
 ```rust,no_run
 use leyline::{Proxy, Session};
@@ -82,13 +84,14 @@ let session = Session::builder().proxy(proxies).build()?;
 
 ## Custom proxy headers
 
-`Proxy::header` and `Proxy::headers` attach extra headers to both plain-HTTP
-proxy requests and `CONNECT` tunnel handshakes (such as sticky-session routing
-tags or a custom `Proxy-Authorization` header that overrides URL userinfo).
-Header values are redacted in `Debug` output, and framing headers (`host`,
-`content-length`, `transfer-encoding`) are rejected at `build()`. Proxy headers
-are not written by `Session::save`, so proxy credentials never land on disk;
-re-apply them on the loaded builder when needed.
+`Proxy::header` and `Proxy::headers` attach extra headers to plain-HTTP proxy
+requests and `CONNECT` tunnel handshakes (HTTP/HTTPS proxies only, not SOCKS5),
+for example sticky-session tags or a custom `Proxy-Authorization` header that
+overrides URL userinfo:
+
+- Header values are redacted in `Debug` output.
+- Invalid or framing headers (`host`, `content-length`, `transfer-encoding`) fail `build()` (or `send()` for per-request proxies) with `Kind::Config`.
+- Proxy headers are not written by `Session::save`, so credentials never land on disk; re-apply them on the loaded builder when needed.
 
 ```rust,no_run
 use leyline::{Proxy, Session};
@@ -104,38 +107,37 @@ let session = Session::builder().proxy(proxy).build()?;
 
 ## Bypass with NO_PROXY
 
-`Proxy::no_proxy(patterns)` lists the hosts that must not go through a
-proxy.
+`Proxy::no_proxy(patterns)` lists hosts (and optional ports) that must go
+direct.
 
 ```rust
 use leyline::Proxy;
 
 let proxies = Proxy::new()
     .all("http://proxy.example:8080")
-    .no_proxy(["localhost", ".internal.example", "192.0.2.1"]);
+    .no_proxy(["localhost", ".internal.example", "192.0.2.1", "[::1]:8080"]);
 # let _ = proxies;
 ```
 
-A pattern matches the host and every subdomain of it. A leading dot is
-optional, a trailing `:port` is stripped, and `*` matches every host.
-Matching ignores case and a trailing dot on the host.
-
-The bypass list applies when you set it with `Proxy::no_proxy`, and
-when the session proxy came from the environment. A per-request `proxy()`
-replaces the session config, bypass list included.
+- A pattern matches the host and every subdomain of it; a leading dot is optional, `*` matches every host, and matching ignores case and a trailing dot.
+- A trailing `:port` (including bracketed IPv6 such as `[::1]:8080`) restricts the bypass to that port (matched against the URL's explicit or default scheme port).
+- The bypass list applies when set via `Proxy::no_proxy` or environment discovery. A per-request `proxy()` replaces the session proxy config, bypass list included.
 
 ## Environment discovery
 
-A session with no explicit proxy reads the environment once, when it is
-built. It takes the first non-empty value of `HTTPS_PROXY`, `https_proxy`,
-`HTTP_PROXY`, `http_proxy`, `ALL_PROXY`, `all_proxy`, and applies it to every
-URL scheme. `NO_PROXY` or `no_proxy` seeds the bypass list.
+A session with no explicit proxy reads environment variables once at build time:
 
-A value that is not a valid proxy URL never falls back to a direct
-connection. A valid value has a scheme of `http`, `https`, `socks5`, or
-`socks5h` (the last two only with the `socks` feature) and a host, so
-`proxy.example:8080` is invalid. Leyline checks only the value it picked and
-does not try a lower variable. The error names the variable, never the value.
+| Variables (first non-empty wins) | Applies to |
+| --- | --- |
+| `HTTPS_PROXY`, `https_proxy` | `https://` and `wss://` URLs |
+| `HTTP_PROXY`, `http_proxy` | `http://` URLs |
+| `ALL_PROXY`, `all_proxy` | Fallback when `https` or `http` is unset (skipped if both are set) |
+| `NO_PROXY`, `no_proxy` | Bypass list (`no_proxy`) |
+
+Every selected variable must be a valid URL with a host and one of `http`,
+`https`, `socks5`, or `socks5h` (the last two require the `socks` feature);
+bare `proxy.example:8080` is rejected. Invalid values never fall back to direct
+connections, and the error names the variable, never its value:
 
 - `SessionBuilder::build()` returns `Kind::Config`.
 - `Session::new()` and `Session::from(..)` return a session in which every
@@ -255,15 +257,10 @@ let session = Session::builder()
 
 Limits:
 
-- The returned `Proxy` must hold one proxy. A `Proxy::list`, a
-  `Proxy::identified`, or another `Proxy::custom` fails the request with
-  `Kind::Config`.
-- The environment proxies do not apply to a session with a custom proxy.
-- `no_proxy` on the custom proxy still applies: a host on that list is sent
-  direct and the closure is not called. `all`, `http`, and `https` on it have
-  no effect.
-- The closure runs once for each request and each redirect hop, so it may
-  keep a counter to rotate.
+- The returned `Proxy` must hold one proxy; returning `Proxy::list`, `Proxy::identified`, or another `Proxy::custom` fails the request with `Kind::Config`. Nesting `Proxy::custom` inside `Proxy::list` or `Proxy::identified` fails `build()` with `Kind::Config`.
+- Environment proxies do not apply to a session with `Proxy::custom`.
+- `no_proxy`, `header`, and `headers` on the `Proxy::custom` wrapper still apply (`no_proxy` bypasses the closure; `all`, `http`, and `https` on it have no effect).
+- The closure runs once per request and per redirect hop, so it can keep a counter to rotate.
 - `Session::save` does not save the closure.
 
 ## Use a proxy list
@@ -365,45 +362,31 @@ let session = Session::builder()
 # }
 ```
 
-On first use of a proxy, the list derives a session for it from the request's
-session with `to_builder().browser(..).platform(..)`, and keeps it. That session shares the
-connection pool (in its own partition) and the host limits, and has its own
-TLS session cache. Unlike a session you make with `to_builder()`, it gets its own
-cookie jar, which starts empty. Each proxy has its own jar, also when two
-proxies share a browser and platform, so cookies set through one proxy never go out
-through another. When an origin moves to another proxy, its cookies stay in
-the old proxy's jar.
+On first use of a proxy, the pool derives and caches a session for it via
+`to_builder().browser(..).platform(..)`:
 
-The session must use a browser profile. A session with `Proxy::identified`
-and no browser or profile fails at `build()` with `Kind::Config`.
+- **Shared with the parent session:** connection pool (in its own partition) and `host_limits`.
+- **Isolated per proxy:** cookie jar (starts empty, even when two proxies share a browser and platform), TLS session cache, and browser/platform identity. Cookies never cross between proxies.
+
+The parent session must use a browser profile; `Proxy::identified` on a plain
+session fails `build()` with `Kind::Config`.
 
 ## Proxy errors
 
-A failure in the proxy dial, the proxy handshake, or `CONNECT` is
-`Kind::Proxy`, and `Error::proxy_status()` holds the proxy's answer to
-`CONNECT`, for example `407`.
-
-When the proxy works but cannot reach the origin, the error is
-`Kind::ProxyTarget`, and `Error::proxy_status()` holds the reply: `502` or
-`504` for a `CONNECT` answer, or the SOCKS5 reply code from 3 to 6.
-
-The default retry rule retries an I/O failure on the way to the proxy and a
-`CONNECT` answer of 502, 503, or 504, and nothing else here. See
-[Choose what to retry](retries-and-timeouts.md#choose-what-to-retry).
+A failure in the proxy dial, proxy handshake, or `CONNECT` is `Kind::Proxy`,
+with `Error::proxy_status()` carrying the proxy's status (such as `407`). When
+the proxy works but cannot reach the origin, the error is `Kind::ProxyTarget`,
+with `Error::proxy_status()` holding `502`/`504` (HTTP `CONNECT`) or SOCKS5
+reply codes `3`–`6`. See [Predicates](errors.md#predicates) for which proxy
+errors `Error::is_retryable()` and `Error::is_proxy()` match.
 
 ### Decide whether to ban a proxy
 
-`Error::is_proxy()` is true when the proxy itself failed, before the tunnel
-was up:
-
-- The proxy dial was refused or timed out. A timeout is `Kind::Timeout`.
-- The proxy answered `CONNECT` with an error such as 407, 403, or 503.
-- The SOCKS5 handshake or authentication failed.
-- The TLS handshake with an `https://` proxy failed.
-
-It is false for `ProxyTargetUnreachable` and for every error after the tunnel
-is up, so it takes a proxy out of rotation without blaming it for the origin.
-A proxy list applies this rule for you.
+`Error::is_proxy()` is `true` only when the proxy itself failed before the
+tunnel was up (including a proxy connect timeout, `CONNECT` `407`/`403`/`503`,
+SOCKS5 auth/handshake errors, and `https://` proxy TLS errors), and `false` for
+`Kind::ProxyTarget` and every post-tunnel origin error. A `Proxy::list` applies
+this rule automatically; with manual per-request proxies, match on it directly:
 
 ```rust,no_run
 use leyline::Kind;

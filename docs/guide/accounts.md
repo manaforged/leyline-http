@@ -8,11 +8,11 @@ This page keeps one session across runs the way a browser profile keeps it: the 
 
 | Field | Holds |
 | --- | --- |
-| `identity`, `platform` | The browser, platform, and languages the session sends, or the profile TOML of a session built with `.profile(..)` |
+| `identity` | The browser, platform, and languages the session sends, or the profile TOML of a session built with `.profile(..)` |
 | `profile_id` | The session's profile id, which `build()` compares on load |
 | `proxy` | The proxy URL without its password |
-| `jar` | The cookies |
-| `state` | The TLS session tickets, the `Alt-Svc` entries, and the HSTS store. See [The connection state](#the-connection-state) |
+| `jar`, `stores_cookies` | The cookies, plus `stores_cookies: false` when `SessionBuilder::cookies(None)` disabled cookie storage |
+| `state` | The TLS session tickets, `Alt-Svc` entries, and HSTS store; see [The connection state](#the-connection-state) |
 
 A save holds only these fields. Headers, host limits, retry, timeout, redirect, and trace hooks are code, so set them again on the builder that `load` returns.
 
@@ -28,7 +28,7 @@ use leyline::{Browser, Platform, Proxy, Session};
 # fn run() -> leyline::Result<()> {
 let proxy = "http://user:secret@proxy.example:8080";
 let session = Session::builder()
-    .browser(Browser::Chrome154).platform(Platform::Windows).languages(["de-DE", "de", "en"])
+    .browser(Browser::Chrome158).platform(Platform::Windows).languages(["de-DE", "de", "en"])
     .proxy(Proxy::from(proxy).env(false))
     .build()?;
 session.save("account/session.json")?;
@@ -51,11 +51,13 @@ let session = Session::load("account/session.json")?
 # }
 ```
 
-`build()` returns `Kind::Config` with `err.is_profile_changed()` set to `true` when the session's profile id differs from the saved one, for example after a crate upgrade changed the bundled profile. Otherwise it restores the connection state. Files that older Leyline versions wrote with `SavedSession` load the same way.
+`build()` returns `Kind::Config` with `err.is_profile_changed() == true` when
+the session's profile id differs from the saved one (for example after a crate
+upgrade updated a bundled profile). Otherwise it restores the connection state.
 
 | Choice | Why |
 | --- | --- |
-| `Browser::Chrome154`, not `Browser::chrome()` | `chrome()` moves to newer captures in a release |
+| `Browser::Chrome158`, not `Browser::chrome()` | `chrome()` moves to newer captures in a release |
 | `env(false)` | The session never picks up `HTTPS_PROXY` or `ALL_PROXY` from another machine |
 
 ## Save the session as it changes
@@ -146,25 +148,10 @@ The saved proxy URL is the configured URL, not the exit IP the proxy assigns. To
 
 ## Freeze a profile
 
-A crate upgrade can change a bundled profile, and the profile id check on load then fails. To keep the profile data itself, build the session from the data with `.profile(..)`. The save then stores the profile TOML, and a later load uses it instead of the bundled profile.
-
-```rust,no_run
-use leyline::{Browser, Platform, Session};
-
-# fn run() -> leyline::Result<()> {
-let bundled = Session::builder()
-    .browser(Browser::Chrome154).platform(Platform::Windows)
-    .build()?;
-let toml = bundled.profile().expect("bundled profile");
-let session = Session::builder()
-    .profile(toml).platform(Platform::Windows)
-    .build()?;
-session.save("account/session.json")?;
-# Ok(())
-# }
-```
-
-See [Profile data stability](profiles.md#profile-data-stability).
+To keep a saved session immune to bundled-profile updates across crate releases,
+extract `bundled.profile()` and build the session with `.profile(toml)` so the
+saved JSON embeds the exact TOML. See
+[Profile data stability](profiles.md#profile-data-stability).
 
 ## The connection state
 
@@ -176,20 +163,27 @@ Each save writes the connection state, and `build()` on a loaded builder restore
 | HTTP/3 `Alt-Svc` entries and their expiry | HTTP/3 is possible on the first request to a known origin |
 | The HSTS store | `http://` requests to a known host go to `https`. See [Network](network.md#hsts) |
 
-A ticket key holds the proxy URL without its user name and password, and a hash of them, so the saved state never holds proxy credentials. The saved state contains TLS session secrets, so store the file with the same protection as credentials.
+A ticket key holds the proxy URL without credentials plus a credential hash, so
+saved state never stores proxy passwords. Treat saved state like credentials
+because it holds TLS session secrets.
 
-Saved TLS sessions are bound to the trust that the session loaded when it was built: the pins, the contents of every root it loaded from `ca_der`,
-`ca_file`, `SSL_CERT_FILE`, and `SSL_CERT_DIR`, the contents of the client
-certificate and key files, and whether system roots are on. A saved TLS
-session resumes only in a session that loaded the same trust. Otherwise the
-connection makes a full handshake and checks the certificate again. A session from `to_builder()` keeps its parent's trust. One with a new pool, such as `to_builder().share_connections(false)`, loads the CA files again. Changes to the operating system's root store are not part of the binding.
+Saved TLS sessions are bound to the full `Tls` configuration loaded at
+`build()`: CA roots (`ca_file`, `ca_pem`, `ca_der`, `SSL_CERT_FILE`,
+`SSL_CERT_DIR`, and `system_roots`), certificate pins, client certificates
+(file, PEM, or PKCS#12), hostname-verification flags, `min_version`, and ECH
+settings. A ticket resumes only when all of those match; otherwise Leyline
+performs a full handshake. Changes to the OS root store are not part of the
+binding.
 
 ## Browse with a tab
 
-A `Tab` sends each request with the current page as its `from_page`, so the `Referer`, `Origin`, and `sec-fetch-site` headers match a real click. [Requests](requests.md#keep-the-page-with-a-tab) lists the calls. For an account:
+A `Tab` sends each request with the current page as its `from_page`, so the
+`Referer`, `Origin`, and `sec-fetch-site` headers match a real click.
+[Requests](requests.md#keep-the-page-with-a-tab) lists the calls. For an
+account:
 
 - `fetch` on a tab with no page fails with `Kind::Request` ("the tab has no page; open one first") and sends nothing. Open a page first.
-- A `.stream()` navigation changes the page at the response head. `current()` reads the page, and `page(..)` sets it.
+- `current()` reads the page, and `page(..)` sets it manually.
 - A page script sets its own `accept`. Set it on the `fetch` builder when the site's script does. See [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
 
 ```rust,no_run
@@ -234,7 +228,7 @@ The `html` feature, on by default, adds `leyline::html` and turns on the `multip
 | `set(name, value)` | Replaces every value of the field with one value, or adds the field |
 | `buttons()`, `press(name)` | The submit button names; `press` adds one button's name and value. It returns `false` for an unknown name, and adds `name.x` and `name.y` for an image button |
 
-`Tab::submit_form(&form)` sends `form.fields()` as they are, with no submit button: call `form.press(name)` first when the site reads the button. The action resolves against the page's `<base href>`, or the current page when there is none. A `Post` form sends the fields with `RequestKind::FormNavigate`, encoded as its `enctype()` says: `application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain`. A `Get` form replaces the action's query with the fields. Both are navigations that carry the page as the `Referer` and change the current page.
+`Tab::submit_form(&form)` sends `form.fields()` as they are, with no submit button: call `form.press(name)` first when the site reads the button. The action resolves against the page's `<base href>`, or the current page when there is none. A `POST` form sends the fields with `RequestKind::FormNavigate`, encoded as its `enctype()` says: `application/x-www-form-urlencoded`, `multipart/form-data`, or `text/plain`. A `GET` form replaces the action's query with the fields. Both are navigations that carry the page as the `Referer` and change the current page.
 
 The session redirect policy applies: after a login `POST`, a 301, 302, or 303 continues as a `GET` without the body, and a 307 or 308 repeats the `POST`. The response and the current page are those of the final URL.
 

@@ -34,12 +34,10 @@ override.
 
 ## Replace the resolver
 
-The default is the system resolver. To resolve over DNS-over-HTTPS (RFC 8484)
-with built-in TTL caching and `HTTPS`/SVCB record support, pass an `https://`
-endpoint to `SessionBuilder::doh`. Combine it with `resolve` to pin bootstrap
-IPs for the DoH host itself. To plug in your own resolver, implement
-`Resolver` and pass it to `SessionBuilder::dns_resolver` as an
-`Arc<dyn Resolver>`. The overrides from `resolve` still apply first.
+The default is the system resolver. Overrides from `resolve` always apply first.
+
+- **DNS-over-HTTPS (RFC 8484):** Pass an `https://` endpoint with a host to `SessionBuilder::doh` (invalid or non-`https` URLs fail `build()` with `Kind::Config`). Built-in caches hold up to 256 IP entries and 256 ECH `HTTPS`/SVCB entries (TTL clamped to 1 s–3600 s; 60 s default/negative ECH TTL). DoH inherits the session's proxy, CA roots, `resolve` bootstrap overrides, connect timeout, and socket options (except `unix_socket`).
+- **Custom resolver:** Implement `Resolver` (including optional `Resolver::resolve_ech` for ECH) and pass an `Arc<dyn Resolver>` to `SessionBuilder::dns_resolver`. Setting `dns_resolver` clears any `doh` endpoint.
 
 ```rust,no_run
 # fn run() -> leyline::Result<()> {
@@ -54,22 +52,14 @@ let session = leyline::Session::builder()
 
 ## Happy Eyeballs
 
-Leyline connects to the addresses of a host IPv6 first, then alternating
-between the families. Each new connection starts one address further on in
-each family, so connections spread evenly across the addresses of a host.
-An address that fails to connect 5 times in a row, or is still connecting
-when another address wins after `happy_eyeballs_delay`, moves to the back of
-the order for 30 seconds. Each further ejection adds 30 seconds, up to
-5 minutes, and a successful connection clears its record. These are the
-defaults of Envoy's outlier detection. An ejected address is still tried
-when every address before it fails.
-Leyline starts one attempt, and starts the next when
-`happy_eyeballs_delay` passes with no connection, or at once when every running
-attempt has failed. The first connection to complete wins.
+TCP connections race resolved addresses (including `resolve` overrides):
 
-This applies to every TCP connection, mapped hosts included. A direct HTTP/3
-connection uses one address: the first IPv4 address, or the first address
-when the host has none.
+- **Family order and rotation:** Interleaves IPv6 first, then alternates families. Each new connection rotates one address further per family to spread traffic evenly.
+- **Staggered racing:** Starts one attempt, then starts the next after `happy_eyeballs_delay` (or immediately if all running attempts fail); the first connection to complete wins.
+- **Outlier ejection:** An address that accumulates 5 consecutive failures (including slow in-flight attempts cancelled after `happy_eyeballs_delay` when another address wins) moves to the back of the order for 30 s, adding 30 s per repeat ejection up to 5 min. A successful connect resets its record; ejected addresses remain fallbacks if every other address fails.
+
+A direct HTTP/3 connection uses one address: the first IPv4 address, or the
+first address when the host has none.
 
 | `SessionBuilder` setter | Default | Meaning |
 | --- | --- | --- |
@@ -137,14 +127,20 @@ retransmits for many minutes and the request waits for its total timeout.
 With it, the kernel closes the socket, the request fails, and a retry policy
 can use a fresh connection.
 
-Where an option is unsupported, Leyline logs one warning for it on the
-`leyline::socket` target and continues. With `strict_socket_options(true)`, the connect fails
-with an `io::ErrorKind::Unsupported` error. `tcp_keepalive_retries` falls back
-to the operating system default where it cannot be set.
+Where an option is unsupported, Leyline logs one warning on `leyline::socket`
+and continues. With `strict_socket_options(true)`, connect fails with
+`Kind::Config` wrapping `io::ErrorKind::Unsupported`. `tcp_keepalive_retries`
+falls back to the OS default where it cannot be set.
 
-These socket options are separate from `TcpProfile`, which sets the values of the
-JA4T fingerprint and comes from the session platform. See
-[Fingerprints](fingerprints.md).
+### Local binding and Unix sockets
+
+- **`local_address(ip)`**: Call once for IPv4 and/or once for IPv6; pass `None` to clear both families.
+- **`interface(name)`**: Binds outgoing sockets to an interface (`SO_BINDTODEVICE` on Linux/Android/Fuchsia, `IP_BOUND_IF` on Apple). Empty names or NUL bytes fail `build()` with `Kind::Config`; unknown or unsupported interfaces fail connect with `Kind::Config` even when `strict_socket_options(false)`.
+- **`unix_socket(path)`** (Unix only): Routes both `http://` and `https://` traffic over a local Unix domain socket (TLS SNI and `Host` still come from the request URL). Disables environment proxies; combining it with any proxy or `Protocol::Http3` fails with `Kind::Config`, and `Protocol::Race` skips HTTP/3.
+
+These socket options are separate from `leyline::profile::TcpProfile`
+(`TcpProfile::from_ja4t` or TOML `FromStr`), which shapes the JA4T TCP
+fingerprint. See [Fingerprints](fingerprints.md#customize-tcpprofile).
 
 ## Connection pool
 
@@ -154,11 +150,11 @@ limits, and every limit applies to one pool.
 | Setter | Default | Effect |
 | --- | --- | --- |
 | `max_connections` | 2048 | Pool entries, one per host, port, scheme, proxy, and transport. Set it above the number of hosts you talk to. At the limit, a new entry replaces the least recently used entry in its shard |
-| `max_connections_per_host` | 256 | HTTP/1.1 connections per host, port, scheme, proxy, and transport. A request over the limit waits for a free slot (bounded by `HostLimits::max_pending`, 1024 by default). HTTP/2 and HTTP/3 share one connection per origin |
+| `max_connections_per_host` | 256 | Max connections per host/port/scheme/proxy/transport. Applies to HTTP/1.1 (waiting requests are bounded by `HostLimits::max_pending`, 1024 default, failing with `Kind::Overloaded`) and to bare-session HTTP/2 when open connections hit the server's stream cap. Browser-profile sessions stay on 1 HTTP/2 connection per origin unless you set this explicitly; HTTP/3 uses 1 connection per origin |
 | `pool_idle_timeout` | 300 s | An idle connection closes after this time |
 | `pool_max_lifetime` | no limit | A connection is not reused after this time. In-flight requests finish. Set it so traffic follows a DNS or load balancer change |
 | `keep_alive` | `true` | Keep connections open for reuse |
-| `http2_ping_after_idle` | 10 s | An idle HTTP/2 connection gets a `PING` after this time, and so does a connection where a request timed out before its response headers arrived. `None` turns both off |
+| `http2_ping_after_idle` | 10 s | Sends an HTTP/2 `PING` after this idle period or after a header timeout (`None` disables both). Idempotent replayable requests are sent alongside the `PING` without waiting a round trip for the `ACK` |
 | `http2_ping_timeout` | 2 s | The wait for the answer to that `PING` |
 
 ```rust,no_run
@@ -212,9 +208,9 @@ which count connections. See [Limit each host](crawling.md#limit-each-host).
 Leyline keeps an HSTS store per session (RFC 6797). It records the first
 `Strict-Transport-Security` header of each `https` response. The header needs
 `max-age`; `includeSubDomains` also covers the subdomains, and `max-age=0`
-removes the host. IP addresses are ignored. A session that turns off
-certificate verification records nothing, because it cannot trust the
-header.
+removes the host. IP addresses are ignored. A session with `danger_accept_invalid_certs(true)` or
+`danger_accept_invalid_hostnames(true)` records nothing, because it cannot
+trust the header.
 
 A later `http://` request or redirect to a recorded host, or a covered
 subdomain, goes to `https` instead, and an explicit port 80 becomes 443.
