@@ -1,9 +1,8 @@
 # Cargo features and linking
 
 This page lists the Cargo features, how Leyline's BoringSSL coexists with
-other TLS crates, and how docs.rs builds the crate. Leyline supports 6 targets
-(Linux x86_64/aarch64 glibc & musl, Apple silicon macOS, Windows x86_64 MSVC);
-see [Supported platforms](platforms.md).
+other TLS crates, and how docs.rs builds the crate. For the build targets, see
+[Supported platforms](platforms.md).
 
 ## Cargo features
 
@@ -23,16 +22,17 @@ system trust-store loading, streaming bodies, SSE, and `Session::robots`
 | `http3` | yes | Adds the `Http3` and `Race` policies and `leyline-quiche`. |
 | `html` | yes | Implies `multipart`. Adds `leyline::html`, `Session::crawl` (`crawl::{Crawl, Page, Respect, Scope, SkipReason}`), and `Tab::submit_form`. (`crawl::Robots` always compiles.) See [Accounts](accounts.md#log-in-with-the-pages-form). |
 | `socks` | no | SOCKS5 proxies, and HTTP/3 through a SOCKS5 proxy. Without it, a `socks5://` or `socks5h://` session proxy, proxy list entry, or environment proxy fails `build()` with `Kind::Config`, and one set on a request fails that request with `Kind::Proxy`. |
-| `tower` | no | Implements `tower_service::Service` for `Session` (also add `tower-service = "0.3"` and `use tower_service::Service;`). See [Service integration](service-integration.md#use-the-tower-adapter). |
+| `tower` | no | Implements `tower_service::Service` for `Session`. See [Service integration](service-integration.md#use-the-tower-adapter) for the setup. |
 | `test-util` | no | Adds `leyline::testing`. Enable it in `[dev-dependencies]` only. See [Testing](testing.md). |
 | `bench-internals` | no | Adds the hidden `leyline::internals` module for Leyline's own tests, benches, and fuzz targets. Outside the semver promise. |
 | `full` | no | Every feature above except `test-util` and `bench-internals`. |
 
 Each compression feature gates both the body codec and the matching RFC 8879
-certificate decompressor. Certificate compression is part of a browser
-profile's fingerprint, so a **browser** profile whose certificate compression
-algorithm is disabled fails at `build()`. **Plain** sessions (`Session::new()`
-or a builder without `.browser(...)`) work cleanly with
+certificate decompressor. A browser profile lists the certificate compression
+algorithms its browser offers in `cert_compression` under `[tls]`. Keep the
+matching `compression-*` features on, or `build()` fails with `Kind::Config`.
+Chrome 158, for example, needs `compression-brotli`. A plain session
+(`Session::new()`, or a builder without `.browser(..)`) builds with
 `default-features = false`.
 
 For a minimal backend microservice (HTTP/1.1 + HTTP/2, gzip, and Tower, without

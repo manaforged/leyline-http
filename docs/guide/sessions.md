@@ -38,16 +38,12 @@ Three setters add default headers, which go out on every request:
 | `header(name, value)` | Replaces the profile default for `name` and appends each value you add |
 | `headers(pairs)` | Appends each `(name, value)` pair from an iterator |
 
-Invalid header names or values fail `build()` with `Kind::Config`. On a browser
-session, setting `user_agent` on the session (or a `user-agent` header on one
-request) drops the profile's `sec-ch-ua*` client hints (`sec-ch-ua`,
-`sec-ch-ua-mobile`, `sec-ch-ua-platform`) unless explicitly set, so the user
-agent and hints never disagree.
+Invalid header names or values fail `build()` with `Kind::Config`.
 
-When a session has a browser and you do not call `protocol`, it defaults to
-`Protocol::Race` if the `http3` feature is enabled and the profile sets
-`race = true` (bundled desktop and iOS 18+ browser profiles), and
-`Protocol::Auto` otherwise. See [HTTP/3](http3.md).
+Client hints are the `sec-ch-ua`, `sec-ch-ua-mobile`, and `sec-ch-ua-platform`
+headers that describe the browser. On a browser session, a session `user_agent` or
+a request `user-agent` header drops them, unless you set them too. This keeps
+the user agent and the hints from naming different browsers.
 
 ## Plain and browser sessions
 
@@ -108,10 +104,8 @@ let health = staging.get("/health").send().await?;
 # }
 ```
 
-`to_builder().base_url(url)` makes a session with another base URL; the
-session token moves with it and goes to the new base URL's origin. `build()`
-returns `Kind::Config` for a base URL that does not parse or cannot be a
-base.
+`to_builder().base_url(url)` makes a session with another base URL. The
+session token moves with it and goes to the new base URL's origin.
 
 ## Change each request before it is sent
 
@@ -148,16 +142,22 @@ The hook sees:
 
 - The method.
 - The absolute URL.
-- The headers you set on the request. It does not see `bearer_auth`, `basic_auth`, session default headers, profile headers, `Cookie`, `Host`, or `Content-Length`.
-- The body. `Body::as_bytes()` returns its bytes (`None` for a stream); `Body::content_length()` returns the known byte length for buffered, `Body::file`, and sized-stream bodies.
+- The headers set on the request, including a request's own `bearer_auth` or
+  `basic_auth`.
+- The body. [Query parameters and bodies](requests.md#query-parameters-and-bodies)
+  lists what `Body` can tell you.
+
+It does not see the session's `bearer_auth` or `basic_auth`, session default
+headers, profile headers, `Cookie`, `Host`, or `Content-Length`.
 
 Leyline sends the method, URL, headers, and body the hook leaves, so a hook can
 sign the query string. The URL must stay an absolute `http` or `https` URL, or
 the request fails. Leyline ignores edits to `http::Request::version` and
 extensions.
 
-- The hook runs before every transport attempt (first send and each retry), not on
-  redirect hops or 401 `refresh_token` / Digest authentication replays.
+- The hook runs before every attempt: the first send and each retry. It does
+  not run on redirect hops, or on the resend after a 401 for `refresh_token`
+  or Digest authentication.
 - Each retry starts from your original method, URL, headers, and body, so a
   hook that inserts a header does not duplicate it.
 - Returning an error aborts the request without retrying; wrap custom errors
@@ -258,27 +258,38 @@ println!("{body}");
 
 ## Derive a session
 
-`session.to_builder()` returns a `SessionBuilder` initialized with the session's
-settings and cookie jar. Change any setting, then call `build()`. The new
-session gets its own HTTP `cache` if caching is enabled, and shares the rest
-according to what changed:
+`session.to_builder()` returns a `SessionBuilder` that starts with the
+session's settings and cookie jar. Change any setting, then call `build()`.
+If caching is on, the new session gets its own HTTP cache. What else it shares
+depends on what you changed. "Own partition" means the new session uses the
+parent's pool and its limits, but never reuses the parent's connections.
 
 | Change | Cookie jar | Pool | TLS session cache |
 | --- | --- | --- | --- |
 | None (`clone()`) | Shared | Shared | Shared |
-| `proxy` (without `doh`), `redirect`, `base_url`, `headers`, `retry`, `accept_encoding`, `max_body_size`, `timeout` with the same `connect` limit, and other request settings | Shared | Shared | Shared |
+| A request setting, such as `redirect`, `base_url`, `headers`, `retry`, or `max_body_size` | Shared | Shared | Shared |
 | `cookies(jar)` | New jar | Shared | Shared |
-| `browser`, `platform`, `hello`, `profile`, `ja3`, `ja4_r`, `akamai`, or `header_order` | Shared | Shared, own partition | New |
-| A connection setting: `max_connections`, `max_connections_per_host`, `pool_idle_timeout`, `pool_max_lifetime`, `keep_alive`, `http2_ping_after_idle`, `http2_ping_timeout`, `dns_resolver`, `doh` (or `proxy` while `doh` is set), `resolve`, socket setters (`local_address`, `interface`, `unix_socket`, `tcp_nodelay`, `happy_eyeballs_delay`, etc.), `tls`, `tcp_profile`, `protocol`, `host_limits`, or a `timeout` with another `connect` limit | Shared | New | New |
+| An identity setting: `browser`, `platform`, `hello`, `profile`, `ja3`, `ja4_r`, `akamai`, or `header_order` | Shared | Shared, own partition | New |
+| A connection setting (list below) | Shared | New | New |
+
+Request settings also include `proxy` without `doh`, `accept_encoding`, and a
+`timeout` with the same `connect` limit. Connection settings are:
+
+- `max_connections`, `max_connections_per_host`, `pool_idle_timeout`,
+  `pool_max_lifetime`, and `keep_alive`.
+- `http2_ping_after_idle` and `http2_ping_timeout`.
+- `dns_resolver`, `doh`, `resolve`, and `proxy` while `doh` is set.
+- Socket setters such as `local_address`, `interface`, `unix_socket`,
+  `tcp_nodelay`, and `happy_eyeballs_delay`.
+- `tls`, `tcp_profile`, `protocol`, `host_limits`, and a `timeout` with
+  another `connect` limit.
 
 Every derived session keeps the shutdown state. It keeps the host limits
 unless you set `host_limits`.
 
 - Pool entries are keyed by proxy, so connections never cross proxies.
-- A new identity's connections sit in their own partition of the parent's
-  pool, so they never cross identities, and they share the parent's pool
-  limits and `stats()`. They also share the HSTS store and the
-  `Alt-Svc` knowledge. See
+- A new identity's partition also shares the parent's `stats()`, HSTS store,
+  and `Alt-Svc` records. See
   [Mix the hello and the headers](fingerprints.md#mix-the-hello-and-the-headers).
 - `share_connections(false)` starts with an empty pool, TLS session cache,
   and HSTS store, with its own pool limits. Set it when the next request must
@@ -343,8 +354,8 @@ The `Browser` enum has a variant for each bundled profile. The
   `Browser::chrome()`, `edge()`, `opera()`, `brave()`, `firefox()`, `safari()`,
   `safari_ios()`, `cfnetwork()`, and `okhttp()`. A release can move them to
   newer captures; pin a variant such as `Browser::Chrome158` to keep one
-  fingerprint.
-- `Browser::default()` is `Browser::chrome()`.
+  fingerprint. [Choosing a profile](choosing-a-profile.md) compares the
+  choices.
 - `Browser::version()` returns the product's major version, `Browser::id()`
   returns a stable id such as `chrome-158` or `edge-158`, and
   `Browser::chromium_major()` returns the underlying Chromium major version for
@@ -357,6 +368,13 @@ assert_eq!(Browser::default(), Browser::chrome());
 assert_eq!(Browser::Edge158.id(), "edge-158");
 assert_eq!(Browser::Opera140.version(), 140);
 ```
+
+A browser session that does not call `protocol` may use `Protocol::Race`.
+`Race` tries HTTP/3 first and falls back to HTTP/2 or HTTP/1.1 when HTTP/3
+setup fails. It is the default when the `http3` feature is on and the profile
+races. Otherwise the default is `Protocol::Auto`.
+[Choosing a profile](choosing-a-profile.md#start-with-the-default) lists the
+profiles that race.
 
 ## Choose a platform
 
@@ -441,11 +459,16 @@ as `chrome-158`, `edge-158`, and `windows`; `id()` returns the id and
 `serde_json::from_str::<SessionBuilder>(&json)?.build()?` rebuilds it.
 `Session::save(path)` and `Session::load(path)` do the same with a file.
 
+Both paths save the identity, the cookie jar, and the proxy without its
+password. They also save the TLS session tickets, the `Alt-Svc` entries, and
+the HSTS store. [Accounts](accounts.md) keeps an account this way.
+
 `profile_id()` returns a 16-hex-character hash of the resolved profile data,
-browser, and platform (`None` for a plain session; hashes the TOML text for a
-loaded profile). Compare it across releases to detect profile updates. `build()`
-on a builder from `Session::load` checks it automatically and returns an error
-with `Error::is_profile_changed() == true` if the data changed.
+browser, and platform. It is `None` for a plain session. For a loaded TOML
+profile, it hashes the TOML text. `build()` on a restored builder compares the
+saved hash with the current one. If the bundled profile data changed, it fails
+with an error where `is_profile_changed()` is `true`. This holds for
+`Session::load` and for `serde_json::from_str::<SessionBuilder>`.
 
 ```rust,no_run
 use leyline::{Browser, Platform, Session, SessionBuilder};
@@ -455,17 +478,15 @@ let session = Session::builder()
     .browser(Browser::Chrome158).platform(Platform::MacOS)
     .build()?;
 let saved = serde_json::to_string(&session)?;
-let profile_id = session.profile_id().ok_or("plain session")?;
 
-let restored = serde_json::from_str::<SessionBuilder>(&saved)?.build()?;
-if restored.profile_id() != Some(profile_id) {
-    return Err("the profile changed".into());
+match serde_json::from_str::<SessionBuilder>(&saved)?.build() {
+    Ok(restored) => drop(restored),
+    Err(err) if err.is_profile_changed() => return Err("the profile changed".into()),
+    Err(err) => return Err(err.into()),
 }
 # Ok(())
 # }
 ```
-
-To save the identity with the cookie jar, the proxy, the TLS session tickets, the `Alt-Svc` entries, and the HSTS store, use `Session::save` and `Session::load`; see [Accounts](accounts.md).
 
 ## Keep connections warm
 
@@ -530,7 +551,7 @@ let session = Session::builder().trace(Slow).build()?;
 - `dns` fires each time Leyline resolves a name for a TCP connection. Through
   a proxy it reports the proxy host. A direct HTTP/3 connection fires none.
 - `sent` carries the method and the path with the query. On HTTP/2 and
-  HTTP/3 it fires before the connection driver takes the request, and its
+  HTTP/3 it fires when the request is queued on the connection, so its
   `elapsed` is zero.
 - `head` carries the response headers as received, before decompression and
   redirect handling.

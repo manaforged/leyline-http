@@ -20,23 +20,27 @@ A session file is a credential: its cookies and TLS session tickets resume the a
 
 ## Save and load
 
-Pin a browser variant, set the languages and one proxy, and turn the proxy environment variables off. Then save the session.
+Pin a browser variant, then set the languages and one proxy. Then save the session.
 
 ```rust,no_run
-use leyline::{Browser, Platform, Proxy, Session};
+use leyline::{Browser, Platform, Session};
 
 # fn run() -> leyline::Result<()> {
 let proxy = "http://user:secret@proxy.example:8080";
 let session = Session::builder()
     .browser(Browser::Chrome158).platform(Platform::Windows).languages(["de-DE", "de", "en"])
-    .proxy(Proxy::from(proxy).env(false))
+    .proxy(proxy)
     .build()?;
 session.save("account/session.json")?;
 # Ok(())
 # }
 ```
 
-`Session::load(path)` returns a `SessionBuilder` with the saved identity, proxy, and cookies. Add any setter, then call `build()`. On a first run the file does not exist and `load` fails with `Kind::Io`, so build a new session when `path.exists()` is false. A loaded builder does not read the proxy environment variables, so a save without a proxy goes direct.
+`Session::load(path)` returns a `SessionBuilder` with the saved identity, proxy, and cookies. Add any setter, then call `build()`.
+
+On a first run the file does not exist, and `load` fails with `Kind::Io`. Check `Path::new(path).exists()` first and build a new session when it is false.
+
+A loaded builder does not read the proxy environment variables. A save without a proxy therefore loads as a direct session.
 
 ```rust,no_run
 use std::time::Duration;
@@ -55,7 +59,8 @@ let session = Session::load("account/session.json")?
 the session's profile id differs from the saved one (for example after a crate
 upgrade updated a bundled profile). Otherwise it restores the connection state.
 To accept an upgraded bundled profile while keeping the saved cookies, load the
-saved `jar` field into a fresh session and re-save:
+saved `jar` field into a fresh session and re-save. The fresh session keeps only
+the cookies, so set the languages and the proxy on it again before you save:
 
 ```rust,no_run
 use leyline::cookie::Jar;
@@ -74,6 +79,7 @@ let session = match Session::load("account/session.json")?.build() {
         let fresh = Session::builder()
             .browser(Browser::Chrome158)
             .platform(Platform::Windows)
+            .languages(["de-DE", "de", "en"])
             .cookies(saved.jar)
             .build()?;
         fresh.save("account/session.json")?;
@@ -89,7 +95,7 @@ let session = match Session::load("account/session.json")?.build() {
 | Choice | Why |
 | --- | --- |
 | `Browser::Chrome158`, not `Browser::chrome()` | `chrome()` moves to newer captures in a release |
-| `env(false)` | The session never picks up `HTTPS_PROXY` or `ALL_PROXY` from another machine |
+| An explicit `proxy(url)` | A session with a proxy URL never reads `HTTPS_PROXY` or `ALL_PROXY`, so the account keeps one exit route |
 
 ## Save the session as it changes
 
@@ -162,13 +168,13 @@ The optional [HTTP cache](api-clients.md#cache-responses) lives in memory and is
 `save`, `autosave`, and `Serialize` never write the proxy password. To use the password again, read it from your own secret store or an environment variable and set the full proxy URL on the loaded builder.
 
 ```rust,no_run
-use leyline::{Proxy, Session};
+use leyline::Session;
 
 # fn run() -> Result<(), Box<dyn std::error::Error>> {
 let password = std::env::var("ACCOUNT_PROXY_PASSWORD")?;
 let proxy = format!("http://user:{password}@proxy.example:8080");
 let session = Session::load("account/session.json")?
-    .proxy(Proxy::from(proxy).env(false))
+    .proxy(proxy)
     .build()?;
 # let _ = session;
 # Ok(())
@@ -180,8 +186,8 @@ The saved proxy URL is the configured URL, not the exit IP the proxy assigns. To
 ## Freeze a profile
 
 To keep a saved session immune to bundled-profile updates across crate releases,
-extract `bundled.profile()` and build the session with `.profile(toml)` so the
-saved JSON embeds the exact TOML. See
+export the TOML with `session.profile()` and build the session with
+`.profile(toml)`. The saved JSON then embeds the exact TOML. See
 [Profile data stability](profiles.md#profile-data-stability).
 
 ## The connection state
@@ -194,17 +200,12 @@ Each save writes the connection state, and `build()` on a loaded builder restore
 | HTTP/3 `Alt-Svc` entries and their expiry | HTTP/3 is possible on the first request to a known origin |
 | The HSTS store | `http://` requests to a known host go to `https`. See [Network](network.md#hsts) |
 
-A ticket key holds the proxy URL without credentials plus a credential hash, so
-saved state never stores proxy passwords. Treat saved state like credentials
-because it holds TLS session secrets.
+Saved TLS tickets are filed under the proxy URL with its password removed,
+plus a hash of the proxy credentials. The file never holds the proxy password.
+Treat saved state like credentials, because it holds TLS session secrets.
 
-Saved TLS sessions are bound to the full `Tls` configuration loaded at
-`build()`: CA roots (`ca_file`, `ca_pem`, `ca_der`, `SSL_CERT_FILE`,
-`SSL_CERT_DIR`, and `system_roots`), certificate pins, client certificates
-(file, PEM, or PKCS#12), hostname-verification flags, `min_version`, and ECH
-settings. A ticket resumes only when all of those match; otherwise Leyline
-performs a full handshake. Changes to the OS root store are not part of the
-binding.
+A saved ticket resumes only with the same `Tls` settings it was saved under.
+See [TLS trust](tls-trust.md#pin-a-certificate) for the full list.
 
 ## Browse with a tab
 
@@ -215,7 +216,6 @@ account:
 
 - `open`, `follow`, `submit`, and `submit_form` are `async fn`s returning `Result<Response>` directly; only `fetch` returns a `RequestBuilder`.
 - `fetch` on a tab with no current page fails with `Kind::Request` ("the tab has no page; open one first") and sends nothing. Open a page first (or call `tab.page(Some(url))` with a parsed `Url`).
-- `Tab` clones share the same current page, so give each concurrent page flow its own `session.tab()`.
 - A page script sets its own `accept`; set it on the `fetch` builder when the site's script does. See [Fingerprints](fingerprints.md#set-accept-on-a-script-request).
 
 ```rust,no_run
@@ -277,9 +277,8 @@ println!("{}", cart.status());
 ## Check the login, log in again
 
 Leyline cannot tell whether a site considers you logged in. Probe an
-authenticated endpoint with `session.get(...)` (or after `tab.open(...)` — do
-not call `tab.fetch(...)` before the tab has an open page), and log in again if
-it returns `401`:
+authenticated endpoint with `session.get(..)`, and log in again if it returns
+`401`:
 
 ```rust,no_run
 use leyline::html::Form;

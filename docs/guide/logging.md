@@ -60,8 +60,8 @@ println!("{} via {}", resp.status(), resp.proxy().map(leyline::Url::as_str).unwr
 
 The INFO event has the fields `id`, `method`, `url`, `redirects`, `status`,
 `version`, `attempts`, `elapsed_ms`, `streamed`, `label`, `proxy`, `browser`,
-and `outcome`. `label`, `proxy`, and `browser` appear only when they have a
-value. A failed request adds `kind` and `error`. The URL is redacted: the
+and `outcome`. `status`, `version`, `label`, `proxy`, and `browser` appear
+only when they have a value. A failed request adds `kind` and `error`. The URL is redacted: the
 password, or a user name without a password, becomes `***`, the whole query
 becomes `***`, and the fragment is removed.
 
@@ -149,10 +149,15 @@ read counters from the handle (`Display` formats a single `key=value` line):
 | Method | Signature / Count |
 | --- | --- |
 | `requests()`, `attempts()` | `u64` monotonic totals (attempts include retries) |
-| `status_class(class: u8)` | `u64` responses in `class`xx (`2`, `3`, `4`, `5` — note `u8`, not `u16`) |
+| `status_class(class: u8)` | `u64` responses in `class`xx, for `class` 1 to 5 |
 | `errors(kind)`, `errors_total()` | `u64` errors per `Kind` and all errors |
 | `bodies_complete()`, `bodies_failed()`, `bodies_dropped()` | `u64` streamed body outcomes |
-| `latency()` | `Vec<(Option<Duration>, u64)>` **per-bucket (non-cumulative)** counts of `Event::Summary` elapsed time (full request when buffered; time-to-headers when `.stream()`), with upper bounds 10, 50, 100, 250, 500, 1000, 2500, 5000, 10000 ms and `None` (> 10 s) |
+| `latency()` | `Vec<(Option<Duration>, u64)>` request-time buckets (see below) |
+
+`latency()` returns one count per bucket, not a running total. The upper
+bounds are 10, 50, 100, 250, 500, 1000, 2500, 5000, and 10000 ms, and `None`
+for the bucket over 10 s. A buffered request counts its full time. A
+`.stream()` request counts the time to its response head.
 
 Pair `Metrics` with `Session::stats()` for live connection and queue counts:
 `hosts()` lists tracked origin strings, `in_flight(url)` and `waiting(url)`
@@ -162,7 +167,6 @@ and `busy()` / `idle()` count connections.
 
 ```rust,no_run
 use std::sync::Arc;
-use std::time::Duration;
 
 use leyline::{Kind, Session};
 use leyline::trace::Metrics;
@@ -179,7 +183,6 @@ let stats = session.stats();
 for host in stats.hosts() {
     println!("{host} in_flight={} waiting={}", stats.in_flight(host), stats.waiting(host));
 }
-let _ = Duration::from_secs(10);
 # Ok(())
 # }
 ```
@@ -249,17 +252,20 @@ impl Trace for OneLine {
 
 ## Phase events
 
-Match the six per-attempt `Event` variants in `Trace::event` (all `Event`
-variants are `#[non_exhaustive]`, so include `..` in struct patterns). Note for
-`tracing::Span` correlation: `Summary` and HTTP/1.1 events run on the caller's
-task, while HTTP/2 and HTTP/3 connection-open events (`Dns`, `Connect`, `Tls`)
-fire on the spawned connection task (keep listeners non-blocking).
+Match the six per-attempt `Event` variants in `Trace::event`. Every variant is
+`#[non_exhaustive]`, so include `..` in struct patterns. `Summary` and
+HTTP/1.1 events run on your task. For HTTP/2 and HTTP/3, `Dns`, `Connect`, and
+`Tls` run on a background connection task, so a span you entered is not
+active there. Keep `event` fast and non-blocking.
 
 | Variant | Key fields | When it fires |
 | --- | --- | --- |
-| `Dns` | `id`, `host`, `addrs`, `elapsed` | Name resolution completed for a TCP connect (proxy host when proxied) |
+| `Dns` | `id`, `host`, `port`, `addrs`, `elapsed` | Name resolution completed for a TCP connect (proxy host when proxied) |
 | `Connect` | `id`, `host`, `port`, `addr`, `reused`, `elapsed` | Socket connected or reused from pool (`addr` matches `Response::remote_addr()`) |
 | `Tls` | `id`, `host`, `version`, `cipher`, `alpn`, `elapsed` | TLS handshake completed |
-| `Sent` | `id`, `method`, `path`, `elapsed` | Request dispatched (`elapsed` is zero on H2/H3 before the driver sends) |
-| `Head` | `id`, `host`, `status`, `headers`, `elapsed` | Response head arrived (raw `&http::HeaderMap` before decompression/redirects) |
+| `Sent` | `id`, `host`, `method`, `path`, `version`, `elapsed` | Request dispatched (`elapsed` is zero on H2/H3 before the driver sends) |
+| `Head` | `id`, `host`, `status`, `version`, `headers`, `elapsed` | Response head arrived (raw `&http::HeaderMap` before decompression/redirects) |
+
+`Sent::path` keeps its query string and `Head::headers` are not redacted.
+Redact them before you log them.
 | `Done` | `id`, `elapsed`, `outcome` (`Result<(), &Error>`) | One transport attempt finished |

@@ -1,20 +1,19 @@
 # Leyline user guide
 
 Leyline (`leyline-http`, imported as `leyline`) is an async HTTP client for
-Rust built on Tokio — like Python's `requests.Session` or JavaScript's `fetch`.
+Rust built on Tokio. It plays the role of Python's `requests.Session` or
+JavaScript's `fetch`.
 Use it for REST APIs, resumable file downloads, reverse-proxy relays, and
 crawling, with optional browser impersonation when a server checks TLS, HTTP/2,
 or HTTP/3 fingerprints.
 
 ## Pick a session kind
 
-| You want | Call | What the server sees |
-| --- | --- | --- |
-| Plain HTTP client (APIs, services) | `Session::new()` | `user-agent: leyline/<version>`, `accept: */*`, no browser headers |
-| Browser profile (impersonation) | `Session::from(Browser::default())` or `Session::builder().browser(Browser::Chrome158).build()?` | The TLS handshake, HTTP/2, HTTP/3, and headers of a real browser |
-
-Build one `Session` and clone it across tasks; clones share connections,
-cookies, cache, and limits.
+For APIs and services, use a plain session: `Session::new()`. To look like a
+real browser, use a browser session: `Session::from(Browser::default())`.
+[Plain and browser sessions](guide/sessions.md#plain-and-browser-sessions)
+shows what each one sends. Build one `Session` and clone it across tasks; see
+[Share a session](guide/sessions.md#share-a-session).
 
 ## Mental model: `Session`, `Tab`, and `Crawl`
 
@@ -24,7 +23,7 @@ cookies, cache, and limits.
 | `Tab` | One browser tab (`session.tab()`) | Tracking the current page URL (`Referer`, `Origin`, `sec-fetch-*`) and submitting HTML forms (no JS) |
 | `Crawl` | A turnkey site spider (`session.crawl(seed)`) | Following links in scope with `robots.txt`, sitemaps, deduplication, and checkpoints |
 
-> **Using a coding agent?** Point it at [`llms.txt`](llms.txt) (machine-readable index with module paths and pitfalls) or [`AGENTS.md`](https://github.com/manaforged/leyline-http/blob/main/AGENTS.md) in the repository root.
+> If you use a coding agent, point it at [`llms.txt`](llms.txt) (machine-readable index with module paths and pitfalls) or [`AGENTS.md`](https://github.com/manaforged/leyline-http/blob/main/AGENTS.md) in the repository root.
 
 ## Core
 

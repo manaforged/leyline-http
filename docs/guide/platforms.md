@@ -30,8 +30,8 @@ build can claim Windows or macOS. See
 ## Build BoringSSL
 
 By default, `leyline-bssl-sys` compiles the BoringSSL source shipped in the
-crate. Any `LEYLINE_BSSL_*` variable also accepts a target-specific suffix
-(`LEYLINE_BSSL_*_<TARGET>`).
+crate. Each `LEYLINE_BSSL_*` variable can also be set per target, with a
+`_<target>` suffix (dashes or underscores) or a `HOST_` or `TARGET_` prefix.
 
 | Variable | Purpose | Notes |
 | --- | --- | --- |
@@ -47,8 +47,8 @@ The build needs:
 - A C and C++ compiler: Xcode Command Line Tools on macOS, GCC or Clang on
   Linux, the MSVC build tools on Windows. The `cc` crate finds it, and
   `CC`, `CXX`, `CFLAGS`, and `CXXFLAGS` work as they do for any `cc` build.
-- Git. Every build runs `git apply` for Leyline's patches unless
-  `LEYLINE_BSSL_ASSUME_PATCHED` is set. A source checkout also uses Git to
+- Git. The build runs `git apply` for Leyline's patches unless
+  `LEYLINE_BSSL_ASSUME_PATCHED` or `LEYLINE_BSSL_PATH` is set. A source checkout also uses Git to
   fetch the BoringSSL submodule.
 
 In minimal Docker / CI builder images, install both the C++ toolchain and Git:

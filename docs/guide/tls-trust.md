@@ -12,7 +12,7 @@ identities, ECH configs, and TLS versions the session accepts.
 | `system_roots(bool)` | `true` | Trust the OS certificate store |
 | `env_roots(bool)` | `true` | Trust `SSL_CERT_FILE` and `SSL_CERT_DIR` when set |
 | `ca_file(path)` | none | Add CA certificates from a PEM file |
-| `ca_pem(impl Into<Vec<u8>>)` | none | Add CA certificates from in-memory PEM bytes (call `.to_vec()` on `Bytes`) |
+| `ca_pem(impl Into<Vec<u8>>)` | none | Add CA certificates from in-memory PEM bytes (`Vec<u8>` or `Bytes`) |
 | `ca_der(impl Into<Vec<u8>>)` | none | Add one CA certificate from DER bytes |
 | `pin_cert_sha256([u8; 32])` | none | Require the verified leaf certificate's DER SHA-256 to match a pin |
 | `client_cert(cert_path, key_path)` | none | Mutual TLS from PEM files (leaf-first chain + unencrypted key) |
@@ -20,7 +20,7 @@ identities, ECH configs, and TLS versions the session accepts.
 | `client_cert_pkcs12(der, password)` | none | Mutual TLS from a DER PKCS#12 archive (`impl Into<Vec<u8>>`, `impl Into<String>`) |
 | `ech(bool)` | `false` | Fetch RFC 9460 `HTTPS`/SVCB records via DoH or custom resolver for ECH |
 | `ech_config_list(impl Into<Vec<u8>>)` | none | Use a raw RFC 9460 `ECHConfigList` (takes precedence over `ech(true)`) |
-| `min_version(TlsVersion)` | `Tls10` floor (plain sessions enforce **TLS 1.2**) | Minimum TLS version floor (`Tls10`, `Tls12`, or `Tls13`) |
+| `min_version(TlsVersion)` | `Tls10` | Lowest TLS version the session accepts (`Tls10`, `Tls12`, or `Tls13`); see [Set a TLS version floor](#set-a-tls-version-floor) |
 | `danger_accept_invalid_hostnames(bool)` | `false` | Skip hostname matching while keeping CA and pin checks |
 | `danger_accept_invalid_certs(bool)` | `false` | Accept any server certificate (skips CA, pins, and resumption) |
 
@@ -72,7 +72,7 @@ let session = leyline::Session::builder()
 ```
 
 - Pins apply to every host the session contacts, so give a pinned host its own session and include the next rotation pin before cutover. Hash `Response::peer_certificate()` to inspect a live leaf's DER digest.
-- A saved TLS session resumes only when loaded into a session with matching roots, pins, and client certificate.
+- A saved TLS session is bound to the full `Tls` value loaded at `build()`. That covers CA roots (`ca_file`, `ca_pem`, `ca_der`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `system_roots`), pins, the client certificate, the hostname flags, `min_version`, and ECH settings. A ticket resumes only when all of them match; otherwise Leyline does a full handshake. Changes to the OS root store are not part of the binding.
 - A pin failure is `Kind::Tls` across HTTP/1.1, HTTP/2, and HTTP/3.
 
 ## Present a client certificate
@@ -99,9 +99,10 @@ let from_p12 = leyline::Session::builder()
 # }
 ```
 
-- `client_cert_pkcs12` sends the leaf and all extra intermediate chain certificates in the archive (`""` works for passwordless archives). It does **not** add bundled CA certs to the trust store — still pass `ca_file`/`ca_pem` for private CAs.
+- `client_cert_pkcs12` sends the leaf and every intermediate certificate in the archive. Pass `""` for an archive with no password.
+- `client_cert_pkcs12` does not add the archive's CA certificates to the trust store. Pass `ca_file` or `ca_pem` for a private CA.
 - Certificates and CA files are read once at `build()`; to rotate expiring certs in a long-lived service, build a fresh `Session` and swap it (for example via `ArcSwap`).
-- Mutual TLS and pins work through `http://` `CONNECT` proxies, but **not** through `https://` proxies (requests fail with `Kind::Proxy`; see [Proxies](proxies.md#socks5-and-https-proxies)).
+- Mutual TLS and pins work through `http://` and SOCKS5 proxies, but not through an `https://` proxy. The origin's TLS identity must not reach the proxy. `build()` accepts the combination, and every request routed through the `https://` proxy fails with `Kind::Proxy`.
 
 ## Encrypt SNI with ECH
 
@@ -123,8 +124,8 @@ let session = leyline::Session::builder()
 # }
 ```
 
-- `ech_config_list` takes precedence over `ech(true)` when both are set.
-- `SessionBuilder::doh` inherits `Tls` CA roots (`system_roots`, `ca_pem`, `ca_der`), while stripping client certs and pins. If you set `system_roots(false)` with an internal CA, also include the DoH provider's CA or point `doh` at an internal resolver.
+- `SessionBuilder::doh` uses the session's `Tls` value without client certificates, pins, and ECH settings. It keeps every root, `min_version`, and the danger flags.
+- If you set `system_roots(false)` with an internal CA, also add the DoH provider's CA, or point `doh` at an internal resolver.
 - ECH works over TCP (HTTP/1.1, HTTP/2), HTTP/3, and proxies; it is skipped on `unix_socket` connections.
 
 ## Set a TLS version floor

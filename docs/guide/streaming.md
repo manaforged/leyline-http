@@ -5,10 +5,17 @@ on the first bytes before the last ones arrive. This chapter covers resumable
 file downloads, streaming request and response bodies, `read_until`, and
 server-sent events (SSE).
 
-Streaming needs no extra Cargo feature. `Body::next()`, `Body::file()`, and
-`Events::next()` need no extra crates; `tokio` feature `"fs"` is used for
-`tokio::fs::File`, and `bytes`, `futures-util`, and `tokio-util` (feature `"io"`)
-are only for custom `Body::stream`, `StreamReader`, and `RequestBuilder::pages()`.
+Streaming needs no extra Leyline feature. Some examples on this page use
+other crates:
+
+| Call or type | Extra crate |
+| --- | --- |
+| `Body::next()`, `Body::file()`, `Events::next()` | None |
+| `tokio::fs::File` | `tokio` with feature `fs` |
+| `ReaderStream`, `StreamReader` | `tokio-util` with feature `io` |
+| `TryStreamExt`, `StreamExt` combinators | `futures-util` |
+
+`leyline::Bytes` re-exports `bytes::Bytes` for custom `Body::stream` sources.
 
 ## Download a file
 
@@ -47,24 +54,40 @@ println!("saved {bytes} bytes");
 # }
 ```
 
-- **How resume works.** Accepts `GET` without a body or caller `Range` header and requests uncompressed (`identity`) bytes so byte offsets stay exact. Resumes using `Range` + `If-Range` when the server returned a strong `ETag` (such as `"abc123"`, not a weak `W/"..."` tag) and the final URL, ETag, byte range, and total length all agree; otherwise restarts cleanly on `200`.
-- **Retries and checkpoints.** Checkpoints sync to disk after at least 1 MiB **and** 1 second since the last checkpoint, and on a reported body error. Under `.retry(n)`, dropped transfers retry automatically from the saved checkpoint (remember `Timeout::total` still spans retries unless cleared or raised); repeating `download_to(path)` later resumes the same checkpoint.
-- **Verification and progress.** `.sha256([u8; 32])` verifies the complete file (including any resumed prefix) before atomic rename. `.resume(false)` ignores saved partial files. `.progress` takes `impl Fn(u64, Option<u64>) + Send + Sync + 'static` (not `FnMut` — use atomics for shared state; `total` is `None` when `Content-Length` is absent) and runs on the requesting task. `sha256`, `progress`, and `resume` are download-only and fail with `Kind::Config` on `send()`/`text()`/`bytes()`/`pages()`/`events()`/`websocket()`.
-- **Files on disk.** Writes to `<name>.leyline.part` (plus `.part.json` metadata capped at 16 KiB and advisory `.leyline.lock`, mode `0600` on Unix) and renames atomically onto `path` only after success, leaving any existing target untouched on failure.
+With `.retry(n)`, a dropped transfer resumes from the last saved checkpoint.
+Calling `download_to(path)` again later resumes the same checkpoint.
+`Timeout::total` still spans every retry, so clear or raise it for a long
+download.
+
+| Topic | Behavior |
+| --- | --- |
+| Request | `GET` only, with no body and no caller `Range` or `If-Range` header. Otherwise `download_to` fails with `Kind::Config` |
+| Encoding | Asks for `identity` (uncompressed) bytes so byte offsets stay exact |
+| Resume | Sends `Range` and `If-Range` when the server sent a strong `ETag`, such as `"abc123"` and not `W/"abc123"`. The final URL, ETag, byte range, and total length must also match. Otherwise the download restarts on a `200` |
+| Checkpoints | Synced to disk after at least 1 MiB and 1 second since the last one, and on a body error |
+| Checksum | `.sha256([u8; 32])` checks the complete file, resumed prefix included, before the rename |
+| Fresh start | `.resume(false)` ignores a saved partial file |
+| Progress | `.progress` takes `impl Fn(u64, Option<u64>) + Send + Sync + 'static`, so use atomics for shared state. `total` is `None` without `Content-Length`. It runs on the requesting task |
+| Files | Writes `<name>.leyline.part`, `<name>.leyline.part.json` (metadata, at most 16 KiB), and an advisory `<name>.leyline.lock`, mode `0600` on Unix. It renames onto `path` only after success. On failure the existing target is untouched |
+
+`sha256`, `progress`, and `resume` apply only to `download_to`. On `send()`,
+`text()`, `bytes()`, `pages()`, `events()`, or `websocket()`, they fail with
+`Kind::Config`.
 
 ### One-shot download (inspect headers first)
 
-When you want to inspect `Response` headers before deciding where or whether to
-save (or want automatic decompression while saving), use `.stream()` +
-`Response::download_to(path)` (one-shot; no resume or progress callbacks):
+To read the `Response` headers before you decide whether or where to save,
+send with `.stream()` and call `Response::download_to(path)`. This call also
+decodes a compressed body. It saves in one pass, with no resume and no
+progress callback:
 
 | Step | What happens |
 | --- | --- |
-| Status | With `RequestBuilder::error_for_status()`, `4xx`/`5xx` fails with `Kind::Status` (keeping up to 64 KiB of error body) and writes nothing; `Response::download_to` itself does not check status |
-| Write | Streams decoded bytes to a temp `.<name>.<hex>.part` file in the same directory |
-| Limit | Capped by `max_body_size` (100 MiB default) in decoded bytes |
-| Commit | Flushes, syncs, and atomically renames onto `path` (preserving existing file permissions on Unix without setuid/setgid/sticky bits; once the blocking commit starts, it finishes even if the future is dropped) |
-| Error or drop | Removes the temp `.part` file before commit starts, leaving `path` untouched |
+| Status | `Response::download_to` does not check the status. Add `RequestBuilder::error_for_status()` to fail a `4xx` or `5xx` with `Kind::Status` before anything is written; see [Errors](errors.md#status-codes-are-not-errors) |
+| Write | Streams decoded bytes to a temporary `.<name>.<hex>.part` file in the same directory |
+| Limit | Capped by `max_body_size` in decoded bytes |
+| Commit | Flushes, syncs, and renames the file onto `path` in one atomic step. On Unix it keeps the existing file's permissions, without setuid, setgid, or sticky bits |
+| Error | Removes the temporary file and leaves `path` untouched. [Cancellation](cancellation.md#drop-a-request-before-send-returns) covers a dropped future |
 
 A path with no file name fails with `Kind::Request`. If directory sync fails
 after rename, `path` already holds the new file and the `Kind::Io` message says
@@ -72,14 +95,10 @@ so.
 
 ### Bound streamed bodies and downloads
 
-For a `.stream()` request, `Timeout::total` covers only up to the response
-headers (before the body arrives). Two timeouts bound the body itself:
-
-- `read` limits the idle gap between chunks (catches a stalled server).
-- `body` limits total body transfer time from the first read (catches a slow trickle).
-
-See [Retries and timeouts](retries-and-timeouts.md#the-timeouts). To cancel a
-download from your code (such as on Ctrl-C), drop its future; see
+For a `.stream()` request, `Timeout::total` ends at the response headers.
+Bound the body with the `read` and `body` timeouts; see
+[Retries and timeouts](retries-and-timeouts.md#the-timeouts). To cancel a
+download from your code, such as on Ctrl-C, drop its future; see
 [Cancellation](cancellation.md).
 
 ## Stream a request body
@@ -117,10 +136,13 @@ HTTP/2 and HTTP/3 reset only that stream, while HTTP/1.1 closes the connection.
 
 ### When a body cannot be replayed
 
-A streamed body is consumed by the first attempt, so:
+The first attempt consumes a streamed body, so Leyline cannot send it again:
 
-- **Redirects:** `301`/`302`/`303` (rewritten to `GET`) follow normally; `307`/`308` (which must resend the body) fail with `Kind::Redirect`.
-- **Retries:** Skipped once any byte has been read. Buffer the body as `Bytes` when retries or `307`/`308` redirects are needed.
+- A redirect that rewrites the request to `GET` follows. Every other redirect fails with `Kind::Redirect`; [Redirects](redirects.md#what-a-redirect-changes) lists which statuses rewrite.
+- A retry is skipped once any byte of the body was read.
+
+Buffer the body as `Bytes` when you need retries or redirects that keep the
+body.
 
 ## Stream a response body
 
@@ -149,7 +171,7 @@ println!("{total} bytes");
 ```
 
 `text()`, `bytes()`, and `json()` also work on a `.stream()` response (draining
-and decoding it). A streamed response carries no trailers. `Body` also
+and decoding it). `Body` also
 implements `futures_util::Stream<Item = leyline::Result<Bytes>>`.
 
 ### Read the body as `AsyncRead`
@@ -221,8 +243,8 @@ if matched {
 
 Start each scan at `from.saturating_sub(marker.len() - 1)` so markers crossing
 chunk boundaries match in linear time (`examples/stock_monitor.rs` uses this
-pattern). Stopping early closes an HTTP/1.1 connection or resets the HTTP/2 /
-HTTP/3 stream.
+pattern). [Cancellation](cancellation.md#drop-a-streamed-response) covers
+what stopping early does on the wire.
 
 ## Back-pressure
 
@@ -231,7 +253,7 @@ applies back-pressure instead of growing memory unboundedly:
 
 | Protocol | Channel | When you stop reading |
 | --- | --- | --- |
-| HTTP/1.1 | 16 chunks | Socket reader pauses and TCP flow control slows the peer |
+| HTTP/1.1 | 32 chunks | Socket reader pauses and TCP flow control slows the peer |
 | HTTP/2 | 32 chunks | Driver serves other streams while withholding window updates for the stalled stream |
 | HTTP/3 | 32 chunks | QUIC stream reads pause and QUIC flow control slows the peer |
 
@@ -263,6 +285,23 @@ while let Some(event) = events.next().await {
 # }
 ```
 
-- **Framing and parsing.** Requires `GET` without a body and a `200 text/event-stream` response. Handles UTF-8, leading BOM, multiline `data`, comments, and CR/LF/CRLF line endings. `event.json::<T>()` deserializes `data` with serde; incomplete trailing events are discarded.
-- **Reconnection.** `Events::last_event_id(id)` seeds the initial `Last-Event-ID`; subsequent reconnects send the last id committed by a complete event block (an empty id clears it). `204` ends the stream. Defaults to 3 consecutive reconnects (resetting on each delivered event); `retry(0)` disables reconnects. Wait is `max(server retry, backoff)` capped by `max_wait`. Malformed responses and event-size errors are terminal.
-- **Limits and cancellation.** `max_event_size` defaults to 1 MiB (pass `None` to remove the cap), and `max_body_size`, `read`, and `body` timeouts apply per connection. Dropping `Events` closes the active body or connect with no background reconnect task; cancelling a single `next()` future keeps the pending read in `Events`.
+Parsing:
+
+- `events()` needs a `GET` without a body. The response must be a `200` with `text/event-stream`.
+- The parser handles UTF-8, a leading BOM, multiline `data`, comments, and CR, LF, or CRLF line endings.
+- `event.json::<T>()` deserializes `data` with serde. An incomplete event at the end of the stream is dropped.
+
+Reconnection:
+
+- `Events::last_event_id(id)` sets the first `Last-Event-ID`. Each reconnect sends the id of the last complete event. An empty id clears it.
+- A `204` response ends the stream.
+- By default, `Events` reconnects up to 3 times in a row. The count resets on each delivered event. `retry(0)` turns reconnects off.
+- The wait is the larger of the server's `retry:` value and the backoff. Without a `retry:` value, the wait is the larger of the backoff and 3 s (or `max_wait`, if shorter).
+- A wait longer than `max_wait` ends the stream with the error. So do a malformed response and an event over the size limit.
+
+Limits and cancellation:
+
+- `max_event_size` defaults to 1 MiB. Pass `None` to remove the cap.
+- `max_body_size` and the `read` and `body` timeouts apply to each connection.
+- Dropping `Events` closes the open body or connect. No reconnect task keeps running.
+- Cancelling one `next()` future keeps the pending read in `Events`.

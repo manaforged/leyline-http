@@ -37,9 +37,9 @@ that does not parse does not panic: `send` returns `Kind::Url` with the
 | `basic_auth(user, pass)` | Sets `Authorization: Basic <credentials>` for this request |
 | `digest_auth(user, pass)` | Answers an HTTP Digest `401` challenge automatically |
 
-Invalid header names or values fail `send()`. On a browser session, setting a
-per-request `user-agent` header drops the profile's `sec-ch-ua*` client hints
-unless the request sets them too. On HTTP/2 and HTTP/3, a custom `Host` header
+Invalid header names or values fail `send()`. A `user-agent` header on a
+browser session also drops the client hints; see
+[Build a session](sessions.md#build-a-session). On HTTP/2 and HTTP/3, a custom `Host` header
 is ignored because `:authority` carries the host.
 
 ```rust,no_run
@@ -66,10 +66,11 @@ headers you can change without breaking the fingerprint.
 ### Order
 
 Order matters to a fingerprint, so the profile's order applies on the wire. A
-request header replaces every session or profile header of the same name, in
-that header's position; repeated `header` calls for the name send every value
-there. A name the session does not send goes where a browser places it, such
-as `authorization` after `user-agent`, or else at the end.
+request header replaces any session or profile header with the same name. It
+keeps that header's place in the order. If you call `header` twice with one
+name, both values go in that place. A name the session does not send goes where
+a browser places it, such as `authorization` after `user-agent`. Any other name
+goes at the end.
 
 Two methods override the order:
 
@@ -149,10 +150,10 @@ let resp = session
 # }
 ```
 
-`Body::as_bytes()` returns buffered bytes (`None` for a stream),
-`Body::content_length()` returns the known byte length for buffered, file, and
-sized-stream bodies, and `Body::try_clone()` clones a buffered body. To stream
-from any async source, pass `Body::stream`; see
+`Body::as_bytes()` returns the bytes of a buffered body, or `None` for a
+stream. `Body::content_length()` returns the known length of a buffered body,
+a `Body::file`, or a stream with a declared size. `Body::try_clone()` copies a
+buffered body. To stream from any async source, pass `Body::stream`; see
 [Streaming](streaming.md#stream-a-request-body).
 
 ### Upload multipart forms
@@ -183,10 +184,11 @@ let resp = session.post("https://api.example/upload").multipart(form).send().awa
 # }
 ```
 
-`Part::file(path)` uses the last component of `path` as the filename (or `file`
-when missing or non-UTF-8) and sends no part `Content-Type` by default (RFC 7578
-`text/plain`); call `.mime(..)` to set one. Unopenable files fail with
-`Kind::Io`. See `examples/multipart.rs` for a complete example.
+`Part::file(path)` uses the last component of `path` as the filename. When
+that is missing or not UTF-8, the filename is `file`. A file part sends no
+`Content-Type`, which RFC 7578 reads as `text/plain`; call `.mime(..)` to set
+one. A file that cannot be opened fails with `Kind::Io`. See
+`crates/leyline/examples/multipart.rs` for a complete example.
 
 ## Override the session for one request
 
@@ -205,8 +207,17 @@ To use another cookie jar for some requests, derive a session with
 `session.to_builder().cookies(jar).build()?`; see
 [Derive a session](sessions.md#derive-a-session).
 
-- **`timeout(..)`**: A `Duration` sets `total` (which ends at the response head for `.stream()`); a `Timeout` merges `total`, `read`, `body`, `response_header`, and `error_body` over the session defaults (`None` turns a timeout off). See [Retries and timeouts](retries-and-timeouts.md).
-- **`protocol(..)`**: A version the server cannot speak fails the request (for example, `Protocol::Http2` against an HTTP/1.1 server fails with `Kind::Http2`). Requests with a forced version bypass reading/filling the HTTP cache (unsafe writes still invalidate cached entries), and WebSocket handshakes honor it too. Forced HTTP/1.1 requests keep their own pooled connections apart from HTTP/2 connections to the same `https` host.
+- A `Duration` passed to `timeout` sets only `total`. For a `.stream()`
+  request, `total` ends at the response head. A `Timeout` sets each limit you
+  name and keeps the session value for the rest. `None` turns a limit off.
+  See [Retries and timeouts](retries-and-timeouts.md).
+- A version the server cannot speak fails the request. For example,
+  `Protocol::Http2` against an HTTP/1.1 server fails with `Kind::Http2`.
+- A request with a forced version neither reads nor fills the HTTP cache. A
+  write with a forced version still removes cached entries.
+- WebSocket handshakes honor `protocol` too.
+- Forced HTTP/1.1 requests use their own pooled connections, apart from
+  HTTP/2 connections to the same `https` host.
 
 ```rust,no_run
 use std::time::Duration;
@@ -242,7 +253,12 @@ let legacy = session
 
 ## Read, change, or copy a request
 
-- `RequestBuilder::build()?` converts a request into an `http::Request<Body>` without sending it, carrying `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`, `Protocol`, and download options (`sha256`, `progress`, `resume`) as extensions. Download options are only valid with `download_to()` and fail with `Kind::Config` if sent with `send()`, `text()`, `bytes()`, `pages()`, `events()`, or `websocket()`.
+- `RequestBuilder::build()?` converts a request into an `http::Request<Body>`
+  without sending it. Its options go in the extensions: `RequestKind`,
+  `Timeout`, `Retry`, `Redirect`, `Proxy`, `Protocol`, and the download options.
+- The download options `sha256`, `progress`, and `resume` work only with
+  `download_to()`. With `send()`, `text()`, `bytes()`, `pages()`, `events()`,
+  or `websocket()`, they fail with `Kind::Config`.
 - `Session::request_from(request)` turns an `http::Request<Body>` back into a `RequestBuilder`.
 - `RequestBuilder::try_clone()` copies a buffered request and all its options (`None` for a stream body or recorded setter error).
 
@@ -273,13 +289,15 @@ if let Some(second) = first.try_clone() {
 ## Send an http::Request
 
 `Session::execute(request)` sends an `http::Request<Body>` with its method,
-URI, headers, and body. It is `session.request_from(request).send()`: it
-reads an optional `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`, and
-`Protocol` from the request extensions, infers the request kind from
-`content-type` as the builder does, and reads the whole response before it
-returns. `http::Request::version` is ignored; to force a version, insert a
-`Protocol` extension. To stream the response or use digest authentication,
-call `request_from` and set it on the `RequestBuilder`.
+URI, headers, and body. It is the same as `session.request_from(request).send()`.
+It reads an optional `RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy`,
+and `Protocol` from the request extensions. It infers the request kind from
+`content-type`, as the builder does, and reads the whole response before it
+returns.
+
+`http::Request::version` is ignored; to force a version, insert a `Protocol`
+extension. To stream the response or use digest authentication, call
+`request_from` and set that option on the `RequestBuilder`.
 
 ```rust,no_run
 use leyline::Body;
@@ -315,9 +333,9 @@ On a browser session with no request kind, a POST, PUT, or PATCH infers one from
 `application/x-www-form-urlencoded` gives `Form`. Other types leave the
 kind unset. Set `.kind(..)` when the guess is wrong.
 
-`Form` is a script that posts form data with `fetch()`. `FormNavigate` is a
-person who clicks the submit button of an HTML form, as on a login page;
-`form()` never infers it.
+`Form` imitates page script that posts form data with `fetch()`.
+`FormNavigate` imitates a user who submits an HTML form, as on a login page,
+and the browser loads a new page. `form()` never infers `FormNavigate`.
 
 | RequestKind | `sec-fetch-mode` | `sec-fetch-dest` | `sec-fetch-user` | Other headers |
 | --- | --- | --- | --- | --- |
@@ -390,10 +408,17 @@ that page as its `from_page`, and each navigation sets the next page.
 | `submit_form(&form)` | `async -> Result<Response>` | A parsed `html::Form`, with its own method and action | Yes |
 | `fetch(method, url)` | `RequestBuilder` | A script request (`RequestKind::Xhr`; chain `.kind(..)` for `Image`/`Script`) | No |
 
-- `open`, `follow`, `submit`, and `submit_form` are `async fn`s returning `Result<Response>` directly (do not chain `.send()`). Only `fetch` returns a `RequestBuilder`.
-- Each navigation response (including `4xx`/`5xx`) updates the current page to the final URL after redirects; transport errors leave it unchanged.
-- Relative URLs resolve against the current page, or else the session `base_url`.
-- `page(impl Into<Option<Url>>)` sets or clears the current page manually (pass a parsed `Url`, not `&str`). `fetch` on a tab with no current page fails with `Kind::Request` without sending anything.
+- Await `open`, `follow`, `submit`, and `submit_form` directly; do not chain
+  `.send()`.
+- Each navigation response, `4xx` and `5xx` included, sets the current page
+  to the final URL after redirects. A transport error leaves the page as it
+  was.
+- Relative URLs resolve against the current page, or else the session
+  `base_url`.
+- `page(impl Into<Option<Url>>)` sets or clears the current page. Pass a
+  parsed `Url`, not a `&str`.
+- `fetch` on a tab with no current page fails with `Kind::Request` and sends
+  nothing.
 
 ```rust,no_run
 use leyline::profile::RequestKind;

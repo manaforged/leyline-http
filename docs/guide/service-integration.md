@@ -20,7 +20,11 @@ hyper 1 with no conversion.
 A service often needs a plain session for its own APIs and a browser session
 for sites that check the fingerprint.
 
-> **Gateway / reverse-proxy defaults (important if migrating from `reqwest`):** Unlike `reqwest`, Leyline has **cookies and redirects ON by default** and leaves `tcp_nodelay` unset. For a multi-tenant backend or reverse proxy sharing one `Session` across users, pass `.cookies(None)`, `.redirect(Redirect::none())`, and `.tcp_nodelay(true)` so users never share a cookie jar or experience 40 ms Nagle stalls.
+A session stores cookies and follows redirects by default. A gateway that
+shares one `Session` across users should pass `.cookies(None)` and
+`.redirect(Redirect::none())`, so one user's cookies never reach another.
+`TCP_NODELAY` is already on through the platform TCP profile on Windows,
+macOS, Linux, and iOS; `.tcp_nodelay(true)` forces it everywhere.
 
 ```rust,no_run
 use std::time::Duration;
@@ -82,11 +86,11 @@ the hop-by-hop headers of RFC 9110, section 7.6.1.
 | default | The decoded body | Drops `content-encoding` and `content-length` when encoded | Decoded bytes |
 | `.decode(false)` | Raw wire bytes (recommended for pass-through proxies: avoids CPU decompression and keeps `Content-Length`) | Keeps `content-encoding` and `content-length` | Wire bytes |
 
-`leyline::Body` implements `futures_util::Stream<Item = leyline::Result<Bytes>>`
-(not `http_body::Body`), so wrap it with your framework's stream adapter (for
-example `axum::body::Body::from_stream(resp.bytes_stream()?)`). To bridge an
-incoming framework request body into Leyline, wrap its byte stream with
-`leyline::Body::stream(stream, content_length)`.
+`leyline::Body` is not an `http_body::Body`, so wrap it with your framework's
+stream adapter, for example `axum::body::Body::from_stream(resp.bytes_stream()?)`.
+To send an incoming request body upstream, pass its byte stream to
+`leyline::Body::stream(stream, content_length)`. That stream must yield
+`std::io::Result<Bytes>`, so map its errors with `std::io::Error::other`.
 
 Once your service sends its status and headers, a body error can only abort
 the body, and the client sees a truncated response. To answer 502 for an
@@ -118,30 +122,51 @@ let body = resp.bytes_stream()?;
 # }
 ```
 
-After the head, `read` bounds each chunk and `Timeout::body` bounds
-the whole body. When your client goes away, drop the stream: Leyline resets
+After the head, `Timeout::read` bounds the wait for each chunk and
+`Timeout::body` bounds the whole body. When your client goes away, drop the stream: Leyline resets
 the upstream stream or closes the HTTP/1.1 connection. See
 [Streaming](streaming.md) and [Cancellation](cancellation.md).
 
 ### Axum 0.8 streaming handler
 
-Because `leyline::Body` implements `futures_util::Stream` rather than
-`http_body::Body`, bridge incoming and outgoing bodies explicitly when wiring
-an Axum 0.8 reverse-proxy handler:
+This reverse-proxy handler bridges both bodies. Axum gives a path-only URI, so
+the handler joins it to the upstream origin before it builds the request. It
+also drops `host` and the hop-by-hop headers, so Leyline sends the upstream
+authority and keeps the connection alive. `status_for` is defined in
+[Map errors to HTTP statuses](#map-errors-to-http-statuses) below.
 
 ```rust,ignore
 use axum::body::Body as AxumBody;
 use axum::extract::{Request, State};
 use axum::response::Response;
 use futures_util::TryStreamExt;
-use leyline::http::StatusCode;
+use leyline::http::{StatusCode, Uri};
 use leyline::{Body, Session};
+
+const UPSTREAM: &str = "https://upstream.example";
+const DROPPED: [&str; 8] = [
+    "host",
+    "connection",
+    "proxy-connection",
+    "keep-alive",
+    "te",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
+];
 
 async fn proxy_handler(
     State(session): State<Session>,
     req: Request,
 ) -> Result<Response, StatusCode> {
-    let (parts, body) = req.into_parts();
+    let (mut parts, body) = req.into_parts();
+    let path = parts.uri.path_and_query().map_or("/", |p| p.as_str());
+    parts.uri = format!("{UPSTREAM}{path}")
+        .parse::<Uri>()
+        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    for name in DROPPED {
+        parts.headers.remove(name);
+    }
     let len = parts
         .headers
         .get("content-length")
@@ -173,9 +198,9 @@ async fn proxy_handler(
 `Kind::gateway_status()` maps `leyline::Error` to an HTTP status: `None` for
 `Status` (pass `err.status()` through), `504` for `Timeout`, `503` for
 `Overloaded`, `500` for `Url`/`Config`/`Request`, and `502` for everything
-else. Check `err.is_shut_down()` first so shutting-down handlers answer `503`
-instead of `500`. If a Tower layer wraps the error in `BoxError`, unwrap it
-with `leyline::Error::find(&box_err)`. See
+else. Check `err.is_shut_down()` first, so a handler answers `503` during
+shutdown instead of `500`. If a Tower layer wraps the error in `BoxError`,
+unwrap it with `leyline::Error::find(box_err.as_ref())`. See
 [Map errors to HTTP statuses](errors.md#map-errors-to-http-statuses).
 
 ```rust
@@ -202,9 +227,8 @@ fn error_body(err: &leyline::Error) -> String {
 
 ## Log one line per request
 
-Install `leyline::trace::Log` for one `INFO` event per request on
-`leyline::trace` (with `version=HTTP/2.0`, redacted URLs, proxy, and attempts),
-or `trace::Metrics` / a custom `Trace` hook for counters. See
+Install `leyline::trace::Log` for one log line per request, or
+`trace::Metrics` for counters. See
 [Logging and tracing](logging.md#log-each-request).
 
 ## Choose an `http` / Tower integration path
@@ -223,8 +247,10 @@ Enable `features = ["tower"]` (and add `tower-service = "0.3"` with
 `tower_service::Service<http::Request<leyline::Body>>` returning
 `http::Response<leyline::Body>` and `leyline::Error`.
 
-- **Hop-by-hop headers:** `Session::call` calls `into_http()` directly and leaves hop-by-hop headers intact (there is no `relay_headers()` on `http::Response`). For a reverse proxy or gateway that forwards headers, use `session.request_from(req).stream().send().await?` + `resp.relay_headers()` + `resp.into_http()?` directly or inside your own `Service` wrapper (shown below).
-- **Body & extensions:** The body streams decoded and capped at `max_body_size` (`leyline::Body` is a `futures_util::Stream`, not `http_body::Body`; wrap with `axum::body::Body::from_stream` when returning from Axum). Request extensions accept `profile::RequestKind`, `Timeout` (merges over session timeouts), `Retry`, `Redirect`, `Proxy`, and `Protocol` (`http::Request::version` is ignored). The response stores the final `leyline::Url` in extensions and sets `version()`.
+- `Session::call` keeps hop-by-hop headers. For a gateway, use the `relay` function or the service wrapper below.
+- The response body streams decoded and is capped at `max_body_size`.
+- Request extensions accept `profile::RequestKind`, `Timeout` (merged over the session timeouts), `Retry`, `Redirect`, `Proxy`, and `Protocol`. Leyline ignores `http::Request::version`.
+- The response stores the final `leyline::Url` in its extensions and sets `version()`.
 
 ```rust,no_run
 # #[cfg(feature = "tower")]
@@ -258,8 +284,8 @@ println!("{size} bytes");
 # }
 ```
 
-To relay a request without Tower (needs no `tower` feature), strip hop-by-hop
-headers with `relay_headers()` before `into_http()`:
+To relay a request without the `tower` feature, read `relay_headers()` before
+`into_http()`, then put those headers on the converted response:
 
 ```rust,no_run
 # mod example {
@@ -338,20 +364,22 @@ Choose the limiter that matches your boundary:
 
 | Mechanism | Scope | When full |
 | --- | --- | --- |
-| `SessionBuilder::max_connections_per_host` | TCP / H2 sockets per origin | Queues up to `HostLimits::max_pending` (1024 default), then fails with `Kind::Overloaded` (503) |
+| `SessionBuilder::max_connections_per_host` | TCP / H2 sockets per origin | Queues up to `HostLimits::max_pending` (1024 HTTP/1.1 waiters by default), then fails with `Kind::Overloaded` (503) |
 | `SessionBuilder::host_limits(HostLimits)` | Per-origin & global in-flight requests | Queues up to `max_pending` / `max_total_pending`, then fails with `Kind::Overloaded` (503) |
 | `tokio::sync::Semaphore::try_acquire` | Global or per-route gateway shedding | Returns `503 Service Unavailable` immediately without queuing |
 
 ```rust,no_run
-# #[cfg(feature = "tower")]
 # mod example {
 use std::sync::Arc;
 use std::time::Duration;
 
-use leyline::http::{Request, StatusCode};
-use leyline::{Body, Session, Timeout};
+use leyline::http::StatusCode;
+use leyline::Session;
 use tokio::sync::Semaphore;
-use tower_service::Service;
+# fn status_for(err: &leyline::Error) -> StatusCode {
+#     if err.is_shut_down() { return StatusCode::SERVICE_UNAVAILABLE; }
+#     err.kind().gateway_status().or_else(|| err.status()).unwrap_or(StatusCode::BAD_GATEWAY)
+# }
 
 const MAX_IN_FLIGHT: usize = 32;
 const UPSTREAM_TIMEOUT: Duration = Duration::from_secs(10);
@@ -372,24 +400,13 @@ impl AppState {
 }
 
 pub async fn handler(state: AppState, url: String) -> StatusCode {
-    let Ok(mut request) = Request::builder().uri(url).body(Body::default()) else {
-        return StatusCode::BAD_REQUEST;
-    };
-    request
-        .extensions_mut()
-        .insert(Timeout::new().total(UPSTREAM_TIMEOUT));
     let Ok(_slot) = state.slots.try_acquire() else {
         return StatusCode::SERVICE_UNAVAILABLE;
     };
-    let mut upstream = state.upstream.clone();
-    match upstream.call(request).await {
+    let sent = state.upstream.get(url).timeout(UPSTREAM_TIMEOUT).send().await;
+    match sent {
         Ok(response) => response.status(),
-        Err(err) if err.is_shut_down() => StatusCode::SERVICE_UNAVAILABLE,
-        Err(err) => err
-            .kind()
-            .gateway_status()
-            .or_else(|| err.status())
-            .unwrap_or(StatusCode::BAD_GATEWAY),
+        Err(err) => status_for(&err),
     }
 }
 # }
@@ -397,9 +414,9 @@ pub async fn handler(state: AppState, url: String) -> StatusCode {
 
 For streaming handlers, hold an `OwnedSemaphorePermit` (`try_acquire_owned`)
 inside the returned stream so the slot stays occupied until the body finishes.
-When wrapping `Session` with Tower layers, call `ready().await?` (from
-`tower::ServiceExt`) before `call(request)` and unwrap `tower::BoxError` with
-`leyline::Error::find`.
+When you wrap `Session` in Tower layers, call `ready().await?` (from
+`tower::ServiceExt`) before `call(request)`. Unwrap `tower::BoxError` with
+`leyline::Error::find(box_err.as_ref())`.
 
 ## Call a service on localhost
 
@@ -430,7 +447,9 @@ drop(session);
 # }
 ```
 
-`Session::shutdown()` cancels at once and returns a future; awaiting it waits until every autosave writer of the session and its derived sessions has made its last save. Stop the server first so that the open requests finish, then stop the sessions:
+`shutdown()` cancels requests at once. Await the future it returns to wait for
+the last autosave of the session and its derived sessions. Stop your server
+first so open requests can finish, then shut down the sessions:
 
 ```rust,no_run
 use std::time::Duration;

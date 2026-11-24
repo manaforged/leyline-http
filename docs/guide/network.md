@@ -56,7 +56,7 @@ TCP connections race resolved addresses (including `resolve` overrides):
 
 - **Family order and rotation:** Interleaves IPv6 first, then alternates families. Each new connection rotates one address further per family to spread traffic evenly.
 - **Staggered racing:** Starts one attempt, then starts the next after `happy_eyeballs_delay` (or immediately if all running attempts fail); the first connection to complete wins.
-- **Outlier ejection:** An address that accumulates 5 consecutive failures (including slow in-flight attempts cancelled after `happy_eyeballs_delay` when another address wins) moves to the back of the order for 30 s, adding 30 s per repeat ejection up to 5 min. A successful connect resets its record; ejected addresses remain fallbacks if every other address fails.
+- **Outlier ejection:** An address that fails 5 connects in a row moves to the back of the order for 30 s. Each repeat ejection adds 30 s, up to 5 min. A slow attempt cancelled because another address won counts as a failure. One successful connect clears the record. An ejected address is still tried when every other address fails.
 
 A direct HTTP/3 connection uses one address: the first IPv4 address, or the
 first address when the host has none.
@@ -90,7 +90,7 @@ connects.
 
 | Method | Default | Effect |
 | --- | --- | --- |
-| `tcp_nodelay` | unset (enable for low-latency APIs/gateways) | `TCP_NODELAY` (unlike `reqwest`, unset by default; pass `true` to avoid 40 ms Nagle stalls) |
+| `tcp_nodelay` | on, from the platform TCP profile (off on Android) | `TCP_NODELAY`; pass `false` to allow Nagle batching |
 | `tcp_keepalive` | 60 s | Idle time before the first keepalive probe |
 | `tcp_keepalive_interval` | 30 s | Time between probes |
 | `tcp_keepalive_retries` | 3 | Failed probes before the socket closes |
@@ -162,7 +162,7 @@ limits, and every limit applies to one pool.
 
 | Setter | Default | Effect |
 | --- | --- | --- |
-| `max_connections` | 2048 | Max **origin-key buckets** (host, port, scheme, proxy, transport) — not total sockets (total sockets can reach up to `max_connections × max_connections_per_host`). Set above the number of distinct hosts; at the limit, LRU evicts the oldest entry in its shard |
+| `max_connections` | 2048 | Most pool entries, one per host, port, scheme, proxy, and transport. It does not count sockets. Set it above your number of distinct hosts. At the limit, the least recently used entry in its shard is evicted |
 | `max_connections_per_host` | 256 | Max sockets per origin bucket (see protocol breakdown below) |
 | `pool_idle_timeout` | 300 s | An idle connection closes after this time |
 | `pool_max_lifetime` | no limit | A connection is not reused after this time. In-flight requests finish. Set it so traffic follows a DNS or load balancer change |
@@ -173,7 +173,7 @@ limits, and every limit applies to one pool.
 How `max_connections_per_host` behaves by protocol:
 
 - **HTTP/1.1:** Opens up to `max_connections_per_host` sockets per origin; excess requests queue up to `HostLimits::max_pending` (1024 default), failing with `Kind::Overloaded`.
-- **HTTP/2:** Plain sessions open additional H2 connections (up to `max_connections_per_host`) when existing connections hit the server's stream cap (100 before `SETTINGS`). Browser-profile sessions stay on 1 H2 connection per origin unless you set `max_connections_per_host` explicitly; when all streams are busy, up to 1024 requests queue before failing.
+- **HTTP/2:** Plain sessions open additional H2 connections (up to `max_connections_per_host`) when existing connections hit the server's stream cap (100 before `SETTINGS`). Browser-profile sessions stay on 1 H2 connection per origin unless you set `max_connections_per_host` explicitly.
 - **HTTP/3:** Uses 1 QUIC connection per origin.
 
 ```rust,no_run
@@ -188,11 +188,11 @@ let session = leyline::Session::builder()
 # }
 ```
 
-Clones and every derived session share the pool, except one built after a
-connection setting changed (the [list](sessions.md#derive-a-session)), or `to_builder().share_connections(false)`, which
-starts a new, empty one. A session with another identity keeps its connections in a
-partition of its own, inside the shared pool and its limits. See
-[Sessions](sessions.md#derive-a-session).
+Clones and derived sessions share the pool. A derived session starts a new,
+empty pool when you change a connection setting or call
+`to_builder().share_connections(false)`. A session with another identity keeps
+its connections in its own partition, inside the shared pool and its limits.
+See [Sessions](sessions.md#derive-a-session) for the list of connection settings.
 
 When every stream slot of an HTTP/2 connection is in use, one request waits
 inside the connection and later requests wait in a queue of at most 1024. The
@@ -220,16 +220,16 @@ ClientHello; when the server picks another protocol, the request fails with
 
 ## Limit each host
 
-`HostLimits` caps concurrent requests, request rate, queue depth, and
-rate-limit pauses per origin (scheme, host, port) across HTTP/1.1, HTTP/2, and
-HTTP/3 — separate from pool limits, which count sockets. Clones and derived
-sessions share its live counters, queues, and pauses; `HostLimits::default()`
-sets no limits.
+`HostLimits` caps concurrent requests, request rate, and queue depth per
+origin (scheme, host, port). It can also pause an origin on statuses you list.
+It applies across HTTP/1.1, HTTP/2, and HTTP/3. Pool limits are separate and
+count connections. Clones and derived sessions share its live counters, queues,
+and pauses. `HostLimits::new()` sets no limits.
 
 | Setter | Effect |
 | --- | --- |
 | `max_in_flight(n)` | Max concurrent requests per origin (minimum 1) |
-| `per_second(rate)` | Minimum spacing of `1 / rate` seconds between starts per origin (`<= 0` disables) |
+| `per_second(rate)` | Minimum spacing of `1 / rate` seconds between starts per origin (a rate that is not a positive finite number disables it) |
 | `max_total_in_flight(n)` | Max concurrent requests across all origins (minimum 1) |
 | `host_max_in_flight(host, n)` | Per-host override for `max_in_flight` (`*.example.com` matches subdomains only; exact host wins over wildcard, longer wildcard over shorter) |
 | `host_per_second(host, rate)` | Per-host override for `per_second` (same host/wildcard precedence) |
@@ -239,9 +239,10 @@ sets no limits.
 | `pause_for(duration)` | Fallback pause duration when no wait header is sent (default `60 s`) |
 | `max_pause(duration)` | Cap on server-requested pauses (default `24 h`) |
 
-```rust
-use leyline::HostLimits;
+```rust,no_run
+use leyline::{HostLimits, Session};
 
+# fn run() -> leyline::Result<()> {
 let limits = HostLimits::new()
     .max_in_flight(4)
     .per_second(2.0)
@@ -249,11 +250,14 @@ let limits = HostLimits::new()
     .host_per_second("api.shop.example", 0.5)
     .host_max_in_flight("*.cdn.example", 16)
     .max_total_in_flight(64);
-# let _ = limits;
+let session = Session::builder().host_limits(limits).build()?;
+# let _ = session;
+# Ok(())
+# }
 ```
 
 - A host override uses only the overrides set for it; unset fields are unlimited for that host while `max_total_in_flight` still applies.
-- Requests acquire slots in order: per-origin in-flight → origin pause & rate spacing → global in-flight (never holding a global slot while paused or waiting for rate spacing).
+- A request takes its slots in this order: the per-origin in-flight slot, then any origin pause and rate spacing, then the global in-flight slot. It never holds a global slot while it waits for a pause or rate spacing.
 - Queue waits count toward request deadlines (`Kind::Timeout`). Buffered requests release slots after the body is read; `.stream()` requests hold them until the body ends, errors, or drops. Dropping a waiting request removes it from the queue.
 
 ## HSTS

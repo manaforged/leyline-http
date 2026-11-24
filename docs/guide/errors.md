@@ -5,18 +5,21 @@ Every fallible call returns `leyline::Result<T>` with error type
 predicates rather than parsing error strings. Because `Kind` is
 `#[non_exhaustive]`, always include a wildcard `_ =>` arm when matching.
 
-`leyline::Error` implements `std::error::Error + Send + Sync + 'static`, so
+`leyline::Error` implements `std::error::Error + Send + Sync + 'static`. So
 `?` converts it into `Box<dyn std::error::Error + Send + Sync>` or
-`anyhow::Error`. It converts automatically via `?` from `std::io::Error`,
-`url::ParseError` (`Kind::Url`), and `http` header/URI errors — not from
-`serde_json::Error` (wrap custom errors with `Error::request` inside hooks).
+`anyhow::Error`.
+
+`?` also converts `std::io::Error`, `url::ParseError` (`Kind::Url`), and
+`http` header and URI errors into `leyline::Error`. It does not convert
+`serde_json::Error`. To fail a hook with your own error, return
+`Error::request(err)`.
 
 ## Match on the kind
 
-`err.kind()` classifies each error in priority order: `Timeout` → `Status` →
-`BodyLimit` → underlying transport or TLS cause → failing layer. `Kind::as_str()`
-(and `Display`) returns a stable `snake_case` label for logs, metrics, and
-API error responses.
+When several kinds apply, `kind()` reports the first of these: a timeout, a
+status error, a body limit, the network or TLS cause, then the component that
+failed. `Kind::as_str()` and `Display` return a stable `snake_case` label for
+logs, metrics, and API error responses.
 
 | `Kind` | `as_str()` | When it happens |
 | --- | --- | --- |
@@ -28,7 +31,7 @@ API error responses.
 | `ProxyTarget` | `"proxy_target"` | Proxy worked but could not reach the origin |
 | `Status` | `"status"` | `error_for_status()` (or `RequestBuilder::download_to`) rejected a `4xx`/`5xx` response |
 | `BodyLimit` | `"body_limit"` | Response body passed `max_body_size` or a caller limit |
-| `Body` | `"body"` | Failed/unreplayable request body stream, `Body::file` error, or WebSocket protocol/size error |
+| `Body` | `"body"` | Failed or unreplayable request body stream, or WebSocket protocol or size error |
 | `Decode` | `"decode"` | Decompression failed (corrupt data, truncated stream, or > 4 codings) |
 | `Json` | `"json"` | JSON serialization or deserialization failed |
 | `Http2` | `"http2"` | HTTP/2 protocol failure or forced H2 to an H1 server |
@@ -37,7 +40,7 @@ API error responses.
 | `Url` | `"url"` | URL failed to parse or relative URL without `base_url` |
 | `Config` | `"config"` | Invalid session/request/TLS/proxy/socket option, or `build()` rejected env proxy |
 | `Request` | `"request"` | Malformed HTTP request, invalid header, `Session::shutdown()`, or `Error::request(...)` |
-| `Io` | `"io"` | Socket I/O error after connect, or malformed HTTP/1.1 wire response |
+| `Io` | `"io"` | Socket I/O error after connect, malformed HTTP/1.1 wire response, or a file that `Body::file` cannot open or read |
 | `Overloaded` | `"overloaded"` | `HostLimits::max_pending` or `max_total_pending` queue limit exceeded |
 
 ```rust,no_run
@@ -87,22 +90,33 @@ if let Err(err) = session.get("https://api.example/").error_for_status().send().
 ## Status codes are not errors
 
 A `4xx` or `5xx` response is `Ok`. Call `error_for_status()` on the request
-builder to convert statuses `>= 400` into `Kind::Status` after retries finish,
-keeping up to `max_error_body_size` (64 KiB default) of decoded body (see
-[Turn a status into an error](responses.md#turn-a-status-into-an-error)).
+builder to turn a status of 400 or more into a `Kind::Status` error. The
+check runs on the final response, after the retry policy is done. The error
+keeps the start of the decoded body:
+
+| Limit | Default | Set with |
+| --- | --- | --- |
+| Body bytes kept, after decoding | 64 KiB, and never more than `max_body_size` | `SessionBuilder::max_error_body_size` |
+| Time to read that body | 10 s, and never past the `total` timeout | `Timeout::error_body` |
+
+- Leyline applies both limits as soon as it sees the error status. Decompression stops at the byte limit, so a large error page cannot exhaust memory.
+- If the read fails or times out, the error keeps the status, the headers, and the bytes that arrived. Leyline drops `content-encoding` when it decoded the body, and `content-length` when the body was cut short.
+- On HTTP/2 and HTTP/3, an error body over the limit resets only that stream.
+- On HTTP/1.1, the rest of a fixed-length error body up to `max_error_body_size` drains in the background, so the connection stays reusable. A larger or unframed error body closes the connection.
 
 | Method on `Error` | Returns |
 | --- | --- |
 | `status()` | `Option<StatusCode>` |
 | `url()` | `Option<&Url>` (final URL after redirects; set on `Kind::Status` only) |
 | `headers()` | `Option<&HeaderMap>` (set on `Kind::Status` only) |
-| `body()` | `Option<&[u8]>` (captured decoded body prefix, or `None` if reading failed) |
-| `retry_after()` | `Option<Duration>` (wait read from `wait_header` / `Retry-After`; `None` for non-status errors) |
-| `retries_exhausted()` | `bool` (`true` when retries stopped due to max attempts, retry budget, `max_wait`, or remaining `total` timeout) |
+| `body()` | `Option<&[u8]>` (the captured decoded body prefix; `None` when no byte arrived) |
+| `retry_after()` | `Option<Duration>` (wait read from `wait_header` or `Retry-After`; `None` for non-status errors) |
+| `retries_exhausted()` | `bool` (`true` when the retry policy stopped on this status because of the attempt count, the retry budget, `max_wait`, or the remaining `total` time; set only by `RequestBuilder::error_for_status()`) |
 
-For a response you already hold, `Response::error_for_status()` borrows the
-response and returns a `Kind::Status` error with status, URL, and headers (no
-captured body).
+For a response you already hold, `Response::error_for_status()` returns the
+same `Kind::Status` error with the status, URL, and headers. It captures no
+body. It borrows the response, so you can still read the body; see
+[Responses](responses.md#turn-a-status-into-an-error).
 
 ```rust,no_run
 use leyline::http::StatusCode;
@@ -180,7 +194,7 @@ Log `Proxy` and `ProxyTarget` separately from upstream failures. See
 
 - `Error::proxy_status()` returns the proxy's HTTP `CONNECT` status (`407`, `502`, ...) or SOCKS5 reply code.
 - `Error::h2_code()` returns the HTTP/2 `RST_STREAM` or `GOAWAY` error code (for example `7` for `REFUSED_STREAM`).
-- `Error::find(err)` walks an error's `source()` chain — including errors wrapped inside a `std::io::Error` or Tower `BoxError` — and returns the first `leyline::Error` in it.
+- `Error::find(err)` walks an error's `source()` chain and returns the first `leyline::Error` in it. It also looks inside a `std::io::Error` or a Tower `BoxError`.
 
 ```rust,no_run
 use std::error::Error as _;

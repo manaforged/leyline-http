@@ -3,15 +3,16 @@
 This chapter builds one plain client for a JSON API: a base URL, a bearer token,
 timeouts, retries and rate limits, status errors, pagination, uploads,
 [response caching](#cache-responses), and [token refresh](#refresh-a-bearer-token).
-`examples/api_client.rs` puts the steps together.
+`crates/leyline/examples/api_client.rs` puts the steps together.
 
 ## Build the client once
 
 Build one `Session` at startup and clone it across tasks; clones share the
-connection pool, cookie jar, cache, and retry budget. `.retry(3)` already
-retries `429` (honoring `Retry-After`), `502`, `503`, `504`, and transient
-network failures on safe/idempotent methods (`GET`, `HEAD`, `PUT`, `DELETE`,
-`OPTIONS`, `TRACE` — not `POST`/`PATCH`, to avoid duplicate writes).
+connection pool, cookie jar, cache, and retry budget. `.retry(3)` retries a
+`429` (honoring `Retry-After`), a `502`, `503`, or `504`, and transient network
+failures. It retries only idempotent methods: `GET`, `HEAD`, `PUT`, `DELETE`,
+`OPTIONS`, and `TRACE`. It does not retry `POST` or `PATCH`, to avoid duplicate
+writes.
 
 ```rust,no_run
 use std::time::Duration;
@@ -40,8 +41,8 @@ let api = Session::builder()
 
 | Call | Effect |
 | --- | --- |
-| `base_url` | Resolves relative request paths. End `base_url` with `/` **and** omit a leading `/` on paths (`api.get("repos")`, not `api.get("/repos")`, which strips `/v1/`) |
-| `bearer_auth` | Sends `authorization: Bearer <token>` only to the `base_url` origin (or to every host if no `base_url` is set) |
+| `base_url` | Resolves relative request paths. End it with `/` and write paths without a leading `/`, as in `api.get("repos")` |
+| `bearer_auth` | Sends `authorization: Bearer <token>`, scoped to the `base_url` origin |
 | `user_agent` | Replaces the default `user-agent` (`leyline/<version>`) |
 | `header`, `headers` | Default header(s) sent on every request |
 | `timeout(Timeout)` | `connect` bounds opening a connection; `total` bounds the whole call across retries |
@@ -52,11 +53,13 @@ token scoping rules.
 
 ## Customize retries and rate-limit headers
 
-`.retry(3)` waits progressively longer between attempts with random jitter
-(so many clients do not retry in lockstep) and honors `Retry-After` up to
-`max_wait` (60 s default). Use `Retry::new(n)` when an API uses non-standard
-rate-limit headers (such as GitHub's `403` + `x-ratelimit-remaining: 0` + Unix
-timestamp in `x-ratelimit-reset`):
+`.retry(3)` waits longer before each new attempt. It adds random jitter, so
+many clients do not retry at the same moment. It honors `Retry-After` up to
+`max_wait`, which is 60 s by default.
+
+Some APIs signal rate limits in their own way. For example, GitHub answers
+`403` with `x-ratelimit-remaining: 0` and a Unix time in `x-ratelimit-reset`.
+Build a `Retry` that reads those headers:
 
 ```rust,no_run
 use std::time::Duration;
@@ -89,20 +92,21 @@ let policy = Retry::new(3)
 | `wait_header(name)`, `wait_header_ms(name)` | Reads a wait in seconds, Unix timestamp, HTTP date, or milliseconds (takes precedence over `Retry-After`) |
 | `max_wait(d)` | If the server asks to wait longer than `d` (default 60 s), stop retrying immediately instead of sleeping |
 
-Requests of any method that never reached the server (DNS, connect, TLS, proxy,
-connect timeout, HTTP/2 `REFUSED_STREAM`, or HTTP/3 rejected requests) retry
-automatically. Keep `Timeout::total` above `max_wait` plus request time so a
+With a retry policy set, a request that never reached the server retries
+whatever its method. That covers DNS, connect, TLS, and proxy failures, a
+connect timeout, and an HTTP/2 or HTTP/3 refused stream. With no retry policy,
+nothing retries. Keep `Timeout::total` above `max_wait` plus request time so a
 rate-limit wait fits inside the deadline. See
 [Retries and timeouts](retries-and-timeouts.md).
 
 ## Turn statuses into errors
 
 `4xx` and `5xx` responses return `Ok(Response)` by default. Chain
-`.error_for_status()` on each request (it is per-request, not a session
-setting) to turn statuses `>= 400` into `Kind::Status` errors after retries
-finish:
+`.error_for_status()` on a request to turn a status of 400 or more into a
+`Kind::Status` error. It is a request setting, not a session setting, and it
+applies after retries finish:
 
-- Keeps the status, headers, and up to 64 KiB of the body (see [Turn a status into an error](responses.md#turn-a-status-into-an-error)).
+- The error keeps the response details listed in [Status codes are not errors](errors.md#status-codes-are-not-errors).
 - `err.retry_after()` returns the wait from `wait_header` / `Retry-After`, if present.
 - `err.retries_exhausted()` is `true` when retries stopped due to max attempts, retry budget, `max_wait`, or remaining `total` time.
 
@@ -134,10 +138,10 @@ See [Errors](errors.md).
 
 ## Read JSON pages
 
-For APIs that paginate with RFC 8288 `Link: <https://api.example/v1/repos?page=2>; rel="next"`
-headers, `pages()` returns a stream of responses following each `next` link
-automatically (for JSON cursor/offset pagination, write a standard `while`
-loop updating `.query(...)`).
+Some APIs send the next page in a `Link: <https://api.example/v1/repos?page=2>; rel="next"`
+header (RFC 8288). `pages()` follows each `next` link and yields one response
+per page. For a cursor or offset in the JSON body, loop and change `.query(..)`
+yourself.
 
 `pages()` returns a `futures_util::Stream` (no inherent `.next()`), so add
 `futures-util = "0.3"` to `Cargo.toml` and import `futures_util::StreamExt`.
@@ -191,8 +195,9 @@ api.post("uploads").multipart(form).error_for_status().send().await?;
 # }
 ```
 
-Response bodies are decoded automatically for all enabled compression features
-(`gzip`, `deflate`, `br`, `zstd` by default). See
+Leyline decompresses response bodies for each enabled compression feature:
+`compression-gzip`, `compression-deflate`, `compression-brotli`, and
+`compression-zstd`, all on by default. See
 [Cargo features and linking](features-and-targets.md).
 
 ## Cache responses
@@ -216,14 +221,33 @@ api.clear_cache();
 # }
 ```
 
-Caching is off by default. Session clones share the cache; `to_builder().build()`
-creates a new one. The budget charges bodies plus an allowance for headers and
-metadata with LRU eviction, and entries larger than the budget are not stored.
+Caching is off by default. Only a plain `GET` with no body is cached. The cache
+honors `Cache-Control`, `Vary`, and the `ETag` and `Last-Modified` validators.
+Session clones share the cache. A session from `to_builder()` gets its own; see
+[Derive a session](sessions.md#derive-a-session).
 
-- **Revalidation and invalidation.** Respects `Cache-Control`, validators, and `Vary`. Stale entries revalidate with `If-None-Match` or `If-Modified-Since` (a `304` reuses the stored body). Successful writes invalidate cached variants of the request URL and same-origin `Location` / `Content-Location` URLs.
-- **Context partitioning.** Request headers and the proxy route partition entries, so changing credentials or proxies cannot reuse another context's body. Responses that set cookies are not stored.
-- **Bypass rules.** The cache is bypassed for non-`GET` methods, `.stream()` requests, requests with a body, URLs with embedded credentials, `Range` / `If-Range` / `If-None-Match` / `If-Modified-Since` request headers, and per-request `.protocol(...)` overrides that differ from the session policy.
-- **Directives and persistence.** A cache miss with `Cache-Control: only-if-cached` returns status 504 without contacting the origin. `Session::save` does not save the cache. Audited request headers describe the caller's request before revalidation headers are added.
+### Cache details
+
+- The budget counts each body plus an allowance for its headers. The least
+  recently used entries go first, and an entry larger than the budget is not
+  stored.
+- A stale entry revalidates with `If-None-Match` or `If-Modified-Since`. A
+  `304` reuses the stored body.
+- A successful write, such as a `POST`, removes cached entries for its URL.
+  It also removes same-origin `Location` and `Content-Location` URLs.
+- Request headers and the proxy route split the cache. A request with other
+  credentials or another proxy never gets another context's body.
+- A response that sets cookies is not stored.
+- The cache skips `.stream()` requests and URLs with a user name or password.
+  It also skips requests that set `Range`, `If-Range`, `If-None-Match`, or
+  `If-Modified-Since`.
+- A per-request `.protocol(..)` that differs from the session policy also
+  skips the cache.
+- A cache miss with `Cache-Control: only-if-cached` returns status 504 and
+  sends nothing.
+- `Session::save` does not save the cache.
+- With `.audit(true)`, `Response::request_headers` shows your request without
+  the revalidation headers the cache adds.
 
 ## Refresh a bearer token
 

@@ -113,13 +113,10 @@ connections remain open until closed.
 
 ## HTTP/2 or HTTP/1.1
 
-By default (`websocket_http2(true)`), Leyline multiplexes WebSockets onto a
-pooled HTTP/2 connection (RFC 8441 extended `CONNECT`, matching modern Chrome
-and Firefox) and falls back automatically to a classic HTTP/1.1 `101 Switching
-Protocols` upgrade if the server does not negotiate `h2` or does not advertise
-HTTP/2 WebSocket support (`SETTINGS_ENABLE_CONNECT_PROTOCOL`). Set
-`websocket_http2(false)` if an intermediary or server mishandles HTTP/2
-upgrades and you want to go straight to HTTP/1.1.
+Leyline first tries the WebSocket over a pooled HTTP/2 connection (RFC 8441
+extended `CONNECT`), as Chrome and Firefox do. If the server does not offer
+it, Leyline uses the HTTP/1.1 `101 Switching Protocols` upgrade. Set
+`websocket_http2(false)` to skip HTTP/2 when a proxy or server mishandles it.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -160,14 +157,17 @@ ws.send(Message::Text("subscribe".to_owned())).await?;
 # }
 ```
 
-Leyline does not negotiate `Sec-WebSocket-Extensions` (`permessage-deflate` is
-not offered, and `sec-websocket-extensions` is reserved).
+Leyline offers no WebSocket extensions, so `permessage-deflate` is never used.
+It drops any `Sec-WebSocket-Extensions` header you set. If the server picks an
+extension in an HTTP/1.1 upgrade anyway, the handshake fails with
+`Kind::Request`.
 
 ## Split the connection
 
 `split()` returns `(impl Sink<Message> + Send + Unpin, impl Stream<Item = leyline::Result<Message>> + Send + Unpin)`
-so one task can write while another reads. Closing the sink does not send a
-close frame; send `Message::Close` instead.
+so one task can write while another reads. Closing the sink with
+`sink.close().await` sends a close frame with no code. Send
+`Message::Close(Some((code, reason)))` to include a code.
 
 ```rust,no_run
 use futures_util::{SinkExt, StreamExt};

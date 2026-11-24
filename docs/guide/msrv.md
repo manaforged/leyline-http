@@ -12,8 +12,7 @@ them is expected to work but is not part of the gate.
 
 ## When the MSRV moves
 
-The MSRV stays at least two releases behind current stable and targets every
-stable release from the last six months. It moves only when Leyline needs a
+The MSRV supports every stable release from the last six months. It moves only when Leyline needs a
 compiler feature, never on a schedule or for style. A bump ships in a minor
 release with its own line in
 [CHANGELOG.md](https://github.com/manaforged/leyline-http/blob/main/CHANGELOG.md);

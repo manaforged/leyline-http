@@ -6,15 +6,12 @@ between the three layouts below:
 
 | Layout | Entry point | Best for | v0.3.0 loopback benchmark (`BENCHMARKS.md`) |
 | --- | --- | --- | --- |
-| Default async | `Session::builder().build()?` on multi-threaded Tokio | Most apps, Axum/Tonic services, single-origin HTTP/2 | 1.44M req/s (8 H2 conns × 256 streams, 5.68 µs CPU/req) |
+| Default async | `Session::builder().build()?` on multi-threaded Tokio | Most apps, Axum/Tonic services, single-origin HTTP/2 | 1.44M req/s (8 H2 conns × 256 streams) |
 | Per-core async | `SessionBuilder::run_per_core(\|s\| ...)` | Standalone high-rate workers, lowest open-loop p99 latency, high-concurrency H1 | 921k req/s (64 concurrent H1 conns); 28 µs p99 H1 (20k/s), 78 µs p99 H2 (50k/s) |
-| Blocking per thread | `SessionBuilder::build_blocking()?` | Sync threads, low-concurrency direct H1 | 423k req/s (8 concurrent H1 conns, zero task switches on direct H1) |
+| Blocking per thread | `SessionBuilder::build_blocking()?` | Sync threads, low-concurrency direct H1 | 423k req/s (8 concurrent H1 conns) |
 
-**Embedding in Axum / Tonic?** Start with **Default async** (one cloned
-`Session` in `State`). If you want to test `event_interval(4)`, replace
-`#[tokio::main]` with `tokio::runtime::Builder::new_multi_thread()`. Use
-`run_per_core` for standalone worker processes (or custom thread-per-core
-`SO_REUSEPORT` servers).
+In an Axum or Tonic service, use Default async: keep one cloned `Session` in
+your state. Use `run_per_core` only for standalone worker processes.
 
 ## One runtime per core
 
@@ -53,22 +50,21 @@ fn main() -> leyline::Result<()> {
 }
 ```
 
-The closure's future does not need to be `Send`. Each request runs start to
-finish on one thread, eliminating cross-thread wakeup jitter: in
-[BENCHMARKS.md](https://github.com/manaforged/leyline-http/blob/main/BENCHMARKS.md),
-`run_per_core` (`leyline-cores`) cuts open-loop (fixed arrival rate) p99
-latency on 64 HTTP/1.1 connections (20k req/s) from 62 µs to 28 µs, and on
-8 HTTP/2 connections × 256 streams (50k req/s) from 115 µs to 78 µs at 4.31 µs
-CPU/req.
+The closure's future does not need to be `Send`. Each request runs on one
+thread, so no wake-up crosses threads. That is where the lower p99 in the
+table above comes from. See
+[BENCHMARKS.md](https://github.com/manaforged/leyline-http/blob/main/BENCHMARKS.md)
+for the method.
 
 The gain requires at least as many connections as cores. A workload that sends
 everything over one HTTP/2 connection runs faster on a shared runtime.
 
 ## Check for I/O more often on a shared runtime
 
-On a multi-threaded Tokio runtime with many concurrent requests, lowering
-`event_interval` from the default 61 to 4 makes busy workers poll epoll/kqueue
-more frequently so responses wait less in the kernel:
+`event_interval` sets how many scheduler ticks a Tokio worker runs before it
+checks for I/O. The default is 61. With many requests in flight, lowering it to 4 makes
+busy workers check epoll or kqueue more often, so responses wait less in the
+kernel. Build the runtime yourself instead of using `#[tokio::main]`:
 
 ```rust,no_run
 let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -78,8 +74,8 @@ let runtime = tokio::runtime::Builder::new_multi_thread()
 # Ok::<(), std::io::Error>(())
 ```
 
-The gain is workload-dependent and trades slightly more CPU per request;
-measure on your target workload and leave the default for low-concurrency or
+The gain depends on the workload and costs slightly more CPU per request.
+Measure it on your own traffic. Keep the default for low-concurrency or
 sequential traffic.
 
 ## Manual per-thread runtimes
@@ -96,14 +92,10 @@ Unlike `run_per_core`, completely separate `Session` instances share nothing:
 
 ## Choose an allocator for sustained load
 
-At sustained rates in the hundreds of thousands of requests per second (or on
-multi-threaded `musl` binaries), use `jemalloc` rather than glibc or musl's
-default allocator. Under the sustained 300,000 req/s / 2,000-host
+Leyline does not set a global allocator. The load tests in
 [QUALIFICATION.md](https://github.com/manaforged/leyline-http/blob/main/QUALIFICATION.md)
-fault-injection load, glibc's allocator produced 15–40 ms recovery latency
-spikes, whereas `jemalloc` kept tail latency flat for roughly 10% more peak
-RSS. Leyline does not set a global allocator; set one in your binary crate (for
-example with `tikv-jemallocator`):
+run with jemalloc in the client. To do the same, set it in your binary crate,
+for example with `tikv-jemallocator`:
 
 ```rust,ignore
 #[global_allocator]

@@ -57,12 +57,14 @@ retried by default.
 attempt `n + 1`, capped at `max` (equal jitter). Call `retry.delay(attempt)` to
 sample the wait for a 0-based retry index.
 
-`Retry::budget(ratio)` uses a token bucket to prevent retry storms during
-outages: the bucket starts with a 100-retry burst allowance, each new request
-deposits `ratio` tokens (for example `0.2` for 20%, capped at 100), and each
-retry spends 1 token. Set it on `SessionBuilder::retry` so all clones share one
-budget (a per-request `Retry::budget` creates its own independent bucket). When
-the budget stops a retry on an error outcome (or with `error_for_status()`),
+`Retry::budget(ratio)` limits retries during an outage with a token bucket.
+The bucket starts full, with 100 tokens. Each new request adds `ratio` tokens,
+for example `0.2` for 20%, and the bucket never holds more than 100. Each
+retry spends 1 token.
+
+Set the budget on `SessionBuilder::retry` so that all clones share one bucket.
+A per-request `Retry::budget` creates its own bucket. When the budget stops a
+retry of a status that `RequestBuilder::error_for_status()` then rejects,
 `Error::retries_exhausted()` is `true`.
 
 ```rust
@@ -83,10 +85,11 @@ backoff. Leyline reads delta-seconds and an IMF-fixdate with a `GMT` or `UTC`
 zone. An unparsable value falls back to the backoff. A header set with
 [`wait_header`](#wait-on-a-header) wins over `Retry-After`.
 
-`max_wait` caps the wait; the default is 60 s. When the server asks for
-longer than the cap, or a wait is longer than the time left before the
-`total` timeout, Leyline stops and returns the response, or the last error,
-as when retries run out. `Error::retries_exhausted()` is then `true`.
+`max_wait` caps the wait; the default is 60 s. The server can ask for longer
+than the cap, or a wait can be longer than the time left before the `total`
+timeout. Then Leyline stops and returns the response, as when retries run
+out. With `error_for_status()`, the status error has `retries_exhausted()`
+set to `true`. A transport error never sets it.
 
 A `Retry-After` on a response the rule does not retry is not acted on. Read
 it after `error_for_status()` with `Error::retry_after()`:
@@ -163,8 +166,15 @@ can be sent again. A streaming request body is retried only when no byte of
 it was read, for example after a connect error. See
 [Streaming](streaming.md).
 
-- **Retried for any method (never reached server):** DNS, connect, TLS, or proxy errors, connect timeouts, HTTP/2 `REFUSED_STREAM`, or HTTP/3 requests the server reports it did not process. If a request fails before reaching the server on the second (Digest-authenticated) leg of a `401` challenge, Leyline still treats it as unsent and retries it for any method.
-- **Not treated as unsent:** An error on a redirect leg after the original request already received a response.
+Some failures mean the request never reached the server. Leyline retries
+these for any method:
+
+- DNS, connect, TLS, and proxy errors, and connect timeouts.
+- HTTP/2 `REFUSED_STREAM`, and HTTP/3 requests the server reports it did not process.
+- A request that answers a Digest `401` challenge and fails before it reaches the server.
+
+An error on a redirect hop does not count as unsent, because the first
+request already got a response.
 
 `any_method(true)` retries every failure of any method. Use it only when the
 endpoint is safe to repeat.
@@ -174,7 +184,7 @@ endpoint is safe to repeat.
 `Response::attempts()` returns the number of attempts that produced the
 response: 1 without retries. When retries run out on a retryable status, the
 response carries the full count. `Error::attempts()` and
-the `attempts` field of `Event::Summary` carry the same count. See
+the `attempts` field of `leyline::trace::Event::Summary` carry the same count. See
 [Logging and tracing](logging.md#one-event-per-request).
 
 ## Retries and streamed responses
@@ -185,38 +195,42 @@ not retried. To try again, send a new request.
 
 ## Resends outside the policy
 
-Connection setup has no retry loop of its own. These transport-level resends
-run automatically before handing the outcome to `Retry`:
+Connection setup has no retry loop of its own. Leyline makes these resends
+itself, before `Retry` sees the outcome:
 
-- **Stale pooled connection (first attempt only, at most once):** On HTTP/1.1 or HTTP/2, if a reused connection fails before a response, an idempotent request with a buffered or empty body replays once on a fresh connection.
-- **Unsent or rejected stream (at most once per attempt, any method):** On HTTP/2 after `REFUSED_STREAM`, or on HTTP/3 after `GOAWAY` (new connection) or `H3_REQUEST_REJECTED` before headers (same connection), a buffered or empty request resends once.
-- **`Protocol::Race` fallback:** If HTTP/3 fails and the TCP/TLS leg negotiated HTTP/1.1, Leyline falls back to `Auto` for HTTP/1.1. If both HTTP/3 and TCP/TLS fail with errors, Leyline returns the TCP/TLS error without dialing again.
+- A stale pooled connection. On HTTP/1.1 or HTTP/2, a reused connection can fail before a response. An idempotent request with a buffered or empty body then runs once more on a new connection. This happens only on the first attempt.
+- An unsent or rejected stream. A buffered or empty request of any method resends once per attempt after HTTP/2 `REFUSED_STREAM`. On HTTP/3 it resends after `GOAWAY` (on a new connection) or after `H3_REQUEST_REJECTED` before headers (on the same connection).
+- A `Protocol::Race` fallback. If HTTP/3 fails and the TCP/TLS connection negotiated HTTP/1.1, Leyline uses HTTP/1.1. If both fail, Leyline returns the TCP/TLS error and does not dial again.
 
-ALPN needs no second send. See
+The HTTP version is chosen during the TLS handshake (ALPN), so it never
+causes a resend. See
 [One handshake per connection](network.md#one-handshake-per-connection).
 
 ## The timeouts
 
-`Timeout` holds all six timeouts. Each setter takes a `Duration` or `None`
-(`None` disables that timeout). To keep timer overhead low, `total` timeouts of
-2 s or more are checked on a shared 250 ms ticker (they may fire up to ~250 ms
-past the exact deadline; timeouts under 2 s use exact timers).
+`Timeout` holds all six timeouts. Each setter takes a `Duration`, or `None`
+to turn that timeout off.
 
 | Setter | Default | Covers |
 | --- | --- | --- |
 | `total` | 300 s | Whole `send`: redirects, retries, backoff, and buffered body read (ends at response headers for `.stream()`). Also bounds WebSocket handshakes and `RequestBuilder::download_to` retries |
 | `connect` | 10 s | One new connection (DNS, TCP/UDP, proxy negotiation, TLS/QUIC handshake). Session-wide; not applied to pooled reuse |
 | `response_header` | none | Dispatch to response headers per redirect leg, including connect (on buffered requests, also covers reading the buffered body) |
-| `read` | none | Longest idle gap between chunks on streamed reads (`.stream()`, `download_to`, `events()`, `bytes_stream()`) — not applied to buffered responses |
-| `body` | none | Total time to read a streamed body (`.stream()`, `download_to`, `events()`, `bytes_stream()`) from its first read — not applied to buffered responses |
-| `error_body` | 10 s | Body prefix captured by `RequestBuilder::error_for_status()`, bounded by `total`. See [Responses](responses.md#turn-a-status-into-an-error) |
+| `read` | none | Longest idle gap between chunks on streamed reads (`.stream()`, `download_to`, `events()`, `bytes_stream()`). Not applied to buffered responses |
+| `body` | none | Total time to read a streamed body (`.stream()`, `download_to`, `events()`, `bytes_stream()`) from its first read. Not applied to buffered responses |
+| `error_body` | 10 s | Body prefix captured by `RequestBuilder::error_for_status()`, bounded by `total`. See [Errors](errors.md#status-codes-are-not-errors) |
 
-Recommended defaults by workload:
+To keep timer cost low, a `total` timeout of 2 s or more is checked on a
+shared 250 ms ticker. It can fire up to about 250 ms late. A shorter `total`
+uses an exact timer.
 
-- **Buffered JSON APIs / service calls:** Set `connect` (5–10 s), `response_header` (per-attempt cap), and `total` (overall cap across retries).
-- **Streamed relays & downloads:** Clear or raise `total` (`.total(None)` for long downloads) and set `read` (catch stalled servers) + `body` (catch slow trickles).
+Suggested settings by workload:
 
-`Timeout::total`, and `.timeout(duration)`, bound the whole call, every retry and wait included. To bound each attempt, set `Timeout::response_header` or `read`.
+- For buffered JSON APIs and service calls, set `connect` (5 to 10 s), `response_header` (a cap per attempt), and `total` (a cap across retries).
+- For streamed relays and downloads, clear or raise `total`. Set `read` to catch a stalled server and `body` to catch a slow trickle.
+
+`total`, and `.timeout(duration)`, bound the whole call, with every retry and
+wait. To bound each attempt instead, set `response_header` or `read`.
 
 ```rust,no_run
 use leyline::{Session, Timeout};
@@ -248,12 +262,13 @@ Every timeout gives an error of kind `Kind::Timeout`. For a connect timeout,
 
 ## Per-request timeouts
 
-Unlike `SessionBuilder::timeout` (which replaces the whole `Timeout`),
-`RequestBuilder::timeout` and `http::Request` `Timeout` extensions **merge**
-only the fields you set on `Timeout::new()` over the session defaults (`None`
-explicitly disables a field; unset fields keep the session value). A plain
-`Duration` sets `total` (which also bounds WebSocket handshakes). A per-request
-`connect` timeout is ignored because connections are pooled session-wide.
+`RequestBuilder::timeout` and a `Timeout` extension on an `http::Request` do
+not replace the session's `Timeout`. They merge the fields you set over the
+session values. A field set to `None` turns that timeout off. An unset field
+keeps the session value.
+
+A plain `Duration` sets `total`. A per-request `connect` timeout is ignored,
+because connections are pooled across the session.
 
 ```rust,no_run
 use leyline::Timeout;
@@ -285,33 +300,8 @@ let streamed = session
 
 ## Bound a whole download
 
-`Timeout::body` bounds the whole transfer from its first read for both
-resumable `RequestBuilder::download_to` and one-shot `Response::download_to`.
-Because `RequestBuilder::download_to` still enforces the 300 s session
-`Timeout::total` across retries, pass `.total(None)` (or raise `total`) for
-long resumable downloads:
-
-```rust,no_run
-use std::time::Duration;
-
-use leyline::Timeout;
-
-# async fn run(session: leyline::Session) -> leyline::Result<()> {
-let written = session
-    .get("https://example.com/archive.zip")
-    .timeout(Timeout::new().total(None).body(Duration::from_secs(600)))
-    .max_body_size(None)
-    .retry(3)
-    .download_to("archive.zip")
-    .await;
-match written {
-    Ok(bytes) => println!("{bytes} bytes"),
-    Err(err) if err.kind() == leyline::Kind::Timeout => println!("download took too long"),
-    Err(err) => return Err(err),
-}
-# Ok(())
-# }
-```
-
-See [Streaming](streaming.md#download-a-file) and
-[Cancellation](cancellation.md) for checkpoint and partial-file behavior.
+`Timeout::body` bounds a download from its first read, for both
+`RequestBuilder::download_to` and `Response::download_to`. A resumable
+download is still bounded by `total` across its retries. Clear or raise
+`total` for a long download. [Streaming](streaming.md#download-a-file) has
+the example, and [Cancellation](cancellation.md) covers partial files.

@@ -39,23 +39,18 @@ async fn main() -> leyline::Result<()> {
 }
 ```
 
-`Session::get` and its siblings return a `RequestBuilder`. You can either
-`.await` a builder directly or call `.send().await?` — both behave identically
-(`.send()` is useful when you need to name or store the future type).
+`Session::get` and its siblings return a `RequestBuilder`. Await it directly or
+call `.send().await?`; both send the request and return the `Response`.
 `.text().await?` and `.bytes().await?` send the request and read the body in
 one step.
 
 ## Choose a plain or a browser session
 
-| Session | Build it with | Sends |
-| --- | --- | --- |
-| Plain | `Session::new()` or `Session::builder().build()` | `user-agent: leyline/<version>`, `accept: */*`, and no browser headers |
-| Browser | `Session::from(Browser::default())` | The TLS handshake, HTTP/2, HTTP/3, and headers of the newest bundled Chrome on Windows |
-| Pinned browser | `Session::builder().browser(Browser::Chrome158).build()` | One fixed browser profile |
-
 Use a plain session for APIs. Use a browser session when the server checks
-that the client is a real browser. `SessionBuilder::user_agent` replaces the
-default `user-agent` on either kind.
+that the client is a real browser. A browser session sends the TLS handshake
+and headers of a bundled browser. Pin a version such as `Browser::Chrome158`
+so the fingerprint does not change between releases.
+`SessionBuilder::user_agent` replaces the default `user-agent` on either kind.
 
 ```rust,no_run
 use leyline::{Browser, Session};
@@ -74,10 +69,10 @@ let pinned = Session::builder().browser(Browser::Chrome158).build()?;
 ## Read the body
 
 `text()` decodes the body with the charset from `Content-Type`, falling back to
-UTF-8. `json::<T>()` parses JSON into any `#[derive(serde::Deserialize)]` type
-that owns its fields (such as `String` or `Vec`, not borrowed `&str` — known in
-Serde as `DeserializeOwned`) and fails with `Kind::Json` on invalid JSON. Each
-body call consumes the response, so read `status()` and `headers()` first.
+UTF-8. `json::<T>()` parses the body into `T`. `T` must own its data, such as
+`String` rather than `&str`; Serde calls this `DeserializeOwned`. Invalid JSON
+fails with `Kind::Json`. Each body call consumes the response, so read
+`status()` and `headers()` first.
 
 ```rust,no_run
 use serde::Deserialize;
@@ -106,9 +101,9 @@ println!("{} {} {}", page.len(), state.name, state.ready);
 | Method | Effect |
 | --- | --- |
 | `json(&value)` | Serializes as JSON and sets `content-type: application/json` |
-| `form(pairs)` | Sends `application/x-www-form-urlencoded` from an array (`[("k", "v")]`), `Vec`, slice, or `HashMap` of strings |
-| `query(pairs)` | Appends query pairs (same collection types as `form`) to the URL |
-| `timeout(Duration)` | Sets `Timeout::total` across retries; use `Timeout::new().total(None).body(..)` for long streamed downloads |
+| `form(pairs)` | Sends the pairs as `application/x-www-form-urlencoded` |
+| `query(pairs)` | Appends the pairs to the URL query |
+| `timeout(Duration)` | Sets the total time limit for the request, retries included |
 
 ```rust,no_run
 use std::time::Duration;
@@ -160,9 +155,8 @@ match session.get("https://api.example/users/7").error_for_status().send().await
 # }
 ```
 
-`Error::kind()` sorts every failure into one `Kind`, such as
-`Timeout`, `Dns`, `Tls`, or `Status`, for a short message. See
-[Errors](errors.md).
+`err.kind()` returns one `Kind`, such as `Timeout`, `Dns`, `Tls`, or `Status`.
+Match on it instead of parsing the error message. See [Errors](errors.md).
 
 ## Use `?` with other error types
 
@@ -186,15 +180,15 @@ std::fs::write("me.json", body)?;
 
 ## Download a file
 
-`RequestBuilder::download_to(path)` streams directly to a temporary `.part`
-file, renames it onto `path` only after the transfer succeeds (an atomic commit,
-so you never get a half-written file), rejects `4xx`/`5xx` statuses
-automatically, and resumes dropped transfers when the server sends a strong
-`ETag` (a file-version header such as `"abc123"`, not a weak `W/"..."` tag).
+`RequestBuilder::download_to(path)` writes the body to a temporary file. It
+renames that file to `path` only when the transfer succeeds, so `path` is never
+half written. A 4xx or 5xx status is an error. An `ETag` is a header that names
+one version of a file. When the server sends a strong `ETag` (not `W/"..."`),
+a retry resumes where the transfer stopped.
 
-For large files, clear the 300 s `total` deadline with `.total(None)` and set
-`Timeout::body(...)` for the transfer time, and raise or remove (`None`) the
-default 100 MiB `max_body_size` cap. See
+For a large file, remove the 300 s `total` limit with `.total(None)` and set
+`Timeout::body(..)` for the transfer time. Also raise the 100 MiB
+`max_body_size` cap, or pass `None` to remove it. See
 [Streaming](streaming.md#download-a-file) for SHA-256 verification and progress
 callbacks.
 
@@ -229,8 +223,8 @@ println!("{bytes} bytes");
 | Read or stop redirects | [Redirects](redirects.md) |
 | Retry failed requests and set timeouts | [Retries and timeouts](retries-and-timeouts.md) |
 | Map failures to my own errors or HTTP statuses | [Errors](errors.md) |
-| Keep a login between runs | [Cookies](cookies.md) |
-| Keep an account's session, tab, and cookies between runs | [Accounts](accounts.md) |
+| Read, set, or save cookies | [Cookies](cookies.md) |
+| Keep a logged-in account between runs | [Accounts](accounts.md) |
 | Crawl many hosts with rate limits and proxy pools | [Crawling](crawling.md) |
 | Send traffic through a proxy | [Proxies](proxies.md) |
 | Stop a request early | [Cancellation](cancellation.md) |
