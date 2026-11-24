@@ -1,6 +1,11 @@
 name: book
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/book.yml'
   workflow_call:
     inputs:
       deploy:

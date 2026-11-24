@@ -66,7 +66,7 @@ jobs:
 
       - name: Xvfb
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y xvfb
+        run: sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y xvfb
 
       - name: capture
         shell: bash
@@ -181,7 +181,7 @@ jobs:
           python-version: '3.12'
 
       - name: GNOME settings schemas
-        run: sudo apt-get update && sudo apt-get install -y gsettings-desktop-schemas
+        run: sudo apt-get -o Acquire::Retries=5 update && sudo apt-get -o Acquire::Retries=5 install -y gsettings-desktop-schemas
 
       - name: capture the brand row
         shell: bash
