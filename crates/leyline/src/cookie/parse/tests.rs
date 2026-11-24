@@ -202,3 +202,18 @@ fn a_cookie_date_out_of_range_is_ignored() {
         assert_eq!(parse_cookie_date(bad), None, "{bad}");
     }
 }
+
+#[test]
+fn max_age_rejects_leading_plus_and_saturates_overflow() {
+    let url = test_url("https://example.com/");
+    let plus = parse_set_cookie("a=1; Max-Age=+100", &url).unwrap();
+    assert!(
+        plus.expires.is_none(),
+        "RFC 6265 rejects leading '+' in Max-Age"
+    );
+
+    let huge = parse_set_cookie("b=1; Max-Age=999999999999999999999999999999", &url).unwrap();
+    let max_400_days = SystemTime::now() + Duration::from_secs(400 * 86400 + 2);
+    assert!(huge.expires.is_some());
+    assert!(huge.expires.unwrap() <= max_400_days);
+}

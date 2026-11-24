@@ -343,3 +343,40 @@ fn h1_connection_closed_is_typed_retryable_but_framing_is_not() {
     );
     assert!(!pinning.is_connection_closed());
 }
+
+#[test]
+fn parse_h1_head_rejects_non_token_header_names() {
+    for head in [
+        "HTTP/1.1 200 OK\r\nBad Name: 1\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nBad(Name): 1\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nBad/Name: 1\r\n\r\n",
+    ] {
+        parse_h1_head(head.as_bytes()).expect_err(head);
+    }
+}
+
+#[tokio::test]
+async fn chunked_body_rejects_bare_lf_malformed_trailer_and_oversized_line() {
+    let oversized = format!("0;{}\r\n\r\n", "a".repeat(17 * 1024));
+    for payload in [
+        "1\na\r\n0\r\n\r\n".as_bytes(),
+        b"0\r\nNotAHeader\r\n\r\n",
+        b"0\r\nBad Name: 1\r\n\r\n",
+        oversized.as_bytes(),
+    ] {
+        let mut head = H1Head {
+            status: 200,
+            headers: crate::wire::Fields::default(),
+            minor: 1,
+            framing: BodyFraming::Chunked,
+            initial_body: payload.to_vec(),
+        };
+        let (mut client, _server) = tcp_pair().await;
+        assert!(
+            read_h1_body(&mut client, &mut head, BodyLimit::session(usize::MAX))
+                .await
+                .is_err(),
+            "malformed chunked framing must fail"
+        );
+    }
+}

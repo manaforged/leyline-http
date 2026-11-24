@@ -23,3 +23,29 @@ fn tls_debug_shows_ca_lengths_not_bytes() {
     assert!(shown.contains("ca_der_lengths: [300]"), "{shown}");
     assert!(!shown.contains("171"), "{shown}");
 }
+
+#[tokio::test]
+async fn tab_and_link_debug_redact_credentials_and_query() {
+    let server = leyline::testing::Server::http(|_| {
+        leyline::testing::Response::new(200)
+            .header(
+                "link",
+                "<https://alice:hunter2@example.com/next?token=secret99>; rel=\"next\"",
+            )
+            .body("ok")
+    })
+    .await
+    .unwrap();
+    let session = leyline::Session::new();
+    let tab = session.tab();
+    let url = server.url("/page?api_key=topsecret");
+    let resp = tab.open(&url).await.unwrap();
+    let tab_debug = format!("{tab:?}");
+    assert!(!tab_debug.contains("topsecret"), "{tab_debug}");
+
+    let links = resp.links();
+    assert_eq!(links.len(), 1);
+    let link_debug = format!("{:?}", links[0]);
+    assert!(!link_debug.contains("hunter2"), "{link_debug}");
+    assert!(!link_debug.contains("secret99"), "{link_debug}");
+}

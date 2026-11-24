@@ -612,3 +612,7 @@ impl Drop for CryptoBufferBuilder<'_> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "callbacks_tests.rs"]
+mod tests;
