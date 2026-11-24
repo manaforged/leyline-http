@@ -302,7 +302,7 @@ async fn prop_proxy_pool_state_machine_invariants() {
                 Proxy::from(proxy_b_url.as_str()).no_proxy([format!("127.0.0.1:{origin_port}")]),
             ])
             .ban_after(2)
-            .ban_for(Duration::from_millis(80)),
+            .ban_for(Duration::from_millis(350)),
         )
         .build()
         .expect("build pooled session");
@@ -321,10 +321,9 @@ async fn prop_proxy_pool_state_machine_invariants() {
     }
 
     let stats = session.stats();
-    assert!(
-        stats.proxy_banned_until(&proxy_a_url).is_some(),
-        "proxy A must be banned after ban_after=2 block responses"
-    );
+    let banned_until = stats
+        .proxy_banned_until(&proxy_a_url)
+        .expect("proxy A must be banned after ban_after=2 block responses");
     assert_eq!(stats.proxy_failures(&proxy_a_url), 0);
     assert!(stats.proxy_banned_until(&proxy_b_url).is_none());
 
@@ -362,7 +361,10 @@ async fn prop_proxy_pool_state_machine_invariants() {
     assert_eq!(proxy_a_hits.load(Ordering::SeqCst), a_before_bypass);
     assert_eq!(proxy_b_hits.load(Ordering::SeqCst), b_before_bypass);
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    let wait_until = banned_until + Duration::from_millis(20);
+    if let Some(remaining) = wait_until.checked_duration_since(std::time::Instant::now()) {
+        tokio::time::sleep(remaining).await;
+    }
     let a_before_recovery = proxy_a_hits.load(Ordering::SeqCst);
     for _ in 0..4 {
         let body = session

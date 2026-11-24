@@ -446,3 +446,49 @@ async fn host_gates_ready_with_preserves_delay_after_lru_eviction() {
     assert!(!gates.ready_with(&first_origin, Some(delay)));
     assert!(gates.ready_at_with(&first_origin, Some(delay)).is_some());
 }
+
+#[cfg(feature = "html")]
+#[tokio::test]
+async fn host_gates_eviction_keeps_long_retry_after_pause_over_short_spacing() {
+    let limits = HostLimits::new().pause_on([429]);
+    let gates = HostGates::new(limits);
+    let held_url = url::Url::parse("https://held.example/").expect("valid held url");
+    let held_origin = Origin::of(&held_url).expect("held origin");
+    let _held = gates
+        .admit_with(None, &held_url)
+        .await
+        .expect("admit held origin");
+    let paused_url = url::Url::parse("https://paused.example/").expect("valid paused url");
+    let paused_origin = Origin::of(&paused_url).expect("paused origin");
+    gates.observe(&paused_url, http::StatusCode::TOO_MANY_REQUESTS, || {
+        Some(Duration::from_secs(3600))
+    });
+    assert!(gates.ready_at(&paused_origin).is_some());
+
+    let short_delay = Duration::from_secs(60);
+    for idx in 0..4096 {
+        let other =
+            url::Url::parse(&format!("https://short{idx}.example/")).expect("valid short url");
+        let origin = Origin::of(&other).expect("short origin");
+        gates.set_floor_origin(origin, Some(short_delay));
+        let _pass = gates
+            .admit_with(None, &other)
+            .await
+            .expect("admit short origin");
+    }
+
+    let stats = gates.stats();
+    assert_eq!(
+        stats.len(),
+        4096,
+        "origin gate map must stay capped at MAX_ORIGIN_GATES"
+    );
+    assert!(
+        stats.iter().any(|s| s.key == held_origin),
+        "in-flight origin gate must not be evicted"
+    );
+    assert!(
+        gates.ready_at(&paused_origin).is_some(),
+        "a 1-hour Retry-After pause must not be evicted before 60-second spacing gates"
+    );
+}

@@ -155,7 +155,7 @@ impl Gates {
             let evict = map
                 .iter()
                 .filter(|(_, gate)| Arc::strong_count(gate) == 1)
-                .min_by_key(|(_, gate)| *crate::util::lock(&gate.quiet))
+                .min_by_key(|(_, gate)| (*crate::util::lock(&gate.quiet)).max(gate.paused_until()))
                 .map(|(key, _)| key.clone());
             if let Some(evict) = evict {
                 map.remove(&evict);
