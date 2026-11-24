@@ -136,17 +136,52 @@ impl RequestBuilder {
         }
         self.resume_headers(old.as_ref())
             .map_err(TransferFailure::Error)?;
-        let part = Arc::clone(&partial);
         let checksum = options.checksum.is_some() && offset > 0;
-        let hashing = async move {
-            if checksum {
-                atomic::blocking(move |_| part.prefix()).await
-            } else {
-                Ok(Sha256::new())
-            }
+        let (response, digest) = if checksum {
+            let part = Arc::clone(&partial);
+            let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let flag = Arc::clone(&active);
+            let mut hash_task =
+                tokio::task::spawn_blocking(move || part.prefix(&atomic::Waiting::from_flag(flag)));
+            let send = self.send();
+            tokio::pin!(send);
+            let (resp, hash_res) = tokio::select! {
+                resp = &mut send => {
+                    match resp {
+                        Ok(response) => {
+                            let hash_res = hash_task
+                                .await
+                                .map_err(|e| crate::error::Error::from(std::io::Error::other(e)))
+                                .and_then(|r| r);
+                            (Ok(response), hash_res)
+                        }
+                        Err(err) => {
+                            active.store(false, std::sync::atomic::Ordering::Release);
+                            drop(hash_task.await);
+                            return Err(TransferFailure::Error(err));
+                        }
+                    }
+                }
+                hash_res = &mut hash_task => {
+                    let hash_res = hash_res
+                        .map_err(|e| crate::error::Error::from(std::io::Error::other(e)))
+                        .and_then(|r| r);
+                    match hash_res {
+                        Ok(digest) => (send.await, Ok(digest)),
+                        Err(err) => return Err(TransferFailure::Error(err)),
+                    }
+                }
+            };
+            (
+                resp.map_err(TransferFailure::Error)?,
+                hash_res.map_err(TransferFailure::Error)?,
+            )
+        } else {
+            (
+                self.send().await.map_err(TransferFailure::Error)?,
+                Sha256::new(),
+            )
         };
-        let (response, digest) =
-            tokio::try_join!(self.send(), hashing).map_err(TransferFailure::Error)?;
         let (metadata, append) = match metadata(&response, key, old.as_ref()) {
             Ok(meta) => meta,
             Err(MetadataFailure::Status) => return Err(TransferFailure::Status(response)),

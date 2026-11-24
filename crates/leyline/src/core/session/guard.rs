@@ -62,19 +62,26 @@ impl Session {
         self.inner.shutdown.stop();
         let writers = std::mem::take(&mut *self.writers());
         async move {
-            for writer in writers {
+            for (_cancel, writer) in writers {
                 drop(writer.await);
             }
         }
     }
 
-    pub(crate) fn track_writer(&self, writer: tokio::task::JoinHandle<()>) {
+    pub(crate) fn replace_writer(
+        &self,
+        cancel: tokio::sync::watch::Sender<bool>,
+        writer: tokio::task::JoinHandle<()>,
+    ) {
         let mut writers = self.writers();
-        writers.retain(|running| !running.is_finished());
-        writers.push(writer);
+        for (old_cancel, _) in writers.iter() {
+            old_cancel.send_replace(true);
+        }
+        writers.retain(|(_, running)| !running.is_finished());
+        writers.push((cancel, writer));
     }
 
-    fn writers(&self) -> std::sync::MutexGuard<'_, Vec<tokio::task::JoinHandle<()>>> {
+    fn writers(&self) -> std::sync::MutexGuard<'_, Vec<super::AutosaveWriter>> {
         crate::util::lock(&self.inner.writers)
     }
 

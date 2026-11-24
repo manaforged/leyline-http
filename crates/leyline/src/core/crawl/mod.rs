@@ -447,6 +447,7 @@ impl Crawl {
     }
 
     fn fetch(&mut self, origin: Origin, queued: Queued) {
+        self.sync_floor(&origin);
         self.pages_in_flight += 1;
         *self.busy.entry(origin.clone()).or_default() += 1;
         self.stats.request();

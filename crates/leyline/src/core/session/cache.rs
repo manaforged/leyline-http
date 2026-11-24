@@ -120,6 +120,16 @@ impl Cache {
         }
     }
 
+    fn remove_key(&self, key: &Key, generation: u64) {
+        let mut state = lock(&self.state);
+        if state.generation != generation {
+            return;
+        }
+        if let Some(entry) = state.entries.pop(key) {
+            state.bytes -= entry.cost;
+        }
+    }
+
     fn store(&self, key: Key, entry: Entry, generation: u64) {
         let mut state = lock(&self.state);
         if state.generation != generation {
@@ -340,12 +350,12 @@ fn finish(
         ),
     };
     if response.headers.seen().cookies {
-        cache.remove(&key.url);
+        cache.remove_key(&key, lookup.generation);
         return Ok(response);
     }
     match Entry::capture(policy, &key, request, &response, cache.capacity) {
         Some(entry) => cache.store(key, entry, lookup.generation),
-        None => cache.remove(&key.url),
+        None => cache.remove_key(&key, lookup.generation),
     }
     Ok(response)
 }

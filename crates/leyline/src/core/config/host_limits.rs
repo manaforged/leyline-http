@@ -287,12 +287,17 @@ impl HostLimits {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HostStats {
+    pub(super) key: super::Origin,
     pub(super) origin: String,
     pub(super) in_flight: usize,
     pub(super) waiting: usize,
 }
 
 impl HostStats {
+    pub(crate) fn key(&self) -> &super::Origin {
+        &self.key
+    }
+
     pub(crate) fn origin(&self) -> &str {
         &self.origin
     }

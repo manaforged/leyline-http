@@ -129,9 +129,17 @@ impl Rules {
     }
 
     pub(crate) fn check(&self, response: &Response) -> Option<Block> {
+        self.check_parts(response.status(), &response.parts.headers)
+    }
+
+    pub(crate) fn check_parts(
+        &self,
+        status: StatusCode,
+        headers: &crate::wire::Fields,
+    ) -> Option<Block> {
         self.rules
             .iter()
-            .find(|rule| rule.matches(response))
+            .find(|rule| rule.matches(status, headers))
             .map(BlockRule::block)
     }
 }
@@ -183,17 +191,13 @@ impl BlockRule {
         }
     }
 
-    fn matches(&self, response: &Response) -> bool {
-        if self
-            .status
-            .is_some_and(|status| status != response.status())
-        {
+    fn matches(&self, status: StatusCode, headers: &crate::wire::Fields) -> bool {
+        if self.status.is_some_and(|want| want != status) {
             return false;
         }
         let Some(header) = &self.header else {
             return true;
         };
-        let headers = &response.parts.headers;
         let Some(expected) = &self.value else {
             return headers.any_value(header, |_| true);
         };

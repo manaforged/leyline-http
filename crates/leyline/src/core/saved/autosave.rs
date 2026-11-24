@@ -35,7 +35,15 @@ impl Session {
             saved_state: None,
         };
         let writer = Autosave::spawn(target, self.cookies().changes(), every);
-        self.track_writer(tokio::spawn(writer.until(self.stopped())));
+        let (cancel, mut cancelled) = watch::channel(false);
+        let stopped = self.stopped();
+        let handle = tokio::spawn(writer.until(async move {
+            tokio::select! {
+                () = stopped => {}
+                _ = cancelled.changed() => {}
+            }
+        }));
+        self.replace_writer(cancel, handle);
     }
 }
 
@@ -156,7 +164,14 @@ impl Guard {
 impl Drop for Guard {
     fn drop(&mut self) {
         if !self.finished && self.pending() {
-            drop(self.save_now());
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                if let Some(write) = self.begin() {
+                    let ordered = self.order.order(write);
+                    drop(handle.spawn_blocking(move || drop(ordered())));
+                }
+            } else {
+                drop(self.save_now());
+            }
         }
     }
 }
@@ -265,11 +280,7 @@ async fn deadline(due: Option<Instant>) {
 }
 
 async fn handle(command: Option<Command>, guard: &mut Guard) {
-    let saved = match guard.save_or_join_failed().await {
-        Ok(saved) => saved,
-        Err(_) if guard.dirty => guard.save_now(),
-        Err(err) => Err(err),
-    };
+    let saved = guard.save_or_join_failed().await.unwrap_or_else(Err);
     if let Some(Command::Shutdown(reply)) = command {
         drop(reply.send(saved));
     }

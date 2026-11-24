@@ -140,8 +140,8 @@ impl Stats {
 
     fn host(&self, url: impl crate::core::IntoUrl) -> Option<&HostStats> {
         let url = url.into_url().ok()?;
-        let origin = crate::core::config::Origin::ascii(&url);
-        self.hosts.iter().find(|stats| stats.origin() == origin)
+        let origin = crate::core::config::Origin::of(&url)?;
+        self.hosts.iter().find(|stats| stats.key() == &origin)
     }
 
     fn proxy(&self, proxy: impl crate::core::IntoUrl) -> Option<&ProxyHealth> {

@@ -63,44 +63,39 @@ impl Session {
         let mut answered = false;
         let mut refreshed = false;
         let mut hop_proxy: Option<Option<crate::net::ProxyUrl>> = first_hop;
+        let mut hop_leased: Option<crate::core::proxy_pool::Leased> = None;
         loop {
             drop(pass.take());
             pass = self.admit_host(&journey.url).await?;
 
-            let mut hop_leased: Option<(
-                Option<crate::core::config::Origin>,
-                crate::core::proxy_pool::Lease,
-                Session,
-            )> = None;
             let proxy = match &hop_proxy {
                 Some(chosen) => chosen.as_ref().map(std::borrow::Cow::Borrowed),
                 None => {
                     let chosen = if request_proxy.is_none()
                         && let Some(pool) = self.proxy_pool()
-                        && let Some((origin, lease, leased_session)) = pool
+                        && let Some(leased) = pool
                             .acquire_session(self, &journey.url, None)
                             .map_err(leg_error(answered))?
                     {
-                        let p = leased_session
-                            .proxy_for(&journey.url, Some(lease.config()))
+                        let p = leased
+                            .session
+                            .proxy_for(&journey.url, Some(leased.lease.config()))
                             .map_err(leg_error(answered))?
                             .map(std::borrow::Cow::into_owned);
-                        hop_leased = Some((origin, lease, leased_session));
+                        hop_leased = Some(leased);
                         p
                     } else {
                         self.proxy_for(&journey.url, request_proxy)
                             .map_err(leg_error(answered))?
                             .map(std::borrow::Cow::into_owned)
                     };
-                    hop_proxy = Some(chosen);
                     hop_proxy
-                        .as_ref()
-                        .expect("hop_proxy just set")
+                        .insert(chosen)
                         .as_ref()
                         .map(std::borrow::Cow::Borrowed)
                 }
             };
-            let leg_session = hop_leased.as_ref().map_or(self, |(_, _, s)| s);
+            let leg_session = hop_leased.as_ref().map_or(self, |l| &l.session);
 
             let refresh = leg_session
                 .refresh_version(&journey, digest.as_ref())
@@ -129,14 +124,21 @@ impl Session {
                 attempt.deadline.response_header(send).await
             }
             .map_err(leg_error(answered));
-            if let Some((origin, lease, _)) = &hop_leased
+            if let Some(leased) = &hop_leased
                 && proxy.is_some()
             {
-                let outcome = match &leg {
-                    Ok(leg) => Ok(leg.status),
-                    Err(err) => Err(err),
-                };
-                lease.record_status(outcome, origin.as_ref());
+                let blocked = leg.as_ref().is_ok_and(|leg| {
+                    leg_session
+                        .inner
+                        .inputs
+                        .block_rules
+                        .check_parts(leg.status, &leg.headers)
+                        .is_some()
+                });
+                let outcome = leg.as_ref().map(|leg| leg.status);
+                leased
+                    .lease
+                    .record_result(outcome, leased.origin.as_ref(), blocked);
             }
             let leg = match leg {
                 Ok(leg) => leg,
@@ -166,9 +168,9 @@ impl Session {
 
             if leg.status == http::StatusCode::UNAUTHORIZED
                 && let Some(version) = refresh
-                && replay_body.is_some()
+                && let Some(replay_body) = replay_body
             {
-                let token = self
+                let token = leg_session
                     .inner
                     .inputs
                     .credential
@@ -177,8 +179,7 @@ impl Session {
                 drop(leg);
                 Box::pin(self.unless_shut_down(attempt.deadline.total(token.renew(version))))
                     .await?;
-                journey.body =
-                    replay_body.expect("invariant: replayable body checked before refresh");
+                journey.body = replay_body;
                 refreshed = true;
                 continue;
             }
@@ -195,6 +196,7 @@ impl Session {
                 drop(leg.body);
                 if journey.url != prev_url {
                     hop_proxy = None;
+                    hop_leased = None;
                 }
                 continue;
             }

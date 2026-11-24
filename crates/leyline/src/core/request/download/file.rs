@@ -105,12 +105,13 @@ impl Partial {
         lock(&self.data).metadata.clone()
     }
 
-    pub(super) fn prefix(&self) -> Result<Sha256> {
+    pub(super) fn prefix(&self, waiting: &atomic::Waiting) -> Result<Sha256> {
         let mut data = lock(&self.data);
         let mut digest = Sha256::new();
         data.file.rewind()?;
         let mut bytes = [0u8; 64 * 1024];
         loop {
+            waiting.check()?;
             let n = data.file.read(&mut bytes)?;
             if n == 0 {
                 break;

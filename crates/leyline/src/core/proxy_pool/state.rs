@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::time::Instant;
+
+use lru::LruCache;
 
 use super::ProxyPool;
 use crate::core::config::{Origin, Proxy};
@@ -7,6 +9,8 @@ use crate::core::response::Response;
 use crate::core::session::Session;
 use crate::error::Result;
 use crate::util::saturating_after;
+
+const MAX_STICKY_ORIGINS: NonZeroUsize = NonZeroUsize::new(4096).unwrap();
 
 #[derive(Debug, Default, Clone, Copy)]
 pub(super) struct Health {
@@ -18,7 +22,7 @@ pub(super) struct Health {
 #[derive(Debug)]
 pub(super) struct PoolState {
     health: Vec<Health>,
-    sticky: HashMap<Origin, (usize, Instant)>,
+    sticky: LruCache<Origin, (usize, Instant)>,
     cursor: usize,
 }
 
@@ -26,7 +30,7 @@ impl PoolState {
     pub(super) fn new(len: usize) -> Self {
         Self {
             health: vec![Health::default(); len],
-            sticky: HashMap::new(),
+            sticky: LruCache::new(MAX_STICKY_ORIGINS),
             cursor: 0,
         }
     }
@@ -41,9 +45,14 @@ impl PoolState {
             .is_none_or(|until| until <= now)
     }
 
-    fn sticky_index(&self, origin: &Origin, now: Instant) -> Option<usize> {
+    fn sticky_index(&mut self, origin: &Origin, now: Instant) -> Option<usize> {
         let (index, until) = *self.sticky.get(origin)?;
-        (until > now && self.usable(index, now)).then_some(index)
+        if until > now && self.usable(index, now) {
+            Some(index)
+        } else {
+            self.sticky.pop(origin);
+            None
+        }
     }
 
     fn next_index(&mut self, avoid: Option<usize>, now: Instant) -> Option<usize> {
@@ -63,19 +72,18 @@ impl PoolState {
             .min_by_key(|&index| self.health[index].banned_until)
     }
 
-    fn stick(&mut self, origin: Origin, index: usize, until: Instant, now: Instant) {
-        self.sticky.retain(|_, (_, expiry)| *expiry > now);
-        self.sticky.insert(origin, (index, until));
+    fn stick(&mut self, origin: Origin, index: usize, until: Instant) {
+        self.sticky.put(origin, (index, until));
     }
 
     fn unstick(&mut self, origin: Option<&Origin>, index: usize) {
         if let Some(origin) = origin
             && self
                 .sticky
-                .get(origin)
+                .peek(origin)
                 .is_some_and(|(held, _)| *held == index)
         {
-            self.sticky.remove(origin);
+            self.sticky.pop(origin);
         }
     }
 
@@ -87,7 +95,15 @@ impl PoolState {
         }
         health.failures = 0;
         health.banned_until = Some(saturating_after(now, pool.settings.ban_for));
-        self.sticky.retain(|_, (held, _)| *held != index);
+        let bound: Vec<Origin> = self
+            .sticky
+            .iter()
+            .filter(|(_, (held, _))| *held == index)
+            .map(|(origin, _)| origin.clone())
+            .collect();
+        for origin in bound {
+            self.sticky.pop(&origin);
+        }
     }
 }
 
@@ -136,7 +152,7 @@ impl ProxyPool {
             return;
         }
         let until = saturating_after(now, self.settings.sticky_for);
-        state.stick(origin.clone(), index, until, now);
+        state.stick(origin.clone(), index, until);
     }
 }
 
@@ -165,35 +181,34 @@ impl Lease {
         origin: Option<&Origin>,
         answered: Option<&Origin>,
     ) {
-        let strike = match result {
-            Err(err) if err.is_proxy() => true,
-            Ok(resp) => resp.block().is_some(),
-            Err(_) => return,
-        };
-        self.record_outcome(strike, origin, answered);
+        self.record_check(
+            result.as_ref().map(|resp| resp.block().is_some()),
+            origin,
+            answered,
+        );
     }
 
-    pub(crate) fn record_status(
+    pub(crate) fn record_result<T>(
         &self,
-        result: std::result::Result<http::StatusCode, &crate::error::Error>,
+        result: std::result::Result<T, &crate::error::Error>,
         origin: Option<&Origin>,
+        blocked: bool,
+    ) {
+        self.record_check(result.map(|_| blocked), origin, origin);
+    }
+
+    fn record_check(
+        &self,
+        result: std::result::Result<bool, &crate::error::Error>,
+        origin: Option<&Origin>,
+        answered: Option<&Origin>,
     ) {
         let strike = match result {
             Err(err) if err.is_proxy() => true,
-            Ok(_) => false,
+            Ok(blocked) => blocked,
             Err(_) => return,
         };
-        self.record_outcome(strike, origin, origin);
-    }
-
-    #[cfg(feature = "websocket")]
-    pub(crate) fn record_handshake<T>(&self, result: &Result<T>, origin: Option<&Origin>) {
-        let strike = match result {
-            Err(err) if err.is_proxy() => true,
-            Ok(_) => false,
-            Err(_) => return,
-        };
-        self.record_outcome(strike, origin, origin);
+        self.record_outcome(strike, origin, answered);
     }
 
     fn record_outcome(&self, strike: bool, origin: Option<&Origin>, answered: Option<&Origin>) {

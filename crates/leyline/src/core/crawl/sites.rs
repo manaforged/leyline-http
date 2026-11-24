@@ -33,6 +33,7 @@ pub(super) enum Site {
     Pending,
     Ready {
         robots: Robots,
+        delay: Option<Duration>,
         read: Instant,
         used: bool,
     },
@@ -75,9 +76,24 @@ impl Crawl {
                 .is_none_or(|max| read.elapsed() < max)
     }
 
+    pub(super) fn site_delay(&self, origin: &Origin) -> Option<Duration> {
+        self.settings.respect?;
+        match self.sites.get(origin) {
+            Some(Site::Ready { delay, .. }) => *delay,
+            _ => None,
+        }
+    }
+
+    pub(super) fn sync_floor(&self, origin: &Origin) {
+        if let Some(delay) = self.site_delay(origin) {
+            self.pace.set_floor_origin(origin.clone(), Some(delay));
+        }
+    }
+
     fn origin_ready(&self, origin: &Origin) -> bool {
+        let delay = self.site_delay(origin);
         self.busy.get(origin).copied().unwrap_or(0) < self.origin_cap(origin)
-            && self.pace.ready(origin)
+            && self.pace.ready_with(origin, delay)
             && self.session.host_limits().ready(origin)
     }
 
@@ -115,18 +131,24 @@ impl Crawl {
         let obey = self.settings.respect.is_some();
         self.frontier.pop_where(|origin| {
             let cap = origin_cap_for(pace, own, origin, fallback);
+            let delay = obey
+                .then(|| match sites.get(origin) {
+                    Some(Site::Ready { delay, .. }) => *delay,
+                    _ => None,
+                })
+                .flatten();
             !(obey && matches!(sites.get(origin), Some(Site::Pending)))
                 && busy.get(origin).copied().unwrap_or(0) < cap
-                && pace.ready(origin)
+                && pace.ready_with(origin, delay)
                 && own.ready(origin)
         })
     }
 
     fn take_verdict(&mut self, origin: &Origin, url: &Url) -> Option<Option<SkipReason>> {
         let verdict = match self.sites.get(origin) {
-            Some(Site::Ready { robots, read, used }) if self.robots_fresh(*read, *used) => {
-                self.verdict(robots, url)
-            }
+            Some(Site::Ready {
+                robots, read, used, ..
+            }) if self.robots_fresh(*read, *used) => self.verdict(robots, url),
             _ => return None,
         };
         if let Some(Site::Ready { used, .. }) = self.sites.get_mut(origin) {
@@ -199,19 +221,26 @@ impl Crawl {
                 }
             }
         }
-        if self.settings.respect.is_some() {
+        let delay = self.settings.respect.and_then(|_| {
             let max_delay = self.settings.max_crawl_delay;
-            let gap = robots
+            robots
                 .crawl_delay()
                 .map(|gap| max_delay.map_or(gap, |max| gap.min(max)))
-                .filter(|gap| !gap.is_zero());
-            self.pace.set_floor(&url, gap);
-            self.pace.set_floor(&self.session.upgraded(&url), gap);
+                .filter(|gap| !gap.is_zero())
+        });
+        if self.settings.respect.is_some() {
+            self.pace.set_floor_origin(origin.clone(), delay);
+            if let Some(upgraded) = Origin::of(&self.session.upgraded(&url))
+                && upgraded != origin
+            {
+                self.pace.set_floor_origin(upgraded, delay);
+            }
         }
         self.sites.insert(
             origin,
             Site::Ready {
                 robots,
+                delay,
                 read: Instant::now(),
                 used: false,
             },
@@ -285,7 +314,11 @@ impl Crawl {
         }
         let mut waiting = VecDeque::new();
         let mut opened = false;
-        while let Some(file) = self.sitemaps.queue.pop_front() {
+        while let Some(mut file) = self.sitemaps.queue.pop_front() {
+            let upgraded = self.session.upgraded(&file.url);
+            if upgraded != file.url {
+                file.url = upgraded;
+            }
             let Some(origin) = Origin::of(&file.url) else {
                 continue;
             };
@@ -333,6 +366,7 @@ impl Crawl {
     }
 
     fn start_sitemap(&mut self, origin: Origin, file: SitemapFile) {
+        self.sync_floor(&origin);
         self.sitemaps.in_flight += 1;
         *self.busy.entry(origin.clone()).or_default() += 1;
         let session = self.session.clone();

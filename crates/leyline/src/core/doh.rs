@@ -203,11 +203,11 @@ impl Resolver for DohResolver {
             } else {
                 format!("_{port}._https.{}", cache_key.0)
             };
-            let (config, ttl) = match self.query(&qname, TYPE_HTTPS).await {
-                Ok(answer) => (answer.ech_config_list, answer.min_ttl),
-                Err(_) => (None, None),
+            let Ok(answer) = self.query(&qname, TYPE_HTTPS).await else {
+                return None;
             };
-            self.store_ech(cache_key, config.clone(), ttl);
+            let config = answer.ech_config_list;
+            self.store_ech(cache_key, config.clone(), answer.min_ttl);
             config
         })
     }

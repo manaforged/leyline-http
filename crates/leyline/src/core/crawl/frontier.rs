@@ -235,10 +235,10 @@ impl Frontier {
         {
             self.bounds.push(bound);
         }
+        let again = redirect && self.redirected.remove(&key);
         if !queued.seed && !self.in_scope(&queued.url) {
             return stats.skip(if redirect { lost } else { SkipReason::Scope });
         }
-        let again = redirect && self.redirected.remove(&key);
         if known && !again {
             if redirect {
                 stats.skip(SkipReason::Duplicate);
@@ -300,25 +300,30 @@ impl Frontier {
     }
 
     pub(super) fn push_back(&mut self, queued: Queued) {
-        let Some(origin) = Origin::of(&queued.url) else {
-            return;
-        };
-        let queue = self.queues.entry(origin.clone()).or_default();
-        if queue.is_empty() {
-            self.order.push_back(origin);
-        }
-        queue.push_back(queued);
+        self.push(queued, false);
     }
 
     pub(super) fn push_front(&mut self, queued: Queued) {
+        self.push(queued, true);
+    }
+
+    fn push(&mut self, queued: Queued, front: bool) {
         let Some(origin) = Origin::of(&queued.url) else {
             return;
         };
         let queue = self.queues.entry(origin.clone()).or_default();
         if queue.is_empty() {
-            self.order.push_front(origin);
+            if front {
+                self.order.push_front(origin);
+            } else {
+                self.order.push_back(origin);
+            }
         }
-        queue.push_front(queued);
+        if front {
+            queue.push_front(queued);
+        } else {
+            queue.push_back(queued);
+        }
     }
 
     pub(super) fn pop_where(&mut self, mut ready: impl FnMut(&Origin) -> bool) -> Option<Queued> {

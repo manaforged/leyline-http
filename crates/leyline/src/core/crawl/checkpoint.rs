@@ -48,6 +48,21 @@ impl Versioned for CheckpointVersion {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum SavedSitemap {
+    Full {
+        url: Url,
+        attempts: u32,
+        not_before: Option<SystemTime>,
+        #[serde(default)]
+        hops: usize,
+        #[serde(default)]
+        previous: Vec<Url>,
+    },
+    Legacy(Url, u32, Option<SystemTime>),
+}
+
+#[derive(Serialize, Deserialize)]
 struct Checkpoint {
     #[serde(with = "version")]
     version: CheckpointVersion,
@@ -61,7 +76,7 @@ struct Checkpoint {
     dedup: Dedup,
     stats: CrawlStats,
     delayed: Vec<(SystemTime, Queued)>,
-    sitemaps: Vec<(Url, u32, Option<SystemTime>)>,
+    sitemaps: Vec<SavedSitemap>,
     sitemap_files: HashSet<String>,
     pauses: Vec<(Origin, SystemTime)>,
 }
@@ -132,7 +147,7 @@ impl Checkpoint {
             .filter_map(|origin| {
                 crawl
                     .pace
-                    .ready_at(&origin)
+                    .ready_at_with(&origin, crawl.site_delay(&origin))
                     .max(crawl.session.host_limits().ready_at(&origin))
                     .map(|at| Ok((origin, wall_time(at)?)))
             })
@@ -157,11 +172,13 @@ impl Checkpoint {
                 .queue
                 .iter()
                 .map(|file| {
-                    Ok((
-                        file.url.clone(),
-                        file.attempts,
-                        file.not_before.map(wall_time).transpose()?,
-                    ))
+                    Ok(SavedSitemap::Full {
+                        url: file.url.clone(),
+                        attempts: file.attempts,
+                        not_before: file.not_before.map(wall_time).transpose()?,
+                        hops: file.hops,
+                        previous: file.previous.clone(),
+                    })
                 })
                 .collect::<Result<_>>()?,
             sitemap_files: crawl.sitemaps.files.clone(),
@@ -193,12 +210,22 @@ impl Checkpoint {
         crawl.sitemaps.queue = self
             .sitemaps
             .into_iter()
-            .map(|(url, attempts, at)| {
+            .map(|saved| {
+                let (url, attempts, at, hops, previous) = match saved {
+                    SavedSitemap::Full {
+                        url,
+                        attempts,
+                        not_before,
+                        hops,
+                        previous,
+                    } => (url, attempts, not_before, hops, previous),
+                    SavedSitemap::Legacy(url, attempts, at) => (url, attempts, at, 0, Vec::new()),
+                };
                 Ok(SitemapFile {
                     url,
                     attempts,
-                    hops: 0,
-                    previous: Vec::new(),
+                    hops,
+                    previous,
                     not_before: at.map(monotonic).transpose()?,
                 })
             })

@@ -102,7 +102,11 @@ impl Crawl {
 
     fn host_wait(&self, origin: &Origin) -> Wait {
         let own = self.session.host_limits();
-        match self.pace.ready_at(origin).max(own.ready_at(origin)) {
+        match self
+            .pace
+            .ready_at_with(origin, self.site_delay(origin))
+            .max(own.ready_at(origin))
+        {
             Some(at) => Wait::Until(at),
             None if !(self.pace.has_room(origin) && own.has_room(origin)) => Wait::Room,
             None => Wait::Ready,

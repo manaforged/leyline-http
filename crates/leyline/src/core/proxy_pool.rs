@@ -63,6 +63,12 @@ impl ProxyHealth {
     }
 }
 
+pub(crate) struct Leased {
+    pub(crate) origin: Option<crate::core::config::Origin>,
+    pub(crate) lease: Box<Lease>,
+    pub(crate) session: crate::core::session::Session,
+}
+
 impl ProxyPool {
     pub(crate) fn new<P: Into<Proxy>>(proxies: impl IntoIterator<Item = P>) -> Self {
         Self::from_entries(proxies.into_iter().map(|proxy| entry(proxy.into(), None)))
@@ -132,18 +138,16 @@ impl ProxyPool {
         base: &crate::core::session::Session,
         url: &url::Url,
         last: Option<usize>,
-    ) -> crate::error::Result<
-        Option<(
-            Option<crate::core::config::Origin>,
-            Lease,
-            crate::core::session::Session,
-        )>,
-    > {
+    ) -> crate::error::Result<Option<Leased>> {
         let Some((origin, lease)) = self.lease_for(url, last) else {
             return Ok(None);
         };
         let session = lease.session(base)?;
-        Ok(Some((origin, lease, session)))
+        Ok(Some(Leased {
+            origin,
+            lease: Box::new(lease),
+            session,
+        }))
     }
 
     pub(crate) fn for_doh(&self) -> Self {

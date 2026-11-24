@@ -99,6 +99,8 @@ pub struct Session {
     inner: Arc<SessionInner>,
 }
 
+pub(super) type AutosaveWriter = (tokio::sync::watch::Sender<bool>, tokio::task::JoinHandle<()>);
+
 #[derive(Clone)]
 pub(crate) struct SessionInner {
     browser: Option<Browser>,
@@ -120,7 +122,7 @@ pub(crate) struct SessionInner {
     hsts: Arc<std::sync::Mutex<crate::core::hsts::HstsStore>>,
     digest_nonces: Arc<crate::core::digest::DigestNonces>,
     shutdown: Arc<crate::core::shutdown::Shutdown>,
-    writers: Arc<std::sync::Mutex<Vec<tokio::task::JoinHandle<()>>>>,
+    writers: Arc<std::sync::Mutex<Vec<AutosaveWriter>>>,
     audit_tls: Option<Arc<crate::audit::AuditTlsCache>>,
     #[cfg(feature = "http3")]
     h3_config: Option<crate::quic::H3Config>,

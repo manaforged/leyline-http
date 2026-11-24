@@ -25,7 +25,12 @@ impl PartialFile {
 impl Drop for PartialFile {
     fn drop(&mut self) {
         if self.armed {
-            drop(std::fs::remove_file(&self.path));
+            let path = std::mem::take(&mut self.path);
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                drop(handle.spawn_blocking(move || drop(std::fs::remove_file(&path))));
+            } else {
+                drop(std::fs::remove_file(&path));
+            }
         }
     }
 }
@@ -46,11 +51,14 @@ impl Response {
     }
 
     async fn write_file(self, temp: &Path, target: &Path) -> Result<u64> {
-        let mut file = tokio::fs::File::from_std(atomic::create_temp(
-            temp,
-            target,
-            atomic::FileMode::KeepExisting,
-        )?);
+        let temp = temp.to_path_buf();
+        let target = target.to_path_buf();
+        let std_file = atomic::blocking(move |waiting| {
+            waiting.check()?;
+            atomic::create_temp(&temp, &target, atomic::FileMode::KeepExisting)
+        })
+        .await?;
+        let mut file = tokio::fs::File::from_std(std_file);
         let written = self.write_to(&mut file).await?;
         file.flush().await?;
         file.sync_all().await?;

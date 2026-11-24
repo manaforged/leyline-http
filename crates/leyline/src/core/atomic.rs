@@ -17,6 +17,10 @@ impl Drop for CallerWaits {
 pub(crate) struct Waiting(Arc<AtomicBool>);
 
 impl Waiting {
+    pub(crate) fn from_flag(flag: Arc<AtomicBool>) -> Self {
+        Self(flag)
+    }
+
     pub(crate) fn check(&self) -> Result<()> {
         match self.0.load(Ordering::Acquire) {
             true => Ok(()),

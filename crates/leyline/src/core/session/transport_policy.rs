@@ -184,6 +184,9 @@ impl Session {
     #[cfg(feature = "http3")]
     async fn send_raced<'r>(&self, h3_config: &H3Config, req: Prepared<'r>) -> Raced<'r> {
         let pool = &self.inner.pool;
+        if !self.inner.inputs.pool_config.keepalive {
+            return ControlFlow::Continue((Route::Auto, req));
+        }
         let connector = &self.inner.connector;
         let h2_config = &self.inner.h2_config;
         let Ok((host, port)) = crate::wire::host_port(req.url) else {
@@ -202,6 +205,7 @@ impl Session {
 
         let mut h3_done = false;
         let mut h2_done = false;
+        let mut h2_err: Option<Error> = None;
         let winner = loop {
             tokio::select! {
                 biased;
@@ -224,7 +228,14 @@ impl Session {
                 },
                 r = &mut h2_connect, if !h2_done => match r {
                     Ok(Some(_)) => break Some(Winner::H2),
-                    Ok(None) | Err(_) => {
+                    Ok(None) => {
+                        h2_done = true;
+                        if h3_done {
+                            break None;
+                        }
+                    }
+                    Err(error) => {
+                        h2_err = Some(error);
                         h2_done = true;
                         if h3_done {
                             break None;
@@ -237,7 +248,10 @@ impl Session {
         match winner {
             Some(Winner::H3) => ControlFlow::Break(Box::pin(send_h3(pool, &target, req)).await),
             Some(Winner::H2) => ControlFlow::Continue((Route::Http2, req)),
-            None => ControlFlow::Continue((Route::Auto, req)),
+            None => match h2_err {
+                Some(error) => ControlFlow::Break(Err(error)),
+                None => ControlFlow::Continue((Route::Auto, req)),
+            },
         }
     }
 }

@@ -42,20 +42,16 @@ impl Session {
                 "WebSocket handshakes are not supported over HTTP/3",
             ));
         }
-        let (lease_origin, lease, leased_session) = match self
+        let leased = self
             .proxy_pool()
             .filter(|_| carry.proxy().is_none())
             .map(|pool| pool.acquire_session(self, http_url, None))
             .transpose()?
-            .flatten()
-        {
-            Some((origin, lease, session)) => (origin, Some(lease), Some(session)),
-            None => (None, None, None),
-        };
-        let session = leased_session.as_ref().unwrap_or(self);
-        let request_proxy = lease
+            .flatten();
+        let session = leased.as_ref().map_or(self, |l| &l.session);
+        let request_proxy = leased
             .as_ref()
-            .map(crate::core::proxy_pool::Lease::config)
+            .map(|l| l.lease.config())
             .or_else(|| carry.proxy());
         let proxy = session.proxy_for(http_url, request_proxy)?;
         let extra_headers = session.websocket_headers(http_url, extra_headers);
@@ -99,9 +95,11 @@ impl Session {
         }
         .await;
         if proxy.is_some()
-            && let Some(lease) = &lease
+            && let Some(leased) = &leased
         {
-            lease.record_handshake(&result, lease_origin.as_ref());
+            leased
+                .lease
+                .record_result(result.as_ref(), leased.origin.as_ref(), false);
         }
         if let Ok(conn) = &result {
             session.store_cookies(conn.headers(), http_url);

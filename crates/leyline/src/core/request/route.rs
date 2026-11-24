@@ -1,16 +1,10 @@
 use super::Draft;
 use crate::core::config::Origin;
-use crate::core::proxy_pool::{Lease, ProxyPool};
+use crate::core::proxy_pool::{Leased, ProxyPool};
 use crate::core::response::Response;
 use crate::core::retry::Retry;
 use crate::core::session::Session;
 use crate::error::Result;
-
-struct Leased {
-    origin: Option<Origin>,
-    lease: Box<Lease>,
-    session: Session,
-}
 
 pub(super) struct Route<'a> {
     session: &'a Session,
@@ -81,16 +75,11 @@ impl<'a> Route<'a> {
         let Some((pool, url)) = self.pool.zip(this.url()) else {
             return Ok(None);
         };
-        let Some((origin, lease, session)) = pool.acquire_session(self.session, url, self.last)?
-        else {
+        let Some(leased) = pool.acquire_session(self.session, url, self.last)? else {
             return Ok(None);
         };
-        this.carry.overrides_mut().proxy = Some(lease.config().clone());
-        Ok(Some(Leased {
-            origin,
-            lease: Box::new(lease),
-            session,
-        }))
+        this.carry.overrides_mut().proxy = Some(leased.lease.config().clone());
+        Ok(Some(leased))
     }
 
     fn observe(&self, response: &Response) {

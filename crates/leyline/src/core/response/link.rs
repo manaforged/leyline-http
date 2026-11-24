@@ -4,12 +4,22 @@ use url::Url;
 use super::Response;
 
 /// One entry of a `Link` response header.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Link {
     url: Url,
     rel: Vec<String>,
     params: Vec<(String, String)>,
+}
+
+impl std::fmt::Debug for Link {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Link")
+            .field("url", &crate::util::redact(self.url.as_str()))
+            .field("rel", &self.rel)
+            .field("params", &self.params)
+            .finish()
+    }
 }
 
 impl Link {
