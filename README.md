@@ -82,22 +82,9 @@ better.
 | libcurl | 48,412 | 793,204 |
 | Go net/http | 42,896 | 615,231 |
 
-Leyline also uses less client CPU per request than each of them in all four
-measured HTTP/2 workloads (and fewer user-space instructions per request than
-the bare `h2` crate). At a fixed offered rate of 50,000 HTTP/2 requests per
-second, its p99 latency is 115 µs at 8.13 µs client CPU/req (78 µs p99 at
-4.31 µs CPU with `run_per_core`), against 125 µs (12.09 µs CPU) for libcurl,
-153 µs (13.81 µs CPU) for hyper-util, and 158 µs (19.95 µs CPU) for reqwest.
-[BENCHMARKS.md](BENCHMARKS.md) has every workload, HTTP/1.1, confidence
-intervals, and the commands to reproduce them.
+At 50,000 HTTP/2 req/s, p99 latency is 115 µs (78 µs with `run_per_core`), compared to 125 µs for libcurl, 153 µs for hyper-util, and 158 µs for reqwest. `SessionBuilder::run_per_core` runs one runtime per CPU core (sharing cookies, cache, and tokens) and reaches 921k HTTP/1.1 req/s and 28 µs open-loop HTTP/1.1 p99.
 
-For the highest request rate and lowest tail latency, `SessionBuilder::run_per_core`
-runs one runtime per CPU core; the cores share cookies, cache and tokens and
-keep their own connections. In that layout Leyline reaches 921k HTTP/1.1 req/s
-at 64 workers (903k in the 1M-request runs, ahead of fasthttp at 8 workers and
-tied at 64 at 0.79–0.84× CPU), leads the bare `h2` crate at 8 and 256 requests
-in flight over eight HTTP/2 connections, and drops open-loop HTTP/1.1 `c64`
-(20k req/s) p99 to 28 µs at 9.66 µs CPU/req.
+See [BENCHMARKS.md](BENCHMARKS.md) for HTTP/1.1, browser profiles, client CPU per request, confidence intervals, and reproduction commands.
 
 ## Browser profiles
 
