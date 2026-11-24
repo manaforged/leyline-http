@@ -219,7 +219,10 @@ pub(super) fn try_send_udp_batch(
             return Err(io::Error::last_os_error());
         }
         if ret == 0 {
-            return Err(io::Error::from(io::ErrorKind::WouldBlock));
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "sendmmsg sent zero messages",
+            ));
         }
         Ok(usize::try_from(ret).unwrap_or(0))
     })

@@ -3,8 +3,6 @@ use std::net::SocketAddr;
 
 use tokio::net::UdpSocket;
 
-pub(crate) const MAX_SENDMMSG: usize = crate::net::MAX_UDP_BATCH;
-
 use crate::net::ProxyUrl;
 use crate::net::proxy::SOCKS_FEATURE_OFF;
 #[cfg(feature = "socks")]

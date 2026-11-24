@@ -91,24 +91,13 @@ impl Decoder {
         self.fed = true;
         match self.stages.as_mut_slice() {
             [] => self.emit_slice(chunk, out),
-            [single] => {
-                let before = out.len();
-                single.write_into(chunk, out)?;
-                self.produced = self.produced.saturating_add(out.len() - before);
-                Ok(())
-            }
-            [first, rest @ ..] => {
+            [single] => single.write_into(chunk, out),
+            [first, middle @ .., last] => {
                 let mut data = first.write(chunk)?;
-                let Some((last, middle)) = rest.split_last_mut() else {
-                    return self.emit_slice(&data, out);
-                };
                 for stage in middle {
                     data = stage.write(&data)?;
                 }
-                let before = out.len();
-                last.write_into(&data, out)?;
-                self.produced = self.produced.saturating_add(out.len() - before);
-                Ok(())
+                last.write_into(&data, out)
             }
         }
     }
@@ -118,17 +107,12 @@ impl Decoder {
             return Ok(());
         }
         if let [single] = self.stages.as_mut_slice() {
-            let before = out.len();
-            single.finish_into(out)?;
-            self.produced = self.produced.saturating_add(out.len() - before);
-            return Ok(());
+            return single.finish_into(out);
         }
         let len = self.stages.len();
         for index in 0..len {
             if index + 1 == len {
-                let before = out.len();
                 self.stages[index].finish_into(out)?;
-                self.produced = self.produced.saturating_add(out.len() - before);
                 continue;
             }
             let mut data = self.stages[index].finish()?;
@@ -136,9 +120,7 @@ impl Decoder {
             for stage in middle {
                 data = stage.write(&data)?;
             }
-            let before = out.len();
             last[0].write_into(&data, out)?;
-            self.produced = self.produced.saturating_add(out.len() - before);
         }
         Ok(())
     }
@@ -171,7 +153,7 @@ pub(crate) fn decompress_body(
     let hint = body
         .len()
         .saturating_mul(2)
-        .min(1024 * 1024)
+        .min(crate::wire::BODY_RESERVE_CAP)
         .min(config.max_body_size);
     let mut out = Vec::with_capacity(hint);
     decoder.feed(&body, &mut out)?;

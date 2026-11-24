@@ -42,6 +42,10 @@ pub(super) struct H3Loop {
 
 type DatagramStop = (String, fn(String) -> H3SendError);
 
+fn closed_stop(msg: String) -> DatagramStop {
+    (msg, H3SendError::Closed)
+}
+
 impl H3Loop {
     pub(super) fn new(driver: H3Driver) -> Self {
         let EstablishedH3 {
@@ -286,7 +290,7 @@ impl H3Loop {
                 };
                 return Err((reason, H3SendError::Tls));
             }
-            return Err((format!("quic recv: {e}"), H3SendError::Closed));
+            return Err(closed_stop(format!("quic recv: {e}")));
         }
         Ok(())
     }
@@ -301,7 +305,7 @@ impl H3Loop {
             draining: self.draining,
         }
         .run()
-        .map_err(|msg| (msg, H3SendError::Closed as fn(String) -> H3SendError))?;
+        .map_err(closed_stop)?;
         if goaway {
             self.begin_draining();
         }
@@ -309,8 +313,7 @@ impl H3Loop {
     }
 
     fn on_datagram_batch(&mut self, first: io::Result<usize>) -> Result<(), DatagramStop> {
-        let closed = |msg: String| (msg, H3SendError::Closed as fn(String) -> H3SendError);
-        let len = first.map_err(|e| closed(format!("udp recv: {e}")))?;
+        let len = first.map_err(|e| closed_stop(format!("udp recv: {e}")))?;
         self.ingest_datagram(len)?;
         self.drain_h3()?;
         for _ in 1..RECV_BATCH_LIMIT {
@@ -324,7 +327,7 @@ impl H3Loop {
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => break,
                 Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-                Err(e) => return Err(closed(format!("udp recv: {e}"))),
+                Err(e) => return Err(closed_stop(format!("udp recv: {e}"))),
             }
         }
         Ok(())

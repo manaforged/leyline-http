@@ -2,11 +2,9 @@ use bytes::Bytes;
 use http::HeaderMap;
 
 use crate::deadline::{Elapsed, within};
-use crate::wire::{BlockReader, ResponseBlock};
+use crate::wire::{BODY_RESERVE_CAP, BlockReader, ResponseBlock};
 
 use super::*;
-
-const BODY_RESERVE_CAP: usize = 64 * 1024;
 
 impl StreamActor {
     fn reserve_body(&mut self) {

@@ -165,12 +165,18 @@ where
     Ok(())
 }
 
+pub(super) async fn read_limit<S, B>(stream: &mut S, buf: &mut B, max: usize) -> io::Result<usize>
+where
+    S: AsyncRead + Unpin + ?Sized,
+    B: bytes::BufMut,
+{
+    stream.read_buf(&mut bytes::BufMut::limit(buf, max)).await
+}
+
 pub(super) async fn read_into<S>(stream: &mut S, buf: &mut Vec<u8>, max: usize) -> io::Result<usize>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
     buf.reserve(max);
-    stream
-        .read_buf(&mut bytes::BufMut::limit(&mut *buf, max))
-        .await
+    read_limit(stream, buf, max).await
 }

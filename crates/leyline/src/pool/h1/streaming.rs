@@ -83,18 +83,33 @@ pub(super) struct Drain {
     wait: Duration,
 }
 
-async fn read_into_bytes_mut<S>(
+const STREAM_SLAB_MIN_SPARE: usize = 16 * 1024;
+const SMALL_STREAM_COPY: usize = 4 * 1024;
+const DRAIN_BUF_CAP: usize = 8 * 1024;
+
+async fn read_stream_chunk<S>(
     stream: &mut S,
     buf: &mut bytes::BytesMut,
-    max: usize,
+    want: usize,
 ) -> io::Result<usize>
 where
     S: AsyncRead + Unpin + ?Sized,
 {
-    buf.reserve(max);
-    stream
-        .read_buf(&mut bytes::BufMut::limit(&mut *buf, max))
-        .await
+    if buf.capacity() < want.min(STREAM_SLAB_MIN_SPARE) {
+        buf.reserve(want);
+    }
+    let limit = want.min(buf.capacity());
+    read_limit(stream, buf, limit).await
+}
+
+fn take_stream_chunk(buf: &mut bytes::BytesMut) -> Bytes {
+    if buf.len() <= SMALL_STREAM_COPY && buf.capacity() > SMALL_STREAM_COPY * 2 {
+        let piece = Bytes::copy_from_slice(&buf[..]);
+        buf.clear();
+        piece
+    } else {
+        buf.split().freeze()
+    }
 }
 
 pub(super) async fn stream_fixed_into(
@@ -116,7 +131,7 @@ pub(super) async fn stream_fixed_into(
     let mut buf = bytes::BytesMut::new();
     while remaining > 0 {
         let want = usize::try_from(remaining).map_or(READ_CHUNK, |left| left.min(READ_CHUNK));
-        let Some(read) = until_closed(tx, read_into_bytes_mut(stream, &mut buf, want)).await else {
+        let Some(read) = until_closed(tx, read_stream_chunk(stream, &mut buf, want)).await else {
             return Ok(drain_fixed(stream, remaining, drain).await);
         };
         let n = read?;
@@ -124,7 +139,7 @@ pub(super) async fn stream_fixed_into(
             return Err(cut_short().into_error().into_io());
         }
         remaining -= n as u64;
-        if !send_chunk(tx, buf.split().freeze(), inline).await {
+        if !send_chunk(tx, take_stream_chunk(&mut buf), inline).await {
             return Ok(drain_fixed(stream, remaining, drain).await);
         }
     }
@@ -135,7 +150,11 @@ async fn drain_fixed(stream: &mut dyn H1Io, mut remaining: u64, drain: Drain) ->
     if remaining > drain.limit {
         return false;
     }
-    let mut tmp = vec![0u8; READ_CHUNK];
+    if remaining == 0 {
+        return true;
+    }
+    let cap = usize::try_from(remaining).map_or(DRAIN_BUF_CAP, |left| left.min(DRAIN_BUF_CAP));
+    let mut tmp = vec![0u8; cap];
     let read_rest = async {
         while remaining > 0 {
             let want = remaining.min(tmp.len() as u64) as usize;
@@ -159,7 +178,7 @@ pub(super) async fn stream_to_close_into(
     }
     let mut buf = bytes::BytesMut::new();
     loop {
-        let Some(read) = until_closed(tx, read_into_bytes_mut(stream, &mut buf, READ_CHUNK)).await
+        let Some(read) = until_closed(tx, read_stream_chunk(stream, &mut buf, READ_CHUNK)).await
         else {
             return Ok(false);
         };
@@ -167,7 +186,7 @@ pub(super) async fn stream_to_close_into(
         if n == 0 {
             return Ok(true);
         }
-        if !send_chunk(tx, buf.split().freeze(), inline).await {
+        if !send_chunk(tx, take_stream_chunk(&mut buf), inline).await {
             return Ok(false);
         }
     }

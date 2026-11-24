@@ -85,8 +85,10 @@ impl H3Stream {
                     && let Some(len) = length
                     && let Ok(cap) = usize::try_from(len)
                 {
-                    self.body
-                        .reserve(cap.min(self.body_limit.room(0)).min(1024 * 1024));
+                    self.body.reserve(
+                        cap.min(self.body_limit.room(0))
+                            .min(crate::wire::BODY_RESERVE_CAP),
+                    );
                 }
                 self.headers = headers;
             }
