@@ -164,14 +164,7 @@ impl Guard {
 impl Drop for Guard {
     fn drop(&mut self) {
         if !self.finished && self.pending() {
-            if let Ok(handle) = tokio::runtime::Handle::try_current() {
-                if let Some(write) = self.begin() {
-                    let ordered = self.order.order(write);
-                    drop(handle.spawn_blocking(move || drop(ordered())));
-                }
-            } else {
-                drop(self.save_now());
-            }
+            drop(self.save_now());
         }
     }
 }
@@ -257,8 +250,9 @@ async fn run(mut guard: Guard, every: Duration) {
                 }
             }
             command = guard.commands.recv() => {
-                handle(command, &mut guard).await;
-                guard.finished = true;
+                if handle(command, &mut guard).await {
+                    guard.finished = true;
+                }
                 return;
             }
         }
@@ -279,11 +273,14 @@ async fn deadline(due: Option<Instant>) {
     }
 }
 
-async fn handle(command: Option<Command>, guard: &mut Guard) {
-    let saved = guard.save_or_join_failed().await.unwrap_or_else(Err);
+async fn handle(command: Option<Command>, guard: &mut Guard) -> bool {
+    let outcome = guard.save_or_join_failed().await;
+    let completed = outcome.is_ok();
+    let saved = outcome.unwrap_or_else(Err);
     if let Some(Command::Shutdown(reply)) = command {
         drop(reply.send(saved));
     }
+    completed
 }
 
 #[cfg(test)]
