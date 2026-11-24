@@ -23,8 +23,8 @@ let mac = Session::builder()
 # }
 ```
 
-With the `http3` feature, a Chrome session races HTTP/3 against HTTP/2 for an
-origin that advertised `h3`. See [HTTP/3](http3.md).
+With the `http3` feature, bundled desktop and iOS 18+ browser profiles race
+HTTP/3 against HTTP/2 for origins that advertise `h3`. See [HTTP/3](http3.md).
 
 ## Pick another browser
 
@@ -34,10 +34,10 @@ origin that advertised `h3`. See [HTTP/3](http3.md).
 | Safari on macOS | `.browser(Browser::Safari26).platform(Platform::MacOS)` |
 | Safari on iPhone | `.browser(Browser::safari_ios())`. It needs no platform: the session claims iOS |
 | Edge or Opera | `.browser(Browser::edge())` or `.browser(Browser::opera())`, desktop only. See [Sessions](sessions.md#pick-edge-or-opera) |
-| Brave | `.browser(Browser::Brave146).platform(Platform::MacOS)` |
-| A phone app | `Browser::OkHttpAndroid10` or `Browser::CfnetworkIOS18` |
+| Brave | `.browser(Browser::Brave158).platform(Platform::MacOS)` |
+| A phone app | `Browser::OkHttpAndroid10` or `Browser::CfnetworkIOS27` |
 | A phone browser | `.browser(browser).platform(Platform::Android)` or `Platform::IOS` with a browser that has that platform |
-| One fixed version | `.browser(Browser::Chrome150).platform(platform)` |
+| One fixed version | `.browser(Browser::Chrome158).platform(platform)` |
 
 `.browser(Browser::Safari26).platform(Platform::IOS)` maps to the Safari on
 iPhone sibling. [Sessions](sessions.md#platform-defaults-and-call-order)
@@ -51,13 +51,12 @@ and the TCP fingerprint. `Platform::Host` uses the OS the program runs on.
 
 ## Keep a saved session stable
 
-The newest-build functions such as `Browser::chrome()` move to newer captures in a release, and a release can
-correct the data behind a pinned variant. For an account that must keep one
-profile, pin the variant and store `session.profile_id()`. Compare it
-with the new session's `profile_id()` on start, or save the session with `Session::save`: `build()` on the builder from `Session::load` returns an error with `err.is_profile_changed()` set to `true` when
-the profile changed. To keep the data itself, build the session with `.profile(..)`, and the save stores the profile TOML. See
-[Profile data stability](profiles.md#profile-data-stability) and
-[Accounts](accounts.md#freeze-a-profile).
+Newest-build helpers such as `Browser::chrome()` advance in releases, and
+bundled profile data can be corrected between releases. Pin a specific `Browser`
+variant and check `session.profile_id()` (or `err.is_profile_changed()` after
+`Session::load`), or pass `.profile(&toml)` to freeze the exact profile bytes.
+See [Save and restore a session](sessions.md#save-and-restore-a-session) and
+[Profile data stability](profiles.md#profile-data-stability).
 
 ## Read the JA4 labels
 

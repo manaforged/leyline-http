@@ -2,7 +2,7 @@
 
 [Introduction](README.md)
 
-# Using the client
+# Core
 
 - [Quick start](guide/quick-start.md)
 - [API clients](guide/api-clients.md)
@@ -12,13 +12,22 @@
 - [Responses](guide/responses.md)
 - [Streaming](guide/streaming.md)
 - [Cancellation](guide/cancellation.md)
+
+# Reliability and routing
+
 - [Redirects](guide/redirects.md)
 - [Retries and timeouts](guide/retries-and-timeouts.md)
 - [Errors](guide/errors.md)
 - [Proxies](guide/proxies.md)
+
+# Sessions and crawling
+
 - [Crawling](guide/crawling.md)
 - [Cookies](guide/cookies.md)
 - [Accounts](guide/accounts.md)
+
+# Protocols and operations
+
 - [WebSocket](guide/websocket.md)
 - [HTTP/3](guide/http3.md)
 - [TLS trust](guide/tls-trust.md)
@@ -31,7 +40,7 @@
 # Reference
 
 - [Fingerprints](guide/fingerprints.md)
-- [Features and targets](guide/features-and-targets.md)
+- [Cargo features and linking](guide/features-and-targets.md)
 - [Supported platforms](guide/platforms.md)
 - [Profile reference](guide/profiles.md)
 - [MSRV](guide/msrv.md)

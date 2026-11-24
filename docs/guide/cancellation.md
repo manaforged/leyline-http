@@ -21,11 +21,7 @@ dropping its future also stops the body read.
   it is ready, the pool keeps it for the next request.
 - A request that waits for a `HostLimits` slot leaves the wait, and one that
   holds a slot gives it back. See [Crawling](crawling.md#limit-each-host).
-- A `download` dropped before its commit starts removes its temporary
-  `.part` file and leaves the target path as it was. The commit starts on a
-  blocking thread after the body is written and synced. Once it has
-  started, it renames the file over the target even if the future is
-  dropped.
+- A `Response::download_to` dropped before commit starts removes its temporary `.part` file and leaves the target path untouched; once the blocking commit starts, the rename completes. A resumable `RequestBuilder::download_to` keeps its `<name>.leyline.part` checkpoint so the next call can resume. See [Streaming](streaming.md#download-a-file).
 - A request with a streaming body stops polling the body. On HTTP/2 and
   HTTP/3, Leyline resets the stream with `CANCEL`. It polls the body only
   after the request starts and buffers at most 256 KiB ahead of the peer's
@@ -44,8 +40,6 @@ you do not want.
 | HTTP/3 | Leyline resets the stream. The connection stays in the pool. [HTTP/3](http3.md) lists the reset codes |
 
 ```rust,no_run
-use futures_util::StreamExt;
-
 # async fn run() -> leyline::Result<()> {
 let session = leyline::Session::new();
 let resp = session.get("https://example.com/file").stream().send().await?;

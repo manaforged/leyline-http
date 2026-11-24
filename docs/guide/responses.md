@@ -50,16 +50,13 @@ HTTP/3 responses carry them; a streamed response and HTTP/1.1 yield none.
 
 ### Relay headers
 
-`relay_headers()` returns the headers without the hop-by-hop ones:
-`connection`, each header that `connection` names, `keep-alive`,
-`proxy-connection`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailer`, `transfer-encoding`, and `upgrade` (RFC
-9110, section 7.6.1). When Leyline decodes the body, it also drops
-`content-encoding` and `content-length`, so the headers match what every
-sink returns. When it does not decode, because the request set
-`decode(false)` or the session does not offer the coding, the body arrives as
-sent and `content-encoding` stays. `proxy-authenticate` and
-`proxy-authorization` are dropped as hop-by-hop headers. See
-[Service integration](service-integration.md#relay-an-upstream-body).
+`relay_headers()` returns a header map ready to forward downstream:
+
+- Strips RFC 9110 §7.6.1 hop-by-hop headers: `connection`, every header listed in `connection`, `keep-alive`, `proxy-connection`, `proxy-authenticate`, `proxy-authorization`, `te`, `trailer`, `transfer-encoding`, and `upgrade`.
+- When Leyline decodes the body, also strips `content-encoding` and `content-length` so the headers match what every sink returns.
+- When decoding is disabled (`decode(false)`) or the coding is not offered, `content-encoding` stays intact.
+
+See [Service integration](service-integration.md#relay-an-upstream-body).
 
 ## Bodies
 
@@ -73,7 +70,7 @@ streamed one is drained, with the `read` timeout on each chunk, then decoded.
 | `text().await` | `Result<String>` | Decodes with the `Content-Type` charset, default UTF-8 |
 | `text_with_charset(label).await` | `Result<String>` | Uses `label` when the response declares no charset. Feature `charset` |
 | `bytes().await` | `Result<bytes::Bytes>` | The decoded body |
-| `json::<T>().await` | `Result<T>` | Deserializes with serde. A failure is `Kind::Json`, in `Kind::Decode` |
+| `json::<T>().await` | `Result<T>` | Deserializes with serde. A failure is `Kind::Json` |
 | `bytes_stream()` | `Result<Body>` | The decoded body as a stream of `Result<Bytes>` |
 | `write_to(writer).await` | `Result<u64>` | Writes the decoded body |
 | `download_to(path).await` | `Result<u64>` | Saves the decoded body to a file; see [Streaming](streaming.md#download-a-file) |
@@ -87,12 +84,11 @@ overrides the declared charset. Without the `charset` feature, on by default,
 
 ### Size cap and content coding
 
-`max_body_size` (100 MiB by default) caps every body you read: `text`,
-`bytes`, `json`, `bytes_stream`, `write_to`, and `download_to`, on every
-protocol. It counts decoded bytes. A body over the cap fails with
-`Kind::BodyLimit`, and the message names `max_body_size`. Set it on the
-session, or on one request, where it replaces the session's value for a
-`.stream()` response:
+`max_body_size` (100 MiB by default) caps decoded bytes across every sink
+(`text`, `bytes`, `json`, `bytes_stream`, `write_to`, `download_to`) on every
+protocol, failing with `Kind::BodyLimit`. Set it on the session or on one
+request (applies to both buffered and `.stream()` responses); pass `None` on
+either builder to remove the cap:
 
 ```rust,no_run
 use leyline::Session;
@@ -110,14 +106,9 @@ let big = session
 # }
 ```
 
-A session offers and decodes gzip, deflate, br, and zstd, those that are
-compiled in. `accept_encoding([..])` picks the codings it offers, and
-`accept_encoding([])` offers none. Every sink decodes the codings the session
-offers. `RequestBuilder::decode(false)` turns decoding off for one request:
-every sink then returns the bytes as received, and the request still sends
-the same `accept-encoding`. Repeated `Content-Encoding` fields combine into
-one list. More than four codings fail with `Kind::Decode`. A coding the
-session does not offer comes back as received.
+- **Accepted codings.** A session offers and decodes every compiled-in coding (`gzip`, `deflate`, `br`, `zstd`). `accept_encoding([..])` restricts the list; `accept_encoding([])` offers none.
+- **Raw passthrough.** `RequestBuilder::decode(false)` skips decompression for one request while keeping `accept-encoding` unchanged. Codings the session did not offer also pass through raw.
+- **Chained codings.** Repeated `Content-Encoding` headers combine into one list; more than four codings fail with `Kind::Decode`.
 
 ## Final URL and redirects
 
@@ -143,19 +134,18 @@ See [Redirects](redirects.md).
 
 ## Follow `Link` pagination
 
-`link(rel)` returns the URL of the first `Link` entry with that relation.
-`links()` returns every entry as a `Link` with `url`, `rel`, and `params`.
-Parsing follows RFC 8288: several headers, comma-separated entries, quoted
-parameters, and several relations in one `rel`. Relative URLs resolve
-against `url()`, and the `rel` match ignores case.
+`links()` parses RFC 8288 `Link` headers (multiple headers, comma-separated
+entries, quoted parameters, multi-value `rel`). Each `Link` exposes `url()`,
+`rel()`, `params()`, and `has_rel(name)` (case-insensitive); relative URLs
+resolve against `resp.url()`. For example, find the next page with
+`resp.links().into_iter().find(|l| l.has_rel("next"))`.
 
 `RequestBuilder::pages()` turns a request into a stream of responses that
-follows `Link: rel="next"`. Read it with `futures_util::StreamExt::next`,
-and cap it with `take(n)`. Each follow-up is a `GET` with the first request's
-headers, timeouts, retry policy, and `error_for_status()` setting. The
-sequence ends after a page with no `next` link, after an error, or at a
-`next` URL it already fetched. The first request URL and the final URL of
-each page, after redirects, count as fetched.
+follows `Link: rel="next"` automatically:
+
+- Read with `futures_util::StreamExt::next` and cap with `.take(n)`.
+- Follow-ups use `GET` with the first request's headers, timeouts, retry policy, and `error_for_status()` setting.
+- Stops when a page has no `next` link, returns an error, or repeats an already-visited URL (including final URLs after redirects).
 
 ```rust,no_run
 use serde::Deserialize;
@@ -206,30 +196,9 @@ retry policy is done, and keeps the start of the body in the error:
 | Body bytes kept, after decoding | 64 KiB, and never more than `max_body_size` | `SessionBuilder::max_error_body_size` |
 | Time to read that body | 10 s, and never past the `total` timeout | `Timeout::error_body` |
 
-Leyline decides after the status line. A response below 400 is read in full
-as usual. An error response is read only up to these limits, so a large or
-slow error body cannot hold the request to the `body` timeout or exceed
-`max_body_size`. Decompression stops at the byte limit, so a small
-compressed body cannot expand past it.
-
-The error-body timeout starts when the response head arrives, and each error
-response gets one window, however its body is read. If the read fails or the
-window ends first, the error keeps the bytes decoded so far, or no body if
-none arrived, with the status and headers. The error's headers drop
-`content-encoding` when Leyline decoded the body, and `content-length` when
-the kept body is not the full declared length.
-
-`max_error_body_size` counts decoded bytes. Over HTTP/1.1, an error body that
-declares a length of `max_error_body_size` or less is read with the response. If
-it arrives within the window, the connection goes back to the pool;
-otherwise Leyline closes it. A larger or unframed error body is read only
-until `max_error_body_size` decoded bytes. If the rest of a fixed-length error
-body is no larger than `max_error_body_size`, Leyline reads and discards it in the
-background, within the pool's idle timeout, so the connection can be reused;
-this never extends the error-body window. Otherwise it closes the connection.
-Over HTTP/2 and HTTP/3, the stream is reset and the connection stays open.
-`download_to` after `error_for_status()` uses the same limits for a
-status error.
+- **Bounded read.** Leyline decides at the status line. Error responses read only up to `max_error_body_size` decoded bytes and `Timeout::error_body` (stopping decompression at the byte cap).
+- **Partial capture.** If the read fails or times out, the error still keeps the status, headers, and whatever bytes arrived. `content-encoding` is dropped when decoded; `content-length` is dropped when truncated.
+- **Connection reuse.** On HTTP/2 and HTTP/3, excess error bodies reset only that stream. On HTTP/1.1, remaining fixed-length bytes up to `max_error_body_size` drain in the background within the idle timeout so the connection stays reusable; larger or unframed error bodies close the connection. `download_to` with `error_for_status()` uses the same limits.
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -271,9 +240,11 @@ do not include the body read.
 | `elapsed()` | `Duration` | Connect plus send: the time to the response head |
 
 `tls_version()` and `tls_cipher()` return the negotiated version and cipher,
-and `peer_certificate()` the peer certificate as DER. `fingerprint()` returns the
-fingerprints the session presents when it was built with `.audit(true)`, and
-`None` otherwise. See [Fingerprints](fingerprints.md#audit-a-session).
+`ech_accepted()` reports whether TLS 1.3 Encrypted Client Hello succeeded (see
+[TLS trust](tls-trust.md#encrypt-sni-with-ech)), and `peer_certificate()`
+returns the leaf certificate as DER. `fingerprint()` returns the fingerprints
+the session presented when built with `.audit(true)` (`None` otherwise); see
+[Fingerprints](fingerprints.md#audit-a-session).
 
 ```rust,no_run
 # async fn run() -> leyline::Result<()> {
@@ -320,13 +291,9 @@ let checked = session
 # }
 ```
 
-These requests never use the cache, so `from_cache()` is `false` for them:
-
-- A method other than `GET`.
-- A `.stream()` request.
-- A request with a body.
-- A URL with credentials.
-- A request with a `Range`, `If-None-Match`, or `If-Modified-Since` header.
+See [Cache responses](api-clients.md#cache-responses) for the complete cache
+bypass rules (including non-`GET`, `.stream()`, `Range`/`If-Range`/conditional
+headers, and per-request `.protocol(...)` overrides).
 
 ## Convert to an http::Response
 

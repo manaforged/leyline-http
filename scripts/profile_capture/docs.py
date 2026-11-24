@@ -29,6 +29,21 @@ def profile_rows() -> list[dict]:
     return [meta for _, _, meta in sorted(rows, key=lambda row: row[:2])]
 
 
+def format_ranges(values: list[int]) -> str:
+    if not values:
+        return ""
+    ranges: list[str] = []
+    start = prev = values[0]
+    for v in values[1:]:
+        if v == prev + 1:
+            prev = v
+        else:
+            ranges.append(f"{start}" if start == prev else f"{start} to {prev}")
+            start = prev = v
+    ranges.append(f"{start}" if start == prev else f"{start} to {prev}")
+    return ", ".join(ranges)
+
+
 def render_profiles() -> str:
     lines = [
         "| Profile | `Browser` variant | `capture` | `captured_against` | JA4 | Verified against |",
@@ -52,7 +67,7 @@ def render_profiles() -> str:
             bases = sorted(int(major) for major in versions if int(major) in chrome)
             own = sorted({int(build.split(".")[0]) for major in bases for build in versions[str(major)]})
         lines.append(
-            f"| {brand} | `{brand}{own[0]}` to `{brand}{own[-1]}` | Chrome {bases[0]} to {bases[-1]} |"
+            f"| {brand} | `{brand}{own[0]}` to `{brand}{own[-1]}` | Chrome {format_ranges(bases)} |"
         )
     return "\n".join(lines) + "\n"
 

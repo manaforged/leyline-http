@@ -1,14 +1,11 @@
 # API clients
 
-This chapter builds one plain client for a JSON API: a base URL, a token,
-timeouts, retries with a rate limit, status errors, pagination, and uploads.
-Each section links to the chapter with the full detail.
+This chapter builds one plain client for a JSON API: a base URL, a bearer token,
+timeouts, retries with rate limits, status errors, pagination, uploads,
+[response caching](#cache-responses), and [token refresh](#refresh-a-bearer-token).
 `examples/api_client.rs` puts the steps together.
 
 ## Build the client once
-
-The sections below also cover [response caching](#cache-responses) and
-[token refresh](#refresh-a-bearer-token).
 
 ```rust,no_run
 use std::time::Duration;
@@ -24,9 +21,16 @@ const MAX_RATE_WAIT: Duration = Duration::from_secs(120);
 
 # fn run() -> leyline::Result<()> {
 let token = std::env::var("API_TOKEN").unwrap_or_default();
-let policy = Retry::new(3).wait_header(RATE_RESET).max_wait(MAX_RATE_WAIT).when(|attempt| attempt.is_transient() || attempt.response().is_some_and(|resp| {
-        resp.status() == StatusCode::FORBIDDEN && resp.header(RATE_REMAINING) == Some("0")
-    }));
+let policy = Retry::new(3)
+    .wait_header(RATE_RESET)
+    .max_wait(MAX_RATE_WAIT)
+    .when(|attempt| {
+        attempt.is_transient()
+            || attempt.response().is_some_and(|resp| {
+                resp.status() == StatusCode::FORBIDDEN
+                    && resp.header(RATE_REMAINING) == Some("0")
+            })
+    });
 let api = Session::builder()
     .base_url(BASE_URL)
     .bearer_auth(&token)
@@ -83,13 +87,11 @@ plus the time of the requests. See
 ## Turn statuses into errors
 
 `error_for_status()` on the request turns a status of 400 or more into a
-`Kind::Status` error after the retries. The error keeps the status, the
-headers, and up to 64 KiB of the body; see
-[Turn a status into an error](responses.md#turn-a-status-into-an-error).
-`err.retry_after()` returns the wait the policy read from the last response.
-`err.retries_exhausted()` is `true` when the policy wanted another try and
-did not make it; see
-[Status codes are not errors](errors.md#status-codes-are-not-errors).
+`Kind::Status` error after retries finish:
+
+- The error keeps the status, headers, and up to 64 KiB of the body (see [Turn a status into an error](responses.md#turn-a-status-into-an-error)).
+- `err.retry_after()` returns the wait the policy read from the last response.
+- `err.retries_exhausted()` is `true` when the policy wanted another attempt and stopped (see [Status codes are not errors](errors.md#status-codes-are-not-errors)).
 
 ```rust,no_run
 use leyline::{Error, Kind};
@@ -105,7 +107,7 @@ fn explain(err: &Error) -> String {
                 err.body().map(String::from_utf8_lossy).unwrap_or_default()
             ),
         },
-        Kind::Decode => format!("unexpected body: {err}"),
+        Kind::Json | Kind::Decode => format!("unexpected body: {err}"),
         Kind::Timeout => "the api timed out".to_owned(),
         other => format!("{other:?}: {err}"),
     }
@@ -117,14 +119,10 @@ See [Errors](errors.md).
 
 ## Read JSON pages
 
-`pages()` sends the request, then follows the `Link: rel="next"` header of
-each response with the same settings. See
-[Responses](responses.md#follow-link-pagination).
-
-There is no default page limit. Call `limit(max)` to stop after `max` pages.
-When a next link goes to another origin, the request drops the session
-credentials: the `Authorization`, `Cookie`, and `Proxy-Authorization`
-defaults and the session bearer token, as a redirect does.
+`pages()` sends the request and follows `Link: rel="next"` headers with the same
+settings. There is no default page limit: chain `StreamExt::take(max)` to cap
+pages. Cross-origin next links strip session credentials just like redirects.
+See [Responses](responses.md#follow-link-pagination).
 
 ```rust,no_run
 use serde::Deserialize;
@@ -178,7 +176,8 @@ deflate, Brotli, and zstd. See [Features and targets](features-and-targets.md).
 
 ## Cache responses
 
-Enable a private, in-memory HTTP cache with a byte budget:
+Enable a private, in-memory HTTP cache with a byte budget. Pass `cache(None)` to
+turn caching off on a derived session.
 
 ```rust,no_run
 use leyline::Session;
@@ -188,32 +187,22 @@ let api = Session::builder()
     .base_url("https://api.example/v1/")
     .cache(64 * 1024 * 1024)
     .build()?;
-let first = api.get("catalog").bytes().await?;
-let again = api.get("catalog").bytes().await?;
+let first = api.get("catalog").send().await?;
+let again = api.get("catalog").send().await?;
+println!("first={} again={}", first.from_cache(), again.from_cache());
 api.clear_cache();
-# drop((first, again));
 # Ok(())
 # }
 ```
 
 Caching is off by default. Session clones share the cache; `to_builder().build()`
-creates a new one. The budget charges bodies and a conservative allowance for
-headers and metadata, with least-recently-used eviction. An entry larger than
-the budget is not stored.
+creates a new one. The budget charges bodies plus an allowance for headers and
+metadata with LRU eviction, and entries larger than the budget are not stored.
 
-The cache respects cache-control directives, validators, and `Vary`. Stale
-responses are revalidated with `If-None-Match` or `If-Modified-Since`; a matching
-304 reuses the stored body. Successful writes invalidate all cached variants
-of the request URL and same-origin `Location` and `Content-Location` URLs.
-
-Request headers and the proxy route partition entries, so changing credentials
-or proxies cannot reuse another context's body. This is deliberately more
-conservative than `Vary` alone. Responses that set cookies are not stored.
-Streaming requests, ranges, and caller-supplied conditional requests bypass the
-cache. A cache miss with `Cache-Control: only-if-cached` returns status 504
-without contacting the origin. The cache is not written by `Session::save`. Audited request headers describe
-the caller's request before the cache adds revalidation headers; they are not
-a packet capture.
+- **Revalidation and invalidation.** Respects `Cache-Control`, validators, and `Vary`. Stale entries revalidate with `If-None-Match` or `If-Modified-Since` (a `304` reuses the stored body). Successful writes invalidate cached variants of the request URL and same-origin `Location` / `Content-Location` URLs.
+- **Context partitioning.** Request headers and the proxy route partition entries, so changing credentials or proxies cannot reuse another context's body. Responses that set cookies are not stored.
+- **Bypass rules.** The cache is bypassed for non-`GET` methods, `.stream()` requests, requests with a body, URLs with embedded credentials, `Range` / `If-Range` / `If-None-Match` / `If-Modified-Since` request headers, and per-request `.protocol(...)` overrides that differ from the session policy.
+- **Directives and persistence.** A cache miss with `Cache-Control: only-if-cached` returns status 504 without contacting the origin. `Session::save` does not save the cache. Audited request headers describe the caller's request before revalidation headers are added.
 
 ## Refresh a bearer token
 
@@ -248,13 +237,8 @@ let api = Session::builder()
 # }
 ```
 
-A 401 from the base URL origin permits one authentication replay per transport
-attempt, only for a replayable body. Concurrent requests that used the old token
-share the refresh result, including a failure. An explicit request authorization
-header and cross-origin redirects do not trigger refresh. The callback's wait
-is covered by the request's total deadline and session shutdown.
-
-Use a separate session for the token endpoint to avoid recursive refresh. The
-callback owns provider-specific behavior, refresh-token rotation, and secret
-storage. It can be cancelled. Bearer tokens and callbacks are not saved by
-`Session::save`.
+- A 401 from the base URL origin triggers at most one authentication replay per transport attempt, and only for a replayable body.
+- Concurrent requests that used the expired token share one single-flight refresh result, including errors.
+- An explicit request `Authorization` header and cross-origin redirects do not trigger a refresh.
+- A caller's wait respects the request's `total` deadline, cancellation, and session shutdown without aborting the shared in-progress refresh task.
+- Use a separate `Session` for the token endpoint to avoid recursive refresh. Bearer tokens and refresh callbacks are not written by `Session::save`.

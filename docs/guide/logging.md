@@ -11,18 +11,19 @@ Every target starts with `leyline`.
 
 | Target | Events |
 | --- | --- |
-| `leyline::session` | Session setup, for example the notice that a session defaults to Windows |
-| `leyline::env_proxy::cgi` | An `HTTP_PROXY` value that the CGI guard ignored |
+| `leyline::session` | `Protocol::Race` HTTP/3 fallback and proxy-skip debug events |
+| `leyline::env_proxy::cgi` | An `HTTP_PROXY` value skipped by the CGI httpoxy guard |
 | `leyline::pool` | Connection pool events |
-| `leyline::socket` | A `SessionBuilder` socket option that the platform does not support |
-| `leyline::tcp` | A `TcpProfile` socket option that the operating system rejected, once per option |
+| `leyline::socket` | Unsupported `SessionBuilder` or `TcpProfile` socket option warnings |
 | `leyline::tls::trust` | Loading and checking the trust store |
 | `leyline::h2`, `leyline::h2::flood_guard` | HTTP/2 connection events and flood protection |
 | `leyline::quic` | HTTP/3 and QUIC events |
-| `leyline::profile` | Profile load warnings, for example a missing `captured_against` |
+| `leyline::profile` | Profile load warnings (such as a missing `captured_against`) |
 | `leyline::digest` | Digest authentication |
-| `leyline::trace` | `Log`: one summary per request, the end of each streamed body, and the request phases |
-| `leyline::cache` | A response reused from the session cache |
+| `leyline::autosave` | Background `Session::autosave` write failures |
+| `leyline::crawl` | Crawler robots/sitemap/fetch diagnostics |
+| `leyline::trace` | `Log`: one summary per request, streamed body completion, and request phases |
+| `leyline::cache` | Responses reused from the session HTTP cache |
 
 With a subscriber that reads `RUST_LOG`, this filter shows one line per
 request and the warnings from the rest of the crate. Use
@@ -65,8 +66,8 @@ password, or a user name without a password, becomes `***`, the whole query
 becomes `***`, and the fragment is removed.
 
 ```text
-INFO leyline::trace: request id=7 method="GET" url=https://***@example.com/a?*** redirects=1 status=200 version=Http2 attempts=1 elapsed_ms=84 streamed=false outcome="ok"
-INFO leyline::trace: request id=8 method="GET" url=https://shop.example/item/1 redirects=0 status=200 version=Http2 attempts=2 elapsed_ms=310 streamed=false label="listing" proxy="http://user:***@proxy-a.example:8080/" browser=Chrome154 outcome="ok"
+INFO leyline::trace: request id=7 method="GET" url=https://***@example.com/a?*** redirects=1 status=200 version=HTTP/2.0 attempts=1 elapsed_ms=84 streamed=false outcome="ok"
+INFO leyline::trace: request id=8 method="GET" url=https://shop.example/item/1 redirects=0 status=200 version=HTTP/2.0 attempts=2 elapsed_ms=310 streamed=false label="listing" proxy="http://user:***@proxy-a.example:8080/" browser=Chrome158 outcome="ok"
 ```
 
 `RequestBuilder::label(text)` names a request, for example by job, account, or
@@ -138,8 +139,46 @@ let session = leyline::Session::builder()
 ```
 
 Each `trace` call adds a hook, and every hook sees every event.
-`trace::Metrics::new()` returns a `Metrics` counter; wrap it in an `Arc` to pass a clone to `.trace(..)` and read its counters, such as `metrics.requests()`. See
-[Count requests and watch the queues](crawling.md#count-requests-and-watch-the-queues).
+
+## Count requests and inspect queues
+
+`leyline::trace::Metrics` is a bundled `Trace` hook that counts session
+activity. Wrap `Metrics::new()` in an `Arc`, pass a clone to `.trace(..)`, and
+read counters from the handle (`Display` formats a single `key=value` line):
+
+| Method | Count |
+| --- | --- |
+| `requests()`, `attempts()` | Requests and total attempts (retries included) |
+| `status_class(n)` | Responses with status `n`xx (`2`, `3`, `4`, `5`) |
+| `errors(kind)`, `errors_total()` | Errors per `Kind` and all errors |
+| `bodies_complete()`, `bodies_failed()`, `bodies_dropped()` | Streamed body outcomes |
+| `latency()` | `(Option<Duration>, u64)` histogram buckets (10, 50, 100, 250, 500, 1000, 2500, 5000, 10000 ms, and `None` for > 10 s) |
+
+Pair `Metrics` with `Session::stats()` for live connection and queue counts:
+`hosts()`, `in_flight(host)`, `waiting(host)` (paused hosts count as waiting),
+`busy()`, and `idle()`.
+
+```rust,no_run
+use std::sync::Arc;
+use std::time::Duration;
+
+use leyline::Kind;
+use leyline::trace::Metrics;
+
+# async fn run(session: leyline::Session, metrics: Arc<Metrics>) {
+loop {
+    tokio::time::sleep(Duration::from_secs(10)).await;
+    println!("{metrics}");
+    if metrics.errors(Kind::Proxy) > 100 {
+        break;
+    }
+    let stats = session.stats();
+    for host in stats.hosts() {
+        println!("{host} in_flight={} waiting={}", stats.in_flight(host), stats.waiting(host));
+    }
+}
+# }
+```
 
 ## Streamed bodies
 
@@ -206,15 +245,18 @@ impl Trace for OneLine {
 
 ## Phase events
 
-To handle the phases in your own code, match the other `Event` variants:
-`Dns`, `Connect`, `Tls`, `Sent`, `Head`, and `Done`. `Connect` carries the
-`host`, the `port`, whether the connection was `reused`, and `addr`: the
-socket address the connection was opened to, which is the proxy's address
-through a proxy, or `None` when it is not known. `Response::remote_addr()`
-returns the same address. `Sent` carries the
-method and the path with the query. `Head` carries the status and the response headers as received, before
-decompression, as `&http::HeaderMap`. See
-[Trace the request lifecycle](sessions.md#trace-the-request-lifecycle).
+Match the six per-attempt `Event` variants in `Trace::event` (see
+[Trace the request lifecycle](sessions.md#trace-the-request-lifecycle) for
+attempt `id` and task rules):
+
+| Variant | Key fields | When it fires |
+| --- | --- | --- |
+| `Dns` | `id`, `host`, `addrs`, `elapsed` | Name resolution completed for a TCP connect (proxy host when proxied) |
+| `Connect` | `id`, `host`, `port`, `addr`, `reused`, `elapsed` | Socket connected or reused from pool (`addr` matches `Response::remote_addr()`) |
+| `Tls` | `id`, `host`, `version`, `cipher`, `alpn`, `elapsed` | TLS handshake completed |
+| `Sent` | `id`, `method`, `path`, `elapsed` | Request dispatched (`elapsed` is zero on H2/H3 before the driver sends) |
+| `Head` | `id`, `host`, `status`, `headers`, `elapsed` | Response head arrived (raw `&http::HeaderMap` before decompression/redirects) |
+| `Done` | `id`, `elapsed`, `error` | One transport attempt finished |
 
 ## Next
 

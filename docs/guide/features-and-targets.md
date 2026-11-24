@@ -1,14 +1,15 @@
-# Features and targets
+# Cargo features and linking
 
 This page lists the Cargo features, how Leyline's BoringSSL coexists with
-other TLS crates, and how the documentation builds. For the supported
-targets and building BoringSSL from source, see
-[Supported platforms](platforms.md).
+other TLS crates, and how docs.rs builds the crate. Leyline supports 6 targets
+(Linux x86_64/aarch64 glibc & musl, Apple silicon macOS, Windows x86_64 MSVC);
+see [Supported platforms](platforms.md).
 
 ## Cargo features
 
 The package is `leyline-http` and the library is `leyline`. The cookie jar,
-system trust-store loading, and streaming bodies always compile.
+system trust-store loading, streaming bodies, SSE, and `Session::robots`
+(`leyline::crawl::{Robots, RobotsSource, Purpose}`) always compile.
 
 | Feature | Default | What it changes |
 | --- | --- | --- |
@@ -18,9 +19,9 @@ system trust-store loading, and streaming bodies always compile.
 | `compression-deflate` | yes | deflate bodies and the zlib certificate decompressor. Pulls in `flate2`. |
 | `compression-zstd` | yes | zstd bodies and the zstd certificate decompressor. Pulls in `zstd`. |
 | `multipart` | yes | Adds `leyline::multipart` and `RequestBuilder::multipart`. |
-| `websocket` | yes | Adds `RequestBuilder::websocket`, `WebSocket`, and `Message`. Pulls in tungstenite. |
+| `websocket` | yes | Adds `RequestBuilder::websocket`, `WebSocket`, and `Message`. Pulls in `tokio-tungstenite`. |
 | `http3` | yes | Adds the `Http3` and `Race` policies and `leyline-quiche`. |
-| `html` | yes | Adds `leyline::html`, `Session::crawl`, and `Tab::submit_form`. See [Accounts](accounts.md#log-in-with-the-pages-form). |
+| `html` | yes | Implies `multipart`. Adds `leyline::html`, `Session::crawl` (`crawl::{Crawl, Page, Respect, Scope, SkipReason}`), and `Tab::submit_form`. (`crawl::Robots` always compiles.) See [Accounts](accounts.md#log-in-with-the-pages-form). |
 | `socks` | no | SOCKS5 proxies, and HTTP/3 through a SOCKS5 proxy. Without it, a `socks5://` or `socks5h://` session proxy, proxy list entry, or environment proxy fails `build()` with `Kind::Config`, and one set on a request fails that request with `Kind::Proxy`. |
 | `tower` | no | Implements `tower_service::Service` for `Session`. See [Service integration](service-integration.md#use-the-tower-adapter). |
 | `test-util` | no | Adds `leyline::testing`. Enable it in `[dev-dependencies]` only. See [Testing](testing.md). |

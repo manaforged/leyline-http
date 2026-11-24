@@ -33,7 +33,8 @@ leyline-http = { version = "0.3", features = ["test-util"] }
 | --- | --- |
 | `testing::Server::http(handler)` | Starts an HTTP/1.1 server on `127.0.0.1` on a free port |
 | `testing::Server::https(handler)` | The same over TLS with a private CA, `http/1.1` only |
-| `testing::Server::http_on(listener, handler)` | An HTTP/1.1 server on a `std::net::TcpListener` you bound, for a fixed port or address. It is not `async` and needs no runtime, so synchronous code can call it |
+| `testing::Server::http_on(listener, handler)` | Synchronous HTTP/1.1 server on a `std::net::TcpListener` you bound (no async runtime needed) |
+| `testing::Server::https_on(listener, handler)` | Synchronous HTTPS/1.1 counterpart on a `std::net::TcpListener` with a private CA |
 | `queue([..])` | A handler that answers with each `testing::Response` in turn, then with an empty 503 once they run out |
 | `url(path)` | `http://127.0.0.1:<port>/path`, or `https://`. `url("")` is the origin with a trailing `/`, for a `base_url` |
 | `addr()` | The bound address |
@@ -125,7 +126,6 @@ error handling:
 ```rust,no_run
 # #[cfg(feature = "test-util")]
 # async fn run() -> leyline::Result<()> {
-use leyline::Retry;
 use leyline::testing::{self, queue};
 
 let server = testing::Server::http(queue([
@@ -189,9 +189,10 @@ assert_eq!(text, "ping");
 # }
 ```
 
-`testing::Server::http_on(listener, handler)` is not `async`, so synchronous
-code can also start a server with no `block_on`, on a
-`std::net::TcpListener` it bound.
+`testing::Server::http_on(listener, handler)` and
+`testing::Server::https_on(listener, handler)` are synchronous, so blocking
+tests can also start plain or TLS servers without `block_on` on a bound
+`std::net::TcpListener`.
 
 ## Test timeouts
 

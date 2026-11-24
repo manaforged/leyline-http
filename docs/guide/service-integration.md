@@ -117,9 +117,10 @@ the upstream stream or closes the HTTP/1.1 connection. See
 
 ## Map errors to HTTP statuses
 
-`Kind::gateway_status()` gives the status a gateway answers for an
-error: `None` for `Status` (pass the upstream status through), 504 for
-`Timeout`, 500 for `Url`, `Config`, and `Request`, and 502 for the rest.
+`Kind::gateway_status()` maps `leyline::Error` to an HTTP status: `None` for
+`Status` (pass `err.status()` through), `504` for `Timeout`, `503` for
+`Overloaded`, `500` for `Url`/`Config`/`Request`, and `502` for everything
+else. See [Map errors to HTTP statuses](errors.md#map-errors-to-http-statuses).
 
 ```rust
 use leyline::http::StatusCode;
@@ -137,46 +138,37 @@ fn error_body(err: &leyline::Error) -> String {
 # let _ = (status_for, error_body);
 ```
 
-`Kind::as_str()` is a stable snake_case label that leaks no
-upstream detail. Log the failed URL with `leyline::redact_url`, which masks
-the password and the query and drops the fragment. See
-[Map errors to HTTP statuses](errors.md#map-errors-to-http-statuses) for
-the reasons behind each status.
+`Kind::as_str()` returns a safe snake_case label with no upstream details, and
+`leyline::redact_url` masks passwords and queries before logging.
 
 ## Log one line per request
 
-`Log` logs one INFO event per request on the `leyline::trace`
-target, after redirects and retries:
+Install `leyline::trace::Log` for one `INFO` event per request on
+`leyline::trace` (with `version=HTTP/2.0`, redacted URLs, proxy, and attempts),
+or `trace::Metrics` / a custom `Trace` hook for counters. See
+[Logging and tracing](logging.md#log-each-request).
 
-```text
-INFO leyline::trace: request id=7 method="GET" url=https://***@example.com/a?*** redirects=1 status=200 version=Http2 attempts=1 elapsed_ms=84 streamed=false outcome="ok"
-```
+## Choose an `http` / Tower integration path
 
-For a `.stream()` request the event fires at the head, so `elapsed_ms`
-leaves out the body. To feed your own metrics, match `Event::Summary` in a `Trace`;
-wrap the hook in an `Arc` to share it between sessions. See
-[Logging and tracing](logging.md#one-event-per-request).
+| Need | Use | Response mode | Headers |
+| --- | --- | --- | --- |
+| Idiomatic Leyline client inside handlers | `session.get(..)` / `post(..)` | Buffered (or `.stream()`) | Use `resp.relay_headers()` before forwarding |
+| Send an `http::Request<Body>` and get a `Response` | `session.execute(req)` | Buffered | Full `Response` API |
+| Modify/stream an `http::Request<Body>` into `http::Response<Body>` | `session.request_from(req).stream().send().await?.into_http()?` | Streaming | Filter with `resp.relay_headers()` before `into_http()` |
+| Plug `Session` directly into Tower layers | `tower` feature (`Service<Request<Body>>`) | Streaming | Leaves hop-by-hop headers intact |
 
 ## Use the Tower adapter
 
 The `tower` feature makes `Session` a
-`tower_service::Service<http::Request<leyline::Body>>` whose response is
-`http::Response<leyline::Body>` and whose error is `leyline::Error`. It sends
-each request through the session, with its cookies, redirects, retries, and
-presets, and returns at the response head.
+`tower_service::Service<http::Request<leyline::Body>>` returning
+`http::Response<leyline::Body>` and `leyline::Error`. It sends each request
+through the session with its cookies, redirects, retries, and request kinds,
+and returns at the response head.
 
-- The body streams decoded and capped at `max_body_size`. When Leyline
-  decodes it, the response has no `content-encoding` and no
-  `content-length`. Trailers are not exposed.
-- Every other upstream header stays, hop-by-hop headers included. Call
-  `Response::relay_headers()` before `into_http()` when relaying through a
-  service of your own.
-- Request extensions set per-request policy: `profile::RequestKind`, `Timeout`,
-  `Retry`, `Redirect`, and `Proxy`. A `Proxy`
-  bypasses the session's proxy list. `Session::execute` reads the same
-  extensions and returns a buffered `Response`.
-- The response carries the final `leyline::Url` as an extension, and sets
-  `version()`.
+- The body streams decoded and capped at `max_body_size` (`content-encoding` and `content-length` are stripped when decoded; trailers are not exposed).
+- Other upstream headers stay, hop-by-hop headers included; call `Response::relay_headers()` before `into_http()` when relaying through a gateway.
+- Request extensions override per-request policy: `profile::RequestKind`, `Timeout`, `Retry`, `Redirect`, `Proxy` (bypasses the session proxy list), and `Protocol`. `http::Request::version` is ignored. `Session::execute` reads the same extensions and returns a buffered `Response`.
+- The response stores the final `leyline::Url` in extensions and sets `version()`.
 
 ```rust,no_run
 # #[cfg(feature = "tower")]

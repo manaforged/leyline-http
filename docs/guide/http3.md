@@ -7,7 +7,9 @@ QUIC fingerprint keys of a profile, and HTTP/3 through a proxy.
 
 ## Protocol policy
 
-`SessionBuilder::protocol` sets the `Protocol`.
+`SessionBuilder::protocol` sets the session default, and
+`RequestBuilder::protocol` overrides it for a single request while reusing the
+session's connection pool.
 
 | Variant | Behavior |
 | --- | --- |
@@ -17,9 +19,10 @@ QUIC fingerprint keys of a profile, and HTTP/3 through a proxy.
 | `Http3` | Force HTTP/3 over QUIC. Needs the `http3` feature |
 | `Race` | Race QUIC against TCP and TLS for origins known to speak HTTP/3. Needs the `http3` feature |
 
-Without a `protocol` call, a session selects `Race` when its profile sets
-`race = true` in `[h3]`, and `Auto` otherwise. Every bundled profile with a captured HTTP/3 hello races: Chrome, Edge, Opera, Brave, Firefox, Safari, and Safari on iOS 18 and later, as the real browsers use HTTP/3 once a site advertises it. Safari on iOS 17, CFNetwork, and OkHttp have no `[h3]` table and use `Auto`. `Session::from(Browser::default())` selects `Race`;
-`Session::new()` and a build without the `http3` feature select `Auto`.
+Without a `protocol` call, the default depends on the profile and build:
+
+- **`Race`**: bundled profiles with `race = true` in `[h3]` — Chrome, Edge, Opera, Brave, Firefox, Safari macOS, and Safari iOS 18+ (when the `http3` feature is enabled and `unix_socket` is not set).
+- **`Auto`**: plain `Session::new()`, Safari iOS 17, CFNetwork, OkHttp, `unix_socket` sessions, and builds without the `http3` feature.
 
 Keep that default for a browser session: `Race` uses HTTP/3 where a browser
 would and falls back to TCP. `Http3` forces QUIC on every request, the first
@@ -54,18 +57,18 @@ if second.version() == leyline::http::Version::HTTP_3 {
 ```
 
 The second request can still use HTTP/2: the first transport to hand back a
-connection carries the request, and a pooled HTTP/2 connection is often
-ready first. The request is sent once. If both transports fail, the `Auto`
-path runs. [`examples/http3.rs`](../../crates/leyline/examples/http3.rs)
-runs this sequence.
+connection carries the request, and a pooled HTTP/2 connection is often ready
+first. The request is sent once. If HTTP/3 fails and TCP/TLS negotiated
+HTTP/1.1, Leyline falls back to `Auto`; if both fail with errors, Leyline
+returns the TCP/TLS error without dialing again. See `examples/http3.rs`.
 
 A request is raced only when all of these hold; otherwise it takes the
 `Auto` path:
 
 - The scheme is `https` and the origin is known to speak HTTP/3.
 - Neither the request body nor the response is streamed.
-- No proxy applies, or the proxy is `socks5://` or `socks5h://` and the
-  `socks` feature (not a default feature) is on.
+- `keep_alive` is `true` and `unix_socket` is not set (`Protocol::Http3` with `unix_socket` fails with `Kind::Config`).
+- No proxy applies, or the proxy is `socks5://` or `socks5h://` and the `socks` feature (not a default feature) is enabled.
 
 When an HTTP/3 connection to an origin fails, `Race` skips HTTP/3 for that
 origin and proxy pair for 5 minutes. A successful HTTP/3 connection to the
@@ -86,9 +89,9 @@ origins and drops the one that expires first to make room.
 
 ## Body limits and cancellation
 
-HTTP/3 uses `max_body_size`, as HTTP/1.1 and HTTP/2 do.
-It caps a buffered body and fails with `Kind::BodyLimit`; a `.stream()` response
-has no cap. See [Responses](responses.md#bodies).
+HTTP/3 enforces `max_body_size` (100 MiB default) on both buffered and
+`.stream()` responses, failing with `Kind::BodyLimit`; pass
+`.max_body_size(None)` to remove the cap. See [Responses](responses.md#bodies).
 
 A request that ends early resets its stream with the code Chrome sends:
 
@@ -106,56 +109,38 @@ frame, as Chrome does not.
 
 ## QUIC fingerprint
 
-The `[h3]` table of a profile sets the QUIC transport parameters and the
-HTTP/3 settings: the flow-control limits, `max_idle_timeout_secs`,
-`max_udp_payload_size`, and `active_connection_id_limit`. These keys shape
-the QUIC Initial and the HTTP/3 control stream. `dcid_length` is required;
-without the other keys, a profile keeps quiche's defaults.
+Bundled browser profiles configure `[h3]` automatically; you only need this
+table when authoring a custom profile TOML. `dcid_length` is required, and
+omitted keys keep `quiche` defaults.
 
 | Key | Effect |
 | --- | --- |
-| `[h3.tls]` | A full `[tls]` table for the QUIC ClientHello. Without it, QUIC uses `[tls]`. Its `extension_permutation` may list `quic_transport_parameters` (57). `permute_extensions = true` with `extension_tail = [57, 65037]` shuffles the extensions on each connection and keeps the listed IDs last, in that order. `tls12_extensions = true` sends `extended_master_secret` and `renegotiation_info` although QUIC is TLS 1.3 only |
-| `dcid_length` | The initial destination connection ID length: a number, or `{ weights = [[length, weight], ...] }` for a weighted random length |
-| `scid_length` | The source connection ID length, 0 to 20. The default is `dcid_length` |
-| `transport_parameters` | The exact transport parameter list. `{ id = N }` sends the value from the `[h3]` fields. `{ id = N, varint = V }` and `{ id = N, hex = "..." }` send a fixed value. `{ id = 17, versions = { chosen, available, grease } }` sends `version_information`, with a GREASE version `first` or at a `random` position. `{ grease = { id_bits, max_len } }` sends a reserved parameter with a random ID `31 * N + 27` (N below `2^id_bits`) and 0 to `max_len` random bytes |
-| `initial_datagram_size` | The size of each client datagram that carries an Initial packet during the handshake, 1200 to `max_udp_payload_size`, at most 1232 over IPv6. Each first-flight Initial is padded with PADDING frames to this size; after a loss timeout with no reply, the size falls back to 1200. Without it, Initials are not padded and the datagram is filled with zeros to 1200 bytes |
-| `initial_crypto_split` | `fill` (default) or `even`. With `even`, the first Initial packet carries an even share of the ClientHello and no other packet shares its datagram; the next carries the rest |
-| `initial_crypto_reorder` | `none` (default) or `sni_midpoint`, which needs `initial_crypto_split = "even"`. The ClientHello is cut at the midpoint of the server name. The first Initial carries the end of the ClientHello in one CRYPTO frame, then the start up to the cut in a second; the next Initial carries the middle |
-| `transport_order` | `fixed`, `shuffle` (a new random order per connection), or `rotate` (the list rotated by a random offset). Entries with `pinned = true` keep their place |
-| `max_ack_delay_ms` | The `max_ack_delay` value, when the list sends parameter 11 |
-| `settings` | The exact SETTINGS list, in order. `{ id, value }` sends a fixed setting. `{ grease = { id_bits, value_bits } }` sends a reserved setting `31 * N + 33` with a random value. Known settings in the list also configure the connection |
-| `control_grease_frame` | A reserved frame `{ id_bits, max_len }` sent on the control stream after SETTINGS |
-| `pseudo_order` | The pseudo-header order, as in `[h2]`. The default is `method`, `scheme`, `authority`, `path` |
-| `priority_update` | Sends a PRIORITY_UPDATE frame with the request's `priority` header value |
+| `[h3.tls]` | Optional `[tls]` override for the QUIC ClientHello (supports `permute_extensions`, `extension_tail`, and `tls12_extensions`) |
+| `dcid_length`, `scid_length` | Initial destination / source connection ID length (`dcid_length` accepts a fixed number or `{ weights = [[len, weight], ...] }`; `scid_length` defaults to `dcid_length`) |
+| `transport_parameters` | Explicit transport parameter list (`{ id = N }`, `varint`, `hex`, `versions` for QUICv1/v2 `version_information`, or `{ grease = { id_bits, max_len } }`) |
+| `transport_order` | `fixed`, `shuffle`, or `rotate` (`pinned = true` keeps an entry in place) |
+| `initial_datagram_size` | First-flight Initial padding target (1200..`max_udp_payload_size`, max 1232 over IPv6; falls back to 1200 after loss) |
+| `initial_crypto_split`, `initial_crypto_reorder` | Split Initial CRYPTO frames (`fill` or `even`) and optionally reorder at `sni_midpoint` |
+| `max_ack_delay_ms` | Value sent for transport parameter 11 when listed |
+| `settings`, `control_grease_frame` | Ordered HTTP/3 `SETTINGS` (`{ id, value }` or `{ grease = { id_bits, value_bits } }`) and optional trailing control GREASE frame |
+| `pseudo_order`, `priority_update` | Pseudo-header order (default `method`, `scheme`, `authority`, `path`) and RFC 9218 `PRIORITY_UPDATE` framing |
 
-Leyline speaks QUICv1 and QUICv2 (RFC 9369). It sends its first Initial in
-the `chosen` version of `version_information` and follows a server's
-compatible version negotiation (RFC 9368) to another version in `available`.
-
-A transport parameter list that sends `max_datagram_frame_size` (32) turns on
-QUIC DATAGRAM receipt. Leyline reads RESET_STREAM_AT as RESET_STREAM and
-ignores ACK_FREQUENCY and IMMEDIATE_ACK, so a profile can advertise
-`reset_stream_at` and `min_ack_delay`.
+Leyline speaks QUICv1 and QUICv2 (RFC 9369) with RFC 9368 compatible version
+negotiation, accepts QUIC `DATAGRAM` frames when `max_datagram_frame_size` is
+advertised, and handles `RESET_STREAM_AT` as `RESET_STREAM`.
 
 ### QPACK
 
-The QPACK decoder keeps a dynamic table. The `settings` list sets the
-advertised `QPACK_MAX_TABLE_CAPACITY` and `QPACK_BLOCKED_STREAMS`; a profile
-without a `settings` list uses `qpack_max_table_capacity`,
-`qpack_blocked_streams`, and `max_field_section_size`. The decoder applies
-the peer's encoder stream, holds a field section that waits for inserts (up
-to the advertised blocked streams), and sends Section Acknowledgment, Insert
-Count Increment, and Stream Cancellation. The encoder does not use the
-dynamic table.
+Leyline decodes dynamic-table QPACK responses from servers (respecting
+`QPACK_MAX_TABLE_CAPACITY`, `QPACK_BLOCKED_STREAMS`, and
+`max_field_section_size` from `[h3]`) while sending static-only requests.
 
 ## Proxies
 
-HTTP/3 goes through a `socks5://` or `socks5h://` proxy with the `socks`
-feature, which relays the QUIC datagrams with SOCKS5 `UDP ASSOCIATE`. An
-`http://` or `https://` proxy cannot carry QUIC: under `Race` such a request
-takes the `Auto` path, and `Http3` with such a proxy fails with
-`Kind::Config`. When the cause is a missing `socks` feature, the message says
-so. See [Proxies](proxies.md).
+HTTP/3 runs through `socks5://` and `socks5h://` proxies when the `socks`
+feature is enabled (via SOCKS5 `UDP ASSOCIATE`). `http://` and `https://`
+proxies cannot carry QUIC: `Race` falls back to `Auto`, and `Http3` fails with
+`Kind::Config`. See [HTTP/3 through a SOCKS5 proxy](proxies.md#http3-through-a-socks5-proxy).
 
 ## Next
 
