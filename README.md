@@ -32,7 +32,7 @@ use leyline::{Browser, Session};
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
     let session = Session::builder()
-        .browser(Browser::Chrome154)
+        .browser(Browser::Chrome158)
         .timeout(Duration::from_secs(15))
         .retry(2)
         .build()?;
@@ -95,7 +95,7 @@ header order of a real browser build, taken from captures of that browser:
 use leyline::{Browser, Session};
 
 # async fn run() -> leyline::Result<()> {
-let session = Session::builder().browser(Browser::Chrome154).build()?;
+let session = Session::builder().browser(Browser::Chrome158).build()?;
 # drop(session);
 # Ok(())
 # }
@@ -110,6 +110,7 @@ CPU per request.
 
 - [User guide](https://manaforged.github.io/leyline-http/): task-by-task guides for sessions, TLS, proxies, crawling, and throughput
 - [API reference](https://docs.rs/leyline-http): rustdoc for every public type and method
+- [Examples](crates/leyline/examples/): 19 runnable programs (`cargo run --example api_client`)
 - [For coding agents](AGENTS.md): concise patterns and type map for coding agents
 - [Upgrade guide](UPGRADE.md): 1-to-1 migration tables for breaking changes
 - [Changelog](CHANGELOG.md): release notes, breaking changes, and benchmark highlights

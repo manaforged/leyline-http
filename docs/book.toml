@@ -1,6 +1,6 @@
 [book]
 title = "Leyline"
-description = "User guide and API reference for leyline-http, an async Rust HTTP client that matches the TLS, HTTP/2, and header fingerprint of a chosen browser build"
+description = "User guide for leyline-http, a fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust with sessions, crawling, DoH/ECH, proxies, and browser TLS profiles"
 src = "."
 authors = ["Manaforge Technologies, LLC"]
 language = "en"

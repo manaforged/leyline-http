@@ -18,7 +18,7 @@ maintainer tells you the new date in the advisory thread.
 
 ## Supported versions
 
-Security fixes go to the latest 0.2.x release.
+Security fixes go to the latest 0.3.x release.
 
 ## Scope
 
@@ -42,10 +42,4 @@ Security fixes go to the latest 0.2.x release.
 [`crates/leyline-bssl-sys/PROVENANCE.md`](crates/leyline-bssl-sys/PROVENANCE.md)
 for the commit, the carried patches, and the build notes.
 
-A daily workflow checks the forked crates and the pinned BoringSSL revision
-against upstream security advisories. It also lists each OpenSSL advisory
-published since the `since` date in `crates/leyline-bssl-sys/Cargo.toml`,
-because BoringSSL shares code with OpenSSL, and opens an issue for each one
-not yet reviewed. The reviewed
-advisories and their outcome are in `crates/leyline-bssl-sys/Cargo.toml`.
-`PROVENANCE.md` records the pinned revision and the carried patches.
+A maintainer-dispatched workflow (`release-watch.yml`) checks the forked crates and the pinned BoringSSL revision against upstream security advisories. It also lists each OpenSSL advisory published since the `since` date in `crates/leyline-bssl-sys/Cargo.toml`, because BoringSSL shares code with OpenSSL, and opens an issue for each one not yet reviewed. The reviewed advisories and their outcome are in `crates/leyline-bssl-sys/Cargo.toml`. `PROVENANCE.md` records the pinned revision and the carried patches.

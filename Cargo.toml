@@ -16,6 +16,7 @@ edition = "2024"
 rust-version = "1.96" # MSRV: supports every stable release from the last six months
 authors = ["Manaforge Technologies, LLC <thomas@manaforge.tech>"]
 license = "MIT"
+homepage = "https://manaforged.github.io/leyline-http/"
 repository = "https://github.com/manaforged/leyline-http"
 keywords = ["http-client", "web-scraping", "crawler", "http3", "tls"]
 categories = ["web-programming::http-client", "network-programming"]
