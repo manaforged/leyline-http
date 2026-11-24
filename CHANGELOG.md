@@ -9,7 +9,7 @@ fixes and are mapped 1-to-1 in [UPGRADE.md](UPGRADE.md) (see
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this version
 and publish as separate crates.
 
-## Unreleased
+## 0.3.0 - 2026-11-24
 
 This release cleans up `0.2` API ergonomics while keeping the same five core
 types, cuts 9–13% of user-space instructions per request on bare HTTP/1.1 and
@@ -19,7 +19,7 @@ custom proxy headers.
 
 ### Breaking changes
 
-[UPGRADE.md](UPGRADE.md#breaking-changes-after-020) maps each old call to the new one.
+[UPGRADE.md](UPGRADE.md#breaking-changes-in-030) maps each old call to the new one.
 
 - `cookie::Jar::store` takes the URL first, like every other `Jar` method.
 - `Tls::pin_sha256` is renamed `Tls::pin_cert_sha256`; it pins the whole leaf certificate, not its public key.

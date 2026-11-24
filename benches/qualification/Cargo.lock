@@ -1195,7 +1195,7 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "leyline-bssl"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bitflags",
  "foreign-types",
@@ -1206,7 +1206,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-bssl-sys"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "cc",
  "fslock",
@@ -1215,7 +1215,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-bssl-tokio"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "leyline-bssl",
  "leyline-bssl-sys",
@@ -1224,7 +1224,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-http"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "brotli 8.0.4",
@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "leyline-quiche"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "bytes",
  "debug_panic",

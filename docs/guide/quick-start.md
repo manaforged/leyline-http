@@ -10,7 +10,7 @@ the name you import. Leyline is async and runs on Tokio.
 
 ```toml
 [dependencies]
-leyline-http = "0.2"
+leyline-http = "0.3"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

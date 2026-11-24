@@ -11,7 +11,7 @@ exclude = [
     "crates/leyline-bssl-tokio",
 ]
 [workspace.package]
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 rust-version = "1.96" # MSRV: supports every stable release from the last six months
 authors = ["Manaforge Technologies, LLC <thomas@manaforge.tech>"]
@@ -54,16 +54,16 @@ thiserror = "2.0.7"
 url = "2.5.9"
 sha2 = "0.10"
 md-5 = "0.10"
-leyline-bssl = { path = "crates/leyline-bssl", version = "=0.2.0" }
-leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.2.0" }
-leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.2.0" }
+leyline-bssl = { path = "crates/leyline-bssl", version = "=0.3.0" }
+leyline-bssl-sys = { path = "crates/leyline-bssl-sys", version = "=0.3.0" }
+leyline-bssl-tokio = { path = "crates/leyline-bssl-tokio", version = "=0.3.0" }
 socket2 = { version = "0.6", features = ["all"] }
 bytes = "1.9.0"
 memchr = "2.7"
 foldhash = "0.2"
 tokio-tungstenite = "0.26"
 base64 = "0.22"
-leyline-quiche = { path = "crates/leyline-quiche", version = "=0.2.0", default-features = false, features = ["boringssl-bssl-crate"] }
+leyline-quiche = { path = "crates/leyline-quiche", version = "=0.3.0", default-features = false, features = ["boringssl-bssl-crate"] }
 tokio-util = { version = "0.7.5", features = ["io"] }
 futures-util = "0.3"
 pin-project-lite = "0.2.17"

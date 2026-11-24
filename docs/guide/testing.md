@@ -23,10 +23,10 @@ builds get `test-util` and release builds do not:
 
 ```toml
 [dependencies]
-leyline-http = "0.2"
+leyline-http = "0.3"
 
 [dev-dependencies]
-leyline-http = { version = "0.2", features = ["test-util"] }
+leyline-http = { version = "0.3", features = ["test-util"] }
 ```
 
 | Item | Does |

@@ -6,7 +6,7 @@ Point your coding agent at this file when it writes code that uses Leyline. Leyl
 
 ```toml
 [dependencies]
-leyline-http = "0.2"
+leyline-http = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

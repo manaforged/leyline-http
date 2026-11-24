@@ -44,7 +44,7 @@ default. With either scheme the proxy resolves the host name.
 
 ```toml
 [dependencies]
-leyline-http = { version = "0.2", features = ["socks"] }
+leyline-http = { version = "0.3", features = ["socks"] }
 ```
 
 Without the feature, `build()` refuses a SOCKS URL with `Kind::Config`,

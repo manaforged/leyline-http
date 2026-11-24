@@ -20,7 +20,7 @@ Leyline is a fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust. Sessions, 
 
 ```toml
 [dependencies]
-leyline-http = "0.2"
+leyline-http = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
