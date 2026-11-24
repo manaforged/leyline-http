@@ -57,7 +57,7 @@ jobs:
 
   deploy:
     needs: build
-    if: inputs.deploy != false
+    if: github.event_name == 'push' || inputs.deploy != false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
