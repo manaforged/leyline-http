@@ -337,10 +337,14 @@ kind unset. Set `.kind(..)` when the guess is wrong.
 `FormNavigate` imitates a user who submits an HTML form, as on a login page,
 and the browser loads a new page. `form()` never infers `FormNavigate`.
 
-| RequestKind | `sec-fetch-mode` | `sec-fetch-dest` | `sec-fetch-user` | Other headers |
+| RequestKind | `sec-fetch-mode` | `sec-fetch-dest` | `sec-fetch-user` | Other headers (Chromium) |
 | --- | --- | --- | --- | --- |
 | `Form` | `cors` | `empty` | none | A script `accept`, `priority: u=1, i` |
 | `FormNavigate` | `navigate` | `document` | `?1` | An HTML `accept`, `upgrade-insecure-requests: 1`, `cache-control: max-age=0` |
+
+Gecko and WebKit profiles follow their own templates (`FormNavigate` omits
+`cache-control` on Gecko, and omits `sec-fetch-user`,
+`upgrade-insecure-requests`, and `cache-control` on WebKit).
 
 ## Send the requests of a page
 
@@ -386,13 +390,14 @@ target:
 | RequestKind | No `from_page` | Same origin | Same site or cross site | P is `https`, T is `http` |
 | --- | --- | --- | --- | --- |
 | `Xhr` GET | None | None | P origin | P origin |
-| `Xhr` POST, `Form` | T origin | T origin | P origin | P origin |
-| `FormNavigate` | T origin | T origin | P origin | `null` |
+| `Xhr` POST, `Form` POST | T origin | T origin | P origin | P origin |
+| `FormNavigate` POST | T origin | T origin | P origin | `null` |
 | `Image`, `Script` | None | None | None | None |
 
 `sec-fetch-site` is computed from the page and every redirect by the same rules
-for Chromium and Gecko profiles. `sec-fetch-user: ?1` goes only with `Navigate`
-and `FormNavigate`. An explicit `referer` header wins over the computed value.
+for Chromium, Gecko, and WebKit profiles. `sec-fetch-user: ?1` goes only with
+`Navigate` and `FormNavigate` on Chromium and Gecko profiles. An explicit
+`referer` header wins over the computed value.
 
 ## Keep the page with a tab
 

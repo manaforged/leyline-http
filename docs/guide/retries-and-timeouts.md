@@ -216,7 +216,7 @@ to turn that timeout off.
 | `total` | 300 s | Whole `send`: redirects, retries, backoff, and buffered body read (ends at response headers for `.stream()`). Also bounds WebSocket handshakes and `RequestBuilder::download_to` retries |
 | `connect` | 10 s | One new connection (DNS, TCP/UDP, proxy negotiation, TLS/QUIC handshake). Session-wide; not applied to pooled reuse |
 | `response_header` | none | Dispatch to response headers per redirect leg, including connect (on buffered requests, also covers reading the buffered body) |
-| `read` | none | Longest idle gap between chunks on streamed reads (`.stream()`, `download_to`, `events()`, `bytes_stream()`). Not applied to buffered responses |
+| `read` | none | Longest idle gap between chunks on streamed reads (`.stream()`, `download_to`, `events()`, `bytes_stream()`). Not applied to async buffered responses (on `build_blocking()`, `read` or `total` also sets the HTTP/1.1 socket I/O timeout) |
 | `body` | none | Total time to read a streamed body (`.stream()`, `download_to`, `events()`, `bytes_stream()`) from its first read. Not applied to buffered responses |
 | `error_body` | 10 s | Body prefix captured by `RequestBuilder::error_for_status()`, bounded by `total`. See [Errors](errors.md#status-codes-are-not-errors) |
 

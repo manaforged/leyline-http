@@ -7,7 +7,7 @@ layer: point a session at `127.0.0.1` and check what the server received.
 
 | Session | Use it when |
 | --- | --- |
-| Plain, `Session::new()` | The test checks your own logic: URLs, methods, bodies, headers, error handling. Its default headers are fixed: `Host`, `user-agent: leyline/<version>`, `accept: */*`, `accept-encoding`, and `Connection` on HTTP/1.1, plus `accept-language` only after `.languages(..)`. |
+| Plain, `Session::new()` | The test checks your own logic: URLs, methods, bodies, headers, error handling. Its default headers are fixed: `user-agent: leyline/<version>`, `accept: */*`, `accept-encoding`, plus `Host` and `Connection: keep-alive` on HTTP/1.1, and `accept-language` only after `.languages(..)`. |
 | Browser, `Session::from(..)` | The test checks what the production session sends. Headers and their order come from the profile data, so an exact header assertion can change with the profile. |
 
 Build the session as in production and change only the trust settings and
