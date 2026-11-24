@@ -1,21 +1,18 @@
 # Benchmarks
 
-This page records client-library comparisons on one machine. Each section links
-to its raw results and identifies the configuration under measurement.
+Client-library comparisons on one machine (Ryzen 9 9950X3D, verified TLS 1.3 over loopback, 10-byte response, medians of three runs). Each section links to its raw receipts; see [Method](#method) for CPU pinning, source hashes, peer versions, and reproduction commands.
 
 ## v0.3.0 measurements
 
-All v0.3.0 suites below ran on 2026-11-23 over loopback on a Ryzen 9 9950X3D
-with the CPU frequency governor set to `performance`, the origin pinned to CPUs
-`3-7,19-23` (CCD 0), clients pinned to CPUs `8-15,24-31` (CCD 1), verified TLS
-1.3 (AES-128-GCM, X25519) against a local test CA, a 10-byte response, and a
-30-second request timeout. The measured core is commit `c75e85e8` (`leyline_source_hash` `8381ed83` in
-throughput and HTTP/1.1 open-loop receipts) and commit `56e95e4c`
-(`leyline_source_hash` `220ac1b6` in the re-run HTTP/2 open-loop receipts,
-which differ only outside the 10-byte buffered HTTP/2 path); peers are
-hyper-util 0.1.21, hyper 1.12.0, reqwest 0.13.5, h2 0.4.20, wreq 0.16.3,
-libcurl 8.22.0, ureq 3.5.0, Go 1.27.1 `net/http`, fasthttp 1.77.0, and
-tls-client 1.16.0.
+### At a glance
+
+| Workload | Leyline (default) | Leyline (`run_per_core`) | Closest peer |
+| --- | ---: | ---: | --- |
+| HTTP/2 throughput (`8×256`, bare) | **1,438,580 req/s** | 1,409,655 req/s | 1,124,148 req/s (`hyper-util`) |
+| HTTP/2 throughput (`8×256`, Chrome 146) | **1,129,848 req/s** | — | 724,707 req/s (`wreq`) |
+| HTTP/2 open-loop p99 (50k req/s) | 115 µs | **78 µs** | 119 µs (`h2`), 125 µs (`libcurl`) |
+| HTTP/1.1 throughput (64 workers, bare) | 878,877 req/s | **921,370 req/s** | 888,039 req/s (`fasthttp`) |
+| HTTP/1.1 open-loop p99 (20k req/s, `c64`) | 62 µs | **28 µs** | 37 µs (`libcurl`) |
 
 ### Browser profiles over HTTP/2
 
@@ -339,6 +336,12 @@ python3 libs-table.py results/reproduce-paced-h2-r{1,2,3}/rows.txt
 ```
 
 ## Method
+
+### Environment and receipts
+
+All v0.3.0 suites ran on 2026-11-23 over loopback on a Ryzen 9 9950X3D with the CPU frequency governor set to `performance`, the origin pinned to CPUs `3-7,19-23` (CCD 0), clients pinned to CPUs `8-15,24-31` (CCD 1), verified TLS 1.3 (AES-128-GCM, X25519) against a local test CA, a 10-byte response, and a 30-second request timeout. The measured core is commit `c75e85e8` (`leyline_source_hash` `8381ed83` in throughput and HTTP/1.1 open-loop receipts) and commit `56e95e4c` (`leyline_source_hash` `220ac1b6` in the re-run HTTP/2 open-loop receipts, which differ only outside the 10-byte buffered HTTP/2 path). Measured peers: hyper-util 0.1.21, hyper 1.12.0, reqwest 0.13.5, h2 0.4.20, wreq 0.16.3, libcurl 8.22.0, ureq 3.5.0, Go 1.27.1 `net/http`, fasthttp 1.77.0, and tls-client 1.16.0.
+
+### Measurement passes
 
 Each comparison has two passes, both run by `libs.sh`.
 

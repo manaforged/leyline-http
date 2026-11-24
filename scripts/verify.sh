@@ -375,8 +375,41 @@ g_release() {
     git rev-parse --quiet --verify origin/main >/dev/null || fail "origin/main is unknown; fetch it before qualifying a release"
     git merge-base --is-ancestor HEAD origin/main || fail "tag $tag is on a commit that is not on main"
     mkdir -p "$target_dir"
-    awk -v head="## $version " 'index($0, head) == 1 {on = 1; next} on && /^## / {exit} on' CHANGELOG.md \
-        >"$target_dir/release-notes.md"
+    local repo_url prev_tag anchor
+    repo_url="$(awk -F'"' '/^\[/{section=$0} section=="[workspace.package]" && /^repository *= *"/{print $2; exit}' Cargo.toml)"
+    prev_tag="$(git tag --list 'v*' --sort=-v:refname | awk -v cur="$tag" '$0 != cur {print; exit}')"
+    anchor="$(awk -v head="## $version " 'index($0, head) == 1 {sub(/^## /, ""); gsub(/[^A-Za-z0-9 -]/, ""); gsub(/ /, "-"); print tolower($0); exit}' CHANGELOG.md)"
+    python3 - "$version" "$tag" "$repo_url" "$prev_tag" "$anchor" "$target_dir/release-notes.md" <<'PY'
+import pathlib, re, sys
+
+version, tag, repo_url, prev_tag, anchor, out_path = sys.argv[1:]
+lines = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+section = []
+on = False
+prefix = f"## {version} "
+for line in lines:
+    if line.startswith(prefix):
+        on = True
+        continue
+    if on and line.startswith("## "):
+        break
+    if on:
+        section.append(line)
+body = "\n".join(section).strip()
+base = f"{repo_url.rstrip('/')}/blob/{tag}/"
+body = re.sub(
+    r"(\[[^\]]+\]\()((?!https?://|mailto:|#)[^)]+)(\))",
+    lambda m: f"{m.group(1)}{base}{m.group(2).lstrip('./')}{m.group(3)}",
+    body,
+)
+leftover = re.findall(r"\[[^\]]+\]\((?!https?://|mailto:|#)([^)]+)\)", body)
+if leftover:
+    raise SystemExit(f"release notes still contain relative links: {leftover}")
+footer = f"**Full changelog**: [CHANGELOG.md]({base}CHANGELOG.md#{anchor})"
+if prev_tag:
+    footer += f" · **Diff**: [{prev_tag}...{tag}]({repo_url.rstrip('/')}/compare/{prev_tag}...{tag})"
+pathlib.Path(out_path).write_text(f"{body}\n\n{footer}\n", encoding="utf-8")
+PY
     ok "release $tag qualified"
 }
 

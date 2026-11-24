@@ -1,0 +1,45 @@
+name: Bug report
+description: Report a defect, panic, or spec mismatch in leyline-http
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Concise description of the unexpected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Minimal reproduction
+      description: Code snippet or test case that reproduces the issue.
+      render: rust
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs actual behavior
+      description: What you expected to happen and what happened instead (including exact Error::kind() or backtrace).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: leyline-http version
+      placeholder: "0.3.0"
+    validations:
+      required: true
+  - type: input
+    id: rustc
+    attributes:
+      label: Rust toolchain & target
+      placeholder: "rustc 1.96.0 (x86_64-unknown-linux-gnu)"
+    validations:
+      required: true
+  - type: input
+    id: features
+    attributes:
+      label: Cargo features enabled
+      placeholder: "default / full / socks / --no-default-features"

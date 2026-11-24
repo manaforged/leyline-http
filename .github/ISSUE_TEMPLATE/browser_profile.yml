@@ -1,0 +1,32 @@
+name: Browser profile request
+description: Request a newly shipped browser build or report a fingerprint drift
+labels: ["profiles"]
+body:
+  - type: dropdown
+    id: family
+    attributes:
+      label: Browser family
+      options:
+        - Chrome
+        - Firefox
+        - Safari
+        - Safari (iOS)
+        - Edge
+        - Opera
+        - Brave
+        - CFNetwork
+        - OkHttp
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Browser version
+      placeholder: "e.g. Chrome 159 / Firefox 161 / Safari 28"
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Platform & details
+      description: Target OS (Windows, macOS, Linux, iOS, Android) and any observed JA4/HTTP/2/HTTP/3 differences.

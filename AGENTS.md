@@ -31,7 +31,7 @@ use leyline::{Browser, Session};
 
 # async fn run() -> leyline::Result<()> {
 let session = Session::builder()
-    .browser(Browser::Chrome154)
+    .browser(Browser::Chrome158)
     .timeout(Duration::from_secs(30))
     .retry(2)
     .build()?;
@@ -45,7 +45,7 @@ let again = Session::load("session.json")?.build()?;
 
 ## Patterns that work
 
-- Pin a browser such as `Browser::Chrome154`. `Browser::default()` moves to the newest Chrome in a patch release.
+- Pin a browser such as `Browser::Chrome158`. `Browser::default()` moves to the newest Chrome in a patch release.
 - Build one session and clone it into tasks. A new session per request opens new connections and loses cookies.
 - Pass a `Duration` to `timeout`, a `u32` to `retry`, and a URL string to `proxy`; each converts into the full config type.
 - A session does not retry until you set `retry(n)`, which allows `n` more attempts. A retry happens for what `err.is_retryable()` accepts and for a 429, 502, 503 or 504 response, on idempotent methods only; `Retry::new(n).any_method(true)` includes `POST`, `.when(|attempt| ..)` replaces the rule, and `.backoff(min, max)` sets the delay range.

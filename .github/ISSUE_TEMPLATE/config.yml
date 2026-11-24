@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Report
+    url: https://github.com/manaforged/leyline-http/security/advisories/new
+    about: Report security vulnerabilities privately through GitHub Security Advisories.
+  - name: User Guide
+    url: https://manaforged.github.io/leyline-http/
+    about: Task-by-task guides for sessions, TLS, proxies, crawling, and throughput.
+  - name: API Reference (docs.rs)
+    url: https://docs.rs/leyline-http
+    about: Rustdoc reference for every public type, method, and feature flag.

@@ -1,16 +1,15 @@
 # Upgrading to Leyline 0.3
 
-This guide maps earlier Leyline Rust APIs to 0.3.0. The API changes are breaking. There is no automatic migration command.
+This guide maps breaking API changes from `0.2.0` to `0.3.0` (and `0.1.6` to `0.2.0` below). There is no automatic migration command.
 
-## Migration steps
+## Upgrading from 0.2 to 0.3
 
 1. Change the `leyline-http` dependency to `"0.3"` and use Rust 1.96 or later.
-2. Find each old name in the table below and update its imports and calls.
-3. Replace typed browser profiles with profile TOML where required.
-4. Check error handling, retries, streaming, and saved-session behavior against the [release notes](CHANGELOG.md#030---2026-11-24).
-5. Run `cargo check` and your application's tests with the features you use.
+2. Update moved imports (`crawl::*`, `sse::*`, `profile::*`) and renamed calls using the table below.
+3. Check behavior changes (dropped `sec-ch-ua*` hints on custom `user-agent`, strict download option validation, and `UnexpectedEof` on unclean TLS closes) against the [0.3.0 changelog](CHANGELOG.md#030---2026-11-24).
+4. Run `cargo check` and your application's tests with the features you use.
 
-For new code, start with the [five main types](AGENTS.md#the-five-types). The [user guide](https://manaforged.github.io/leyline-http/) covers current workflows.
+For new code, start with the [five main types](AGENTS.md#the-five-types) or the [user guide](https://manaforged.github.io/leyline-http/).
 
 ## Breaking changes in 0.3.0
 

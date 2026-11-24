@@ -63,7 +63,7 @@ Default: `charset`, `compression-gzip`, `compression-brotli`,
   to the ones already set. A request setter merges over the
   session value field by field.
 - Public enums, and public structs with public fields, are
-  `#[non_exhaustive]`, `Cookie` and `SameSite` included.
+  `#[non_exhaustive]`, `SameSite` and `Kind` included.
 - Builder input errors surface at `build()`, `send()`, or `websocket()`,
   never eagerly, `hello` and language tags included.
 - `IntoUrl` is sealed. `Session::new()` and `Session::from(..)` never

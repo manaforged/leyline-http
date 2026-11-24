@@ -14,21 +14,24 @@ cargo test -p leyline-http --features full,bench-internals
 
 ## Focused checks
 
-If [cargo-nextest](https://nexte.st/docs/running/) is installed, select the cases that cover the change. For example:
+If [cargo-nextest](https://nexte.st/docs/running/) is installed, filter to the cases that cover your change. For example:
 
 ```sh
 CARGO_TARGET_DIR=target/verify cargo nextest run --workspace --locked \
   --features leyline-http/full,leyline-http/bench-internals \
-  --test h1_failures --test h2_stream_state \
-  --ignore-default-filter --no-tests=fail --retries 0
+  --test it -E 'test(h1_failures) | test(h2_stream_state)' \
+  --no-tests=fail --retries 0
 ```
 
-Change the test targets or add a filter for other contracts. An empty selection fails. This command shares the verification build directory and feature selection. Cold builds and source or dependency changes can require compilation. The script's default sanity pass includes packaging; use the focused command during edits.
+Change the filter expression for other integration modules under `crates/leyline/tests/it/`. An empty selection fails.
 
-## Proofs
+## Proofs and sanitizers
 
-`scripts/verify.sh --only kani` runs the [Kani](https://model-checking.github.io/kani/) proofs: HPACK integers round-trip for every value and prefix width, arbitrary bytes never decode past the HPACK limit, HTTP/2 frame headers round-trip and ignore the reserved bit, every server SETTINGS id and value follows RFC 9113 section 6.5.2, every HTTP/2 stream state and event follows RFC 9113 section 5.1, and HTTP/2 flow-control windows never pass 2^31-1. The parser tests in the library unit tests check every input up to a fixed length against models of RFC 9112 status lines, RFC 9110 `Content-Range`, WHATWG server-sent events, and the RFC 9113 rules for DATA, HEADERS and PUSH_PROMISE padding, PRIORITY, RST_STREAM, SETTINGS, PING, GOAWAY, WINDOW_UPDATE and unknown frame types.
+- `scripts/verify.sh --only kani` runs all 27 [Kani](https://model-checking.github.io/kani/) symbolic harnesses covering HTTP/1.1 framing, HPACK, HTTP/2 state machines and flow windows, cookie prefixes and expiry, resumable `Content-Range`, and DNS/ECH wire parsing (listed in [QUALIFICATION.md](QUALIFICATION.md#proved)).
+- `scripts/verify.sh --only asan` runs the `leyline-bssl` and `leyline-bssl-tokio` FFI tests under AddressSanitizer (with LeakSanitizer on Linux).
 
 ## Full qualification
 
-Run `scripts/verify.sh --full` before qualifying a candidate. It includes the transport tests, mixed-failure resource workload, packaging, and feature checks. Focused checks do not replace full qualification. Run mutation testing against the affected functions and their tests when checking test strength, not as a replacement for either command.
+Run `scripts/verify.sh --full` before qualifying a release candidate. It runs formatting, Clippy across 16 feature sets, rustdoc, mdBook, link checks, MSRV 1.96, workspace and subcrate tests, `cargo-deny`, benchmark compilation, and `.crate` packaging with consumer smoke checks. Use `scripts/verify.sh --only mutants` for diff-scoped mutation testing.
+
+Collaborator PRs run verification locally before merge; `ci.yml` runs on external fork PRs and manual workflow dispatches.
