@@ -9,10 +9,13 @@ All v0.3.0 suites below ran on 2026-11-23 over loopback on a Ryzen 9 9950X3D
 with the CPU frequency governor set to `performance`, the origin pinned to CPUs
 `3-7,19-23` (CCD 0), clients pinned to CPUs `8-15,24-31` (CCD 1), verified TLS
 1.3 (AES-128-GCM, X25519) against a local test CA, a 10-byte response, and a
-30-second request timeout. The measured core is commit `c75e85e8`
-(`leyline_source_hash` `8381ed83` in every receipt); peers are hyper-util
-0.1.21, hyper 1.12.0, reqwest 0.13.5, h2 0.4.20, wreq 0.16.3, libcurl 8.22.0,
-ureq 3.5.0, Go 1.27.1 `net/http`, fasthttp 1.77.0, and tls-client 1.16.0.
+30-second request timeout. The measured core is commit `c75e85e8` (`leyline_source_hash` `8381ed83` in
+throughput and HTTP/1.1 open-loop receipts) and commit `56e95e4c`
+(`leyline_source_hash` `220ac1b6` in the re-run HTTP/2 open-loop receipts,
+which differ only outside the 10-byte buffered HTTP/2 path); peers are
+hyper-util 0.1.21, hyper 1.12.0, reqwest 0.13.5, h2 0.4.20, wreq 0.16.3,
+libcurl 8.22.0, ureq 3.5.0, Go 1.27.1 `net/http`, fasthttp 1.77.0, and
+tls-client 1.16.0.
 
 ### Browser profiles over HTTP/2
 
@@ -248,25 +251,25 @@ HTTP/2, 2 connections, 16 workers, 2,000 requests per second:
 
 | Client | p50 | p99 | p99.9 | CPU µs | RSS MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| **Leyline, one runtime per core** | 19 | 33 | 53 | 10.02 | 10.4 |
-| **Leyline** | 29 | 57 | 69 | 13.66 | 10.1 |
-| libcurl | 23 | 57 | 69 | 18.54 | 7.9 |
-| h2 | 28 | 58 | 68 | 14.17 | 6.3 |
-| hyper-util | 33 | 61 | 76 | 16.55 | 6.8 |
-| reqwest | 30 | 64 | 77 | 19.64 | 7.3 |
-| wreq | 31 | 66 | 79 | 19.09 | 8.4 |
+| **Leyline, one runtime per core** | 19 | 35 | 56 | 9.89 | 10.9 |
+| **Leyline** | 29 | 57 | 70 | 13.56 | 10.9 |
+| libcurl | 23 | 50 | 67 | 18.55 | 8.2 |
+| h2 | 29 | 57 | 70 | 13.89 | 6.4 |
+| hyper-util | 33 | 61 | 70 | 16.08 | 6.9 |
+| reqwest | 30 | 65 | 79 | 19.86 | 7.6 |
+| wreq | 31 | 66 | 77 | 19.27 | 8.7 |
 
 HTTP/2, 8 connections, 256 workers, 50,000 requests per second:
 
 | Client | p50 | p99 | p99.9 | CPU µs | RSS MiB |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| **Leyline, one runtime per core** | 45 | 77 | 96 | 4.23 | 14.4 |
-| **Leyline** | 66 | 119 | 146 | 8.15 | 16.9 |
-| h2 | 66 | 124 | 144 | 10.77 | 11.2 |
-| libcurl | 71 | 128 | 156 | 12.17 | 11.7 |
-| wreq | 84 | 151 | 174 | 19.61 | 16.9 |
-| hyper-util | 84 | 153 | 176 | 13.78 | 13.1 |
-| reqwest | 89 | 154 | 182 | 20.00 | 15.6 |
+| **Leyline, one runtime per core** | 45 | 78 | 98 | 4.31 | 14.3 |
+| **Leyline** | 66 | 115 | 140 | 8.13 | 17.3 |
+| h2 | 66 | 119 | 142 | 10.78 | 11.0 |
+| libcurl | 71 | 125 | 154 | 12.09 | 11.7 |
+| wreq | 81 | 152 | 178 | 19.82 | 16.7 |
+| hyper-util | 84 | 153 | 177 | 13.81 | 13.5 |
+| reqwest | 90 | 158 | 187 | 19.95 | 15.8 |
 
 Paired ratios, Leyline (default shared runtime) over each client, with a 95%
 t-interval across the three run means. Below 1 means Leyline is lower.
@@ -287,37 +290,37 @@ t-interval across the three run means. Below 1 means Leyline is lower.
 | | libcurl | 1.676 [1.596, 1.760] | 0.619 [0.607, 0.631] |
 | | Go net/http | 0.293 [0.287, 0.300] | 0.403 [0.397, 0.409] |
 | | fasthttp | 1.243 [1.191, 1.296] | 0.872 [0.868, 0.876] |
-| HTTP/2, 2 conns | hyper-util | 0.930 [0.897, 0.964] | 0.819 [0.712, 0.941] |
-| | reqwest | 0.901 [0.867, 0.936] | 0.696 [0.620, 0.782] |
-| | wreq | 0.860 [0.818, 0.905] | 0.710 [0.613, 0.821] |
-| | h2 | 0.989 [0.948, 1.032] | 0.964 [0.901, 1.032] |
-| | libcurl | 1.004 [0.967, 1.043] | 0.701 [0.607, 0.811] |
-| HTTP/2, 8 conns | hyper-util | 0.783 [0.686, 0.893] | 0.589 [0.576, 0.602] |
-| | reqwest | 0.780 [0.688, 0.883] | 0.407 [0.404, 0.410] |
-| | wreq | 0.787 [0.718, 0.862] | 0.411 [0.402, 0.421] |
-| | h2 | 1.000 [0.970, 1.031] | 0.755 [0.744, 0.766] |
-| | libcurl | 0.994 [0.878, 1.127] | 0.687 [0.667, 0.708] |
+| HTTP/2, 2 conns | hyper-util | 0.947 [0.927, 0.968] | 0.827 [0.798, 0.857] |
+| | reqwest | 0.892 [0.831, 0.957] | 0.684 [0.624, 0.749] |
+| | wreq | 0.879 [0.861, 0.896] | 0.706 [0.654, 0.762] |
+| | h2 | 1.000 [0.929, 1.077] | 0.966 [0.816, 1.144] |
+| | libcurl | 1.213 [0.800, 1.838] | 0.727 [0.709, 0.745] |
+| HTTP/2, 8 conns | hyper-util | 0.759 [0.695, 0.829] | 0.589 [0.585, 0.592] |
+| | reqwest | 0.733 [0.676, 0.795] | 0.408 [0.401, 0.415] |
+| | wreq | 0.759 [0.716, 0.805] | 0.410 [0.407, 0.414] |
+| | h2 | 0.979 [0.842, 1.138] | 0.753 [0.743, 0.764] |
+| | libcurl | 0.959 [0.825, 1.116] | 0.679 [0.658, 0.700] |
 
 On the default shared Tokio runtime, Leyline uses less CPU per request than
 every other client in all four cells except libcurl at HTTP/1.1 with 8
 connections (1.055×) and ties `h2` at HTTP/2 with 2 connections. At 50,000
-HTTP/2 req/s, default Leyline has 119 µs p99 at 8.15 µs/req CPU: 21–22% lower
+HTTP/2 req/s, default Leyline has 115 µs p99 at 8.13 µs/req CPU: 24–27% lower
 p99 than hyper-util, wreq, and reqwest, and a tie on p99 with bare `h2`
-(1.000×) and libcurl (0.994×) while using 25% less CPU than `h2` and 31% less
+(0.979×) and libcurl (0.959×) while using 25% less CPU than `h2` and 32% less
 CPU than libcurl. On HTTP/1.1 with 64 connections, shared-runtime Tokio
 cross-thread wakeups leave default Leyline at 62 µs p99 behind libcurl,
 fasthttp, and ureq (while using 13–57% less CPU).
 
 With `SessionBuilder::run_per_core`, eliminating cross-thread wakeups cuts p99
 latency sharply across every open-loop cell: at 50,000 HTTP/2 req/s,
-`leyline-cores` drops p99 to 77 µs at 4.23 µs/req CPU (0.500–0.505× the p99 of
-hyper-util, reqwest, and wreq at 0.211–0.306× their CPU, and 0.638–0.642× the
-p99 of libcurl and bare `h2` at 0.357–0.392× their CPU); at 20,000 HTTP/1.1
+`leyline-cores` drops p99 to 78 µs at 4.31 µs/req CPU (0.491–0.508× the p99 of
+hyper-util, reqwest, and wreq at 0.216–0.311× their CPU, and 0.642–0.655× the
+p99 of libcurl and bare `h2` at 0.359–0.398× their CPU); at 20,000 HTTP/1.1
 req/s (`c64`), `leyline-cores` leads all nine clients in both latency and CPU
 at 28 µs p99 and 9.66 µs/req CPU (0.748 [0.710, 0.788]× libcurl's p99 at
 0.509× its CPU, 0.555 [0.530, 0.580]× fasthttp's p99 at 0.717× its CPU, and
 0.420–0.426× hyper-util, reqwest, and wreq). Peak RSS stays between 10.1 and
-16.9 MiB across all four open-loop cells; hyper-util, reqwest, and `h2` still
+17.3 MiB across all four open-loop cells; hyper-util, reqwest, and `h2` still
 have lower peak RSS on low-concurrency cells.
 
 The pooled tables for [HTTP/1.1](benches/comparison/results/2026-11-23-v030-paced-h1-pooled.txt)

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="bench-light-title bench-light-desc" viewBox="0 0 920 316" width="920" height="316">
   <title id="bench-light-title">Leyline HTTP/2 throughput, browser profile speed, and client CPU per request</title>
-  <desc id="bench-light-desc">Left panel compares HTTP/2 throughput across general clients (Leyline 1.44M req/s, hyper-util 1.12M, reqwest 892k, libcurl 793k, Go net/http 615k). Right panel compares Chrome 146 browser-profile throughput (Leyline 1.13M req/s vs wreq 725k and tls-client 195k) and open-loop client CPU per request at 50k req/s (Leyline 8.15 µs vs hyper-util 13.78 µs and reqwest 20.00 µs).</desc>
+  <desc id="bench-light-desc">Left panel compares HTTP/2 throughput across general clients (Leyline 1.44M req/s, hyper-util 1.12M, reqwest 892k, libcurl 793k, Go net/http 615k). Right panel compares Chrome 146 browser-profile throughput (Leyline 1.13M req/s vs wreq 725k and tls-client 195k) and open-loop client CPU per request at 50k req/s (Leyline 8.13 µs vs hyper-util 13.81 µs and reqwest 19.95 µs).</desc>
 
   <!-- Card Background -->
   <rect x="0.5" y="0.5" width="919" height="315" rx="8" fill="#ece7dc" stroke="#1c1d1a" stroke-opacity="0.24"/>
@@ -62,15 +62,15 @@
 
   <text x="566" y="231" fill="#1c1d1a" font-family="'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12.5" font-weight="600" text-anchor="end">Leyline</text>
   <rect x="576" y="216" width="92" height="22" rx="4" fill="#5f7a2e" fill-opacity="0.16" stroke="#4c6422" stroke-width="1.5"/>
-  <text x="676" y="231" fill="#4c6422" font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace" font-size="11.5" font-weight="600">8.15 µs</text>
+  <text x="676" y="231" fill="#4c6422" font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace" font-size="11.5" font-weight="600">8.13 µs</text>
 
   <text x="566" y="259" fill="#5c5a54" font-family="'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500" text-anchor="end">hyper-util</text>
   <rect x="576" y="244" width="156" height="22" rx="4" fill="#5c5a54" fill-opacity="0.13" stroke="#5c5a54" stroke-opacity="0.45" stroke-width="1"/>
-  <text x="740" y="259" fill="#1c1d1a" font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace" font-size="11">13.78 µs</text>
+  <text x="740" y="259" fill="#1c1d1a" font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace" font-size="11">13.81 µs</text>
 
   <text x="566" y="287" fill="#5c5a54" font-family="'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500" text-anchor="end">reqwest</text>
   <rect x="576" y="272" width="226" height="22" rx="4" fill="#5c5a54" fill-opacity="0.13" stroke="#5c5a54" stroke-opacity="0.45" stroke-width="1"/>
-  <text x="810" y="287" fill="#1c1d1a" font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace" font-size="11">20.00 µs</text>
+  <text x="810" y="287" fill="#1c1d1a" font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace" font-size="11">19.95 µs</text>
 
   <!-- Left Footer Note -->
   <text x="24" y="287" fill="#7d796f" font-family="'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace" font-size="10.5">run_per_core reaches 1.41M HTTP/2 req/s and 903k HTTP/1.1 req/s</text>

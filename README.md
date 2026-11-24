@@ -85,9 +85,9 @@ better.
 Leyline also uses less client CPU per request than each of them in all four
 measured HTTP/2 workloads (and fewer user-space instructions per request than
 the bare `h2` crate). At a fixed offered rate of 50,000 HTTP/2 requests per
-second, its p99 latency is 119 µs at 8.15 µs client CPU/req (77 µs p99 at
-4.23 µs CPU with `run_per_core`), against 128 µs (12.17 µs CPU) for libcurl,
-153 µs (13.78 µs CPU) for hyper-util, and 154 µs (20.00 µs CPU) for reqwest.
+second, its p99 latency is 115 µs at 8.13 µs client CPU/req (78 µs p99 at
+4.31 µs CPU with `run_per_core`), against 125 µs (12.09 µs CPU) for libcurl,
+153 µs (13.81 µs CPU) for hyper-util, and 158 µs (19.95 µs CPU) for reqwest.
 [BENCHMARKS.md](BENCHMARKS.md) has every workload, HTTP/1.1, confidence
 intervals, and the commands to reproduce them.
 

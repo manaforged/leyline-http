@@ -1,20 +1,20 @@
 stop_ref none stop_min_rounds 3 stop_margin 0.05
-date_utc 2026-11-23T22:44:34Z
+date_utc 2026-11-24T02:26:12Z
 kernel 7.0.0-38-generic
-loadavg_before 0.35 1.27 1.81
-loadavg_after 0.39 0.98 1.63
+loadavg_before 1.15 1.68 2.40
+loadavg_after 0.54 1.29 2.17
 governor performance
 cpu AMD Ryzen 9 9950X3D 16-Core Processor
 server_cpus 3-7,19-23 client_cpus 8-15,24-31
 server_addr 127.0.0.1:0 netns none link loopback
-leyline_source_hash 8381ed83d4c0bb893837f77167878e815494efaf6a153285d2e4737a65da3d4c
-leyline_commit c75e85e8
+leyline_source_hash 220ac1b6e099c8221b131a206fefeb031dcf1c7d9e6db0882b40e34611062451
+leyline_commit 56e95e4c
 profile bare
 timeout 30s
 leyline_chrome bare
 tls matched
 certificate_verification trusted-ca
-ca_sha256 59a5668c6cdf5070a3828aff802f86320c5bedbb2b541f6f8e1d0cb568b5fb67
+ca_sha256 bc663e9e7407b64c2a989d6fd8deed83d4a082bd2cd9cbd344dca37d9afb1d3c
 curl-client/Cargo.lock name = "curl-sys" version = "0.4.91+curl-8.22.0"
 h2-client/Cargo.lock name = "h2" version = "0.4.20"
 hyper-client/Cargo.lock name = "h2" version = "0.4.20" -- name = "hyper" version = "1.12.0" -- name = "hyper-util" version = "0.1.21"
@@ -32,14 +32,9 @@ dotnet
 proto h2
 mode paced paced_seconds 5
 8f5282e8ee78b9a29e63e77f1c5010eff469a5ccd1082e1d867b29983b82137e  server
-a53c5dc919c8e427b78e33cab544c66d681f589a2a1a52d614b362b93d36a2c6  leyline
-994e0e610f481185d0f131508a110f82497b928241b6c561fd939c952339c77b  leyline-blocking
+5dac9f3b55229965a1043f8b83de08b86f77c678c17d81cdc01e4e827742d3ad  leyline
 dc6347adf95c0494499a28d6f8623d7f78979d9ffe7ae53977b85a6e8bb4b570  reqwest
 e4d40b42c1ffd0b9ab951865be63d8b0351779b5d2e4fe4fc22bb94f30be5bfc  hyper
 749f99a8147aacfddfa23831a1b72e4b9a3bf366aadbeec2b8e19415343dfd43  h2
-a89fab90e2e32abdedb8b81fa619c3a9d71eab61e1d81a4c9156289596057e93  curl
+7a86a12f5d7451a9276732ea56c90071f105df37881a048baf9cdc788c1c14c8  curl
 e376ae1da7e685a2c450ba5f4520c71cbbca39d2ea1c7bb8a7e92652235e516d  wreq
-08f9caaccf8395d1dc9e5fa3873cfda224e5d683af38941528903b2770020e42  ureq
-8da74b33f39a216a8d1118973bfac92e75c24798aa9e1f4424e59ef32845c2b3  nethttp
-b0632a1e99bdb62221becdefece583a5f3abb45b174e3a1c532527dc00acc0e8  tlsclient
-38d61a359431c12d7499cda8181489ef9b1743f47772af43fecc4a2371eb40d7  fasthttp
