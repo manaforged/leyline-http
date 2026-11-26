@@ -7,7 +7,7 @@ const SECOND_URL: &str = "https://www.cloudflare.com/cdn-cgi/trace";
 async fn main() -> leyline::Result<()> {
     let session = Session::from(Browser::default());
 
-    let first = session.get(URL).send().await?;
+    let first = session.get(URL).await?;
     println!(
         "first: {} over {:?}, alt-svc {:?}",
         first.status(),
@@ -15,7 +15,7 @@ async fn main() -> leyline::Result<()> {
         first.header("alt-svc")
     );
 
-    let second = session.get(SECOND_URL).send().await?;
+    let second = session.get(SECOND_URL).await?;
     println!("second: {} over {:?}", second.status(), second.version());
     Ok(())
 }

@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 
 use crate::compile::SOURCES_JSON;
 use crate::config::Config;
+use crate::patch;
 use crate::process::{git, run_command};
 
 const PATCHES_DIR: &str = "patches";
@@ -61,7 +62,7 @@ pub(crate) fn get_boringssl_source_path(config: &Config) -> &Path {
 pub(crate) fn ensure_patches_applied(config: &Config) -> io::Result<()> {
     if config.env.assume_patched || config.env.path.is_some() {
         println!(
-            "cargo:warning=skipping git patches application, provided \
+            "cargo:warning=skipping patch application, provided \
             native BoringSSL is expected to have the patches included"
         );
         return Ok(());
@@ -69,46 +70,20 @@ pub(crate) fn ensure_patches_applied(config: &Config) -> io::Result<()> {
 
     let mut lock_file = LockFile::open(&config.out_dir.join(".patch_lock"))?;
     let src_path = get_boringssl_source_path(config);
-    let has_git = src_path.join(GIT_DIR).exists();
 
     lock_file.lock()?;
 
-    if !has_git {
-        run_command(git(src_path).arg("init"))?;
-    }
-
     println!("cargo:rerun-if-changed={PATCHES_DIR}");
+    let strip = if config.is_bazel { 2 } else { 1 };
     let patches = patch_names(config)?;
-    for patch in patches {
+    for patch_name in patches {
         println!(
             "cargo:rerun-if-changed={PATCHES_DIR}/{}",
-            patch.to_string_lossy()
+            patch_name.to_string_lossy()
         );
-        apply_patch(config, &patch.to_string_lossy())?;
+        let patch_path = config.manifest_dir.join(PATCHES_DIR).join(&patch_name);
+        patch::apply_file(src_path, &patch_path, strip)?;
     }
-
-    Ok(())
-}
-
-fn apply_patch(config: &Config, patch_name: &str) -> io::Result<()> {
-    let src_path = get_boringssl_source_path(config);
-    #[cfg(not(windows))]
-    let cmd_path = config
-        .manifest_dir
-        .join("patches")
-        .join(patch_name)
-        .canonicalize()?;
-
-    #[cfg(windows)]
-    let cmd_path = config.manifest_dir.join(PATCHES_DIR).join(patch_name);
-
-    let mut args = vec!["apply", "-v", "--whitespace=fix"];
-
-    if config.is_bazel {
-        args.push("-p2");
-    }
-
-    run_command(git(src_path).args(&args).arg(cmd_path))?;
 
     Ok(())
 }

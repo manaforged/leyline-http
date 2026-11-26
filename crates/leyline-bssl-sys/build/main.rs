@@ -12,6 +12,7 @@ mod bindings_file;
 mod compile;
 mod config;
 mod fingerprint;
+mod patch;
 mod prefix;
 mod process;
 mod source;

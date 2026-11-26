@@ -11,7 +11,7 @@ async fn main() -> leyline::Result<()> {
         .audit(true)
         .build()?;
 
-    let resp = session.get(ECHO_URL).send().await?;
+    let resp = session.get(ECHO_URL).await?;
     let Some(sent) = resp.fingerprint().cloned() else {
         eprintln!("no fingerprint on this response");
         return Ok(());

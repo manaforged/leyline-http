@@ -8,13 +8,12 @@ async fn main() -> leyline::Result<()> {
         .platform(Platform::Windows)
         .build()?;
 
-    let page = session.get("https://example.com/").send().await?;
+    let page = session.get("https://example.com/").await?;
     println!("navigate: {}", page.status());
 
     let js = session
         .get("https://example.com/app.js")
         .kind(RequestKind::Script)
-        .send()
         .await?;
     println!(
         "script:   {} ({} bytes)",
@@ -25,7 +24,6 @@ async fn main() -> leyline::Result<()> {
     let api = session
         .get("https://example.com/api/state")
         .kind(RequestKind::Xhr)
-        .send()
         .await?;
     println!("xhr get:  {}", api.status());
 
@@ -33,14 +31,12 @@ async fn main() -> leyline::Result<()> {
         .post("https://example.com/api/items")
         .kind(RequestKind::Xhr)
         .body("payload=p%3D1")
-        .send()
         .await?;
     println!("xhr post: {}", posted.status());
 
     let created = session
         .post("https://example.com/users")
         .json(&serde_json::json!({ "name": "ada" }))
-        .send()
         .await?;
     println!("json:     {}", created.status());
 

@@ -18,21 +18,29 @@ Leyline is a fast async HTTP/1.1, HTTP/2, and HTTP/3 client for Rust. Sessions, 
 
 ## Example
 
+The package is `leyline-http` and the library is `leyline`:
+
 ```toml
 [dependencies]
 leyline-http = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
+For a minimal backend service without HTTP/3, WebSocket, HTML, or charset decoding:
+
+```toml
+[dependencies]
+leyline-http = { version = "0.3", default-features = false, features = ["compression-gzip", "tower"] }
+```
+
 ```rust,no_run
 use std::time::Duration;
 
-use leyline::{Browser, Session};
+use leyline::Session;
 
 #[tokio::main]
 async fn main() -> leyline::Result<()> {
     let session = Session::builder()
-        .browser(Browser::Chrome158)
         .timeout(Duration::from_secs(15))
         .retry(2)
         .build()?;
@@ -43,7 +51,7 @@ async fn main() -> leyline::Result<()> {
 }
 ```
 
-Rust 1.96 or later. Leyline supports every stable Rust released in the last six months; a minor release may raise the minimum to drop older ones. Building BoringSSL needs a C and C++ compiler and `git`.
+Rust 1.96 or later. Leyline supports every stable Rust released in the last six months; a minor release may raise the minimum to drop older ones. Building BoringSSL needs only a C and C++ compiler (no CMake, Go, Perl, Git, or libclang), and every BoringSSL symbol is prefixed so the crate links next to `openssl-sys` or `boring-sys`.
 
 To crawl a site while respecting `robots.txt` and per-host rate limits:
 

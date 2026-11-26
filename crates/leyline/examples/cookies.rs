@@ -14,9 +14,9 @@ async fn main() -> leyline::Result<()> {
         .cookies(jar)
         .build()?;
 
-    drop(session.get(URL_SET).send().await?);
+    drop(session.get(URL_SET).await?);
 
-    let resp = session.get(URL_READ).send().await?;
+    let resp = session.get(URL_READ).await?;
     println!("status: {}", resp.status());
 
     Ok(())
