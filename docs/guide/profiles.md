@@ -17,7 +17,7 @@ fingerprint):
 | `Browser::edge()` | `Edge158` | Windows | yes |
 | `Browser::opera()` | `Opera140` | Windows | yes |
 | `Browser::brave()` | `Brave158` | Windows | yes |
-| `Browser::firefox()` | `Firefox160` | Windows | yes |
+| `Browser::firefox()` | `Firefox161` | Windows | yes |
 | `Browser::safari()` | `Safari27` | macOS | yes |
 | `Browser::safari_ios()` | `SafariIOS27` | iOS | yes |
 | `Browser::cfnetwork()` | `CfnetworkIOS27` | iOS | no (`Auto`) |

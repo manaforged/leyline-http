@@ -11,6 +11,11 @@ and publish as separate crates.
 
 ## Unreleased
 
+### Added
+
+- A Firefox 161 profile, `Browser::Firefox161`, from captures of Firefox 161.0
+  on macOS, Linux, and Windows.
+
 ### Changed
 
 - `leyline-bssl-sys` now applies its BoringSSL patches directly in Rust instead of invoking `git init` and `git apply`, so published builds need only a C and C++ compiler.
