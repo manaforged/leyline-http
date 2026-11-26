@@ -12,7 +12,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 
 The examples that send or read JSON as Rust types also use `serde` (with `derive`) and `serde_json`.
 
-The first build compiles BoringSSL and needs a C and C++ compiler and `git`.
+The first build compiles BoringSSL and needs a C and C++ compiler.
 
 ## The five types
 

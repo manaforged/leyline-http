@@ -59,7 +59,6 @@ impl Client {
             .post(format!("repos/{repo}/issues"))
             .json(&NewIssue { title })
             .error_for_status()
-            .send()
             .await
             .map(drop)
     }

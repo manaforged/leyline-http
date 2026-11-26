@@ -9,6 +9,21 @@ fixes and are mapped 1-to-1 in [UPGRADE.md](UPGRADE.md) (see
 `leyline-bssl`, `leyline-bssl-sys`, and `leyline-bssl-tokio` share this version
 and publish as separate crates.
 
+## Unreleased
+
+### Added
+
+- A Firefox 161 profile, `Browser::Firefox161`, from captures of Firefox 161.0
+  on macOS, Linux, and Windows.
+
+### Changed
+
+- `leyline-bssl-sys` now applies its BoringSSL patches directly in Rust instead of invoking `git init` and `git apply`, so published builds need only a C and C++ compiler.
+
+### Security
+
+- Reviewed OpenSSL advisories `CVE-2026-107494`, `CVE-2026-121482`, `CVE-2026-84785`, and `CVE-2026-84786` against the bundled BoringSSL revision (`5b83e5d1abf0`); none apply.
+
 ## 0.3.0 - 2026-11-24
 
 Leyline 0.3.0 cleans up the 0.2 API while keeping the same five core types (`Session`, `Tab`, `RequestBuilder`, `Response`, `Error`). It adds encrypted DNS (DoH) and TLS 1.3 ECH, expands TLS and transport controls, updates browser profiles through Chrome 158 and Firefox 160, and cuts 8–13% of user-space instructions per request on HTTP/1.1 and HTTP/2.

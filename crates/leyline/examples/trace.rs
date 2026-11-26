@@ -71,9 +71,9 @@ async fn main() -> leyline::Result<()> {
         .trace(Printer)
         .build()?;
 
-    drop(session.get(URL).send().await?);
+    drop(session.get(URL).await?);
     println!("--- second request, pooled ---");
-    drop(session.get(URL).send().await?);
+    drop(session.get(URL).await?);
 
     Ok(())
 }

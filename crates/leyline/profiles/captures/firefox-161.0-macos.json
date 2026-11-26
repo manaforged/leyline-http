@@ -1,0 +1,256 @@
+{
+  "donate": "Please consider donating to keep this API running. Visit https://tls.peet.ws",
+  "http_version": "h2",
+  "method": "GET",
+  "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:161.0) Gecko/20100101 Firefox/161.0",
+  "tls": {
+    "ciphers": [
+      "TLS_AES_128_GCM_SHA256",
+      "TLS_CHACHA20_POLY1305_SHA256",
+      "TLS_AES_256_GCM_SHA384",
+      "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+      "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+      "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA",
+      "TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA",
+      "TLS_RSA_WITH_AES_128_GCM_SHA256",
+      "TLS_RSA_WITH_AES_256_GCM_SHA384",
+      "TLS_RSA_WITH_AES_128_CBC_SHA",
+      "TLS_RSA_WITH_AES_256_CBC_SHA"
+    ],
+    "extensions": [
+      {
+        "name": "server_name (0)",
+        "server_name": "tls.peet.ws"
+      },
+      {
+        "name": "extended_master_secret (23)",
+        "master_secret_data": "",
+        "extended_master_secret_data": ""
+      },
+      {
+        "name": "extensionRenegotiationInfo (boringssl) (65281)",
+        "data": "00"
+      },
+      {
+        "name": "supported_groups (10)",
+        "supported_groups": [
+          "X25519MLKEM768 (4588)",
+          "X25519 (29)",
+          "P-256 (23)",
+          "P-384 (24)",
+          "P-521 (25)"
+        ]
+      },
+      {
+        "name": "ec_point_formats (11)",
+        "elliptic_curves_point_formats": [
+          "0x00"
+        ]
+      },
+      {
+        "name": "session_ticket (35)",
+        "data": ""
+      },
+      {
+        "name": "application_layer_protocol_negotiation (16)",
+        "protocols": [
+          "h2",
+          "http/1.1"
+        ]
+      },
+      {
+        "name": "status_request (5)",
+        "status_request": {
+          "certificate_status_type": "OSCP (1)",
+          "responder_id_list_length": 0,
+          "request_extensions_length": 0
+        }
+      },
+      {
+        "name": "delegated_credentials (34)",
+        "signature_hash_algorithms": [
+          "ecdsa_secp256r1_sha256",
+          "ecdsa_secp384r1_sha384",
+          "ecdsa_secp521r1_sha512",
+          "ecdsa_sha1"
+        ]
+      },
+      {
+        "name": "signed_certificate_timestamp (18)"
+      },
+      {
+        "name": "key_share (51)",
+        "shared_keys": [
+          {
+            "X25519MLKEM768 (4588)": "5806b10e126fa3d2b2f7214c22dc74dd87538bb117903a078303776f4753bfc36a4b425519f92f3aaa5ef4f636f047026e7c442f47827c2b596bcb33816c50e8cb0356d220d774181c0592dee97d6353b7ba689c790840feba2da8477b402b4aa09257679a6134ab5c66c82b3a37cab7b7a7f9f26904e9a9df4964884015e403429466135bc73019eb7eb36405e1862b697ac485650f51bbc5ae00a692a251208631d2c0bdda88bfad147929842bdb37a6986b467701758f38c6b21897f3288606f669fd8ab4a2baaa2fe6ced73b1b8dda193e65b701808b2e4768838816d82c7a8998a39948641365a045556fe37a36363c949b1242d168895f263628046c7e903c77ebc6c035c23dea704af23e5e64c503bc09b01c8028872f7b51b1d75c9cc0d6023c4b9f86fb8edb49c7461987fce710d00353f011504645c9beb22fec1c2c20cc2c309393277728765c832805070a637467157ef3f58cece6b604f4a543896b834c174bc78a54146bdfa4867daacb408a088d545476533578e24583fabd72333373a60a3e577d63b344ce5346c17b0f541a3d855552a22a311c3723ba872a4d243b76d069042300d5f50bbd0529a7f7072733826fd995a5233cad9531a4a352ae322e9f214ddbd58eb3157ff1826c1f15bc0e0032a6f6aad56a3118617c2051352959b3be24bb9d6c6ac2b969287354cebb539b81b5ce439b8d3c3055e85057274cf1710b90993fda31b970250cc60cb811716e1b67623a3381aac513648cadb2a41874509d4a11baa9e4a412218aef6904c1dbb4b0d4361406976a60c2faf42491531b00810a0b9276597ca3466434b9d52b1b64866e956ee61a762cd4570f34b9e5d28307823871b6549fd712c28a50ad8b22a998a5a2142076003113e25cd1e0311470cfedd3223f756b398673d67c9343659ab75a4957d3c544854f54bb31e10219518161c8c15b11813b15e79bb30061910499a0a50e305303bab64350869abde4653817c442e99bc61655b5ec66ef0635f9c49ab34841abe8a82c863d07443507b1249d9634e4ea511543893e32a98304bad6ac2cbf18895995a9b2d954850943356738e8c983e5e8007690809d17a00d069b0981278893a07ac61ddbc18c240a35f829416403277af77dc4004a5c7038915c9ff516106be5504446b434e2a5aff765c463872ad47272025b5665732a97ac1e850ecdf76a49369b16b84c42c4457e940ad90537e13010af4945fe144acda71053a03a3e65cc56e590a0069885fc45af0759954c0a465225b4661862241bc0cb7d3186b3bce96c4a78c178f981cae3bddd02af2ee07731588275f4c6c70877419058eb9540f5d97485552ae21303f03423a909c36c81c63f570cb8d466310b89ed7a06819a2205c4024a3ba67834035bd26807b61929a9793e4221d1857aad86a842b108198762d2840f1bb14a475b97103b540291b69e8586032680be891006e4b65bfb4d83407b86929b7fec47e3f19e939031166ac3d6752e190b3b00208baeba1896c0107e0229c77125901732d7c47ee1c65cdfe4ac9a196528c8697189024a0bba4f172092d1299f45142f1094205a626039b78fb04b45828f46ca9238ab9138da184708755c286e8225c792301d3483b7fc84276958b4d4bc37252a577fce1d1fd43c8ac47b66902b3757294143a952f932a1ed4483ef3967d00e22c92db9e4b3b8b14808"
+          },
+          {
+            "X25519 (29)": "7b66902b3757294143a952f932a1ed4483ef3967d00e22c92db9e4b3b8b14808"
+          },
+          {
+            "P-256 (23)": "040006b710095a0b24227614c23df27b00f22627670c3f7da6a3eb1a57de9c8a22f6d86b3808812bf748bbb0a8ef4b16e8d0ae3d80b2f810e5c7aa65654bdd192c"
+          }
+        ]
+      },
+      {
+        "name": "supported_versions (43)",
+        "versions": [
+          "TLS 1.3",
+          "TLS 1.2"
+        ]
+      },
+      {
+        "name": "signature_algorithms (13)",
+        "signature_algorithms": [
+          "ecdsa_secp256r1_sha256",
+          "ecdsa_secp384r1_sha384",
+          "ecdsa_secp521r1_sha512",
+          "rsa_pss_rsae_sha256",
+          "rsa_pss_rsae_sha384",
+          "rsa_pss_rsae_sha512",
+          "rsa_pkcs1_sha256",
+          "rsa_pkcs1_sha384",
+          "rsa_pkcs1_sha512",
+          "ecdsa_sha1",
+          "rsa_pkcs1_sha1"
+        ]
+      },
+      {
+        "name": "psk_key_exchange_modes (45)",
+        "PSK_Key_Exchange_Mode": "PSK with (EC)DHE key establishment (psk_dhe_ke) (1)"
+      },
+      {
+        "name": "record_size_limit (28)",
+        "data": "4001"
+      },
+      {
+        "name": "compress_certificate (27)",
+        "algorithms": [
+          "zlib (1)",
+          "brotli (2)",
+          "zstd (3)"
+        ]
+      },
+      {
+        "name": "extensionEncryptedClientHello (boringssl) (65037)",
+        "data": "0000010001a10020cb67aca0c74c5cdd071f866b3025fb5cc09b8bc176061a4c996376236c3377f600f05e8140b502c9a31ae82e55edb79e3186d2c8066224dea42ec475025c650fb884ae4c3e99405bb6c00ee0be63b9a7ccaf2ce888bdc26e6b50c718da9c0661b0a74ffe38930f3ed1656d19c0f4b6bfd58dc9061e47053dba22b26d7adbcce4d0f074d0f235e8d8c08cdc76269f84d247cf3c4fcd482951cf565a3e8fbdf47a6d7cf8351e3f7342c65cb4249bf46228bd2af27841149dbf6e95b04f584f1f453a3ac1f50a4022ab212792f3b210eb2aa55a155b932ee6d5dda26e98455da5595d8f54b2ee0df242012faa462d9f33ab0bfc3cf8db2f3133b9a8d72565610710d0da198b7f1dc3b704d0086c093393897fad"
+      }
+    ],
+    "tls_version_record": "771",
+    "tls_version_negotiated": "772",
+    "ja3": "771,4865-4867-4866-49195-49199-52393-52392-49196-49200-49171-49172-156-157-47-53,0-23-65281-10-11-35-16-5-34-18-51-43-13-45-28-27-65037,4588-29-23-24-25,0",
+    "ja3_hash": "9d42e90b0225e779f03141ddcd699df2",
+    "ja4": "t13d1517h2_8daaf6152771_3cbfd9057e0d",
+    "ja4_r": "t13d1517h2_002f,0035,009c,009d,1301,1302,1303,c013,c014,c02b,c02c,c02f,c030,cca8,cca9_0005,000a,000b,000d,0012,0017,001b,001c,0022,0023,002b,002d,0033,fe0d,ff01_0403,0503,0603,0804,0805,0806,0401,0501,0601,0203,0201",
+    "peetprint": "772-771|2-1.1|4588-29-23-24-25|1027-1283-1539-2052-2053-2054-1025-1281-1537-515-513|1|1-2-3|4865-4867-4866-49195-49199-52393-52392-49196-49200-49171-49172-156-157-47-53|0-10-11-13-16-18-23-27-28-34-35-43-45-5-51-65037-65281",
+    "peetprint_hash": "a4bbbc7e3adf3db97d276fd0adb1efc4",
+    "client_random": "c7615915aa043cc37a4b77f4a7f3541800ad714cf58257c22651cbd122ead611",
+    "session_id": "2182dbf09a9eda9d1762d9cd7467bbd3d380f13d32b40bcdf3440fe002ecc2d3"
+  },
+  "http2": {
+    "akamai_fingerprint": "1:65536;2:0;4:131072;5:16384|12517377|0|m,p,a,s",
+    "akamai_fingerprint_hash": "6ea73faa8fc5aac76bded7bd238f6433",
+    "sent_frames": [
+      {
+        "frame_type": "SETTINGS",
+        "length": 24,
+        "settings": [
+          "HEADER_TABLE_SIZE = 65536",
+          "ENABLE_PUSH = 0",
+          "INITIAL_WINDOW_SIZE = 131072",
+          "MAX_FRAME_SIZE = 16384"
+        ]
+      },
+      {
+        "frame_type": "WINDOW_UPDATE",
+        "length": 4,
+        "increment": 12517377
+      },
+      {
+        "frame_type": "HEADERS",
+        "stream_id": 3,
+        "length": 288,
+        "headers": [
+          ":method: GET",
+          ":path: /api/all",
+          ":authority: tls.peet.ws",
+          ":scheme: https",
+          "user-agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:161.0) Gecko/20100101 Firefox/161.0",
+          "accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "accept-language: en-US,en;q=0.9",
+          "accept-encoding: gzip, deflate, br, zstd",
+          "upgrade-insecure-requests: 1",
+          "sec-fetch-dest: document",
+          "sec-fetch-mode: navigate",
+          "sec-fetch-site: none",
+          "sec-fetch-user: ?1",
+          "priority: u=0, i",
+          "te: trailers"
+        ],
+        "flags": [
+          "EndStream (0x1)",
+          "EndHeaders (0x4)",
+          "Priority (0x20)"
+        ],
+        "priority": {
+          "weight": 42,
+          "depends_on": 0,
+          "exclusive": 0
+        }
+      }
+    ]
+  },
+  "tcpip": {
+    "cap_length": 567,
+    "dst_port": 443,
+    "src_port": 46644,
+    "ip": {
+      "tos": 42,
+      "ttl": 44,
+      "ip_version": 4,
+      "dst_ip": "205.185.123.167",
+      "src_ip": ""
+    },
+    "tcp": {
+      "ack": 996836986,
+      "checksum": 56525,
+      "seq": 2535492373,
+      "window": 2061
+    },
+    "tcp_syn": {
+      "ip_version": 4,
+      "src_ip": "",
+      "dst_ip": "205.185.123.167",
+      "src_port": 46644,
+      "dst_port": 443,
+      "ttl": 44,
+      "ip_id": 0,
+      "df": false,
+      "ecn": true,
+      "window": 65535,
+      "mss": 1400,
+      "window_scale": 6,
+      "sack_permitted": true,
+      "timestamps": true,
+      "options": [
+        "mss",
+        "nop",
+        "wscale",
+        "nop",
+        "nop",
+        "timestamp",
+        "sackOK",
+        "eol"
+      ],
+      "options_raw": "02040578010303060101080a95ca97450000000004020000",
+      "option_order": "mss,nop,wscale,nop,nop,timestamp,sackOK,eol",
+      "payload_len": 0,
+      "packet_len": 64
+    },
+    "p0f": "4:44+?:0:1400:65535,6:mss,nop,ws,nop,nop,ts,sok,eol+1:id-,ecn:0"
+  }
+}

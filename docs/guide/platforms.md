@@ -7,8 +7,8 @@ build needs.
 
 `leyline-bssl-sys` compiles BoringSSL from source with the `cc` crate, from
 the source lists BoringSSL ships in `gen/sources.json`, and uses the Rust
-bindings committed for the target. A build needs no CMake, Go, Perl, or
-libclang.
+bindings committed for the target. A build from crates.io needs no CMake, Go,
+Perl, Git, or libclang.
 
 | Target | Notes |
 | --- | --- |
@@ -37,28 +37,25 @@ crate. Each `LEYLINE_BSSL_*` variable can also be set per target, with a
 | --- | --- | --- |
 | `LEYLINE_BSSL_SOURCE_PATH` | Compile an alternate BoringSSL source tree | Applies Leyline's patches in place; requires NASM on Windows |
 | `LEYLINE_BSSL_PATH` | Link a prebuilt BoringSSL | Applies no patches; must carry Leyline's patches and `-DBORINGSSL_PREFIX=LEYLINE` (enable `bindgen` if headers differ) |
-| `LEYLINE_BSSL_ASSUME_PATCHED` | Skip `git apply` for an already-patched tree | Requires `LEYLINE_BSSL_PATH` or `LEYLINE_BSSL_SOURCE_PATH` |
+| `LEYLINE_BSSL_ASSUME_PATCHED` | Skip applying patches to an already-patched tree | Requires `LEYLINE_BSSL_PATH` or `LEYLINE_BSSL_SOURCE_PATH` |
 | `LEYLINE_BSSL_RUST_CPPLIB` | Override C++ standard library link | Default: `c++` on macOS, none on Windows, none on Linux when trial link passes (else `stdc++`) |
 | `LEYLINE_BSSL_INCLUDE_PATH` | Custom header path for `bindgen` | Requires the `bindgen` feature of `leyline-bssl-sys` |
 | `LEYLINE_BSSL_SYSROOT` | Sysroot passed to `bindgen` | Used when the `bindgen` feature is enabled |
 
-The build needs:
+The build needs only a C and C++ compiler: Xcode Command Line Tools on macOS,
+GCC or Clang on Linux, or the MSVC build tools on Windows. The `cc` crate finds
+it, and `CC`, `CXX`, `CFLAGS`, and `CXXFLAGS` work as they do for any `cc`
+build. A source checkout with an uninitialized `deps/boringssl` submodule also
+uses Git to fetch the submodule.
 
-- A C and C++ compiler: Xcode Command Line Tools on macOS, GCC or Clang on
-  Linux, the MSVC build tools on Windows. The `cc` crate finds it, and
-  `CC`, `CXX`, `CFLAGS`, and `CXXFLAGS` work as they do for any `cc` build.
-- Git. The build runs `git apply` for Leyline's patches unless
-  `LEYLINE_BSSL_ASSUME_PATCHED` or `LEYLINE_BSSL_PATH` is set. A source checkout also uses Git to
-  fetch the BoringSSL submodule.
-
-In minimal Docker / CI builder images, install both the C++ toolchain and Git:
+In minimal Docker / CI builder images, install the C++ toolchain:
 
 ```sh
 # Debian / Ubuntu (e.g. rust:1.96-slim)
-apt-get update && apt-get install -y --no-install-recommends build-essential git
+apt-get update && apt-get install -y --no-install-recommends build-essential
 
 # Alpine (native musl build, e.g. rust:1.96-alpine)
-apk add --no-cache build-base git
+apk add --no-cache build-base
 ```
 
 On Windows, the x86_64 assembly is NASM source. When NASM is on `PATH`, or

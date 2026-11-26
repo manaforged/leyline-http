@@ -18,7 +18,8 @@ Supported targets:
 - `aarch64-unknown-linux-musl`
 - `x86_64-pc-windows-msvc`
 
-The build needs Git and a C and C++ compiler. On Windows that is the MSVC
+The build needs only a C and C++ compiler (no Git, CMake, Go, Perl, or
+libclang). On Windows that is the MSVC
 build tools; NASM is optional, because the crate ships the assembled objects
 in `prebuilt/` and uses NASM only when it is on `PATH`. On musl it needs a
 musl C and C++ toolchain, such as `x86_64-linux-musl-g++` from musl.cc. Every export carries the
