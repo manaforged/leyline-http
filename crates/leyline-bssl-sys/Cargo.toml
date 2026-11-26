@@ -105,5 +105,9 @@ CVE-2026-84784 = "OpenSSL QUIC connection IDs; BoringSSL has no QUIC stack"
 CVE-2026-35190 = "OpenSSL TLS 1.3 server Suite B key-share OOB read; BoringSSL has no SSL_CERT_FLAG_SUITEB_128_LOS and Leyline is a client"
 CVE-2026-107493 = "PEM_X509_INFO_read_bio with non-NULL stack; BoringSSL pem_info.cc frees only entries above orig_num and leyline-bssl passes nullptr"
 CVE-2026-124709 = "OpenSSL QUIC server stream leak; BoringSSL has no QUIC stack"
+CVE-2026-107494 = "OpenSSL QUIC RETIRE_CONNECTION_ID queue; BoringSSL has no QUIC stack"
+CVE-2026-121482 = "nameRelativeToCRLIssuer in crl_crldp_check; BoringSSL idp_check_dp rejects nameRelativeToCRLIssuer (type != 0), has no CMS_verify or PKCS7_verify, and Leyline does not set X509_V_FLAG_CRL_CHECK"
+CVE-2026-84785 = "OpenSSL QUIC out-of-order STREAM reassembly; BoringSSL has no QUIC stack"
+CVE-2026-84786 = "OpenSSL DANE client verification; BoringSSL has no DANE implementation"
 
 [workspace]

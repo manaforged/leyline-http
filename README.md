@@ -123,6 +123,7 @@ CPU per request.
 - [Upgrade guide](UPGRADE.md): 1-to-1 migration tables for breaking changes
 - [Changelog](CHANGELOG.md): release notes, breaking changes, and benchmark highlights
 - [Qualification](QUALIFICATION.md): what is proved, tested, and measured under failure and load
+- [Security](SECURITY.md): vulnerability reporting, BoringSSL provenance, and upstream CVE tracking
 
 Before `1.0`, breaking changes are limited to clear correctness or ergonomic fixes, and every one is mapped in [UPGRADE.md](UPGRADE.md).
 
