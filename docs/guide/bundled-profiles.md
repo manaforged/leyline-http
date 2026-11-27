@@ -48,4 +48,4 @@
 | Browser | `Browser` variants | Chrome capture |
 | --- | --- | --- |
 | Edge | `Edge145` to `Edge158` | Chrome 145 to 158 |
-| Opera | `Opera129` to `Opera140` | Chrome 145 to 155, 157 |
+| Opera | `Opera129` to `Opera141` | Chrome 145 to 155, 157 to 158 |
